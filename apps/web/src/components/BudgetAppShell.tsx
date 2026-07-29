@@ -1,0 +1,150 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { BudgetApp, type BudgetAppApi } from "@ynab/ui";
+import type { BudgetData } from "@ynab/logic";
+import { todayISO, num } from "@ynab/logic";
+
+async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Request failed (${res.status}): ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function BudgetAppShell() {
+  const [data, setData] = useState<BudgetData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    const json = await jsonReq<BudgetData>("/api/budget");
+    setData(json);
+  }, []);
+
+  useEffect(() => {
+    reload().catch((e: unknown) => setError(String(e)));
+  }, [reload]);
+
+  const api: BudgetAppApi = {
+    reload,
+    assign: async (categoryId, amount, month) => {
+      setData((prev) => {
+        if (!prev) return prev;
+        const existing = prev.assignments.find(
+          (a) => a.categoryId === categoryId && a.month === month
+        );
+        const assignments = existing
+          ? prev.assignments.map((a) =>
+              a.id === existing.id ? { ...a, amount: amount.toFixed(2) } : a
+            )
+          : [
+              ...prev.assignments,
+              { id: -Date.now(), categoryId, month, amount: amount.toFixed(2) },
+            ];
+        return { ...prev, assignments };
+      });
+      await jsonReq("/api/assignments", {
+        method: "PUT",
+        body: JSON.stringify({ categoryId, month, amount }),
+      });
+    },
+    addTransaction: async (t) => {
+      await jsonReq("/api/transactions", { method: "POST", body: JSON.stringify(t) });
+      await reload();
+    },
+    deleteTransaction: async (id) => {
+      await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
+      await reload();
+    },
+    addRecurring: async (v) => {
+      await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });
+      await reload();
+    },
+    deleteRecurring: async (id) => {
+      await jsonReq(`/api/recurring?id=${id}`, { method: "DELETE" });
+      await reload();
+    },
+    postRecurring: async (id) => {
+      if (!data) return;
+      const r = data.recurring.find((x) => x.id === id);
+      if (!r) return;
+      await jsonReq("/api/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          accountId: r.accountId,
+          categoryId: r.categoryId,
+          date: todayISO(),
+          payee: r.payee,
+          memo: "Recurring",
+          amount: num(r.amount),
+        }),
+      });
+      await reload();
+    },
+    saveCategory: async (groupId, categoryId, v) => {
+      if (categoryId) {
+        await jsonReq("/api/categories", {
+          method: "PATCH",
+          body: JSON.stringify({ id: categoryId, name: v.name, goalTarget: v.goalTarget }),
+        });
+      } else {
+        await jsonReq("/api/categories", {
+          method: "POST",
+          body: JSON.stringify({ groupId, name: v.name, goalTarget: v.goalTarget }),
+        });
+      }
+      await reload();
+    },
+    deleteCategory: async (id) => {
+      await jsonReq(`/api/categories?id=${id}`, { method: "DELETE" });
+      await reload();
+    },
+    saveGroup: async (groupId, name) => {
+      if (groupId) {
+        await jsonReq("/api/categories", {
+          method: "PATCH",
+          body: JSON.stringify({ id: groupId, type: "group", name }),
+        });
+      } else {
+        await jsonReq("/api/categories", {
+          method: "POST",
+          body: JSON.stringify({ type: "group", name }),
+        });
+      }
+      await reload();
+    },
+    addAccount: async (v) => {
+      await jsonReq("/api/accounts", { method: "POST", body: JSON.stringify(v) });
+      await reload();
+    },
+  };
+
+  if (error) {
+    return (
+      <div className="grid h-screen place-items-center" style={{ background: "var(--app)" }}>
+        <div className="rounded-2xl p-6" style={{ background: "var(--panel)", border: "1px solid var(--danger)" }}>
+          <h2 className="text-[15px] font-bold" style={{ color: "var(--danger)" }}>Error</h2>
+          <p className="mt-2 text-[13.5px]" style={{ color: "var(--text-2)" }}>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="grid h-screen place-items-center" style={{ background: "var(--app)" }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)]" />
+          <span className="text-[14px]" style={{ color: "var(--muted)" }}>Loading budget…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return <BudgetApp data={data} api={api} />;
+}

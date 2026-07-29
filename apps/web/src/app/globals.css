@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #e9ecf1;
+  --app: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #f6f7f9;
+  --panel-3: #eef0f3;
+  --border: #e3e6eb;
+  --border-strong: #d3d8e0;
+  --text: #1d242e;
+  --text-2: #3c4653;
+  --muted: #6a7482;
+  --faint: #97a0ab;
+  --accent: #2f6d95;
+  --accent-2: #3a7ca5;
+  --accent-fg: #ffffff;
+  --accent-soft: #e7f0f6;
+  --danger: #a93a30;
+  --danger-fg: #ffffff;
+  --danger-bg: #fbe9e6;
+  --danger-border: #f0c8c2;
+  --warn: #bd7a2e;
+  --warn-bg: #f7ecdb;
+  --track: #e4e7ec;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 24px 60px rgba(16, 24, 40, 0.14);
+}
+
+html[data-theme="dark"] {
+  --bg: #0c1116;
+  --app: #10161d;
+  --panel: #171f28;
+  --panel-2: #131a22;
+  --panel-3: #1d2731;
+  --border: #28323d;
+  --border-strong: #354250;
+  --text: #e7ecf2;
+  --text-2: #c3cdd8;
+  --muted: #8b98a7;
+  --faint: #6b7887;
+  --accent: #3f8dc2;
+  --accent-2: #4c9bd0;
+  --accent-fg: #08111a;
+  --accent-soft: #16303f;
+  --danger: #e0655c;
+  --danger-fg: #1a0e0d;
+  --danger-bg: #331b19;
+  --danger-border: #4d2723;
+  --warn: #d8974a;
+  --warn-bg: #2f2416;
+  --track: #26313c;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+html[data-accent="forest"] {
+  --accent: #2e7d5b;
+  --accent-2: #379268;
+  --accent-soft: #e2f1ea;
+}
+html[data-accent="forest"][data-theme="dark"] {
+  --accent: #3fa377;
+  --accent-2: #4bb689;
+  --accent-soft: #143026;
+}
+html[data-accent="grape"] {
+  --accent: #6b4a9e;
+  --accent-2: #7d59b4;
+  --accent-soft: #ece5f5;
+}
+html[data-accent="grape"][data-theme="dark"] {
+  --accent: #9370c7;
+  --accent-2: #a482d4;
+  --accent-soft: #241b34;
+}
+html[data-accent="sunset"] {
+  --accent: #c15b34;
+  --accent-2: #d16a41;
+  --accent-soft: #f8e8e0;
+}
+html[data-accent="sunset"][data-theme="dark"] {
+  --accent: #e0805a;
+  --accent-2: #ec9068;
+  --accent-soft: #331f16;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--app);
+  color: var(--text);
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid var(--app);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade {
+  animation: fadeIn 0.18s ease-out;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-overlay {
+  animation: overlayIn 0.15s ease-out;
+}
+
+.stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--accent) 90%, white 10%),
+    color-mix(in srgb, var(--accent) 90%, white 10%) 6px,
+    color-mix(in srgb, var(--accent) 72%, white 28%) 6px,
+    color-mix(in srgb, var(--accent) 72%, white 28%) 12px
+  );
+}
+.stripe-warn {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--warn),
+    var(--warn) 6px,
+    color-mix(in srgb, var(--warn) 70%, white 30%) 6px,
+    color-mix(in srgb, var(--warn) 70%, white 30%) 12px
+  );
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
