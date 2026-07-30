@@ -6,6 +6,7 @@ import {
   getDefaultDb,
   renameCategoryGroup,
   updateCategory,
+  updateCategoryGroupSort,
 } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,10 @@ export async function PATCH(req: Request) {
   const db = getDefaultDb();
 
   if (body.type === "group") {
+    if (body.sort != null) {
+      const row = await updateCategoryGroupSort(db, id, Number(body.sort));
+      return Response.json(row);
+    }
     const row = await renameCategoryGroup(db, id, String(body.name));
     return Response.json(row);
   }
@@ -43,6 +48,7 @@ export async function PATCH(req: Request) {
   const row = await updateCategory(db, id, {
     name: body.name,
     goalTarget: body.goalTarget === undefined ? undefined : body.goalTarget,
+    sort: body.sort != null ? Number(body.sort) : undefined,
   });
   return Response.json(row);
 }

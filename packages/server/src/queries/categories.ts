@@ -45,14 +45,24 @@ export async function renameCategoryGroup(db: Database, id: number, name: string
 export async function updateCategory(
   db: Database,
   id: number,
-  patch: { name?: string; goalTarget?: number | null }
+  patch: { name?: string; goalTarget?: number | null; sort?: number }
 ) {
   const p: Record<string, unknown> = {};
   if (patch.name != null) p.name = String(patch.name);
   if ("goalTarget" in patch) {
     p.goalTarget = patch.goalTarget == null ? null : Number(patch.goalTarget);
   }
+  if (patch.sort != null) p.sort = Number(patch.sort);
   const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
+  return row;
+}
+
+export async function updateCategoryGroupSort(db: Database, id: number, sort: number) {
+  const [row] = await db
+    .update(categoryGroups)
+    .set({ sort: Number(sort) })
+    .where(eq(categoryGroups.id, id))
+    .returning();
   return row;
 }
 

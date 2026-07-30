@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { GroupRow } from "@ynab/logic";
 import { fmt, monthLabel, MONTHS, parseMonthKey } from "@ynab/logic";
-import { IconChevronDown, IconMenu, IconMoon, IconSun, IconChevronUpDown, IconPalette } from "./icons.js";
+import { IconChevronDown, IconMenu, IconMoon, IconSun, IconChevronUpDown, IconPalette, IconReset } from "./icons.js";
 
 const ACCENTS = [
   { key: "liquid", label: "Liquid Theme", dot: "#2f6d95" },
@@ -25,6 +25,8 @@ export function Inspector({
   accent,
   onToggleTheme,
   onSetAccent,
+  onSelectMonth,
+  onResetDemo,
 }: {
   groups: GroupRow[];
   summary: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -38,9 +40,12 @@ export function Inspector({
   accent: string;
   onToggleTheme: () => void;
   onSetAccent: (a: string) => void;
+  onSelectMonth?: (key: string) => void;
+  onResetDemo?: () => void;
 }) {
   const [sumOpen, setSumOpen] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   let overdraft: string | null = null;
   for (const g of groups) {
@@ -74,9 +79,53 @@ export function Inspector({
         <h2 className="text-[17px] font-bold tracking-tight" style={{ color: "var(--text)" }}>
           Demo Budget
         </h2>
-        <button className="grid h-8 w-8 place-items-center rounded-lg" style={{ color: "var(--muted)" }}>
-          <IconMenu width={18} height={18} />
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setSettingsOpen((o) => !o)}
+            className="grid h-8 w-8 place-items-center rounded-lg transition-colors hover:bg-[var(--panel-3)]"
+            style={{ color: "var(--muted)" }}
+            aria-label="Open settings"
+            aria-expanded={settingsOpen}
+          >
+            <IconMenu width={18} height={18} />
+          </button>
+          {settingsOpen && (
+            <div
+              className="animate-fade absolute right-0 top-[36px] z-30 min-w-[200px] overflow-hidden rounded-xl"
+              style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}
+              role="menu"
+            >
+              <button
+                onClick={() => {
+                  setSettingsOpen(false);
+                  onToggleTheme();
+                }}
+                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
+                style={{ color: "var(--text-2)" }}
+                role="menuitem"
+              >
+                {theme === "dark" ? <IconSun width={15} height={15} /> : <IconMoon width={15} height={15} />}
+                {theme === "dark" ? "Switch to light" : "Switch to dark"}
+              </button>
+              {onResetDemo && (
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    if (confirm("Reset all data and re-seed the demo budget? This cannot be undone.")) {
+                      onResetDemo();
+                    }
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
+                  style={{ color: "var(--danger)" }}
+                  role="menuitem"
+                >
+                  <IconReset width={15} height={15} />
+                  Reset demo data
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -174,16 +223,28 @@ export function Inspector({
               <div className="mt-4 flex h-[110px] items-end justify-between gap-[3px]">
                 {history.map((h) => {
                   const isCurrent = h.key === month;
-                  const height = Math.max(6, (h.assigned / maxHist) * 100);
+                  const height = h.real ? Math.max(6, (h.assigned / maxHist) * 100) : 4;
+                  const interactive = !!onSelectMonth && h.real;
                   return (
-                    <div
+                    <button
                       key={h.key}
-                      title={`${lbl(h.key)}: ${fmt(h.assigned)}`}
+                      type="button"
+                      title={`${lbl(h.key)}: ${h.real ? fmt(h.assigned) : "no data"}`}
+                      aria-label={`Jump to ${lbl(h.key)}`}
+                      disabled={!interactive}
+                      onClick={interactive ? () => onSelectMonth!(h.key) : undefined}
                       className="flex-1 rounded-t-[3px] transition-all"
                       style={{
                         height: `${height}%`,
-                        background: isCurrent ? "var(--accent)" : "var(--accent-2)",
-                        opacity: isCurrent ? 1 : 0.68,
+                        background: isCurrent
+                          ? "var(--accent)"
+                          : h.real
+                            ? "var(--accent-2)"
+                            : "var(--track)",
+                        opacity: isCurrent ? 1 : h.real ? 0.68 : 0.45,
+                        cursor: interactive ? "pointer" : "default",
+                        border: "none",
+                        padding: 0,
                       }}
                     />
                   );

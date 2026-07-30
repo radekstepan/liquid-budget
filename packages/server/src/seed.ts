@@ -1,10 +1,11 @@
 import { sql } from "drizzle-orm";
+import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
 
-// Demo month: June 2026 (matches the highlighted month in YNAB4 screenshots)
-export const DEMO_MONTH = "2026-06";
+// Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
+export { DEMO_MONTH };
 
 export async function ensureTables(db: Db): Promise<void> {
   await db.run(sql`

@@ -1,22 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import type { Account, Category } from "@ynab/logic";
-import { todayISO } from "@ynab/logic";
+import type { Account, Category, Recurring, Transaction } from "@ynab/logic";
+import { todayISO, num } from "@ynab/logic";
 import { Modal, Field, Btn, inputCls, inputStyle } from "./ui.js";
 
 export function TransactionModal({
   accounts,
   categories,
   defaultAccountId,
+  initial,
   onClose,
   onSave,
 }: {
   accounts: Account[];
   categories: Category[];
   defaultAccountId: number | null;
+  initial?: Transaction;
   onClose: () => void;
   onSave: (t: {
+    id?: number;
     accountId: number;
     categoryId: number | null;
     date: string;
@@ -25,18 +28,26 @@ export function TransactionModal({
     amount: number;
   }) => void;
 }) {
-  const [accountId, setAccountId] = useState(defaultAccountId ?? accounts[0]?.id ?? 0);
-  const [categoryId, setCategoryId] = useState<number | "">("");
-  const [date, setDate] = useState(todayISO());
-  const [payee, setPayee] = useState("");
-  const [memo, setMemo] = useState("");
-  const [amount, setAmount] = useState("");
-  const [type, setType] = useState<"outflow" | "inflow">("outflow");
+  const [accountId, setAccountId] = useState(
+    initial?.accountId ?? defaultAccountId ?? accounts[0]?.id ?? 0
+  );
+  const initialAmt = initial ? num(initial.amount) : 0;
+  const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
+  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [payee, setPayee] = useState(initial?.payee ?? "");
+  const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [amount, setAmount] = useState(
+    initial ? Math.abs(initialAmt).toFixed(2) : ""
+  );
+  const [type, setType] = useState<"outflow" | "inflow">(
+    initial ? (initialAmt >= 0 ? "inflow" : "outflow") : "outflow"
+  );
 
   const save = () => {
     const a = Math.abs(parseFloat(amount));
     if (Number.isNaN(a) || !accountId || !payee.trim()) return;
     onSave({
+      id: initial?.id,
       accountId,
       categoryId: categoryId === "" ? null : Number(categoryId),
       date,
@@ -48,12 +59,14 @@ export function TransactionModal({
 
   return (
     <Modal
-      title="Add Transaction"
+      title={initial ? "Edit Transaction" : "Add Transaction"}
       onClose={onClose}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save}>Save Transaction</Btn>
+          <Btn variant="primary" onClick={save}>
+            {initial ? "Save Changes" : "Save Transaction"}
+          </Btn>
         </>
       }
     >
@@ -179,50 +192,62 @@ export function GroupModal({
 export function RecurringModal({
   accounts,
   categories,
+  initial,
   onClose,
   onSave,
 }: {
   accounts: Account[];
   categories: Category[];
+  initial?: Recurring;
   onClose: () => void;
   onSave: (v: {
+    id?: number;
     accountId: number;
     categoryId: number | null;
     payee: string;
     amount: number;
     frequency: string;
     nextDate: string;
+    active: boolean;
   }) => void;
 }) {
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? 0);
-  const [categoryId, setCategoryId] = useState<number | "">("");
-  const [payee, setPayee] = useState("");
-  const [amount, setAmount] = useState("");
-  const [type, setType] = useState<"outflow" | "inflow">("outflow");
-  const [frequency, setFrequency] = useState("monthly");
-  const [nextDate, setNextDate] = useState(todayISO());
+  const initialAmt = initial ? num(initial.amount) : 0;
+  const [accountId, setAccountId] = useState(initial?.accountId ?? accounts[0]?.id ?? 0);
+  const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
+  const [payee, setPayee] = useState(initial?.payee ?? "");
+  const [amount, setAmount] = useState(initial ? Math.abs(initialAmt).toFixed(2) : "");
+  const [type, setType] = useState<"outflow" | "inflow">(
+    initial ? (initialAmt >= 0 ? "inflow" : "outflow") : "outflow"
+  );
+  const [frequency, setFrequency] = useState(initial?.frequency ?? "monthly");
+  const [nextDate, setNextDate] = useState(initial?.nextDate ?? todayISO());
+  const [active, setActive] = useState(initial?.active ?? true);
 
   const save = () => {
     const a = Math.abs(parseFloat(amount));
     if (Number.isNaN(a) || !payee.trim()) return;
     onSave({
+      id: initial?.id,
       accountId,
       categoryId: categoryId === "" ? null : Number(categoryId),
       payee: payee.trim(),
       amount: type === "outflow" ? -a : a,
       frequency,
       nextDate,
+      active,
     });
   };
 
   return (
     <Modal
-      title="Add Recurring Transaction"
+      title={initial ? "Edit Recurring Transaction" : "Add Recurring Transaction"}
       onClose={onClose}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save}>Save</Btn>
+          <Btn variant="primary" onClick={save}>
+            {initial ? "Save Changes" : "Save"}
+          </Btn>
         </>
       }
     >
@@ -262,6 +287,10 @@ export function RecurringModal({
       <Field label="Next Date">
         <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className={inputCls} style={inputStyle} />
       </Field>
+      <label className="mt-2 flex items-center gap-2 text-[13.5px]" style={{ color: "var(--text-2)" }}>
+        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+        Active
+      </label>
     </Modal>
   );
 }
@@ -271,10 +300,16 @@ export function AccountModal({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (v: { name: string; kind: string; groupLabel: string; balance: number; onBudget: boolean }) => void;
+  onSave: (v: {
+    name: string;
+    kind: "liquid" | "credit" | "offbudget";
+    groupLabel: string;
+    balance: number;
+    onBudget: boolean;
+  }) => void;
 }) {
   const [name, setName] = useState("");
-  const [kind, setKind] = useState("liquid");
+  const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">("liquid");
   const [balance, setBalance] = useState("");
 
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
@@ -298,7 +333,12 @@ export function AccountModal({
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputCls} style={inputStyle} />
       </Field>
       <Field label="Type">
-        <select value={kind} onChange={(e) => setKind(e.target.value)} className={inputCls} style={inputStyle}>
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as "liquid" | "credit" | "offbudget")}
+          className={inputCls}
+          style={inputStyle}
+        >
           <option value="liquid">Liquid (Cash / Checking / Savings)</option>
           <option value="credit">Credit Card</option>
           <option value="offbudget">Off-Budget (Retirement / Asset)</option>

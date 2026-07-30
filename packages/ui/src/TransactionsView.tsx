@@ -3,19 +3,21 @@
 import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { IconPlus, IconTrash, IconSwap, IconX } from "./icons.js";
+import { IconPlus, IconTrash, IconSwap, IconX, IconPencil } from "./icons.js";
 
 export function TransactionsView({
   data,
   accountFilter,
   setAccountFilter,
   onAdd,
+  onEdit,
   onDelete,
 }: {
   data: BudgetData;
   accountFilter: number | null;
   setAccountFilter: (id: number | null) => void;
   onAdd: () => void;
+  onEdit: (id: number) => void;
   onDelete: (id: number) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -87,6 +89,7 @@ export function TransactionsView({
               <Th>Payee</Th>
               <Th>Category</Th>
               <Th>Memo</Th>
+              <Th>Status</Th>
               <Th right>Outflow</Th>
               <Th right>Inflow</Th>
               <Th />
@@ -110,6 +113,25 @@ export function TransactionsView({
                     )}
                   </Td>
                   <Td style={{ color: "var(--muted)" }}>{t.memo || "—"}</Td>
+                  <Td>
+                    {t.cleared ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                        title="Cleared — posted to your bank statement"
+                      >
+                        ● Cleared
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                        style={{ background: "var(--warn-bg, var(--panel-3))", color: "var(--warn, var(--text-2))" }}
+                        title="Uncleared — not yet posted to your bank"
+                      >
+                        ○ Uncleared
+                      </span>
+                    )}
+                  </Td>
                   <Td right className="tnum" style={{ color: amt < 0 ? "var(--danger)" : "var(--faint)" }}>
                     {amt < 0 ? fmt(amt) : ""}
                   </Td>
@@ -117,13 +139,26 @@ export function TransactionsView({
                     {amt > 0 ? fmt(amt) : ""}
                   </Td>
                   <Td right>
-                    <button
-                      onClick={() => onDelete(t.id)}
-                      className="rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
-                      style={{ color: "var(--muted)" }}
-                    >
-                      <IconTrash width={15} height={15} />
-                    </button>
+                    <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        onClick={() => onEdit(t.id)}
+                        className="rounded p-1"
+                        style={{ color: "var(--muted)" }}
+                        aria-label={`Edit ${t.payee}`}
+                        title="Edit"
+                      >
+                        <IconPencil width={14} height={14} />
+                      </button>
+                      <button
+                        onClick={() => onDelete(t.id)}
+                        className="rounded p-1"
+                        style={{ color: "var(--muted)" }}
+                        aria-label={`Delete ${t.payee}`}
+                        title="Delete"
+                      >
+                        <IconTrash width={15} height={15} />
+                      </button>
+                    </div>
                   </Td>
                 </tr>
               );
