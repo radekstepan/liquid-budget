@@ -201,6 +201,12 @@ export function BudgetApp({
     [api, month]
   );
 
+  const clearOverdraft = useCallback(
+    (categoryIds: number[]) =>
+      Promise.all(categoryIds.map((id) => api.assign(id, 0, month))),
+    [api, month]
+  );
+
   const toggleGroup = useCallback((id: number) => {
     setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   }, []);
@@ -316,6 +322,7 @@ export function BudgetApp({
         onSetAccent={setAccentTheme}
         onSelectMonth={setMonth}
         onResetDemo={api.resetDemo}
+        onClearOverdraft={clearOverdraft}
       />
 
       {modal.kind === "addTransaction" && (
@@ -323,6 +330,7 @@ export function BudgetApp({
           accounts={data.accounts}
           categories={data.categories}
           defaultAccountId={accountFilter}
+          defaultDate={modal.defaultDate}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
             await api.addTransaction(t);
