@@ -20,6 +20,10 @@ export type Category = {
   groupId: number;
   name: string;
   sort: number;
+  /**
+   * Manually-entered starting balance for this category before the first
+   * tracked month.  Acts as the seed carryover for cumulative calculations.
+   */
   carryover: string;
   goalTarget: string | null;
   linkedAccountId: number | null;
@@ -66,9 +70,24 @@ export type BudgetData = {
 
 export type CatRow = {
   category: Category;
+  /** Available balance carried forward from the end of the previous month. */
+  carryoverIn: number;
+  /** Amount budgeted (assigned) to this category in the current month. */
   assigned: number;
+  /**
+   * Net outflow this month: min(0, rawOutflow).
+   * Positive transactions in a category are clamped to 0 for display.
+   */
   outflow: number;
+  /**
+   * Running available balance: carryoverIn + assigned + rawOutflow.
+   * Can be negative if over-spent.
+   */
   available: number;
+  /**
+   * 0–1 fraction of the goal (or assigned amount) that is funded.
+   * 1 = fully funded, 0 = nothing funded.
+   */
   fundedPct: number;
 };
 
@@ -78,4 +97,20 @@ export type GroupRow = {
   assigned: number;
   outflow: number;
   available: number;
+};
+
+/** Top-level result returned by computeBudget(). */
+export type BudgetResult = {
+  groups: GroupRow[];
+  /**
+   * To Be Budgeted: totalIncome − totalAssigned (all non-CC categories).
+   * Negative means you have assigned more than you earned — "over budgeted".
+   */
+  tbb: number;
+  /** Sum of all uncategorised positive transactions in this month (income). */
+  totalIncome: number;
+  /** true when tbb < 0 */
+  overBudgeted: boolean;
+  /** Total assigned across all non-CC categories this month. */
+  totalAssigned: number;
 };

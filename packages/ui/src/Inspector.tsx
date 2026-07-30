@@ -18,6 +18,8 @@ export function Inspector({
   month,
   history,
   avg,
+  tbb,
+  overBudgeted,
   theme,
   accent,
   onToggleTheme,
@@ -28,13 +30,14 @@ export function Inspector({
   month: string;
   history: { key: string; assigned: number; real: boolean }[];
   avg: number;
+  tbb: number;
+  overBudgeted: boolean;
   theme: "light" | "dark";
   accent: string;
   onToggleTheme: () => void;
   onSetAccent: (a: string) => void;
 }) {
   const [sumOpen, setSumOpen] = useState(true);
-  const [alertOpen, setAlertOpen] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   let overdraft: string | null = null;
@@ -75,33 +78,51 @@ export function Inspector({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {alertOpen && (
+      {/* ── TBB Card (YNAB4's primary number) ── */}
+        <div
+          className="mb-4 overflow-hidden rounded-2xl"
+          style={{
+            border: `1px solid ${overBudgeted ? "var(--danger-border)" : "var(--border)"}`,
+            boxShadow: "var(--shadow)",
+          }}
+        >
           <div
-            className="mb-4 overflow-hidden rounded-2xl"
-            style={{ border: "1px solid var(--danger-border)", boxShadow: "var(--shadow)" }}
+            className="flex items-center justify-between px-4 py-3"
+            style={{ background: overBudgeted ? "var(--danger)" : "var(--accent)", color: overBudgeted ? "var(--danger-fg)" : "var(--accent-fg)" }}
           >
-            <button
-              onClick={() => setAlertOpen(true)}
-              className="flex w-full items-center gap-2 px-4 py-3"
-              style={{ background: "var(--danger)", color: "var(--danger-fg)" }}
-            >
-              <IconChevronDown width={16} height={16} />
-              <span className="text-[14.5px] font-bold">Try It Out!</span>
-            </button>
-            <div className="px-4 py-3.5" style={{ background: "var(--danger-bg)" }}>
-              <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--danger)" }}>
+            <span className="text-[13.5px] font-bold tracking-wide">
+              {overBudgeted ? "⚠ Over Budgeted" : "To Be Budgeted"}
+            </span>
+            <span className="tnum text-[20px] font-extrabold">{fmt(tbb)}</span>
+          </div>
+          <div
+            className="px-4 py-3"
+            style={{ background: overBudgeted ? "var(--danger-bg)" : "var(--accent-soft)" }}
+          >
+            {overBudgeted ? (
+              <p className="text-[13px] leading-relaxed" style={{ color: "var(--danger)" }}>
                 {overdraft ? (
                   <>
-                    A <span className="font-semibold">{overdraft}</span> splurge has overdrafted
-                    this budget. Try to balance it out by moving money from other buckets.
+                    You've assigned more than you've earned.{" "}
+                    <span className="font-semibold">{overdraft}</span> is also
+                    overdrafted. Balance your budget to get back on track.
                   </>
                 ) : (
-                  <>Every bucket is funded. Nicely balanced budget for {monthLabel(month)}!</>
+                  <>You've assigned more than you've earned this month. Remove some assignments to get back to zero.</>
                 )}
               </p>
-            </div>
+            ) : overdraft ? (
+              <p className="text-[13px] leading-relaxed" style={{ color: "var(--accent)" }}>
+                A <span className="font-semibold">{overdraft}</span> splurge
+                overdrafted that category — move money from other buckets to cover it.
+              </p>
+            ) : (
+              <p className="text-[13px] leading-relaxed" style={{ color: "var(--accent)" }}>
+                Every bucket is funded. Nicely balanced budget for {monthLabel(month)}!
+              </p>
+            )}
           </div>
-        )}
+        </div>
 
         <div
           className="mb-4 rounded-2xl p-4"
@@ -124,7 +145,15 @@ export function Inspector({
               >
                 <Row label="Assigned" value={fmt(summary.assigned)} bold />
                 <Row label="Outflow" value={fmt(summary.outflow)} muted />
-                <Row label="Available" value={fmt(summary.available)} muted last />
+                <Row label="Available" value={fmt(summary.available)} muted />
+                <Row
+                  label="To Be Budgeted"
+                  value={fmt(tbb)}
+                  accent={!overBudgeted}
+                  danger={overBudgeted}
+                  bold
+                  last
+                />
               </div>
 
               <div className="mt-5 text-center">
@@ -219,14 +248,25 @@ function Row({
   value,
   bold,
   muted,
+  accent,
+  danger,
   last,
 }: {
   label: string;
   value: string;
   bold?: boolean;
   muted?: boolean;
+  accent?: boolean;
+  danger?: boolean;
   last?: boolean;
 }) {
+  const valueColor = danger
+    ? "var(--danger)"
+    : accent
+      ? "var(--accent)"
+      : bold
+        ? "var(--text)"
+        : "var(--text-2)";
   return (
     <div
       className="flex items-center justify-between py-1.5"
@@ -237,7 +277,7 @@ function Row({
       </span>
       <span
         className="tnum text-[13.5px]"
-        style={{ color: bold ? "var(--text)" : "var(--text-2)", fontWeight: bold ? 700 : 600 }}
+        style={{ color: valueColor, fontWeight: bold ? 700 : 600 }}
       >
         {value}
       </span>
