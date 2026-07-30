@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { computeGroups, summarize, num, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
+import { computeBudget, num, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
@@ -93,8 +93,14 @@ export function BudgetApp({
 
   const { year } = parseMonthKey(month);
 
-  const groups = useMemo(() => computeGroups(data, month), [data, month]);
-  const summary = useMemo(() => summarize(groups), [groups]);
+  const budget = useMemo(() => computeBudget(data, month), [data, month]);
+  const groups = budget.groups;
+  const summary = {
+    assigned: budget.totalAssigned,
+    outflow: groups.reduce((s, g) => s + g.outflow, 0),
+    available: groups.filter((g) => !g.group.isCreditCardPayments).reduce((s, g) => s + g.available, 0),
+    totalAvailable: groups.reduce((s, g) => s + g.available, 0),
+  };
 
   const { history, avg } = useMemo(() => {
     const realMonths = new Set(data.assignments.map((a) => a.month));
@@ -204,6 +210,8 @@ export function BudgetApp({
         month={month}
         history={history}
         avg={avg}
+        tbb={budget.tbb}
+        overBudgeted={budget.overBudgeted}
         theme={theme}
         accent={accent}
         onToggleTheme={toggleTheme}
