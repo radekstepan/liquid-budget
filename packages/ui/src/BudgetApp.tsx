@@ -280,7 +280,7 @@ export function BudgetApp({
             onToggleActive={(id, active) => api.updateRecurring(id, { active })}
           />
         )}
-        {view === "reports" && <ReportsView data={data} month={month} />}
+        {view === "reports" && <ReportsView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />}
         {view === "calendar" && (
           <CalendarView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />
         )}
