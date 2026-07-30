@@ -80,7 +80,13 @@ export type CatRow = {
    */
   outflow: number;
   /**
-   * Running available balance: carryoverIn + assigned + rawOutflow.
+   * CC payment categories only: the amount YNAB4 auto-transferred from
+   * budget categories to cover credit card spending this month.
+   * 0 for all non-CC-payment categories.
+   */
+  ccBuffer: number;
+  /**
+   * Running available balance: carryoverIn + assigned + rawOutflow + ccBuffer.
    * Can be negative if over-spent.
    */
   available: number;
@@ -103,14 +109,16 @@ export type GroupRow = {
 export type BudgetResult = {
   groups: GroupRow[];
   /**
-   * To Be Budgeted: totalIncome − totalAssigned (all non-CC categories).
+   * To Be Budgeted: totalIncome − totalAssigned + priorSurplus.
    * Negative means you have assigned more than you earned — "over budgeted".
    */
   tbb: number;
   /** Sum of all uncategorised positive transactions in this month (income). */
   totalIncome: number;
-  /** true when tbb < 0 */
+  /** Positive TBB surplus accumulated from prior months and carried forward. */
+  priorSurplus: number;
+  /** true when tbb < 0 — you've assigned more than you received. */
   overBudgeted: boolean;
-  /** Total assigned across all non-CC categories this month. */
+  /** Total assigned across all non-CC groups this month. */
   totalAssigned: number;
 };

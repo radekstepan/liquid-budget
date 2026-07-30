@@ -95,12 +95,15 @@ export function BudgetApp({
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
   const groups = budget.groups;
+  const budgetGroups = groups.filter((g) => !g.group.isCreditCardPayments);
   const summary = {
     assigned: budget.totalAssigned,
-    outflow: groups.reduce((s, g) => s + g.outflow, 0),
-    available: groups.filter((g) => !g.group.isCreditCardPayments).reduce((s, g) => s + g.available, 0),
+    // Exclude CC payment group outflow — it's debt repayment, not a budget expense
+    outflow: budgetGroups.reduce((s, g) => s + g.outflow, 0),
+    available: budgetGroups.reduce((s, g) => s + g.available, 0),
     totalAvailable: groups.reduce((s, g) => s + g.available, 0),
   };
+
 
   const { history, avg } = useMemo(() => {
     const realMonths = new Set(data.assignments.map((a) => a.month));
@@ -212,6 +215,7 @@ export function BudgetApp({
         avg={avg}
         tbb={budget.tbb}
         overBudgeted={budget.overBudgeted}
+        priorSurplus={budget.priorSurplus}
         theme={theme}
         accent={accent}
         onToggleTheme={toggleTheme}

@@ -361,18 +361,25 @@ function CategoryRow({
       </span>
       <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
 
-      <div className="ml-2.5 flex w-[168px] shrink-0 items-center gap-1.5">
-        <span className="truncate text-[14.5px] font-medium" style={{ color: "var(--text)" }}>
-          {r.category.name}
-        </span>
-        {!readOnly && (
-          <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
-            <button onClick={onEdit} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Edit">
-              <IconPencil width={13} height={13} />
-            </button>
-            <button onClick={onDelete} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Delete">
-              <IconTrash width={13} height={13} />
-            </button>
+      <div className="ml-2.5 flex w-[168px] shrink-0 flex-col gap-0">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-[14.5px] font-medium" style={{ color: "var(--text)" }}>
+            {r.category.name}
+          </span>
+          {!readOnly && (
+            <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
+              <button onClick={onEdit} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Edit">
+                <IconPencil width={13} height={13} />
+              </button>
+              <button onClick={onDelete} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Delete">
+                <IconTrash width={13} height={13} />
+              </button>
+            </span>
+          )}
+        </div>
+        {Math.abs(r.carryoverIn) > 0.004 && (
+          <span className="tnum text-[10.5px]" style={{ color: r.carryoverIn < 0 ? "var(--danger)" : "var(--faint)" }}>
+            ↩ {fmt(r.carryoverIn)} carried
           </span>
         )}
       </div>
