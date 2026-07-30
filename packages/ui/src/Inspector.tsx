@@ -27,6 +27,7 @@ export function Inspector({
   onSetAccent,
   onSelectMonth,
   onResetDemo,
+  onClearOverdraft,
 }: {
   groups: GroupRow[];
   summary: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -42,22 +43,22 @@ export function Inspector({
   onSetAccent: (a: string) => void;
   onSelectMonth?: (key: string) => void;
   onResetDemo?: () => void;
+  onClearOverdraft?: (categoryIds: number[]) => void;
 }) {
   const [sumOpen, setSumOpen] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  let overdraft: string | null = null;
+  const overdrafted: { id: number; name: string }[] = [];
   for (const g of groups) {
     if (g.group.isCreditCardPayments) continue;
     for (const r of g.rows) {
       if (r.available < 0) {
-        overdraft = r.category.name;
-        break;
+        overdrafted.push({ id: r.category.id, name: r.category.name });
       }
     }
-    if (overdraft) break;
   }
+  const overdraft = overdrafted[0]?.name ?? null;
 
   const maxHist = Math.max(1, ...history.map((h) => h.assigned));
 
@@ -151,17 +152,31 @@ export function Inspector({
             style={{ background: overBudgeted ? "var(--danger-bg)" : "var(--accent-soft)" }}
           >
             {overBudgeted ? (
-              <p className="text-[13px] leading-relaxed" style={{ color: "var(--danger)" }}>
-                {overdraft ? (
-                  <>
-                    You've assigned more than you've earned.{" "}
-                    <span className="font-semibold">{overdraft}</span> is also
-                    overdrafted. Balance your budget to get back on track.
-                  </>
-                ) : (
-                  <>You've assigned more than you've earned this month. Remove some assignments to get back to zero.</>
+              <>
+                <p className="text-[13px] leading-relaxed" style={{ color: "var(--danger)" }}>
+                  {overdraft ? (
+                    <>
+                      You've assigned more than you've earned.{" "}
+                      <span className="font-semibold">{overdraft}</span> is also
+                      overdrafted. Balance your budget to get back on track.
+                    </>
+                  ) : (
+                    <>You've assigned more than you've earned this month. Remove some assignments to get back to zero.</>
+                  )}
+                </p>
+                {overdrafted.length > 0 && onClearOverdraft && (
+                  <button
+                    onClick={() => onClearOverdraft(overdrafted.map((o) => o.id))}
+                    className="mt-2.5 w-full rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition-all hover:brightness-[1.04]"
+                    style={{ background: "var(--danger)", color: "var(--danger-fg)" }}
+                    title="Zero out the assignment on every overdrafted category"
+                  >
+                    Zero out {overdrafted.length === 1
+                      ? `"${overdrafted[0]!.name}"`
+                      : `${overdrafted.length} overdrafted categories`}
+                  </button>
                 )}
-              </p>
+              </>
             ) : overdraft ? (
               <p className="text-[13px] leading-relaxed" style={{ color: "var(--accent)" }}>
                 A <span className="font-semibold">{overdraft}</span> splurge
