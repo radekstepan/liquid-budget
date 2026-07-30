@@ -35,10 +35,10 @@ describe("budget queries", () => {
     expect(data.groups).toHaveLength(1);
   });
 
-  it("isSeeded issues a raw count query", async () => {
+  it("isSeeded issues a select count query", async () => {
     const result = await isSeeded(mock.db);
     expect(result).toBe(false);
-    const executeCalls = mock.calls.filter((c) => c.op === "execute");
-    expect(executeCalls.length).toBeGreaterThanOrEqual(1);
+    const selectCalls = mock.calls.filter((c) => c.op === "select");
+    expect(selectCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

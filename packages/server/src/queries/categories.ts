@@ -27,8 +27,7 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
       groupId: input.groupId,
       name: String(input.name ?? "New Category"),
       sort: Number(maxRow?.max ?? -1) + 1,
-      goalTarget:
-        input.goalTarget != null ? Number(input.goalTarget).toFixed(2) : null,
+      goalTarget: input.goalTarget != null ? Number(input.goalTarget) : null,
     })
     .returning();
   return row;
@@ -51,7 +50,7 @@ export async function updateCategory(
   const p: Record<string, unknown> = {};
   if (patch.name != null) p.name = String(patch.name);
   if ("goalTarget" in patch) {
-    p.goalTarget = patch.goalTarget == null ? null : Number(patch.goalTarget).toFixed(2);
+    p.goalTarget = patch.goalTarget == null ? null : Number(patch.goalTarget);
   }
   const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
   return row;
