@@ -266,6 +266,7 @@ export function RecurringModal({
         <Field label="Frequency">
           <select value={frequency} onChange={(e) => setFrequency(e.target.value)} className={inputCls} style={inputStyle}>
             <option value="weekly">Weekly</option>
+            <option value="biweekly">Biweekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </select>
