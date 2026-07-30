@@ -11,12 +11,14 @@ export function RecurringView({
   onEdit,
   onDelete,
   onPost,
+  onToggleActive,
 }: {
   data: BudgetData;
   onAdd: () => void;
   onEdit: (id: number) => void;
   onDelete: (id: number) => void;
   onPost: (id: number) => void;
+  onToggleActive: (id: number, active: boolean) => void;
 }) {
   const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
@@ -75,6 +77,24 @@ export function RecurringView({
                   <span className="tnum text-[15px] font-bold" style={{ color: amt < 0 ? "var(--danger)" : "var(--accent)" }}>
                     {fmt(amt)}
                   </span>
+                </div>
+                <div className="mt-2">
+                  <button
+                    onClick={() => onToggleActive(r.id, !r.active)}
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-opacity hover:opacity-80"
+                    style={{
+                      background: r.active ? "var(--accent-soft)" : "var(--panel-3)",
+                      color: r.active ? "var(--accent)" : "var(--muted)",
+                    }}
+                    title={r.active ? "Click to pause" : "Click to resume"}
+                    aria-label={r.active ? `Pause ${r.payee}` : `Resume ${r.payee}`}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: r.active ? "var(--accent)" : "var(--muted)" }}
+                    />
+                    {r.active ? "Active" : "Paused"}
+                  </button>
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <span className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold capitalize" style={{ background: "var(--panel-3)", color: "var(--text-2)" }}>
