@@ -66,7 +66,7 @@ function makeChain(
     then(resolve, reject) {
       const key = `${kind}:${entry.table ?? "?"}`;
       const fallback = `${kind}:*`;
-      const value = responses.has(key) ? responses.get(key) : responses.get(fallback);
+      const value = responses.get(key) ?? responses.get(fallback) ?? [];
       try {
         resolve(value as never);
       } catch (e) {

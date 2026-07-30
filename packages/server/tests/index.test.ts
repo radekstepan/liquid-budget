@@ -19,12 +19,12 @@ describe("server package public surface", () => {
 
   it("re-exports seedDatabase and DEMO_MONTH", () => {
     expect(typeof server.seedDatabase).toBe("function");
-    expect(server.DEMO_MONTH).toBe("2025-07");
+    expect(server.DEMO_MONTH).toBe("2026-06");
   });
 
   it("re-exports drizzle client helpers", () => {
     expect(typeof server.createDb).toBe("function");
-    expect(typeof server.createPool).toBe("function");
+    expect(typeof server.openDb).toBe("function");
     expect(typeof server.getDefaultDb).toBe("function");
   });
 

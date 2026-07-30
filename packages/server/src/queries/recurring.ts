@@ -19,7 +19,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       accountId: input.accountId,
       categoryId: input.categoryId,
       payee: input.payee,
-      amount: input.amount.toFixed(2),
+      amount: input.amount,
       frequency: input.frequency,
       nextDate: input.nextDate,
       active: input.active ?? true,

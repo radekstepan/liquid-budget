@@ -33,13 +33,15 @@ describe("seed fixture", () => {
     }
   });
 
-  it("DEMO_MONTH matches all seeded transactions and assignments", () => {
+  it("DEMO_MONTH has at least one assignment and one transaction", () => {
     const d = makeSeedBudgetData();
+    // Fixture spans multiple months (prior months supply carryover history);
+    // verify the primary demo month has data.
     expect(
-      d.assignments.every((a) => a.month === DEMO_MONTH)
+      d.assignments.some((a) => a.month === DEMO_MONTH)
     ).toBe(true);
     expect(
-      d.transactions.every((t) => t.date.startsWith(DEMO_MONTH))
+      d.transactions.some((t) => t.date.startsWith(DEMO_MONTH))
     ).toBe(true);
   });
 });

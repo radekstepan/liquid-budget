@@ -20,7 +20,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
       name: String(input.name),
       kind: String(input.kind ?? "liquid"),
       groupLabel: String(input.groupLabel ?? "Liquid"),
-      balance: (Number(input.balance) || 0).toFixed(2),
+      balance: Number(input.balance) || 0,
       onBudget: input.onBudget ?? true,
       sort: Number(maxRow?.max ?? -1) + 1,
     })

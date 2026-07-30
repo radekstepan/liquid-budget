@@ -31,3 +31,5 @@ coverage/
 
 # turbo
 .turbo/
+
+budget.db*

@@ -9,7 +9,6 @@ export type UpsertAssignmentInput = {
 };
 
 export async function upsertAssignment(db: Database, input: UpsertAssignmentInput) {
-  const amountStr = input.amount.toFixed(2);
   const existing = await db
     .select()
     .from(assignments)
@@ -20,7 +19,7 @@ export async function upsertAssignment(db: Database, input: UpsertAssignmentInpu
   if (existing.length > 0) {
     const [row] = await db
       .update(assignments)
-      .set({ amount: amountStr })
+      .set({ amount: input.amount })
       .where(eq(assignments.id, existing[0]!.id))
       .returning();
     return row;
@@ -28,7 +27,7 @@ export async function upsertAssignment(db: Database, input: UpsertAssignmentInpu
 
   const [row] = await db
     .insert(assignments)
-    .values({ categoryId: input.categoryId, month: input.month, amount: amountStr })
+    .values({ categoryId: input.categoryId, month: input.month, amount: input.amount })
     .returning();
   return row;
 }

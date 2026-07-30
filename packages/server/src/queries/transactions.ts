@@ -28,7 +28,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       date: input.date,
       payee: input.payee,
       memo: input.memo,
-      amount: input.amount.toFixed(2),
+      amount: input.amount,
       cleared: input.cleared ?? true,
     })
     .returning();

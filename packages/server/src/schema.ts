@@ -1,79 +1,75 @@
 import {
-  pgTable,
-  serial,
+  sqliteTable,
   text,
   integer,
-  numeric,
-  boolean,
-  date,
-  timestamp,
+  real,
   uniqueIndex,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 
-export const accounts = pgTable("accounts", {
-  id: serial("id").primaryKey(),
+export const accounts = sqliteTable("accounts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   kind: text("kind").notNull(),
   groupLabel: text("group_label").notNull(),
-  balance: numeric("balance", { precision: 14, scale: 2 }).notNull().default("0"),
-  onBudget: boolean("on_budget").notNull().default(true),
+  balance: real("balance").notNull().default(0),
+  onBudget: integer("on_budget", { mode: "boolean" }).notNull().default(true),
   sort: integer("sort").notNull().default(0),
 });
 
-export const categoryGroups = pgTable("category_groups", {
-  id: serial("id").primaryKey(),
+export const categoryGroups = sqliteTable("category_groups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   sort: integer("sort").notNull().default(0),
-  isCreditCardPayments: boolean("is_credit_card_payments").notNull().default(false),
+  isCreditCardPayments: integer("is_credit_card_payments", { mode: "boolean" }).notNull().default(false),
 });
 
-export const categories = pgTable("categories", {
-  id: serial("id").primaryKey(),
+export const categories = sqliteTable("categories", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   groupId: integer("group_id")
     .notNull()
     .references(() => categoryGroups.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   sort: integer("sort").notNull().default(0),
-  carryover: numeric("carryover", { precision: 14, scale: 2 }).notNull().default("0"),
-  goalTarget: numeric("goal_target", { precision: 14, scale: 2 }),
+  carryover: real("carryover").notNull().default(0),
+  goalTarget: real("goal_target"),
   linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
     onDelete: "cascade",
   }),
 });
 
-export const assignments = pgTable(
+export const assignments = sqliteTable(
   "assignments",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     categoryId: integer("category_id")
       .notNull()
       .references(() => categories.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
-    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    amount: real("amount").notNull().default(0),
   },
   (t) => ({
     uniq: uniqueIndex("assignments_cat_month_uniq").on(t.categoryId, t.month),
   })
 );
 
-export const transactions = pgTable("transactions", {
-  id: serial("id").primaryKey(),
+export const transactions = sqliteTable("transactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   accountId: integer("account_id")
     .notNull()
     .references(() => accounts.id, { onDelete: "cascade" }),
   categoryId: integer("category_id").references(() => categories.id, {
     onDelete: "set null",
   }),
-  date: date("date").notNull(),
+  date: text("date").notNull(),
   payee: text("payee").notNull().default(""),
   memo: text("memo").notNull().default(""),
-  amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
-  cleared: boolean("cleared").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  amount: real("amount").notNull().default(0),
+  cleared: integer("cleared", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(""),
 });
 
-export const recurring = pgTable("recurring", {
-  id: serial("id").primaryKey(),
+export const recurring = sqliteTable("recurring", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   accountId: integer("account_id")
     .notNull()
     .references(() => accounts.id, { onDelete: "cascade" }),
@@ -81,10 +77,10 @@ export const recurring = pgTable("recurring", {
     onDelete: "set null",
   }),
   payee: text("payee").notNull().default(""),
-  amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  amount: real("amount").notNull().default(0),
   frequency: text("frequency").notNull().default("monthly"),
-  nextDate: date("next_date").notNull(),
-  active: boolean("active").notNull().default(true),
+  nextDate: text("next_date").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
 });
 
 export type Account = typeof accounts.$inferSelect;
