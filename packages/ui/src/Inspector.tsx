@@ -20,18 +20,20 @@ export function Inspector({
   avg,
   tbb,
   overBudgeted,
+  priorSurplus,
   theme,
   accent,
   onToggleTheme,
   onSetAccent,
 }: {
   groups: GroupRow[];
-  summary: { assigned: number; outflow: number; available: number };
+  summary: { assigned: number; outflow: number; available: number; totalAvailable: number };
   month: string;
   history: { key: string; assigned: number; real: boolean }[];
   avg: number;
   tbb: number;
   overBudgeted: boolean;
+  priorSurplus: number;
   theme: "light" | "dark";
   accent: string;
   onToggleTheme: () => void;
@@ -146,6 +148,10 @@ export function Inspector({
                 <Row label="Assigned" value={fmt(summary.assigned)} bold />
                 <Row label="Outflow" value={fmt(summary.outflow)} muted />
                 <Row label="Available" value={fmt(summary.available)} muted />
+                {priorSurplus > 0.004 && (
+                  <Row label="↪ Carried Forward" value={fmt(priorSurplus)} accent />
+                )}
+                <Row label="Total Available" value={fmt(summary.totalAvailable)} muted />
                 <Row
                   label="To Be Budgeted"
                   value={fmt(tbb)}

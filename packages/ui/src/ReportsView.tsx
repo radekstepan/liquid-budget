@@ -9,8 +9,12 @@ export function ReportsView({ data, month }: { data: BudgetData; month: string }
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
   const monthTxns = data.transactions.filter((t) => t.date.startsWith(month));
-  const income = monthTxns.filter((t) => num(t.amount) > 0).reduce((s, t) => s + num(t.amount), 0);
+  // True income = uncategorised positive transactions only (YNAB4 "Inflow: To Be Budgeted")
+  const income = monthTxns
+    .filter((t) => t.categoryId == null && num(t.amount) > 0)
+    .reduce((s, t) => s + num(t.amount), 0);
   const expense = monthTxns.filter((t) => num(t.amount) < 0).reduce((s, t) => s + num(t.amount), 0);
+
 
   const byCat = new Map<number, number>();
   for (const t of monthTxns) {

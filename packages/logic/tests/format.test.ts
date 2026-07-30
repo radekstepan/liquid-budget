@@ -9,6 +9,16 @@ describe("format", () => {
     expect(fmt(1234.5)).toBe("$1,234.50");
   });
 
+  it("fmt handles large numbers with comma separators", () => {
+    expect(fmt(1234567.89)).toBe("$1,234,567.89");
+    expect(fmt(-1234567.89)).toBe("-$1,234,567.89");
+  });
+
+  it("fmt rounds correctly at 2 decimal places", () => {
+    expect(fmt(0.005)).toBe("$0.01"); // rounds up
+    expect(fmt(0.004)).toBe("$0.00"); // rounds down
+  });
+
   it("fmtSigned shows zero as $0.00", () => {
     expect(fmtSigned(0)).toBe("$0.00");
     expect(fmtSigned(-5)).toBe("-$5.00");
@@ -20,6 +30,16 @@ describe("format", () => {
     expect(num(null)).toBe(0);
     expect(num(undefined)).toBe(0);
     expect(num("not a number")).toBe(0);
+  });
+
+  it("num returns 0 for dollar-sign-prefixed strings (not a supported format)", () => {
+    // "$1,234.56" is not parseable by parseFloat — callers should strip symbols first
+    expect(num("$1,234.56")).toBe(0);
+  });
+
+  it("num handles negative strings", () => {
+    expect(num("-42.50")).toBeCloseTo(-42.5);
+    expect(num("-0")).toBeCloseTo(0); // parseFloat("-0") is IEEE -0, use toBeCloseTo
   });
 
   it("monthKey zero-pads single-digit months", () => {
@@ -34,6 +54,17 @@ describe("format", () => {
       expect(parsed.year).toBe(2025);
       expect(parsed.month0).toBe(m);
     }
+  });
+
+  it("monthKey / parseMonthKey round-trip across year boundary", () => {
+    // Simulating Dec 2025 + 1 → Jan 2026
+    const dec = parseMonthKey("2025-12");
+    const total = dec.year * 12 + dec.month0 + 1;
+    const nextKey = monthKey(Math.floor(total / 12), total % 12);
+    expect(nextKey).toBe("2026-01");
+    const parsed = parseMonthKey(nextKey);
+    expect(parsed.year).toBe(2026);
+    expect(parsed.month0).toBe(0);
   });
 
   it("monthLabel renders long month + year", () => {
