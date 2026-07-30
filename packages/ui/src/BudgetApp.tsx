@@ -21,7 +21,7 @@ import {
 
 type ModalState =
   | { kind: "none" }
-  | { kind: "addTransaction" }
+  | { kind: "addTransaction"; defaultDate?: string }
   | { kind: "editTransaction"; transactionId: number }
   | { kind: "recurring" }
   | { kind: "editRecurring"; recurringId: number }
@@ -282,7 +282,13 @@ export function BudgetApp({
         )}
         {view === "reports" && <ReportsView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />}
         {view === "calendar" && (
-          <CalendarView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />
+          <CalendarView
+            data={data}
+            month={month}
+            onPrev={() => shiftMonth(-1)}
+            onNext={() => shiftMonth(1)}
+            onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
+          />
         )}
         {view === "projections" && <ProjectionsView data={data} month={month} />}
       </main>
