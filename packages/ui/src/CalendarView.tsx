@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, parseMonthKey, monthLabel } from "@ynab/logic";
+import { fmt, num, parseMonthKey, monthLabel, monthKey } from "@ynab/logic";
 import { IconCalendar, IconChevronRight, IconChevronDown } from "./icons.js";
 
 export function CalendarView({
@@ -10,14 +10,17 @@ export function CalendarView({
   month,
   onPrev,
   onNext,
+  onAdd,
 }: {
   data: BudgetData;
   month: string;
   onPrev: () => void;
   onNext: () => void;
+  onAdd: (date: string) => void;
 }) {
   const { year, month0 } = parseMonthKey(month);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
+  const [expandedDay, setExpandedDay] = useState<number | null>(null);
 
   const firstDay = new Date(year, month0, 1).getDay();
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
@@ -39,6 +42,13 @@ export function CalendarView({
   const monthTotal = data.transactions
     .filter((t) => t.date.startsWith(month))
     .reduce((s, t) => s + num(t.amount), 0);
+
+  const dateIso = (d: number) => {
+    const yyyy = year;
+    const mm = String(month0 + 1).padStart(2, "0");
+    const dd = String(d).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -67,14 +77,25 @@ export function CalendarView({
           {cells.map((d, i) => {
             const items = d ? byDay.get(d) ?? [] : [];
             const dayNet = items.reduce((s, x) => s + x.amount, 0);
+            const expanded = expandedDay === d;
+            const visible = expanded ? items : items.slice(0, 3);
+            const overflow = items.length - visible.length;
             return (
               <div
                 key={i}
-                className="min-h-[104px] rounded-xl p-2"
+                className="min-h-[104px] rounded-xl p-2 transition-colors"
                 style={{
                   background: d ? "var(--panel)" : "transparent",
                   border: d ? "1px solid var(--border)" : "1px solid transparent",
+                  cursor: d ? "pointer" : "default",
                 }}
+                onClick={() => {
+                  if (!d) return;
+                  if (items.length === 0) onAdd(dateIso(d));
+                  else setExpandedDay(expanded ? null : d);
+                }}
+                role={d ? "button" : undefined}
+                aria-label={d ? `Add transaction on ${dateIso(d)}` : undefined}
               >
                 {d && (
                   <>
@@ -85,13 +106,42 @@ export function CalendarView({
                       )}
                     </div>
                     <div className="mt-1 space-y-1">
-                      {items.slice(0, 3).map((x, j) => (
-                        <div key={j} className="truncate rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: x.amount < 0 ? "var(--danger-bg)" : "var(--accent-soft)", color: x.amount < 0 ? "var(--danger)" : "var(--accent)" }}>
-                          {x.payee}
+                      {visible.map((x, j) => (
+                        <div
+                          key={j}
+                          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]"
+                          style={{ background: x.amount < 0 ? "var(--danger-bg)" : "var(--accent-soft)", color: x.amount < 0 ? "var(--danger)" : "var(--accent)" }}
+                          title={`${x.payee}${x.cat ? ` · ${x.cat}` : ""} · ${fmt(x.amount)}`}
+                        >
+                          <span className="truncate flex-1">{x.payee}</span>
+                          <span className="tnum shrink-0">{fmt(x.amount)}</span>
                         </div>
                       ))}
-                      {items.length > 3 && (
-                        <div className="text-[10.5px]" style={{ color: "var(--muted)" }}>+{items.length - 3} more</div>
+                      {overflow > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDay(d);
+                          }}
+                          className="text-left text-[10.5px] underline-offset-2 hover:underline"
+                          style={{ color: "var(--muted)" }}
+                        >
+                          +{overflow} more
+                        </button>
+                      )}
+                      {expanded && overflow > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDay(null);
+                          }}
+                          className="text-[10.5px] underline-offset-2 hover:underline"
+                          style={{ color: "var(--muted)" }}
+                        >
+                          Show less
+                        </button>
                       )}
                     </div>
                   </>
