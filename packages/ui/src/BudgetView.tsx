@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { GroupRow, Account, CatRow } from "@ynab/logic";
 import { fmt, num, MONTHS, parseMonthKey, monthKey } from "@ynab/logic";
 import {
@@ -37,6 +37,8 @@ export function BudgetView({
   onDeleteGroup,
   onCollapseAll,
   onExpandAll,
+  onReorderCategory,
+  onReorderGroup,
 }: {
   groups: GroupRow[];
   month: string;
@@ -54,12 +56,43 @@ export function BudgetView({
   onDeleteGroup: (groupId: number) => void;
   onCollapseAll: () => void;
   onExpandAll: () => void;
+  onReorderCategory?: (id: number, sort: number) => void;
+  onReorderGroup?: (id: number, sort: number) => void;
 }) {
   const { month0 } = parseMonthKey(month);
   const totalBudget = groups.reduce((s, g) => s + g.available, 0);
   const creditGroup = groups.find((g) => g.group.isCreditCardPayments);
   const creditAccounts = accounts.filter((a) => a.kind === "credit");
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // ── Group drag-and-drop state ──
+  const dragGroupId = useRef<number | null>(null);
+  const [groupOverId, setGroupOverId] = useState<number | null>(null);
+
+  const handleGroupDragStart = useCallback((id: number) => {
+    dragGroupId.current = id;
+  }, []);
+
+  const handleGroupDrop = useCallback(
+    (targetId: number) => {
+      const srcId = dragGroupId.current;
+      if (srcId == null || srcId === targetId || !onReorderGroup) return;
+      const nonCC = groups.filter((g) => !g.group.isCreditCardPayments);
+      const srcIdx = nonCC.findIndex((g) => g.group.id === srcId);
+      const tgtIdx = nonCC.findIndex((g) => g.group.id === targetId);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+      // Assign sequential sort values reflecting the new order.
+      const reordered = [...nonCC];
+      const [moved] = reordered.splice(srcIdx, 1);
+      reordered.splice(tgtIdx, 0, moved!);
+      reordered.forEach((g, i) => {
+        if (g.group.sort !== i) onReorderGroup(g.group.id, i);
+      });
+      dragGroupId.current = null;
+      setGroupOverId(null);
+    },
+    [groups, onReorderGroup]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -174,6 +207,12 @@ export function BudgetView({
               onDeleteCategory={onDeleteCategory}
               onEditGroup={() => onEditGroup(g.group.id)}
               onDeleteGroup={() => onDeleteGroup(g.group.id)}
+              onReorderCategory={onReorderCategory}
+              isDragOver={groupOverId === g.group.id}
+              onDragStart={() => handleGroupDragStart(g.group.id)}
+              onDragOver={() => setGroupOverId(g.group.id)}
+              onDragLeave={() => setGroupOverId(null)}
+              onDrop={() => handleGroupDrop(g.group.id)}
             />
           ))}
 
@@ -292,6 +331,12 @@ function GroupBlock({
   onDeleteCategory,
   onEditGroup,
   onDeleteGroup,
+  onReorderCategory,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   g: GroupRow;
   collapsed: boolean;
@@ -302,9 +347,39 @@ function GroupBlock({
   onDeleteCategory: (id: number) => void;
   onEditGroup: () => void;
   onDeleteGroup: () => void;
+  onReorderCategory?: (id: number, sort: number) => void;
+  isDragOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDragLeave?: () => void;
+  onDrop?: () => void;
 }) {
+  // ── Category drag state within this group ──
+  const dragCatId = useRef<number | null>(null);
+  const [catOverId, setCatOverId] = useState<number | null>(null);
+
   return (
-    <div style={{ borderBottom: "1px solid var(--border)" }}>
+    <div
+      style={{
+        borderBottom: "1px solid var(--border)",
+        outline: isDragOver ? "2px solid var(--accent)" : "none",
+        outlineOffset: "-2px",
+        borderRadius: isDragOver ? "4px" : undefined,
+        opacity: isDragOver ? 0.85 : 1,
+        transition: "opacity 0.15s, outline 0.1s",
+      }}
+      draggable
+      onDragStart={(e) => {
+        // Only trigger group drag when the drag originates on the header, not on category rows.
+        const target = e.target as HTMLElement;
+        if (target.closest("[data-cat-row]")) { e.stopPropagation(); return; }
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => { e.preventDefault(); onDrop?.(); }}
+    >
       <div className="group/gh flex items-center px-5 py-2.5" style={{ background: "var(--panel-2)" }}>
         <button onClick={onToggle} className="flex items-center gap-1" style={{ color: "var(--faint)" }}>
           {collapsed ? <IconChevronRight width={16} height={16} /> : <IconChevronDown width={16} height={16} />}
@@ -354,6 +429,25 @@ function GroupBlock({
             onAssign={onAssign}
             onEdit={() => onEditCategory(r.category.id)}
             onDelete={() => onDeleteCategory(r.category.id)}
+            isDragOver={catOverId === r.category.id}
+            onDragStart={() => { dragCatId.current = r.category.id; }}
+            onDragOver={() => setCatOverId(r.category.id)}
+            onDragLeave={() => setCatOverId(null)}
+            onDrop={() => {
+              const srcId = dragCatId.current;
+              if (srcId == null || srcId === r.category.id || !onReorderCategory) return;
+              const srcIdx = g.rows.findIndex((x) => x.category.id === srcId);
+              const tgtIdx = g.rows.findIndex((x) => x.category.id === r.category.id);
+              if (srcIdx === -1 || tgtIdx === -1) return;
+              const reordered = [...g.rows];
+              const [moved] = reordered.splice(srcIdx, 1);
+              reordered.splice(tgtIdx, 0, moved!);
+              reordered.forEach((row, i) => {
+                if (row.category.sort !== i) onReorderCategory(row.category.id, i);
+              });
+              dragCatId.current = null;
+              setCatOverId(null);
+            }}
           />
         ))}
     </div>
@@ -400,12 +494,22 @@ function CategoryRow({
   onEdit,
   onDelete,
   readOnly,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   r: CatRow;
   onAssign: (id: number, amt: number) => void;
   onEdit: () => void;
   onDelete: () => void;
   readOnly?: boolean;
+  isDragOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDragLeave?: () => void;
+  onDrop?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -431,8 +535,30 @@ function CategoryRow({
     r.available < 0 ? "var(--danger)" : r.available === 0 ? "var(--muted)" : "var(--accent)";
 
   return (
-    <div className="group/row flex items-center px-5 py-2 transition-colors hover:bg-[var(--panel-3)]" style={{ borderTop: "1px solid var(--border)" }}>
-      <span className="cursor-grab" style={{ color: "var(--faint)" }}>
+    <div
+      data-cat-row
+      className="group/row flex items-center px-5 py-2 transition-colors hover:bg-[var(--panel-3)]"
+      style={{
+        borderTop: isDragOver ? "2px solid var(--accent)" : "1px solid var(--border)",
+        background: isDragOver ? "var(--accent-soft)" : undefined,
+        transition: "background 0.1s, border-top-color 0.1s",
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
+      onDragLeave={(e) => { e.stopPropagation(); onDragLeave?.(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop?.(); }}
+    >
+      {/* Grip handle — only this part is draggable so clicking the row still works */}
+      <span
+        className="cursor-grab active:cursor-grabbing"
+        style={{ color: "var(--faint)" }}
+        draggable
+        onDragStart={(e) => {
+          e.stopPropagation();
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart?.();
+        }}
+        aria-label={`Drag to reorder ${r.category.name}`}
+      >
         <IconGrip width={16} height={16} />
       </span>
       <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />

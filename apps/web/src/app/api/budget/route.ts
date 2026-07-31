@@ -1,10 +1,14 @@
-import { getBudgetData, getDefaultDb, seedDatabase } from "@ynab/server";
+import { getBudgetData, getDefaultDb, isSeeded, seedDatabase } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const db = getDefaultDb();
-  await seedDatabase(db);
+  // Only seed once — skip the work on every subsequent request.
+  const seeded = await isSeeded(db);
+  if (!seeded) {
+    await seedDatabase(db);
+  }
   const data = await getBudgetData(db);
   return Response.json(data);
 }
