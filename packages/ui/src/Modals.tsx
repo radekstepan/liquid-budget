@@ -9,6 +9,7 @@ export function TransactionModal({
   accounts,
   categories,
   defaultAccountId,
+  defaultDate,
   initial,
   onClose,
   onSave,
@@ -16,6 +17,7 @@ export function TransactionModal({
   accounts: Account[];
   categories: Category[];
   defaultAccountId: number | null;
+  defaultDate?: string;
   initial?: Transaction;
   onClose: () => void;
   onSave: (t: {
@@ -33,7 +35,7 @@ export function TransactionModal({
   );
   const initialAmt = initial ? num(initial.amount) : 0;
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
-  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [date, setDate] = useState(initial?.date ?? defaultDate ?? todayISO());
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
   const [amount, setAmount] = useState(
