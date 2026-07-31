@@ -3,9 +3,19 @@
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, monthLabel } from "@ynab/logic";
-import { IconReports } from "./icons.js";
+import { IconReports, IconChevronRight } from "./icons.js";
 
-export function ReportsView({ data, month }: { data: BudgetData; month: string }) {
+export function ReportsView({
+  data,
+  month,
+  onPrev,
+  onNext,
+}: {
+  data: BudgetData;
+  month: string;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
   const monthTxns = data.transactions.filter((t) => t.date.startsWith(month));
@@ -43,7 +53,25 @@ export function ReportsView({ data, month }: { data: BudgetData; month: string }
       <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <span style={{ color: "var(--accent)" }}><IconReports width={20} height={20} /></span>
         <h1 className="text-[18px] font-bold" style={{ color: "var(--text)" }}>Reports</h1>
-        <span className="ml-auto text-[13.5px] font-medium" style={{ color: "var(--muted)" }}>{monthLabel(month)}</span>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={onPrev}
+            className="grid h-8 w-8 place-items-center rounded-lg"
+            style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text-2)" }}
+            aria-label="Previous month"
+          >
+            <span className="rotate-180"><IconChevronRight width={16} height={16} /></span>
+          </button>
+          <span className="w-[150px] text-center text-[14.5px] font-semibold" style={{ color: "var(--text-2)" }}>{monthLabel(month)}</span>
+          <button
+            onClick={onNext}
+            className="grid h-8 w-8 place-items-center rounded-lg"
+            style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text-2)" }}
+            aria-label="Next month"
+          >
+            <IconChevronRight width={16} height={16} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
