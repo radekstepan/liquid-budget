@@ -205,6 +205,12 @@ export function BudgetApp({
     setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   }, []);
 
+  const collapseAll = useCallback(() => {
+    setCollapsed(Object.fromEntries(data.groups.map((g) => [g.id, true])));
+  }, [data.groups]);
+
+  const expandAll = useCallback(() => setCollapsed({}), []);
+
   const shiftMonth = useCallback(
     (delta: number) => {
       const { year: y, month0 } = parseMonthKey(month);
@@ -258,6 +264,8 @@ export function BudgetApp({
             onDeleteCategory={api.deleteCategory}
             onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
             onDeleteGroup={api.deleteGroup}
+            onCollapseAll={collapseAll}
+            onExpandAll={expandAll}
           />
         )}
         {view === "transactions" && (

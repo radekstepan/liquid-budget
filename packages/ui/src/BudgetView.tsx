@@ -35,6 +35,8 @@ export function BudgetView({
   onDeleteCategory,
   onEditGroup,
   onDeleteGroup,
+  onCollapseAll,
+  onExpandAll,
 }: {
   groups: GroupRow[];
   month: string;
@@ -50,11 +52,14 @@ export function BudgetView({
   onDeleteCategory: (catId: number) => void;
   onEditGroup: (groupId: number) => void;
   onDeleteGroup: (groupId: number) => void;
+  onCollapseAll: () => void;
+  onExpandAll: () => void;
 }) {
   const { month0 } = parseMonthKey(month);
   const totalBudget = groups.reduce((s, g) => s + g.available, 0);
   const creditGroup = groups.find((g) => g.group.isCreditCardPayments);
   const creditAccounts = accounts.filter((a) => a.kind === "credit");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className="flex h-full flex-col">
@@ -92,8 +97,55 @@ export function BudgetView({
         <div className="flex items-center gap-1" style={{ color: "var(--faint)" }}>
           <IconChevronDown width={16} height={16} />
           <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
-          <button className="ml-1"><IconDots width={16} height={16} /></button>
-          <button><IconFilter width={16} height={16} /></button>
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              className="ml-1 rounded-md p-1 transition-colors hover:bg-[var(--panel)]"
+              aria-label="Open budget menu"
+              aria-expanded={menuOpen}
+            >
+              <IconDots width={16} height={16} />
+            </button>
+            {menuOpen && (
+              <div
+                className="animate-fade absolute left-0 top-[28px] z-20 min-w-[180px] overflow-hidden rounded-xl"
+                style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}
+                role="menu"
+              >
+                <button
+                  onClick={() => {
+                    onCollapseAll();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--panel-3)]"
+                  style={{ color: "var(--text-2)" }}
+                  role="menuitem"
+                >
+                  Collapse all groups
+                </button>
+                <button
+                  onClick={() => {
+                    onExpandAll();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--panel-3)]"
+                  style={{ color: "var(--text-2)" }}
+                  role="menuitem"
+                >
+                  Expand all groups
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            className="rounded-md p-1 opacity-50"
+            style={{ color: "var(--faint)", cursor: "not-allowed" }}
+            aria-label="Filter (coming soon)"
+            disabled
+            title="Filters coming in a future update"
+          >
+            <IconFilter width={16} height={16} />
+          </button>
         </div>
         <div className="flex-1" />
         <div className={`${COL_A} text-right text-[11.5px] font-semibold uppercase tracking-[0.07em]`} style={{ color: "var(--muted)" }}>
