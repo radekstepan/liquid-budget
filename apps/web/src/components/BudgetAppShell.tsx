@@ -179,6 +179,19 @@ export function BudgetAppShell() {
       await jsonReq("/api/reset", { method: "POST" });
       await reload();
     },
+    importYnab4: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/import", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Import failed (${res.status}): ${text}`);
+      }
+      await reload();
+    },
   };
 
   if (error) {

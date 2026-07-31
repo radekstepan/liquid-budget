@@ -102,6 +102,7 @@ export type BudgetAppApi = {
     patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number }
   ) => Promise<void>;
   resetDemo: () => Promise<void>;
+  importYnab4?: (file: File) => Promise<void>;
 };
 
 export function BudgetApp({
@@ -330,6 +331,7 @@ export function BudgetApp({
         onSetAccent={setAccentTheme}
         onSelectMonth={setMonth}
         onResetDemo={api.resetDemo}
+        onImportYnab4={api.importYnab4}
         onClearOverdraft={clearOverdraft}
       />
 
