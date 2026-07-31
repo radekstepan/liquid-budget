@@ -277,6 +277,7 @@ export function BudgetApp({
             onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
             onDelete={api.deleteRecurring}
             onPost={api.postRecurring}
+            onToggleActive={(id, active) => api.updateRecurring(id, { active })}
           />
         )}
         {view === "reports" && <ReportsView data={data} month={month} />}
