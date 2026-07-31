@@ -27,6 +27,7 @@ export function Inspector({
   onSetAccent,
   onSelectMonth,
   onResetDemo,
+  onImportYnab4,
   onClearOverdraft,
 }: {
   groups: GroupRow[];
@@ -43,6 +44,7 @@ export function Inspector({
   onSetAccent: (a: string) => void;
   onSelectMonth?: (key: string) => void;
   onResetDemo?: () => void;
+  onImportYnab4?: (file: File) => void;
   onClearOverdraft?: (categoryIds: number[]) => void;
 }) {
   const [sumOpen, setSumOpen] = useState(true);
@@ -123,6 +125,29 @@ export function Inspector({
                   <IconReset width={15} height={15} />
                   Reset demo data
                 </button>
+              )}
+              {onImportYnab4 && (
+                <label
+                  className="flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
+                  style={{ color: "var(--text-2)" }}
+                  role="menuitem"
+                >
+                  <IconReset width={15} height={15} />
+                  <span>Import YNAB4 Backup</span>
+                  <input
+                    type="file"
+                    accept=".y4backup"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setSettingsOpen(false);
+                        onImportYnab4(file);
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
               )}
             </div>
           )}
