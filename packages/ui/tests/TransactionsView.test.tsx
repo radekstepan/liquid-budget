@@ -12,17 +12,18 @@ describe("TransactionsView", () => {
         accountFilter={null}
         setAccountFilter={() => {}}
         onAdd={() => {}}
+        onEdit={() => {}}
         onDelete={() => {}}
       />
     );
 
-    expect(screen.getByText("Whole Foods")).toBeInTheDocument();
-    expect(screen.getAllByText("Acme Corp Payroll").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Superstore").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SAP Concur").length).toBeGreaterThan(0);
 
     const search = screen.getByPlaceholderText(/search/i);
-    fireEvent.change(search, { target: { value: "Whole" } });
-    expect(screen.getByText("Whole Foods")).toBeInTheDocument();
-    expect(screen.queryByText("Acme Corp Payroll")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "Superstore" } });
+    expect(screen.getAllByText("Superstore").length).toBeGreaterThan(0);
+    expect(screen.queryByText("SAP Concur")).not.toBeInTheDocument();
   });
 
   it("calls onAdd when Add Transaction is clicked", () => {
@@ -33,6 +34,7 @@ describe("TransactionsView", () => {
         accountFilter={null}
         setAccountFilter={() => {}}
         onAdd={onAdd}
+        onEdit={() => {}}
         onDelete={() => {}}
       />
     );

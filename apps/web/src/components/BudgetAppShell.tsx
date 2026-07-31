@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BudgetApp, type BudgetAppApi } from "@ynab/ui";
 import type { BudgetData } from "@ynab/logic";
-import { todayISO, num } from "@ynab/logic";
+import { todayISO, num, nextDateFor } from "@ynab/logic";
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -57,12 +57,26 @@ export function BudgetAppShell() {
       await jsonReq("/api/transactions", { method: "POST", body: JSON.stringify(t) });
       await reload();
     },
+    updateTransaction: async (id, t) => {
+      await jsonReq("/api/transactions", {
+        method: "PATCH",
+        body: JSON.stringify({ id, ...t }),
+      });
+      await reload();
+    },
     deleteTransaction: async (id) => {
       await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
       await reload();
     },
     addRecurring: async (v) => {
       await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });
+      await reload();
+    },
+    updateRecurring: async (id, v) => {
+      await jsonReq("/api/recurring", {
+        method: "PATCH",
+        body: JSON.stringify({ id, ...v }),
+      });
       await reload();
     },
     deleteRecurring: async (id) => {
@@ -73,17 +87,27 @@ export function BudgetAppShell() {
       if (!data) return;
       const r = data.recurring.find((x) => x.id === id);
       if (!r) return;
+      const today = todayISO();
       await jsonReq("/api/transactions", {
         method: "POST",
         body: JSON.stringify({
           accountId: r.accountId,
           categoryId: r.categoryId,
-          date: todayISO(),
+          date: today,
           payee: r.payee,
           memo: "Recurring",
           amount: num(r.amount),
         }),
       });
+      // Advance nextDate by one frequency step so the next "Post Now" is
+      // a fresh cycle and the recurring card reflects a new schedule.
+      const next = nextDateFor(r.frequency, r.nextDate);
+      if (next !== r.nextDate) {
+        await jsonReq("/api/recurring", {
+          method: "PATCH",
+          body: JSON.stringify({ id: r.id, nextDate: next }),
+        });
+      }
       await reload();
     },
     saveCategory: async (groupId, categoryId, v) => {
@@ -104,6 +128,20 @@ export function BudgetAppShell() {
       await jsonReq(`/api/categories?id=${id}`, { method: "DELETE" });
       await reload();
     },
+    reorderCategory: async (id, sort) => {
+      await jsonReq("/api/categories", {
+        method: "PATCH",
+        body: JSON.stringify({ id, sort }),
+      });
+      await reload();
+    },
+    reorderGroup: async (id, sort) => {
+      await jsonReq("/api/categories", {
+        method: "PATCH",
+        body: JSON.stringify({ id, type: "group", sort }),
+      });
+      await reload();
+    },
     saveGroup: async (groupId, name) => {
       if (groupId) {
         await jsonReq("/api/categories", {
@@ -118,8 +156,27 @@ export function BudgetAppShell() {
       }
       await reload();
     },
+    deleteGroup: async (id) => {
+      await jsonReq(`/api/categories?type=group&id=${id}`, { method: "DELETE" });
+      await reload();
+    },
     addAccount: async (v) => {
       await jsonReq("/api/accounts", { method: "POST", body: JSON.stringify(v) });
+      await reload();
+    },
+    deleteAccount: async (id) => {
+      await jsonReq(`/api/accounts?id=${id}`, { method: "DELETE" });
+      await reload();
+    },
+    updateAccount: async (id, patch) => {
+      await jsonReq("/api/accounts", {
+        method: "PATCH",
+        body: JSON.stringify({ id, ...patch }),
+      });
+      await reload();
+    },
+    resetDemo: async () => {
+      await jsonReq("/api/reset", { method: "POST" });
       await reload();
     },
   };

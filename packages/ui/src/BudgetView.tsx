@@ -34,6 +34,7 @@ export function BudgetView({
   onEditCategory,
   onDeleteCategory,
   onEditGroup,
+  onDeleteGroup,
 }: {
   groups: GroupRow[];
   month: string;
@@ -48,6 +49,7 @@ export function BudgetView({
   onEditCategory: (catId: number) => void;
   onDeleteCategory: (catId: number) => void;
   onEditGroup: (groupId: number) => void;
+  onDeleteGroup: (groupId: number) => void;
 }) {
   const { month0 } = parseMonthKey(month);
   const totalBudget = groups.reduce((s, g) => s + g.available, 0);
@@ -119,6 +121,7 @@ export function BudgetView({
               onEditCategory={onEditCategory}
               onDeleteCategory={onDeleteCategory}
               onEditGroup={() => onEditGroup(g.group.id)}
+              onDeleteGroup={() => onDeleteGroup(g.group.id)}
             />
           ))}
 
@@ -140,7 +143,13 @@ export function BudgetView({
         {creditGroup && !collapsed[creditGroup.group.id] && (
           <div>
             {creditGroup.rows.map((r) => (
-              <CategoryRow key={r.category.id} r={r} onAssign={onAssign} onEdit={() => {}} onDelete={() => {}} readOnly />
+              <CategoryRow
+                key={r.category.id}
+                r={r}
+                onAssign={onAssign}
+                onEdit={() => onEditCategory(r.category.id)}
+                onDelete={() => onDeleteCategory(r.category.id)}
+              />
             ))}
           </div>
         )}
@@ -230,6 +239,7 @@ function GroupBlock({
   onEditCategory,
   onDeleteCategory,
   onEditGroup,
+  onDeleteGroup,
 }: {
   g: GroupRow;
   collapsed: boolean;
@@ -239,6 +249,7 @@ function GroupBlock({
   onEditCategory: (id: number) => void;
   onDeleteCategory: (id: number) => void;
   onEditGroup: () => void;
+  onDeleteGroup: () => void;
 }) {
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
@@ -257,6 +268,19 @@ function GroupBlock({
           title="Add category"
         >
           <IconPlus width={15} height={15} />
+        </button>
+        <button
+          onClick={() => {
+            if (confirm(`Delete group "${g.group.name}"? This also deletes all of its categories and their assignment history.`)) {
+              onDeleteGroup();
+            }
+          }}
+          className="ml-1 rounded-md p-1 opacity-0 transition-opacity group-hover/gh:opacity-100"
+          style={{ color: "var(--muted)" }}
+          title="Delete group"
+          aria-label={`Delete group ${g.group.name}`}
+        >
+          <IconTrash width={14} height={14} />
         </button>
         <div className="flex-1" />
         <div className={`${COL_A} tnum text-right text-[14.5px] font-bold`} style={{ color: "var(--text)" }}>

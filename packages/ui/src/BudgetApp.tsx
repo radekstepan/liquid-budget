@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { computeBudget, num, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
+import { computeBudget, num, parseMonthKey, monthKey, todayISO, DEMO_MONTH } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
@@ -19,12 +19,12 @@ import {
   AccountModal,
 } from "./Modals.js";
 
-const DEMO_MONTH = "2025-07";
-
 type ModalState =
   | { kind: "none" }
-  | { kind: "transaction" }
+  | { kind: "addTransaction" }
+  | { kind: "editTransaction"; transactionId: number }
   | { kind: "recurring" }
+  | { kind: "editRecurring"; recurringId: number }
   | { kind: "account" }
   | { kind: "addCategory"; groupId: number }
   | { kind: "editCategory"; categoryId: number }
@@ -42,8 +42,38 @@ export type BudgetAppApi = {
     memo: string;
     amount: number;
   }) => Promise<void>;
+  updateTransaction: (
+    id: number,
+    t: {
+      accountId: number;
+      categoryId: number | null;
+      date: string;
+      payee: string;
+      memo: string;
+      amount: number;
+    }
+  ) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
-  addRecurring: (v: unknown) => Promise<void>;
+  addRecurring: (v: {
+    accountId: number;
+    categoryId: number | null;
+    payee: string;
+    amount: number;
+    frequency: string;
+    nextDate: string;
+  }) => Promise<void>;
+  updateRecurring: (
+    id: number,
+    v: {
+      accountId?: number;
+      categoryId?: number | null;
+      payee?: string;
+      amount?: number;
+      frequency?: string;
+      nextDate?: string;
+      active?: boolean;
+    }
+  ) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;
   postRecurring: (id: number) => Promise<void>;
   saveCategory: (
@@ -52,8 +82,23 @@ export type BudgetAppApi = {
     v: { name: string; goalTarget: number | null }
   ) => Promise<void>;
   deleteCategory: (id: number) => Promise<void>;
+  reorderCategory: (id: number, sort: number) => Promise<void>;
+  reorderGroup: (id: number, sort: number) => Promise<void>;
   saveGroup: (groupId: number | null, name: string) => Promise<void>;
-  addAccount: (v: unknown) => Promise<void>;
+  deleteGroup: (groupId: number) => Promise<void>;
+  addAccount: (v: {
+    name: string;
+    kind: "liquid" | "credit" | "offbudget";
+    groupLabel: string;
+    balance: number;
+    onBudget: boolean;
+  }) => Promise<void>;
+  deleteAccount: (id: number) => Promise<void>;
+  updateAccount: (
+    id: number,
+    patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number }
+  ) => Promise<void>;
+  resetDemo: () => Promise<void>;
 };
 
 export function BudgetApp({
@@ -65,20 +110,35 @@ export function BudgetApp({
 }) {
   const [view, setView] = useState<View>("budget");
   const [month, setMonth] = useState(DEMO_MONTH);
+  // Lazy initializer — runs once on mount, not on every render, so reading
+  // data.groups here is cheap. A useMemo would re-derive on every data
+  // reload and clobber the user's manual collapse/expand choices.
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
     const cc = data.groups.find((g) => g.isCreditCardPayments);
     return cc ? { [cc.id]: true } : {};
   });
   const [accountFilter, setAccountFilter] = useState<number | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [accent, setAccent] = useState("liquid");
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof document === "undefined") return "light";
+    const stored = document.documentElement.getAttribute("data-theme");
+    return stored === "dark" ? "dark" : "light";
+  });
+  const [accent, setAccent] = useState<string>(() => {
+    if (typeof document === "undefined") return "liquid";
+    return document.documentElement.getAttribute("data-accent") ?? "liquid";
+  });
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next = prev === "light" ? "dark" : "light";
       if (typeof document !== "undefined") {
         document.documentElement.setAttribute("data-theme", next);
+        try {
+          localStorage.setItem("liquid-theme", next);
+        } catch {
+          // ignore quota / privacy errors
+        }
       }
       return next;
     });
@@ -88,6 +148,11 @@ export function BudgetApp({
     setAccent(a);
     if (typeof document !== "undefined") {
       document.documentElement.setAttribute("data-accent", a);
+      try {
+        localStorage.setItem("liquid-accent", a);
+      } catch {
+        // ignore quota / privacy errors
+      }
     }
   }, []);
 
@@ -110,20 +175,22 @@ export function BudgetApp({
     const assignedFor = (key: string) =>
       data.assignments.filter((a) => a.month === key).reduce((s, a) => s + num(a.amount), 0);
     const { year: y, month0 } = parseMonthKey(month);
-    const base = assignedFor(month) || summary.assigned || 3991;
     const hist: { key: string; assigned: number; real: boolean }[] = [];
     for (let i = -4; i <= 7; i++) {
       const mm = ((month0 + i) % 12 + 12) % 12;
       const yy = y + Math.floor((month0 + i) / 12);
       const key = monthKey(yy, mm);
       const real = realMonths.has(key);
-      const assigned = real
-        ? assignedFor(key)
-        : Math.round(base * (0.72 + 0.5 * Math.abs(Math.sin(i * 1.7 + 2))));
+      // Only use real data. Months without assignments render as 0 so the bar
+      // chart shows an honest empty slot rather than a fabricated value.
+      const assigned = real ? assignedFor(key) : 0;
       hist.push({ key, assigned, real });
     }
     const reals = hist.filter((h) => h.real && h.assigned > 0);
-    const average = reals.length ? reals.reduce((s, h) => s + h.assigned, 0) / reals.length : base;
+    const currentAssigned = assignedFor(month) || summary.assigned;
+    const average = reals.length
+      ? reals.reduce((s, h) => s + h.assigned, 0) / reals.length
+      : currentAssigned;
     return { history: hist, avg: average };
   }, [data, month, summary.assigned]);
 
@@ -151,6 +218,14 @@ export function BudgetApp({
     modal.kind === "editCategory" ? data.categories.find((c) => c.id === modal.categoryId) : undefined;
   const editingGroup =
     modal.kind === "editGroup" ? data.groups.find((g) => g.id === modal.groupId) : undefined;
+  const editingTransaction =
+    modal.kind === "editTransaction"
+      ? data.transactions.find((t) => t.id === modal.transactionId)
+      : undefined;
+  const editingRecurring =
+    modal.kind === "editRecurring"
+      ? data.recurring.find((r) => r.id === modal.recurringId)
+      : undefined;
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--app)" }}>
@@ -163,6 +238,7 @@ export function BudgetApp({
           setView("transactions");
         }}
         onAddAccount={() => setModal({ kind: "account" })}
+        onDeleteAccount={api.deleteAccount}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--panel)" }}>
@@ -181,6 +257,7 @@ export function BudgetApp({
             onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
             onDeleteCategory={api.deleteCategory}
             onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
+            onDeleteGroup={api.deleteGroup}
           />
         )}
         {view === "transactions" && (
@@ -188,7 +265,8 @@ export function BudgetApp({
             data={data}
             accountFilter={accountFilter}
             setAccountFilter={setAccountFilter}
-            onAdd={() => setModal({ kind: "transaction" })}
+            onAdd={() => setModal({ kind: "addTransaction" })}
+            onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
             onDelete={api.deleteTransaction}
           />
         )}
@@ -196,6 +274,7 @@ export function BudgetApp({
           <RecurringView
             data={data}
             onAdd={() => setModal({ kind: "recurring" })}
+            onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
             onDelete={api.deleteRecurring}
             onPost={api.postRecurring}
           />
@@ -220,9 +299,11 @@ export function BudgetApp({
         accent={accent}
         onToggleTheme={toggleTheme}
         onSetAccent={setAccentTheme}
+        onSelectMonth={setMonth}
+        onResetDemo={api.resetDemo}
       />
 
-      {modal.kind === "transaction" && (
+      {modal.kind === "addTransaction" && (
         <TransactionModal
           accounts={data.accounts}
           categories={data.categories}
@@ -234,6 +315,20 @@ export function BudgetApp({
           }}
         />
       )}
+      {modal.kind === "editTransaction" && editingTransaction && (
+        <TransactionModal
+          accounts={data.accounts}
+          categories={data.categories}
+          defaultAccountId={accountFilter}
+          initial={editingTransaction}
+          onClose={() => setModal({ kind: "none" })}
+          onSave={async (t) => {
+            const { id, ...rest } = t;
+            if (id) await api.updateTransaction(id, rest);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
       {modal.kind === "recurring" && (
         <RecurringModal
           accounts={data.accounts}
@@ -241,6 +336,19 @@ export function BudgetApp({
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.addRecurring(v);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
+      {modal.kind === "editRecurring" && editingRecurring && (
+        <RecurringModal
+          accounts={data.accounts}
+          categories={data.categories}
+          initial={editingRecurring}
+          onClose={() => setModal({ kind: "none" })}
+          onSave={async (v) => {
+            const { id, ...rest } = v;
+            if (id) await api.updateRecurring(id, rest);
             setModal({ kind: "none" });
           }}
         />

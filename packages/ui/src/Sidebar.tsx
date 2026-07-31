@@ -14,6 +14,7 @@ import {
   IconChevronRight,
   IconDrop,
   IconPlus,
+  IconTrash,
 } from "./icons.js";
 
 export type View =
@@ -39,14 +40,22 @@ export function Sidebar({
   accounts,
   onSelectAccount,
   onAddAccount,
+  onDeleteAccount,
 }: {
   view: View;
   setView: (v: View) => void;
   accounts: Account[];
   onSelectAccount: (id: number) => void;
   onAddAccount: () => void;
+  onDeleteAccount?: (id: number) => void;
 }) {
-  const groups = ["Liquid", "Credit Cards", "Retirement"];
+  // Group accounts by their `groupLabel` rather than hard-coding category
+  // names so that any seed-data labels (e.g. "Budget Accounts") surface.
+  const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
+  const seen = new Set(accounts.map((a) => a.groupLabel));
+  const groups = [...groupOrder.filter((g) => seen.has(g)), ...seen].filter(
+    (g, i, arr) => arr.indexOf(g) === i
+  );
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     Retirement: true,
   });
@@ -134,21 +143,41 @@ export function Sidebar({
               </button>
               {!isCollapsed &&
                 list.map((a) => (
-                  <button
+                  <div
                     key={a.id}
-                    onClick={() => onSelectAccount(a.id)}
-                    className="group flex w-full items-center rounded-lg py-1.5 pl-8 pr-2 transition-colors hover:bg-[var(--panel-3)]"
+                    className="group flex w-full items-center rounded-lg transition-colors hover:bg-[var(--panel-3)]"
                   >
-                    <span className="text-[14px] font-medium" style={{ color: "var(--text)" }}>
-                      {a.name}
-                    </span>
-                    <span
-                      className="tnum ml-auto text-[13.5px]"
-                      style={{ color: num(a.balance) < 0 ? "var(--danger)" : "var(--text-2)" }}
+                    <button
+                      onClick={() => onSelectAccount(a.id)}
+                      className="flex min-w-0 flex-1 items-center py-1.5 pl-8 pr-2 text-left"
                     >
-                      {fmt(num(a.balance))}
-                    </span>
-                  </button>
+                      <span className="truncate text-[14px] font-medium" style={{ color: "var(--text)" }}>
+                        {a.name}
+                      </span>
+                      <span
+                        className="tnum ml-auto text-[13.5px]"
+                        style={{ color: num(a.balance) < 0 ? "var(--danger)" : "var(--text-2)" }}
+                      >
+                        {fmt(num(a.balance))}
+                      </span>
+                    </button>
+                    {onDeleteAccount && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete account "${a.name}"? This removes all its transactions.`)) {
+                            onDeleteAccount(a.id);
+                          }
+                        }}
+                        className="mr-1 grid h-6 w-6 shrink-0 place-items-center rounded opacity-0 transition-opacity group-hover:opacity-100"
+                        style={{ color: "var(--muted)" }}
+                        title="Delete account"
+                        aria-label={`Delete account ${a.name}`}
+                      >
+                        <IconTrash width={13} height={13} />
+                      </button>
+                    )}
+                  </div>
                 ))}
             </div>
           );

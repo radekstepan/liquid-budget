@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmt, fmtSigned, monthKey, monthLabel, num, parseMonthKey, todayISO } from "../src/format.js";
+import { fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers", () => {
@@ -74,5 +74,38 @@ describe("format", () => {
 
   it("todayISO returns YYYY-MM-DD", () => {
     expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  describe("nextDateFor", () => {
+    it("advances weekly by 7 days", () => {
+      expect(nextDateFor("weekly", "2026-07-01")).toBe("2026-07-08");
+      expect(nextDateFor("weekly", "2026-12-30")).toBe("2027-01-06");
+    });
+
+    it("advances biweekly by 14 days", () => {
+      expect(nextDateFor("biweekly", "2026-07-01")).toBe("2026-07-15");
+    });
+
+    it("advances monthly by one month, rolling over year boundary", () => {
+      expect(nextDateFor("monthly", "2026-07-15")).toBe("2026-08-15");
+      expect(nextDateFor("monthly", "2026-12-15")).toBe("2027-01-15");
+    });
+
+    it("clamps to last day when next month is shorter", () => {
+      // Jan 31 + 1 month = Feb 28 (2026 is not a leap year)
+      expect(nextDateFor("monthly", "2026-01-31")).toBe("2026-02-28");
+    });
+
+    it("advances yearly by one year", () => {
+      expect(nextDateFor("yearly", "2026-07-01")).toBe("2027-07-01");
+    });
+
+    it("falls back to monthly for unknown frequencies", () => {
+      expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
+    });
+
+    it("returns input unchanged for invalid date", () => {
+      expect(nextDateFor("monthly", "not-a-date")).toBe("not-a-date");
+    });
   });
 });

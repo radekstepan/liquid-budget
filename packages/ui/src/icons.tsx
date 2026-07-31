@@ -147,3 +147,9 @@ export const IconPalette = (p: P) => (
     <circle cx="15" cy="8" r="1" fill="currentColor" />
   </svg>
 );
+export const IconReset = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 12a9 9 0 1 0 3-6.7" />
+    <path d="M3 4v5h5" />
+  </svg>
+);

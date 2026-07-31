@@ -3,16 +3,18 @@
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { IconPlus, IconTrash, IconClock } from "./icons.js";
+import { IconPlus, IconTrash, IconClock, IconPencil } from "./icons.js";
 
 export function RecurringView({
   data,
   onAdd,
+  onEdit,
   onDelete,
   onPost,
 }: {
   data: BudgetData;
   onAdd: () => void;
+  onEdit: (id: number) => void;
   onDelete: (id: number) => void;
   onPost: (id: number) => void;
 }) {
@@ -91,9 +93,20 @@ export function RecurringView({
                     Post Now
                   </button>
                   <button
+                    onClick={() => onEdit(r.id)}
+                    className="grid w-9 place-items-center rounded-lg"
+                    style={{ background: "var(--panel-3)", color: "var(--muted)" }}
+                    aria-label={`Edit ${r.payee}`}
+                    title="Edit"
+                  >
+                    <IconPencil width={14} height={14} />
+                  </button>
+                  <button
                     onClick={() => onDelete(r.id)}
                     className="grid w-9 place-items-center rounded-lg"
                     style={{ background: "var(--panel-3)", color: "var(--muted)" }}
+                    aria-label={`Delete ${r.payee}`}
+                    title="Delete"
                   >
                     <IconTrash width={15} height={15} />
                   </button>

@@ -49,4 +49,48 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /cash/i }));
     expect(onSelectAccount).toHaveBeenCalledWith(1);
   });
+
+  it("does not render per-account delete buttons when onDeleteAccount is not provided", () => {
+    render(
+      <Sidebar view="budget" setView={() => {}} accounts={accounts} onSelectAccount={() => {}} onAddAccount={() => {}} />
+    );
+    expect(screen.queryByRole("button", { name: /delete account cash/i })).not.toBeInTheDocument();
+  });
+
+  it("calls onDeleteAccount with the account id when the trash button is clicked (after confirm)", () => {
+    const onDeleteAccount = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        onDeleteAccount={onDeleteAccount}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delete account cash/i }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onDeleteAccount).toHaveBeenCalledWith(1);
+    confirmSpy.mockRestore();
+  });
+
+  it("does not call onDeleteAccount if confirm is cancelled", () => {
+    const onDeleteAccount = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        onDeleteAccount={onDeleteAccount}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delete account cash/i }));
+    expect(onDeleteAccount).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
 });
