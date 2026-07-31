@@ -48,6 +48,7 @@ export async function PATCH(req: Request) {
   const row = await updateCategory(db, id, {
     name: body.name,
     goalTarget: body.goalTarget === undefined ? undefined : body.goalTarget,
+    carryover: body.carryover != null ? Number(body.carryover) : undefined,
     sort: body.sort != null ? Number(body.sort) : undefined,
   });
   return Response.json(row);

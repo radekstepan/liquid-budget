@@ -28,6 +28,7 @@ export function TransactionModal({
     payee: string;
     memo: string;
     amount: number;
+    cleared: boolean;
   }) => void;
 }) {
   const [accountId, setAccountId] = useState(
@@ -44,6 +45,7 @@ export function TransactionModal({
   const [type, setType] = useState<"outflow" | "inflow">(
     initial ? (initialAmt >= 0 ? "inflow" : "outflow") : "outflow"
   );
+  const [cleared, setCleared] = useState(initial?.cleared ?? true);
 
   const save = () => {
     const a = Math.abs(parseFloat(amount));
@@ -56,6 +58,7 @@ export function TransactionModal({
       payee: payee.trim(),
       memo: memo.trim(),
       amount: type === "outflow" ? -a : a,
+      cleared,
     });
   };
 
@@ -119,6 +122,14 @@ export function TransactionModal({
       <Field label="Memo (optional)">
         <input value={memo} onChange={(e) => setMemo(e.target.value)} className={inputCls} style={inputStyle} />
       </Field>
+      <label className="mt-2 flex items-center gap-2 text-[13.5px]" style={{ color: "var(--text-2)" }}>
+        <input
+          type="checkbox"
+          checked={cleared}
+          onChange={(e) => setCleared(e.target.checked)}
+        />
+        Cleared (posted to bank)
+      </label>
     </Modal>
   );
 }
@@ -130,11 +141,16 @@ export function CategoryModal({
 }: {
   initial?: Category;
   onClose: () => void;
-  onSave: (v: { name: string; goalTarget: number | null }) => void;
+  onSave: (v: { name: string; goalTarget: number | null; carryover?: number }) => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [hasGoal, setHasGoal] = useState(!!initial?.goalTarget);
   const [goal, setGoal] = useState(initial?.goalTarget ?? "");
+  const initCarryover = initial?.carryover ? Number(initial.carryover) : 0;
+  const [hasCarryover, setHasCarryover] = useState(initCarryover !== 0);
+  const [carryover, setCarryover] = useState(
+    initCarryover !== 0 ? String(initCarryover) : ""
+  );
 
   return (
     <Modal
@@ -143,7 +159,11 @@ export function CategoryModal({
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => name.trim() && onSave({ name: name.trim(), goalTarget: hasGoal ? Number(goal) || 0 : null })}>Save</Btn>
+          <Btn variant="primary" onClick={() => name.trim() && onSave({
+            name: name.trim(),
+            goalTarget: hasGoal ? Number(goal) || 0 : null,
+            carryover: hasCarryover ? (parseFloat(carryover) || 0) : undefined,
+          })}>Save</Btn>
         </>
       }
     >
@@ -157,6 +177,15 @@ export function CategoryModal({
       {hasGoal && (
         <Field label="Goal Target">
           <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="1000.00" inputMode="decimal" className={inputCls} style={inputStyle} />
+        </Field>
+      )}
+      <label className="mb-2 flex items-center gap-2 text-[13.5px]" style={{ color: "var(--text-2)" }}>
+        <input type="checkbox" checked={hasCarryover} onChange={(e) => setHasCarryover(e.target.checked)} />
+        Set opening carryover balance
+      </label>
+      {hasCarryover && (
+        <Field label="Carryover Amount">
+          <input value={carryover} onChange={(e) => setCarryover(e.target.value)} placeholder="0.00" inputMode="decimal" className={inputCls} style={inputStyle} />
         </Field>
       )}
     </Modal>
@@ -299,9 +328,11 @@ export function RecurringModal({
 }
 
 export function AccountModal({
+  initial,
   onClose,
   onSave,
 }: {
+  initial?: { name: string; kind: "liquid" | "credit" | "offbudget"; balance: number | string };
   onClose: () => void;
   onSave: (v: {
     name: string;
@@ -311,9 +342,11 @@ export function AccountModal({
     onBudget: boolean;
   }) => void;
 }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">("liquid");
-  const [balance, setBalance] = useState("");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">(initial?.kind ?? "liquid");
+  const [balance, setBalance] = useState(
+    initial != null ? String(Math.abs(Number(initial.balance))) : ""
+  );
 
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
   const save = () => {
@@ -321,14 +354,15 @@ export function AccountModal({
     const b = parseFloat(balance) || 0;
     onSave({ name: name.trim(), kind, groupLabel, balance: b, onBudget: kind !== "offbudget" });
   };
+  const isEdit = !!initial;
   return (
     <Modal
-      title="Add Account"
+      title={isEdit ? "Edit Account" : "Add Account"}
       onClose={onClose}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save}>Add Account</Btn>
+          <Btn variant="primary" onClick={save}>{isEdit ? "Save Changes" : "Add Account"}</Btn>
         </>
       }
     >

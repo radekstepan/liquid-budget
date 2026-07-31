@@ -26,6 +26,7 @@ type ModalState =
   | { kind: "recurring" }
   | { kind: "editRecurring"; recurringId: number }
   | { kind: "account" }
+  | { kind: "editAccount"; accountId: number }
   | { kind: "addCategory"; groupId: number }
   | { kind: "editCategory"; categoryId: number }
   | { kind: "addGroup" }
@@ -41,6 +42,7 @@ export type BudgetAppApi = {
     payee: string;
     memo: string;
     amount: number;
+    cleared: boolean;
   }) => Promise<void>;
   updateTransaction: (
     id: number,
@@ -51,6 +53,7 @@ export type BudgetAppApi = {
       payee: string;
       memo: string;
       amount: number;
+      cleared: boolean;
     }
   ) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
@@ -79,7 +82,7 @@ export type BudgetAppApi = {
   saveCategory: (
     groupId: number | null,
     categoryId: number | null,
-    v: { name: string; goalTarget: number | null }
+    v: { name: string; goalTarget: number | null; carryover?: number }
   ) => Promise<void>;
   deleteCategory: (id: number) => Promise<void>;
   reorderCategory: (id: number, sort: number) => Promise<void>;
@@ -238,6 +241,8 @@ export function BudgetApp({
     modal.kind === "editRecurring"
       ? data.recurring.find((r) => r.id === modal.recurringId)
       : undefined;
+  const editingAccount =
+    modal.kind === "editAccount" ? data.accounts.find((a) => a.id === modal.accountId) : undefined;
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--app)" }}>
@@ -250,6 +255,7 @@ export function BudgetApp({
           setView("transactions");
         }}
         onAddAccount={() => setModal({ kind: "account" })}
+        onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onDeleteAccount={api.deleteAccount}
       />
 
@@ -272,6 +278,8 @@ export function BudgetApp({
             onDeleteGroup={api.deleteGroup}
             onCollapseAll={collapseAll}
             onExpandAll={expandAll}
+            onReorderCategory={api.reorderCategory}
+            onReorderGroup={api.reorderGroup}
           />
         )}
         {view === "transactions" && (
@@ -381,6 +389,20 @@ export function BudgetApp({
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.addAccount(v);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
+      {modal.kind === "editAccount" && editingAccount && (
+        <AccountModal
+          initial={editingAccount}
+          onClose={() => setModal({ kind: "none" })}
+          onSave={async (v) => {
+            await api.updateAccount(editingAccount.id, {
+              name: v.name,
+              kind: v.kind,
+              balance: v.balance,
+            });
             setModal({ kind: "none" });
           }}
         />

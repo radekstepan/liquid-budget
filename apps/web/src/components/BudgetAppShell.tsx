@@ -114,7 +114,7 @@ export function BudgetAppShell() {
       if (categoryId) {
         await jsonReq("/api/categories", {
           method: "PATCH",
-          body: JSON.stringify({ id: categoryId, name: v.name, goalTarget: v.goalTarget }),
+          body: JSON.stringify({ id: categoryId, name: v.name, goalTarget: v.goalTarget, carryover: v.carryover }),
         });
       } else {
         await jsonReq("/api/categories", {

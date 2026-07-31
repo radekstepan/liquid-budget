@@ -14,6 +14,7 @@ import {
   IconChevronRight,
   IconDrop,
   IconPlus,
+  IconPencil,
   IconTrash,
 } from "./icons.js";
 
@@ -40,6 +41,7 @@ export function Sidebar({
   accounts,
   onSelectAccount,
   onAddAccount,
+  onEditAccount,
   onDeleteAccount,
 }: {
   view: View;
@@ -47,6 +49,7 @@ export function Sidebar({
   accounts: Account[];
   onSelectAccount: (id: number) => void;
   onAddAccount: () => void;
+  onEditAccount?: (id: number) => void;
   onDeleteAccount?: (id: number) => void;
 }) {
   // Group accounts by their `groupLabel` rather than hard-coding category
@@ -161,6 +164,20 @@ export function Sidebar({
                         {fmt(num(a.balance))}
                       </span>
                     </button>
+                    {onEditAccount && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditAccount(a.id);
+                        }}
+                        className="mr-0.5 grid h-6 w-6 shrink-0 place-items-center rounded opacity-0 transition-opacity group-hover:opacity-100"
+                        style={{ color: "var(--muted)" }}
+                        title="Edit account"
+                        aria-label={`Edit account ${a.name}`}
+                      >
+                        <IconPencil width={13} height={13} />
+                      </button>
+                    )}
                     {onDeleteAccount && (
                       <button
                         onClick={(e) => {
