@@ -14,4 +14,4 @@ export {
   AccountModal,
 } from "./Modals.js";
 export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";
-export { Modal, Field, Btn, inputCls, inputStyle } from "./ui.js";
+export { Modal, Field, Btn, inputCls } from "./ui.js";

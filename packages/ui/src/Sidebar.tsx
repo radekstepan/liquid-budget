@@ -68,19 +68,10 @@ export function Sidebar({
     <aside className="y-sidebar flex h-full w-[214px] shrink-0 flex-col">
       <div className="px-3 pt-3 pb-2">
         <div className="flex items-center gap-2">
-          <div
-            className="w-[22px] h-[22px] rounded-[3px] grid place-items-center text-[11px] font-black text-white"
-            style={{
-              background: "linear-gradient(#96c95c,#5c8f2c)",
-              boxShadow: "0 1px 0 rgba(255,255,255,.3) inset",
-              border: "1px solid #43701d",
-            }}
-          >
-            L
-          </div>
+          <div className="y-logo">L</div>
           <div className="leading-none">
             <div className="text-[13px] font-bold text-white tracking-wide">LIQUID</div>
-            <div className="text-[9px] text-[#8ea0ab] tracking-[.14em]">MY BUDGET</div>
+            <div className="text-[9px] tracking-[.14em]" style={{ color: "var(--y-side-ink-dim)" }}>MY BUDGET</div>
           </div>
         </div>
       </div>
@@ -118,7 +109,7 @@ export function Sidebar({
                 <span>{label}</span>
                 <span
                   className="y-side-amt"
-                  style={{ color: total < 0 ? "#ea8b7d" : undefined }}
+                  style={{ color: total < 0 ? "var(--y-side-neg)" : undefined }}
                 >
                   {fmt(total)}
                 </span>
@@ -139,7 +130,7 @@ export function Sidebar({
                       <span
                         className="y-side-amt"
                         style={{
-                          color: num(a.balance) < 0 ? "#ea8b7d" : undefined,
+                          color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
                           fontWeight: 500,
                         }}
                       >
@@ -206,7 +197,7 @@ export function Sidebar({
           >
             <span className={cx("y-tri", !nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-ink-dim)" }} />
             <span className="text-[11px] font-bold">Net Worth</span>
-            <span className="y-side-amt" style={{ fontWeight: 700, color: "#fff" }}>
+            <span className="y-side-amt text-white" style={{ fontWeight: 700 }}>
               {fmt(netWorth)}
             </span>
           </button>
@@ -222,7 +213,7 @@ export function Sidebar({
                   <span style={{ color: "var(--y-side-ink-dim)" }}>{label as string}</span>
                   <span
                     className="y-num font-medium"
-                    style={{ color: (val as number) < 0 ? "#ea8b7d" : "var(--y-side-ink)" }}
+                    style={{ color: (val as number) < 0 ? "var(--y-side-neg)" : "var(--y-side-ink)" }}
                   >
                     {fmt(val as number)}
                   </span>

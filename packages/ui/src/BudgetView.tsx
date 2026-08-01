@@ -3,7 +3,17 @@
 import { useState, useRef, useEffect } from "react";
 import type { GroupRow, Account, CatRow, BudgetResult } from "@ynab/logic";
 import { fmt } from "@ynab/logic";
-import { Icon, MonthNav, BudgetHeader, cx, money } from "@ynab/theme";
+import {
+  Icon,
+  MonthNav,
+  BudgetHeader,
+  Button,
+  ToolbarSep,
+  Pill,
+  balanceTone,
+  cx,
+  money,
+} from "@ynab/theme";
 import type { BudgetHeaderPart } from "@ynab/theme";
 
 const COL_A = "w-[110px]";
@@ -124,34 +134,27 @@ export function BudgetView({
           onPrev={() => onShiftMonth(-1)}
           onNext={() => onShiftMonth(1)}
         />
-        <div className="y-tb-sep" />
-        <button onClick={onAddGroup} className="y-btn y-btn--sm">
+        <ToolbarSep />
+        <Button onClick={onAddGroup} size="sm">
           <Icon name="plus" size={11} /> Master Category
-        </button>
-        <div className="y-seg">
-          <button className="y-btn y-btn--sm is-on">Budget</button>
-          <button className="y-btn y-btn--sm">Show Hidden</button>
-        </div>
+        </Button>
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
-            <button
+            <Button
               onClick={() => setMenuOpen((o) => !o)}
-              className="y-btn y-btn--sm"
+              size="sm"
               aria-label="Group options"
             >
               <Icon name="dots" size={14} />
-            </button>
+            </Button>
             {menuOpen && (
-              <div
-                className="y-modal absolute right-0 top-[28px] z-20 min-w-[180px]"
-                style={{ width: 200, padding: 4 }}
-              >
+              <div className="y-modal absolute right-0 top-[28px] z-20 min-w-[180px]" style={{ width: 200, padding: 4 }}>
                 <button
                   onClick={() => {
                     onCollapseAll();
                     setMenuOpen(false);
                   }}
-                  className="block w-full text-left text-[12px] px-3 py-[5px] rounded-[2px] hover:bg-[#e8e8e5]"
+                  className="y-menu-item"
                 >
                   Collapse all groups
                 </button>
@@ -160,7 +163,7 @@ export function BudgetView({
                     onExpandAll();
                     setMenuOpen(false);
                   }}
-                  className="block w-full text-left text-[12px] px-3 py-[5px] rounded-[2px] hover:bg-[#e8e8e5]"
+                  className="y-menu-item"
                 >
                   Expand all groups
                 </button>
@@ -177,11 +180,11 @@ export function BudgetView({
       />
 
       {budget.overBudgeted && onClearOverdraft && (
-        <div className="px-3 py-2" style={{ background: "var(--y-red-pale)", borderBottom: "1px solid #dfa9a1" }}>
+        <div className="px-3 py-2 flex items-center gap-2" style={{ background: "var(--y-red-pale)", borderBottom: "1px solid var(--y-border-strong)" }}>
           <span className="text-[11.5px]" style={{ color: "var(--y-red-dk)" }}>
             You've overbudgeted by <strong className="y-num">{money(Math.abs(budget.tbb))}</strong> this month.
           </span>
-          <button
+          <Button
             onClick={() =>
               onClearOverdraft(
                 budget.groups
@@ -190,10 +193,12 @@ export function BudgetView({
                   .map((r) => r.category.id)
               )
             }
-            className="ml-3 y-btn y-btn--sm y-btn--danger"
+            size="sm"
+            variant="danger"
+            className="ml-auto"
           >
             Zero out overdrafts
-          </button>
+          </Button>
         </div>
       )}
 
@@ -223,7 +228,7 @@ export function BudgetView({
                   onEditCategory={() => onEditCategory(g.group.id)}
                   onDeleteCategory={onDeleteCategory}
                   onEditGroup={() => onEditGroup(g.group.id)}
-                  onDeleteGroup={() => onDeleteGroup(g.group.id)}
+                  onDeleteGroup={onDeleteGroup}
                   onReorderCategory={onReorderCategory}
                   isDragOver={groupOverId === g.group.id}
                   onDragStart={() => {
@@ -245,7 +250,7 @@ export function BudgetView({
                 onEditCategory={() => onEditCategory(creditGroup.group.id)}
                 onDeleteCategory={onDeleteCategory}
                 onEditGroup={() => onEditGroup(creditGroup.group.id)}
-                onDeleteGroup={() => onDeleteGroup(creditGroup.group.id)}
+                onDeleteGroup={onDeleteGroup}
                 onReorderCategory={onReorderCategory}
               />
             )}
@@ -254,8 +259,10 @@ export function BudgetView({
 
         <button
           onClick={onAddGroup}
-          className="flex w-full items-center gap-2 px-3 py-2 text-[11.5px] font-medium hover:bg-[#eef0ee]"
+          className="flex w-full items-center gap-2 px-3 py-2 text-[11.5px] font-medium"
           style={{ color: "var(--y-ink-soft)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
           <Icon name="plus" size={11} /> Add Category Group
         </button>
@@ -361,8 +368,10 @@ function GroupBlock({
             </button>
             <button
               onClick={() => onAddCategory()}
-              className="ml-1 grid h-[18px] w-[18px] place-items-center rounded hover:bg-[#cbd5dd]"
+              className="ml-1 grid h-[18px] w-[18px] place-items-center rounded"
               style={{ color: "var(--y-ink-soft)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-master-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               aria-label="Add category"
               title="Add category"
             >
@@ -437,8 +446,10 @@ function GroupBlock({
                 <span className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
                   <button
                     onClick={onEditCategory}
-                    className="grid h-[18px] w-[18px] place-items-center rounded hover:bg-[#eef0ee]"
+                    className="grid h-[18px] w-[18px] place-items-center rounded"
                     style={{ color: "var(--y-ink-soft)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     aria-label={`Edit ${r.category.name}`}
                     title="Edit category"
                   >
@@ -457,7 +468,9 @@ function GroupBlock({
               {fmt(r.outflow)}
             </td>
             <td className="num">
-              <CategoryBalancePill value={r.available} />
+              <Pill tone={balanceTone(r.available)} style={{ minWidth: 72 }}>
+                {fmt(r.available)}
+              </Pill>
             </td>
           </tr>
         ))}
@@ -517,14 +530,5 @@ function CategoryMonthCell({
     >
       {fmt(value)}
     </button>
-  );
-}
-
-function CategoryBalancePill({ value }: { value: number }) {
-  const tone = value > 0 ? "green" : value < 0 ? "red" : "grey";
-  return (
-    <span className={cx("y-pill", `y-pill--${tone}`)} style={{ minWidth: 72 }}>
-      {fmt(value)}
-    </span>
   );
 }

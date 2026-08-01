@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, parseMonthKey, monthLabel } from "@ynab/logic";
-import { Icon, Toolbar } from "@ynab/theme";
+import { Icon, Toolbar, ToolbarSep, MonthNav } from "@ynab/theme";
 
 export function CalendarView({
   data,
@@ -61,22 +61,11 @@ export function CalendarView({
     <div className="flex h-full flex-col">
       <Toolbar>
         <div className="flex items-center gap-2">
-          <Icon name="calendar" size={14} color="#3f4649" />
+          <Icon name="calendar" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Calendar</span>
         </div>
-        <div className="y-tb-sep" />
-        <button onClick={onPrev} className="y-btn y-btn--sm" aria-label="Previous month">
-          <Icon name="left" size={11} />
-        </button>
-        <span
-          className="text-[13.5px] font-bold min-w-[130px] text-center"
-          style={{ color: "var(--y-ink)" }}
-        >
-          {monthLabel(month)}
-        </span>
-        <button onClick={onNext} className="y-btn y-btn--sm" aria-label="Next month">
-          <Icon name="right" size={11} />
-        </button>
+        <ToolbarSep />
+        <MonthNav month={monthLabel(month)} onPrev={onPrev} onNext={onNext} />
         <span className="ml-auto y-hint">
           Net this month:{" "}
           <span

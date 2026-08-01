@@ -18,7 +18,7 @@ export const MonthNav: React.FC<{
     >
       <Icon name="left" size={11} />
     </button>
-    <div className="text-[15px] font-bold text-[#3b4245] min-w-[132px] text-center [text-shadow:0_1px_0_rgba(255,255,255,.8)]">
+    <div className="text-[15px] font-bold min-w-[132px] text-center [text-shadow:0_1px_0_rgba(255,255,255,.8)]" style={{ color: "var(--y-ink)" }}>
       {month}
     </div>
     <button
@@ -38,18 +38,32 @@ export const MonthNav: React.FC<{
    final ATB value; this stays purely presentational so the app
    can wire its own budget numbers.
    ================================================================== */
-export const MathCell: React.FC<{ label: string; value: number; danger?: boolean }> = ({
-  label,
-  value,
-  danger,
-}) => (
-  <div className="y-mathbox">
-    <div className="y-math-label">{label}</div>
-    <div className="y-math-val" style={{ color: danger ? "var(--y-red)" : undefined }}>
-      {money(value)}
+export const MathCell: React.FC<{
+  label: string;
+  value: number | string;
+  danger?: boolean;
+  tone?: "default" | "green" | "red";
+  className?: string;
+  style?: React.CSSProperties;
+}> = ({ label, value, danger, tone = "default", className, style }) => {
+  const color =
+    tone === "green"
+      ? "var(--y-green-dk)"
+      : tone === "red"
+        ? "var(--y-red)"
+        : danger
+          ? "var(--y-red)"
+          : undefined;
+  const rendered = typeof value === "number" ? money(value) : value;
+  return (
+    <div className={cx("y-mathbox", className)} style={style}>
+      <div className="y-math-label">{label}</div>
+      <div className="y-math-val" style={{ color }}>
+        {rendered}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export type BudgetHeaderPart = {
   label: string;
@@ -66,13 +80,7 @@ export const BudgetHeader: React.FC<{
   const tone = atb > 0 ? "green" : atb < 0 ? "red" : "orange";
   const renderedOps = ops ?? parts.slice(0, -1).map(() => "+");
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-3 flex-wrap"
-      style={{
-        background: "linear-gradient(#f6f6f4,#e7e7e4)",
-        borderBottom: "1px solid #bdbdb8",
-      }}
-    >
+    <div className="y-budget-header flex items-center gap-3 px-3 py-3 flex-wrap">
       {parts.map((p, i) => (
         <React.Fragment key={i}>
           {i > 0 && <span className="y-math-op">{renderedOps[i - 1] ?? "+"}</span>}
@@ -109,7 +117,7 @@ export const Modal: React.FC<{
         {onClose && (
           <button
             type="button"
-            className="ml-auto text-[#7d8386] hover:text-[#33383b]"
+            className="y-modal-close ml-auto"
             onClick={onClose}
             aria-label="Close"
           >

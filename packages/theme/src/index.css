@@ -10,9 +10,15 @@
   --y-panel-alt: #fbfbfa;
   --y-line: #c9c9c5;
   --y-line-soft: #e2e2de;
+  --y-border-strong: #bdbdb8;
   --y-ink: #33383b;
   --y-ink-soft: #6d7478;
   --y-ink-faint: #9aa0a4;
+
+  /* --- hovers (light surfaces) --- */
+  --y-hover: #e8e8e5;
+  --y-row-hover: #eef0ee;
+  --y-master-hover: #cbd5dd;
 
   /* --- sidebar --- */
   --y-side-top: #4a5a64;
@@ -22,6 +28,16 @@
   --y-side-ink-dim: #8ea0ab;
   --y-side-sel-top: #2f7fb0;
   --y-side-sel-bot: #1f5c85;
+  --y-side-neg: #ea8b7d;
+
+  /* --- chart bars --- */
+  --y-bar-track: #dcdcd8;
+  --y-bar-track-border: #bcbfbe;
+
+  /* --- chrome gradient (inspector head, budget header bg) --- */
+  --y-chrome-top: #f2f2f0;
+  --y-chrome-bot: #e8e8e5;
+  --y-chrome-line: #c4c4bf;
 
   /* --- brand --- */
   --y-blue: #2f7fb0;
@@ -85,6 +101,60 @@ body {
   border-radius: 6px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 30px rgba(0, 0, 0, 0.28);
   overflow: hidden;
+}
+
+/* ---------- logo badge (sidebar) ---------- */
+.y-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  color: #fff;
+  background: linear-gradient(var(--y-green-lt), var(--y-green-dk));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+  border: 1px solid #43701d;
+}
+
+/* ---------- dropdown menu item ---------- */
+.y-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 2px;
+  color: var(--y-ink);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.y-menu-item:hover {
+  background: var(--y-hover);
+}
+
+/* ---------- inspector panel (right-side chrome) ---------- */
+.y-inspector {
+  background: linear-gradient(var(--y-chrome-top), var(--y-chrome-bot));
+  border-left: 1px solid var(--y-chrome-line);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.7) inset;
+}
+
+/* ---------- budget header strip ---------- */
+.y-budget-header {
+  background: linear-gradient(#f6f6f4, #e7e7e4);
+  border-bottom: 1px solid var(--y-border-strong);
+}
+
+/* ---------- sub-panel chrome (sub-bar with counts) ---------- */
+.y-subbar {
+  border-bottom: 1px solid var(--y-border-strong);
+  background: var(--y-panel-alt);
 }
 .y-titlebar {
   height: 24px;
@@ -380,6 +450,14 @@ body {
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.28);
   font-variant-numeric: tabular-nums;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 1px 1px rgba(0, 0, 0, 0.12);
+  font-family: inherit;
+}
+button.y-pill {
+  border: 0;
+  cursor: pointer;
+}
+button.y-pill:hover {
+  filter: brightness(1.06);
 }
 .y-pill--green {
   background: linear-gradient(var(--y-green-lt), var(--y-green));
@@ -609,6 +687,10 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15) inset;
   overflow: hidden;
 }
+.y-bar-track {
+  background: var(--y-bar-track);
+  border: 1px solid var(--y-bar-track-border);
+}
 .y-bar-fill {
   height: 100%;
   background: linear-gradient(var(--y-green-lt), var(--y-green));
@@ -644,6 +726,17 @@ body {
   font-weight: 700;
   color: #4a5053;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.y-modal-close {
+  color: #7d8386;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.y-modal-close:hover {
+  color: var(--y-ink);
 }
 .y-modal-foot {
   padding: 9px 12px;
