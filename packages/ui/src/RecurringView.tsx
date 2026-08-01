@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { Icon, Toolbar, cx } from "@ynab/theme";
+import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
 
 export function RecurringView({
   data,
@@ -34,23 +34,26 @@ export function RecurringView({
     <div className="flex h-full flex-col">
       <Toolbar>
         <div className="flex items-center gap-2">
-          <Icon name="clock" size={14} color="#3f4649" />
+          <Icon name="clock" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Recurring Transactions</span>
         </div>
         <div className="ml-auto">
-          <button onClick={onAdd} className="y-btn y-btn--primary">
+          <Button onClick={onAdd} variant="primary">
             <Icon name="plus" size={11} color="#fff" /> Add Recurring
-          </button>
+          </Button>
         </div>
       </Toolbar>
 
-      <div
-        className="flex gap-3 px-3 py-2.5"
-        style={{ borderBottom: "1px solid #bdbdb8", background: "var(--y-panel-alt)" }}
-      >
-        <Stat label="Monthly Income" value={fmt(monthlyIn)} tone="green" />
-        <Stat label="Monthly Bills" value={fmt(monthlyOut)} tone="red" />
-        <Stat label="Net Monthly" value={fmt(monthlyIn + monthlyOut)} tone={monthlyIn + monthlyOut >= 0 ? "green" : "red"} />
+      <div className="y-subbar flex gap-3 px-3 py-2.5">
+        <MathCell label="Monthly Income" value={fmt(monthlyIn)} tone="green" className="flex-1" style={{ minWidth: 120 }} />
+        <MathCell label="Monthly Bills" value={fmt(monthlyOut)} tone="red" className="flex-1" style={{ minWidth: 120 }} />
+        <MathCell
+          label="Net Monthly"
+          value={fmt(monthlyIn + monthlyOut)}
+          tone={monthlyIn + monthlyOut >= 0 ? "green" : "red"}
+          className="flex-1"
+          style={{ minWidth: 120 }}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 y-scroll">
@@ -58,10 +61,7 @@ export function RecurringView({
           {data.recurring.map((r) => {
             const amt = num(r.amount);
             return (
-              <div
-                key={r.id}
-                className="y-panel p-3"
-              >
+              <Panel key={r.id} bodyClass="!p-3">
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
                     <div className="truncate text-[14px] font-bold" style={{ color: "var(--y-ink)" }}>
@@ -80,22 +80,19 @@ export function RecurringView({
                   </span>
                 </div>
                 <div className="mt-2">
-                  <button
+                  <Pill
+                    tone={r.active ? "green" : "grey"}
                     onClick={() => onToggleActive(r.id, !r.active)}
-                    className={cx(
-                      "y-pill cursor-pointer transition-all",
-                      r.active ? "y-pill--green" : "y-pill--grey"
-                    )}
-                    style={{ minWidth: 0, padding: "1px 8px" }}
                     title={r.active ? "Click to pause" : "Click to resume"}
                     aria-label={r.active ? `Pause ${r.payee}` : `Resume ${r.payee}`}
+                    style={{ minWidth: 0, padding: "1px 8px" }}
                   >
                     <span
                       className="inline-block h-[6px] w-[6px] rounded-full mr-[5px]"
                       style={{ background: "#fff" }}
                     />
                     {r.active ? "Active" : "Paused"}
-                  </button>
+                  </Pill>
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <span
@@ -105,7 +102,7 @@ export function RecurringView({
                       color: "var(--y-ink-soft)",
                       padding: "2px 7px",
                       borderRadius: 8,
-                      border: "1px solid #cfcfca",
+                      border: "1px solid var(--y-line)",
                     }}
                   >
                     {r.frequency}
@@ -115,27 +112,32 @@ export function RecurringView({
                   </span>
                 </div>
                 <div className="mt-3 flex gap-2">
-                  <button onClick={() => onPost(r.id)} className="y-btn y-btn--sm y-btn--blue flex-1">
+                  <Button
+                    onClick={() => onPost(r.id)}
+                    size="sm"
+                    variant="blue"
+                    className="flex-1"
+                  >
                     Post Now
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => onEdit(r.id)}
-                    className="y-btn y-btn--sm"
+                    size="sm"
                     aria-label={`Edit ${r.payee}`}
                     title="Edit"
                   >
                     <Icon name="edit" size={12} />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => onDelete(r.id)}
-                    className="y-btn y-btn--sm"
+                    size="sm"
                     aria-label={`Delete ${r.payee}`}
                     title="Delete"
                   >
                     <Icon name="trash" size={12} />
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Panel>
             );
           })}
         </div>
@@ -145,15 +147,6 @@ export function RecurringView({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone: "green" | "red" }) {
-  return (
-    <div className="y-mathbox" style={{ minWidth: 120 }}>
-      <div className="y-math-label">{label}</div>
-      <div className="y-math-val" style={{ color: tone === "green" ? "var(--y-green-dk)" : "var(--y-red)" }}>{value}</div>
     </div>
   );
 }

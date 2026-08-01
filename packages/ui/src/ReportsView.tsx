@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { fmt, num, monthLabel } from "@ynab/logic";
-import { Icon, Toolbar } from "@ynab/theme";
+import { Icon, Toolbar, Select, Panel, MathCell } from "@ynab/theme";
 
 function getMonthsBetween(start: string, end: string) {
   const partsS = start.split("-");
@@ -136,46 +136,46 @@ export function ReportsView({
     <div className="flex h-full flex-col">
       <Toolbar>
         <div className="flex items-center gap-2">
-          <Icon name="chart" size={14} color="#3f4649" />
+          <Icon name="chart" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Reports</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="y-caps">From</span>
-          <span className="y-select-wrap">
-            <select
-              value={startMonth}
-              onChange={(e) => setStartMonth(e.target.value)}
-              className="y-select"
-            >
-              {allMonths.map((m) => (
-                <option key={m} value={m}>
-                  {monthLabel(m)}
-                </option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={startMonth}
+            onChange={(e) => setStartMonth(e.target.value)}
+          >
+            {allMonths.map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </Select>
           <span className="y-caps">To</span>
-          <span className="y-select-wrap">
-            <select
-              value={endMonth}
-              onChange={(e) => setEndMonth(e.target.value)}
-              className="y-select"
-            >
-              {allMonths.map((m) => (
-                <option key={m} value={m}>
-                  {monthLabel(m)}
-                </option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={endMonth}
+            onChange={(e) => setEndMonth(e.target.value)}
+          >
+            {allMonths.map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </Select>
         </div>
       </Toolbar>
 
       <div className="flex-1 overflow-y-auto p-4 y-scroll">
         <div className="mb-3 flex flex-wrap gap-2">
-          <Stat label="Income" value={fmt(income)} tone="green" />
-          <Stat label="Expenses" value={fmt(expense)} tone="red" />
-          <Stat label="Net" value={fmt(income + expense)} tone={income + expense >= 0 ? "green" : "red"} />
+          <MathCell label="Income" value={fmt(income)} tone="green" className="flex-1" style={{ minWidth: 140 }} />
+          <MathCell label="Expenses" value={fmt(expense)} tone="red" className="flex-1" style={{ minWidth: 140 }} />
+          <MathCell
+            label="Net"
+            value={fmt(income + expense)}
+            tone={income + expense >= 0 ? "green" : "red"}
+            className="flex-1"
+            style={{ minWidth: 140 }}
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -199,10 +199,7 @@ export function ReportsView({
                         </span>
                       </span>
                     </div>
-                    <div
-                      className="h-[10px] overflow-hidden rounded-[3px]"
-                      style={{ background: "#dcdcd8", border: "1px solid #bcbfbe" }}
-                    >
+                    <div className="y-bar-track h-[10px] overflow-hidden rounded-[3px]">
                       <div
                         className="h-full rounded-[3px]"
                         style={{
@@ -429,37 +426,6 @@ function Donut({
         {fmt(total)}
       </text>
     </svg>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="y-panel">
-      <div className="y-panel-head">{title}</div>
-      <div className="p-3">{children}</div>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "green" | "red";
-}) {
-  return (
-    <div className="y-mathbox" style={{ minWidth: 140, flex: 1 }}>
-      <div className="y-math-label">{label}</div>
-      <div
-        className="y-math-val"
-        style={{ color: tone === "green" ? "var(--y-green-dk)" : "var(--y-red)" }}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 

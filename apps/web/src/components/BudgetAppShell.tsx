@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BudgetApp, type BudgetAppApi } from "@ynab/ui";
+import { Notice } from "@ynab/theme";
 import type { BudgetData } from "@ynab/logic";
 import { todayISO, num, nextDateFor } from "@ynab/logic";
 
@@ -197,13 +198,9 @@ export function BudgetAppShell() {
   if (error) {
     return (
       <div className="grid h-screen place-items-center">
-        <div className="y-notice y-notice--danger" style={{ maxWidth: 480 }}>
-          <span className="mt-[1px]">!</span>
-          <div>
-            <div className="font-bold mb-[2px]">Error</div>
-            <div>{error}</div>
-          </div>
-        </div>
+        <Notice tone="danger" title="Error" className="!max-w-[480px]">
+          {error}
+        </Notice>
       </div>
     );
   }

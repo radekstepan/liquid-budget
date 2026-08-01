@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import type { GroupRow } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
-import { Icon, cx, money } from "@ynab/theme";
+import { Icon, Button, Panel, cx, money } from "@ynab/theme";
 
 export function Inspector({
   groups,
@@ -44,12 +44,7 @@ export function Inspector({
 
   return (
     <aside
-      className="w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto"
-      style={{
-        background: "linear-gradient(#f2f2f0,#e8e8e5)",
-        borderLeft: "1px solid #c4c4bf",
-        boxShadow: "1px 0 0 rgba(255,255,255,.7) inset",
-      }}
+      className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto"
     >
       <div className="flex items-center px-1">
         <div>
@@ -59,14 +54,14 @@ export function Inspector({
           </div>
         </div>
         <div className="ml-auto relative">
-          <button
+          <Button
             onClick={() => setMenuOpen((o) => !o)}
-            className="y-btn y-btn--sm"
+            size="sm"
             aria-label="Settings"
             title="Settings"
           >
             <Icon name="gear" size={12} />
-          </button>
+          </Button>
           {menuOpen && (
             <div
               className="y-modal absolute right-0 top-[28px] z-20"
@@ -77,7 +72,7 @@ export function Inspector({
                   fileRef.current?.click();
                   setMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-[6px] text-left text-[12px] px-3 py-[6px] rounded-[2px] hover:bg-[#e8e8e5]"
+                className="y-menu-item"
               >
                 <Icon name="import" size={12} /> Import YNAB4 Backup
               </button>
@@ -89,7 +84,7 @@ export function Inspector({
                     }
                     setMenuOpen(false);
                   }}
-                  className="flex w-full items-center gap-[6px] text-left text-[12px] px-3 py-[6px] rounded-[2px] hover:bg-[#e8e8e5]"
+                  className="y-menu-item"
                 >
                   <Icon name="reset" size={12} /> Reset demo data
                 </button>
@@ -120,84 +115,76 @@ export function Inspector({
           {overBudgeted ? "Overbudgeted" : "To Be Budgeted"}
         </div>
         {overBudgeted && onClearOverdraft && overdraftCats.length > 0 && (
-          <button
+          <Button
             onClick={() => onClearOverdraft(overdraftCats)}
-            className="mt-2 y-btn y-btn--sm y-btn--danger"
-            style={{ width: "100%" }}
+            size="sm"
+            variant="danger"
+            className="mt-2 w-full"
           >
             Zero out {overdraftCats.length} overdrafted
-          </button>
+          </Button>
         )}
       </div>
 
-      <div className="y-panel">
-        <div className="y-panel-head">Summary</div>
-        <div className="p-[10px] space-y-[5px] text-[11.5px]">
-          {[
-            ["Assigned", money(summary.assigned)],
-            ["Outflow", money(-summary.outflow)],
-            ["Available", money(summary.available)],
-            ["Carried Forward", money(priorSurplus)],
-            ["Total Available", money(summary.totalAvailable)],
-            ["To Be Budgeted", money(tbb)],
-          ].map(([k, v]) => (
-            <div key={k} className="flex justify-between">
-              <span style={{ color: "var(--y-ink-soft)" }}>{k}</span>
-              <span className="y-num" style={{ color: "var(--y-ink)" }}>{v}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <Panel title="Summary" bodyClass="!p-[10px] space-y-[5px] text-[11.5px]">
+        {[
+          ["Assigned", money(summary.assigned)],
+          ["Outflow", money(-summary.outflow)],
+          ["Available", money(summary.available)],
+          ["Carried Forward", money(priorSurplus)],
+          ["Total Available", money(summary.totalAvailable)],
+          ["To Be Budgeted", money(tbb)],
+        ].map(([k, v]) => (
+          <div key={k} className="flex justify-between">
+            <span style={{ color: "var(--y-ink-soft)" }}>{k}</span>
+            <span className="y-num" style={{ color: "var(--y-ink)" }}>{v}</span>
+          </div>
+        ))}
+      </Panel>
 
-      <div className="y-panel">
-        <div className="y-panel-head">Average Assigned</div>
-        <div className="p-[10px]">
-          <div className="text-[18px] font-bold y-num" style={{ color: "var(--y-ink)" }}>{money(avg)}</div>
-          <div className="y-hint mt-[2px]">across {history.filter((h) => h.real).length} real months</div>
-        </div>
-      </div>
+      <Panel title="Average Assigned" bodyClass="!p-[10px]">
+        <div className="text-[18px] font-bold y-num" style={{ color: "var(--y-ink)" }}>{money(avg)}</div>
+        <div className="y-hint mt-[2px]">across {history.filter((h) => h.real).length} real months</div>
+      </Panel>
 
-      <div className="y-panel">
-        <div className="y-panel-head">History (12 mo)</div>
-        <div className="p-[10px]">
-          <div className="flex items-end gap-[3px]" style={{ height: 92 }}>
-            {(() => {
-              const max = Math.max(1, ...history.map((h) => h.assigned));
-              return history.map((h) => {
-                const pct = (h.assigned / max) * 100;
-                const isCurrent = h.key === month;
-                const { month0: m0, year: y } = parseMonthKey(h.key);
-                const label = `${MONTHS[m0]?.slice(0, 3) ?? ""} ${y}`;
-                return (
-                  <button
-                    key={h.key}
-                    onClick={() => h.real && onSelectMonth(h.key)}
-                    disabled={!h.real}
-                    aria-label={`Jump to ${MONTHS[m0]} ${y}`}
-                    title={`${MONTHS[m0]} ${y}: ${money(h.assigned)}`}
-                    className="flex-1 min-w-0 rounded-[2px] transition-all"
-                    style={{
-                      height: `${Math.max(2, pct)}%`,
-                      background: !h.real
-                        ? "#dcdcd8"
-                        : isCurrent
+      <Panel title="History (12 mo)" bodyClass="!p-[10px]">
+        <div className="flex items-end gap-[3px]" style={{ height: 92 }}>
+          {(() => {
+            const max = Math.max(1, ...history.map((h) => h.assigned));
+            return history.map((h) => {
+              const pct = (h.assigned / max) * 100;
+              const isCurrent = h.key === month;
+              const { month0: m0, year: y } = parseMonthKey(h.key);
+              const label = `${MONTHS[m0]?.slice(0, 3) ?? ""} ${y}`;
+              return (
+                <button
+                  key={h.key}
+                  onClick={() => h.real && onSelectMonth(h.key)}
+                  disabled={!h.real}
+                  aria-label={`Jump to ${MONTHS[m0]} ${y}`}
+                  title={`${MONTHS[m0]} ${y}: ${money(h.assigned)}`}
+                  className="flex-1 min-w-0 rounded-[2px] transition-all y-bar-track"
+                  style={{
+                    height: `${Math.max(2, pct)}%`,
+                    background: !h.real
+                      ? undefined
+                      : isCurrent
                         ? "var(--y-blue)"
                         : "var(--y-blue-pale)",
-                      border: isCurrent ? "1px solid var(--y-blue-dark)" : "1px solid transparent",
-                      opacity: !h.real ? 0.5 : isCurrent ? 1 : 0.85,
-                      cursor: h.real ? "pointer" : "default",
-                    }}
-                  />
-                );
-              });
-            })()}
-          </div>
-          <div className="flex justify-between mt-1 y-hint">
-            <span>{history[0] ? formatShortMonth(history[0].key) : ""}</span>
-            <span>{history[history.length - 1] ? formatShortMonth(history[history.length - 1]!.key) : ""}</span>
-          </div>
+                    border: isCurrent ? "1px solid var(--y-blue-dark)" : "1px solid transparent",
+                    opacity: !h.real ? 0.5 : isCurrent ? 1 : 0.85,
+                    cursor: h.real ? "pointer" : "default",
+                  }}
+                />
+              );
+            });
+          })()}
         </div>
-      </div>
+        <div className="flex justify-between mt-1 y-hint">
+          <span>{history[0] ? formatShortMonth(history[0].key) : ""}</span>
+          <span>{history[history.length - 1] ? formatShortMonth(history[history.length - 1]!.key) : ""}</span>
+        </div>
+      </Panel>
     </aside>
   );
 }

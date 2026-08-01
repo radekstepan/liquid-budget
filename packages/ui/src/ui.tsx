@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { Button as YButton, Modal as YModal, Icon, cx } from "@ynab/theme";
+import { Button as YButton, Modal as YModal, cx } from "@ynab/theme";
 
 export function Modal({
   title,
@@ -46,7 +46,6 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 }
 
 export const inputCls = "y-input w-full";
-export const inputStyle = {} as const;
 
 export function Btn({
   children,

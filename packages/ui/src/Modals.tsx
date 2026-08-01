@@ -3,9 +3,10 @@
 import { useState } from "react";
 import type { Account, Category, Recurring, Transaction } from "@ynab/logic";
 import { todayISO, num } from "@ynab/logic";
-import { Modal, Field, Btn, inputCls } from "./ui.js";
+import { Button, TextField, Select, Checkbox } from "@ynab/theme";
+import { Modal, Field, Btn } from "./ui.js";
 
-const inputClass = `${inputCls} py-[3px]`;
+const inputClass = "w-full py-[3px]";
 
 export function TransactionModal({
   accounts,
@@ -79,63 +80,80 @@ export function TransactionModal({
     >
       <div className="y-seg mb-3 w-full">
         {(["outflow", "inflow"] as const).map((t) => (
-          <button
+          <Button
             key={t}
+            size="sm"
+            variant={type === t ? "primary" : "default"}
+            active={type === t}
             onClick={() => setType(t)}
-            className={`y-btn y-btn--sm flex-1 capitalize ${type === t ? "y-btn--primary is-on" : ""}`}
+            className="flex-1 capitalize"
           >
             {t}
-          </button>
+          </Button>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Amount">
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" inputMode="decimal" className={inputClass} />
+          <TextField
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            inputMode="decimal"
+            className={inputClass}
+          />
         </Field>
         <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
+          <TextField
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={inputClass}
+          />
         </Field>
       </div>
       <Field label="Payee">
-        <input value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="e.g. Whole Foods" className={inputClass} />
+        <TextField
+          value={payee}
+          onChange={(e) => setPayee(e.target.value)}
+          placeholder="e.g. Whole Foods"
+          className={inputClass}
+        />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Account">
-          <span className="y-select-wrap">
-            <select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="y-select w-full">
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={accountId}
+            onChange={(e) => setAccountId(Number(e.target.value))}
+            className="w-full"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </Select>
         </Field>
         <Field label="Category">
-          <span className="y-select-wrap">
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))} className="y-select w-full">
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
+            className="w-full"
+          >
+            <option value="">Uncategorized</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </Select>
         </Field>
       </div>
       <Field label="Memo (optional)">
-        <input value={memo} onChange={(e) => setMemo(e.target.value)} className={inputClass} />
+        <TextField value={memo} onChange={(e) => setMemo(e.target.value)} className={inputClass} />
       </Field>
-      <label className="mt-2 mb-0 flex items-center gap-[6px] text-[11.5px]" style={{ color: "var(--y-ink-soft)" }}>
-        <input
-          type="checkbox"
+      <div className="mt-2 mb-0">
+        <Checkbox
           checked={cleared}
-          onChange={(e) => setCleared(e.target.checked)}
-          className="sr-only"
+          onChange={setCleared}
+          label="Cleared (posted to bank)"
         />
-        <span
-          aria-hidden
-          className={`y-check ${cleared ? "is-on" : ""}`}
-        />
-        Cleared (posted to bank)
-      </label>
+      </div>
     </Modal>
   );
 }
@@ -182,36 +200,42 @@ export function CategoryModal({
       }
     >
       <Field label="Name">
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
+        <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
       </Field>
-      <label className="mb-2 flex items-center gap-[6px] text-[11.5px]" style={{ color: "var(--y-ink-soft)" }}>
-        <input
-          type="checkbox"
+      <div className="mb-2">
+        <Checkbox
           checked={hasGoal}
-          onChange={(e) => setHasGoal(e.target.checked)}
-          className="sr-only"
+          onChange={setHasGoal}
+          label="Set a funding goal"
         />
-        <span aria-hidden className={`y-check ${hasGoal ? "is-on" : ""}`} />
-        Set a funding goal
-      </label>
+      </div>
       {hasGoal && (
         <Field label="Goal Target">
-          <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="1000.00" inputMode="decimal" className={inputClass} />
+          <TextField
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="1000.00"
+            inputMode="decimal"
+            className={inputClass}
+          />
         </Field>
       )}
-      <label className="mb-2 flex items-center gap-[6px] text-[11.5px]" style={{ color: "var(--y-ink-soft)" }}>
-        <input
-          type="checkbox"
+      <div className="mb-2">
+        <Checkbox
           checked={hasCarryover}
-          onChange={(e) => setHasCarryover(e.target.checked)}
-          className="sr-only"
+          onChange={setHasCarryover}
+          label="Set opening carryover balance"
         />
-        <span aria-hidden className={`y-check ${hasCarryover ? "is-on" : ""}`} />
-        Set opening carryover balance
-      </label>
+      </div>
       {hasCarryover && (
         <Field label="Carryover Amount">
-          <input value={carryover} onChange={(e) => setCarryover(e.target.value)} placeholder="0.00" inputMode="decimal" className={inputClass} />
+          <TextField
+            value={carryover}
+            onChange={(e) => setCarryover(e.target.value)}
+            placeholder="0.00"
+            inputMode="decimal"
+            className={inputClass}
+          />
         </Field>
       )}
     </Modal>
@@ -245,7 +269,7 @@ export function GroupModal({
       }
     >
       <Field label="Group Name">
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
+        <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
       </Field>
     </Modal>
   );
@@ -315,67 +339,84 @@ export function RecurringModal({
     >
       <div className="y-seg mb-3 w-full">
         {(["outflow", "inflow"] as const).map((t) => (
-          <button
+          <Button
             key={t}
+            size="sm"
+            variant={type === t ? "primary" : "default"}
+            active={type === t}
             onClick={() => setType(t)}
-            className={`y-btn y-btn--sm flex-1 capitalize ${type === t ? "y-btn--primary is-on" : ""}`}
+            className="flex-1 capitalize"
           >
             {t}
-          </button>
+          </Button>
         ))}
       </div>
       <Field label="Payee">
-        <input value={payee} onChange={(e) => setPayee(e.target.value)} className={inputClass} />
+        <TextField value={payee} onChange={(e) => setPayee(e.target.value)} className={inputClass} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Amount">
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" inputMode="decimal" className={inputClass} />
+          <TextField
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            inputMode="decimal"
+            className={inputClass}
+          />
         </Field>
         <Field label="Frequency">
-          <span className="y-select-wrap">
-            <select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="y-select w-full">
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="yearly">Yearly</option>
-            </select>
-          </span>
+          <Select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            className="w-full"
+          >
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Biweekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </Select>
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Account">
-          <span className="y-select-wrap">
-            <select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="y-select w-full">
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={accountId}
+            onChange={(e) => setAccountId(Number(e.target.value))}
+            className="w-full"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </Select>
         </Field>
         <Field label="Category">
-          <span className="y-select-wrap">
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))} className="y-select w-full">
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </span>
+          <Select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
+            className="w-full"
+          >
+            <option value="">Uncategorized</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </Select>
         </Field>
       </div>
       <Field label="Next Date">
-        <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className={inputClass} />
-      </Field>
-      <label className="mt-2 mb-0 flex items-center gap-[6px] text-[11.5px]" style={{ color: "var(--y-ink-soft)" }}>
-        <input
-          type="checkbox"
-          checked={active}
-          onChange={(e) => setActive(e.target.checked)}
-          className="sr-only"
+        <TextField
+          type="date"
+          value={nextDate}
+          onChange={(e) => setNextDate(e.target.value)}
+          className={inputClass}
         />
-        <span aria-hidden className={`y-check ${active ? "is-on" : ""}`} />
-        Active
-      </label>
+      </Field>
+      <div className="mt-2 mb-0">
+        <Checkbox
+          checked={active}
+          onChange={setActive}
+          label="Active"
+        />
+      </div>
     </Modal>
   );
 }
@@ -422,23 +463,27 @@ export function AccountModal({
       }
     >
       <Field label="Account Name">
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
+        <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
       </Field>
       <Field label="Type">
-        <span className="y-select-wrap">
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as "liquid" | "credit" | "offbudget")}
-            className="y-select w-full"
-          >
-            <option value="liquid">Liquid (Cash / Checking / Savings)</option>
-            <option value="credit">Credit Card</option>
-            <option value="offbudget">Off-Budget (Retirement / Asset)</option>
-          </select>
-        </span>
+        <Select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as "liquid" | "credit" | "offbudget")}
+          className="w-full"
+        >
+          <option value="liquid">Liquid (Cash / Checking / Savings)</option>
+          <option value="credit">Credit Card</option>
+          <option value="offbudget">Off-Budget (Retirement / Asset)</option>
+        </Select>
       </Field>
       <Field label="Current Balance">
-        <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" inputMode="decimal" className={inputClass} />
+        <TextField
+          value={balance}
+          onChange={(e) => setBalance(e.target.value)}
+          placeholder="0.00"
+          inputMode="decimal"
+          className={inputClass}
+        />
       </Field>
     </Modal>
   );

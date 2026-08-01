@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { Icon, ClearedFlag, Toolbar, money } from "@ynab/theme";
+import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, Pill, money } from "@ynab/theme";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number };
 
@@ -75,12 +75,15 @@ export function TransactionsView({
     <div className="flex h-full flex-col">
       <Toolbar>
         <div className="flex items-center gap-2">
-          <Icon name="swap" size={14} color="#3f4649" />
+          <Icon name="swap" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>
             {filterAccount ? filterAccount.name : "All Transactions"}
           </span>
           {filterAccount && (
-            <span className="y-pill y-pill--blue" style={{ minWidth: 0, padding: "1px 7px 2px" }}>
+            <Pill
+              tone="blue"
+              style={{ minWidth: 0, padding: "1px 7px 2px" }}
+            >
               {fmt(num(filterAccount.balance))}
               <button
                 type="button"
@@ -90,26 +93,23 @@ export function TransactionsView({
               >
                 <Icon name="x" size={9} color="#fff" />
               </button>
-            </span>
+            </Pill>
           )}
         </div>
-        <div className="y-tb-sep" />
-        <input
+        <ToolbarSep />
+        <TextField
+          search
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search register"
-          className="y-input y-search"
           style={{ width: 168 }}
         />
-        <button onClick={onAdd} className="y-btn y-btn--primary ml-auto">
+        <Button onClick={onAdd} variant="primary" className="ml-auto">
           <Icon name="plus" size={11} color="#fff" /> Add Transaction
-        </button>
+        </Button>
       </Toolbar>
 
-      <div
-        className="flex items-center gap-3 px-3 py-1.5 text-[11px]"
-        style={{ borderBottom: "1px solid #bdbdb8", background: "var(--y-panel-alt)" }}
-      >
+      <div className="y-subbar flex items-center gap-3 px-3 py-1.5 text-[11px]">
         <span className="y-caps">{totals.count} transactions</span>
         <span className="y-num font-bold" style={{ color: "var(--y-ink)" }}>
           Inflow {money(totals.inflow)}

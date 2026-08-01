@@ -194,14 +194,26 @@ export const TextField: React.FC<
   <input {...rest} className={cx("y-input", search && "y-search", className)} />
 );
 
+export type SelectOption = string | { value: string | number; label: string };
+
 export const Select: React.FC<
-  React.SelectHTMLAttributes<HTMLSelectElement> & { options: string[] }
-> = ({ options, className, ...rest }) => (
+  React.SelectHTMLAttributes<HTMLSelectElement> & {
+    options?: SelectOption[];
+    children?: React.ReactNode;
+  }
+> = ({ options, className, children, ...rest }) => (
   <span className="y-select-wrap">
     <select {...rest} className={cx("y-select", className)}>
-      {options.map((o) => (
-        <option key={o}>{o}</option>
-      ))}
+      {children ??
+        options?.map((o) => {
+          const v = typeof o === "string" ? o : o.value;
+          const l = typeof o === "string" ? o : o.label;
+          return (
+            <option key={String(v)} value={v}>
+              {l}
+            </option>
+          );
+        })}
     </select>
   </span>
 );
@@ -213,11 +225,17 @@ export const Checkbox: React.FC<{
   radio?: boolean;
 }> = ({ checked = false, onChange, label, radio }) => (
   <label className="inline-flex items-center gap-[6px] cursor-pointer select-none">
+    <input
+      type={radio ? "radio" : "checkbox"}
+      checked={checked}
+      onChange={(e) => onChange?.(e.target.checked)}
+      className="sr-only"
+    />
     <span
-      onClick={() => onChange?.(!checked)}
+      aria-hidden
       className={cx("y-check", radio && "y-radio", checked && "is-on")}
     />
-    {label && <span className="text-[11.5px] text-[#3f4649]">{label}</span>}
+    {label && <span className="text-[11.5px]" style={{ color: "var(--y-ink)" }}>{label}</span>}
   </label>
 );
 
@@ -226,9 +244,25 @@ export const Pill: React.FC<{
   tone?: "green" | "red" | "orange" | "grey" | "blue";
   children: React.ReactNode;
   className?: string;
-}> = ({ tone = "green", children, className }) => (
-  <span className={cx("y-pill", `y-pill--${tone}`, className)}>{children}</span>
-);
+  style?: React.CSSProperties;
+  onClick?: () => void;
+  title?: string;
+  "aria-label"?: string;
+}> = ({ tone = "green", children, className, style, onClick, title, ...rest }) => {
+  const Tag = onClick ? "button" : "span";
+  return (
+    <Tag
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      title={title}
+      {...rest}
+      className={cx("y-pill", `y-pill--${tone}`, className)}
+      style={style}
+    >
+      {children}
+    </Tag>
+  );
+};
 
 export const balanceTone = (n: number): "green" | "red" | "grey" =>
   n > 0 ? "green" : n < 0 ? "red" : "grey";
@@ -251,8 +285,10 @@ export const Notice: React.FC<{
   tone?: "info" | "warn" | "danger" | "ok";
   title?: string;
   children: React.ReactNode;
-}> = ({ tone = "info", title, children }) => (
-  <div className={cx("y-notice", `y-notice--${tone}`)}>
+  className?: string;
+  style?: React.CSSProperties;
+}> = ({ tone = "info", title, children, className, style }) => (
+  <div className={cx("y-notice", `y-notice--${tone}`, className)} style={style}>
     <span className="mt-[1px]">
       {tone === "ok" ? "✓" : tone === "danger" ? "✕" : tone === "warn" ? "!" : "i"}
     </span>

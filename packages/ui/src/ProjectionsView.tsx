@@ -2,7 +2,7 @@
 
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, MONTHS_LONG, parseMonthKey } from "@ynab/logic";
-import { Icon, Toolbar } from "@ynab/theme";
+import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
 
 export function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
   const { year, month0 } = parseMonthKey(month);
@@ -50,7 +50,7 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
     <div className="flex h-full flex-col">
       <Toolbar>
         <div className="flex items-center gap-2">
-          <Icon name="projections" size={14} color="#3f4649" />
+          <Icon name="projections" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Projections</span>
         </div>
         <span className="ml-auto y-hint">
@@ -60,64 +60,65 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
 
       <div className="flex-1 overflow-y-auto p-4 y-scroll">
         <div className="mb-3 flex flex-wrap gap-2">
-          <Stat label="Liquid Balance" value={fmt(liquidNow)} />
-          <Stat
+          <MathCell label="Liquid Balance" value={fmt(liquidNow)} className="flex-1" style={{ minWidth: 150 }} />
+          <MathCell
             label="Projected Monthly Flow"
             value={fmt(perMonth)}
             tone={perMonth >= 0 ? "green" : "red"}
+            className="flex-1"
+            style={{ minWidth: 150 }}
           />
-          <Stat
+          <MathCell
             label="Projected in 12 mo"
             value={fmt(points[points.length - 1]!.value)}
             tone={points[points.length - 1]!.value >= 0 ? "green" : "red"}
+            className="flex-1"
+            style={{ minWidth: 150 }}
           />
         </div>
 
-        <div className="y-panel">
-          <div className="y-panel-head">12-Month Liquid Balance Forecast</div>
-          <div className="p-3">
-            <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 240 }}>
-              <defs>
-                <linearGradient id="projFillGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--y-blue)" stopOpacity={0.28} />
-                  <stop offset="100%" stopColor="var(--y-blue)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              {y(0) > pad && y(0) < H - pad && (
-                <line
-                  x1={pad}
-                  y1={y(0)}
-                  x2={W - pad}
-                  y2={y(0)}
-                  stroke="var(--y-red)"
-                  strokeDasharray="4 4"
-                  strokeWidth={1}
-                  opacity={0.5}
-                />
-              )}
-              <path d={area} fill="url(#projFillGrad)" />
-              <path
-                d={line}
-                fill="none"
-                stroke="var(--y-blue)"
-                strokeWidth={2.5}
-                strokeLinejoin="round"
+        <Panel title="12-Month Liquid Balance Forecast">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 240 }}>
+            <defs>
+              <linearGradient id="projFillGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--y-blue)" stopOpacity={0.28} />
+                <stop offset="100%" stopColor="var(--y-blue)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            {y(0) > pad && y(0) < H - pad && (
+              <line
+                x1={pad}
+                y1={y(0)}
+                x2={W - pad}
+                y2={y(0)}
+                stroke="var(--y-red)"
+                strokeDasharray="4 4"
+                strokeWidth={1}
+                opacity={0.5}
               />
-              {points.map((p, i) => (
-                <circle key={i} cx={x(i)} cy={y(p.value)} r={3} fill="var(--y-blue)" />
+            )}
+            <path d={area} fill="url(#projFillGrad)" />
+            <path
+              d={line}
+              fill="none"
+              stroke="var(--y-blue)"
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+            />
+            {points.map((p, i) => (
+              <circle key={i} cx={x(i)} cy={y(p.value)} r={3} fill="var(--y-blue)" />
+            ))}
+          </svg>
+          <div className="mt-1 flex justify-between y-hint">
+            {points
+              .filter((_, i) => i % 2 === 0)
+              .map((p) => (
+                <span key={p.label} className="y-num">
+                  {p.label}
+                </span>
               ))}
-            </svg>
-            <div className="mt-1 flex justify-between y-hint">
-              {points
-                .filter((_, i) => i % 2 === 0)
-                .map((p) => (
-                  <span key={p.label} className="y-num">
-                    {p.label}
-                  </span>
-                ))}
-            </div>
           </div>
-        </div>
+        </Panel>
 
         <div className="mt-3 y-panel overflow-hidden">
           <table className="y-table">
@@ -149,28 +150,6 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "green" | "red";
-}) {
-  return (
-    <div className="y-mathbox" style={{ minWidth: 150, flex: 1 }}>
-      <div className="y-math-label">{label}</div>
-      <div
-        className="y-math-val"
-        style={{ color: tone === "green" ? "var(--y-green-dk)" : tone === "red" ? "var(--y-red)" : "var(--y-ink)" }}
-      >
-        {value}
       </div>
     </div>
   );
