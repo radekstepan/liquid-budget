@@ -6,5 +6,5 @@ export * from "./queries/assignments.js";
 export * from "./queries/categories.js";
 export * from "./queries/recurring.js";
 export * from "./queries/transactions.js";
-export { seedDatabase, resetDatabase, DEMO_MONTH } from "./seed.js";
+export { seedDatabase, resetDatabase, ensureTables, DEMO_MONTH } from "./seed.js";
 export { importYnab4 } from "./import-ynab4.js";

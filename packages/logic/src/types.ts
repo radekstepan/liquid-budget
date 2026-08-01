@@ -46,6 +46,8 @@ export type Transaction = {
   amount: string;
   cleared: boolean;
   createdAt?: string;
+  parentId?: number | null;
+  transferAccountId?: number | null;
 };
 
 export type Recurring = {

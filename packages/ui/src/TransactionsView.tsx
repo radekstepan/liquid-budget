@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { BudgetData } from "@ynab/logic";
+import { useMemo, useState, Fragment } from "react";
+import type { BudgetData, Transaction } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { IconPlus, IconTrash, IconSwap, IconX, IconPencil } from "./icons.js";
+import { IconPlus, IconTrash, IconSwap, IconX, IconPencil, IconChevronDown, IconChevronRight } from "./icons.js";
 
 export function TransactionsView({
   data,
@@ -24,18 +24,43 @@ export function TransactionsView({
   const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
-  const filtered = data.transactions.filter((t) => {
+  const [expandedSplits, setExpandedSplits] = useState<Record<number, boolean>>({});
+
+  const childrenByParent = useMemo(() => {
+    const map = new Map<number, Transaction[]>();
+    for (const t of data.transactions) {
+      if (t.parentId) {
+        if (!map.has(t.parentId)) map.set(t.parentId, []);
+        map.get(t.parentId)!.push(t);
+      }
+    }
+    return map;
+  }, [data.transactions]);
+
+  const parentsList = useMemo(() => data.transactions.filter(t => !t.parentId), [data.transactions]);
+
+  const filteredParents = parentsList.filter((t) => {
     if (accountFilter && t.accountId !== accountFilter) return false;
     if (search) {
       const s = search.toLowerCase();
-      const hay = `${t.payee} ${t.memo} ${catMap.get(t.categoryId ?? -1) ?? ""}`.toLowerCase();
-      if (!hay.includes(s)) return false;
+      const matchT = `${t.payee} ${t.memo} ${catMap.get(t.categoryId ?? -1) ?? ""}`.toLowerCase().includes(s);
+      if (matchT) return true;
+      const children = childrenByParent.get(t.id) || [];
+      const matchChild = children.some(c => `${c.payee} ${c.memo} ${catMap.get(c.categoryId ?? -1) ?? ""}`.toLowerCase().includes(s));
+      if (matchChild) return true;
+      return false;
     }
     return true;
   });
 
-  const inflow = filtered.filter((t) => num(t.amount) > 0).reduce((s, t) => s + num(t.amount), 0);
-  const outflow = filtered.filter((t) => num(t.amount) < 0).reduce((s, t) => s + num(t.amount), 0);
+  const inflow = filteredParents.reduce((sum, t) => {
+    const a = num(t.amount);
+    return a > 0 ? sum + a : sum;
+  }, 0);
+  const outflow = filteredParents.reduce((sum, t) => {
+    const a = num(t.amount);
+    return a < 0 ? sum + a : sum;
+  }, 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -74,7 +99,7 @@ export function TransactionsView({
       </div>
 
       <div className="flex gap-3 px-6 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-        <Chip label="Transactions" value={String(filtered.length)} />
+        <Chip label="Transactions" value={String(filteredParents.length)} />
         <Chip label="Inflow" value={fmt(inflow)} color="var(--accent)" />
         <Chip label="Outflow" value={fmt(outflow)} color="var(--danger)" />
         <Chip label="Net" value={fmt(inflow + outflow)} />
@@ -96,76 +121,96 @@ export function TransactionsView({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t) => {
-              const amt = num(t.amount);
-              return (
-                <tr key={t.id} className="group transition-colors hover:bg-[var(--panel-3)]" style={{ borderTop: "1px solid var(--border)" }}>
-                  <Td className="tnum" style={{ color: "var(--muted)" }}>{t.date}</Td>
-                  <Td>{accMap.get(t.accountId)}</Td>
-                  <Td className="font-medium" style={{ color: "var(--text)" }}>{t.payee}</Td>
-                  <Td>
-                    {t.categoryId ? (
-                      <span className="rounded-md px-2 py-0.5 text-[12.5px] font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                        {catMap.get(t.categoryId)}
-                      </span>
-                    ) : (
-                      <span style={{ color: "var(--faint)" }}>—</span>
-                    )}
-                  </Td>
-                  <Td style={{ color: "var(--muted)" }}>{t.memo || "—"}</Td>
-                  <Td>
-                    {t.cleared ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-                        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                        title="Cleared — posted to your bank statement"
-                      >
-                        ● Cleared
-                      </span>
-                    ) : (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-                        style={{ background: "var(--warn-bg, var(--panel-3))", color: "var(--warn, var(--text-2))" }}
-                        title="Uncleared — not yet posted to your bank"
-                      >
-                        ○ Uncleared
-                      </span>
-                    )}
-                  </Td>
-                  <Td right className="tnum" style={{ color: amt < 0 ? "var(--danger)" : "var(--faint)" }}>
-                    {amt < 0 ? fmt(amt) : ""}
-                  </Td>
-                  <Td right className="tnum" style={{ color: amt > 0 ? "var(--accent)" : "var(--faint)" }}>
-                    {amt > 0 ? fmt(amt) : ""}
-                  </Td>
-                  <Td right>
-                    <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        onClick={() => onEdit(t.id)}
-                        className="rounded p-1"
-                        style={{ color: "var(--muted)" }}
-                        aria-label={`Edit ${t.payee}`}
-                        title="Edit"
-                      >
-                        <IconPencil width={14} height={14} />
-                      </button>
-                      <button
-                        onClick={() => onDelete(t.id)}
-                        className="rounded p-1"
-                        style={{ color: "var(--muted)" }}
-                        aria-label={`Delete ${t.payee}`}
-                        title="Delete"
-                      >
-                        <IconTrash width={15} height={15} />
-                      </button>
-                    </div>
-                  </Td>
-                </tr>
-              );
+            {filteredParents.map((t) => {
+              const renderRow = (txn: Transaction, isChild = false) => {
+                const amt = num(txn.amount);
+                const hasChildren = !isChild && childrenByParent.has(txn.id);
+                const children = hasChildren ? childrenByParent.get(txn.id)! : [];
+                const expanded = !!expandedSplits[txn.id];
+
+                let payeeDisplay = txn.payee;
+                let icon = null;
+                if (txn.transferAccountId) {
+                  payeeDisplay = `Transfer : ${accMap.get(txn.transferAccountId) || "Unknown"}`;
+                  icon = <IconSwap width={14} height={14} className="mr-1.5 inline-block opacity-70" />;
+                }
+
+                return (
+                  <Fragment key={txn.id}>
+                    <tr className={`group transition-colors ${isChild ? "bg-[var(--panel-3)]" : "hover:bg-[var(--panel-3)]"}`} style={{ borderTop: isChild ? "none" : "1px solid var(--border)" }}>
+                      <Td className="tnum" style={{ color: "var(--muted)" }}>{!isChild ? txn.date : ""}</Td>
+                      <Td>{!isChild ? accMap.get(txn.accountId) : ""}</Td>
+                      <Td className={isChild ? "pl-8" : "font-medium"} style={{ color: "var(--text)" }}>
+                        {icon}
+                        {payeeDisplay}
+                      </Td>
+                      <Td>
+                        {hasChildren ? (
+                          <button
+                            onClick={() => setExpandedSplits(s => ({ ...s, [txn.id]: !s[txn.id] }))}
+                            className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--accent-strong)]"
+                            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                          >
+                            {expanded ? <IconChevronDown width={14} height={14} /> : <IconChevronRight width={14} height={14} />}
+                            Split (Multiple Categories)...
+                          </button>
+                        ) : txn.categoryId ? (
+                          <span className="rounded-md px-2 py-0.5 text-[12.5px] font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                            {catMap.get(txn.categoryId)}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--faint)" }}>—</span>
+                        )}
+                      </Td>
+                      <Td style={{ color: "var(--muted)" }}>{txn.memo || "—"}</Td>
+                      <Td>
+                        {!isChild && (
+                          txn.cleared ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                              title="Cleared"
+                            >
+                              ● Cleared
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                              style={{ background: "var(--warn-bg, var(--panel-3))", color: "var(--warn, var(--text-2))" }}
+                              title="Uncleared"
+                            >
+                              ○ Uncleared
+                            </span>
+                          )
+                        )}
+                      </Td>
+                      <Td right className="tnum" style={{ color: amt < 0 ? "var(--danger)" : "var(--faint)" }}>
+                        {amt < 0 ? fmt(amt) : ""}
+                      </Td>
+                      <Td right className="tnum" style={{ color: amt > 0 ? "var(--accent)" : "var(--faint)" }}>
+                        {amt > 0 ? fmt(amt) : ""}
+                      </Td>
+                      <Td right>
+                        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button onClick={() => onEdit(txn.id)} className="rounded p-1 text-[var(--muted)] hover:text-[var(--text)]" title="Edit">
+                            <IconPencil width={14} height={14} />
+                          </button>
+                          <button onClick={() => onDelete(txn.id)} className="rounded p-1 text-[var(--muted)] hover:text-[var(--danger)]" title="Delete">
+                            <IconTrash width={15} height={15} />
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                    {expanded && children.map(c => renderRow(c, true))}
+                  </Fragment>
+                );
+              };
+              
+              return renderRow(t);
             })}
-            {filtered.length === 0 && (
+            {filteredParents.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-16 text-center text-[14px]" style={{ color: "var(--muted)" }}>
+                <td colSpan={9} className="py-16 text-center text-[14px]" style={{ color: "var(--muted)" }}>
                   No transactions found.
                 </td>
               </tr>

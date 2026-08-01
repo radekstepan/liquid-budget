@@ -4,6 +4,7 @@ import {
   integer,
   real,
   uniqueIndex,
+  AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 export const accounts = sqliteTable("accounts", {
@@ -66,6 +67,8 @@ export const transactions = sqliteTable("transactions", {
   amount: real("amount").notNull().default(0),
   cleared: integer("cleared", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().default(""),
+  parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
+  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
 });
 
 export const recurring = sqliteTable("recurring", {

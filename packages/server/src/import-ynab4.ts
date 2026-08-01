@@ -142,31 +142,86 @@ export async function importYnab4(db: Db, ynabData: any) {
   }
 
   // 5. Insert Transactions
+  const accNameMap = new Map<number, string>();
+  const allAccountsForMap = await db.select().from(accounts);
+  for (const a of allAccountsForMap) accNameMap.set(a.id, a.name);
+
   for (const t of yTransactions) {
     if (t.isTombstone) continue;
 
     const accId = accountIdMap.get(t.accountId);
     if (!accId) continue;
 
-    const payee = payeeMap.get(t.payeeId) || "";
+    let payee = payeeMap.get(t.payeeId) || "";
+    let transferAccountId = t.targetAccountId ? accountIdMap.get(t.targetAccountId) || null : null;
+    
+    if (t.payeeId && t.payeeId.startsWith("Payee/Transfer:")) {
+      const targetId = t.payeeId.split(":")[1];
+      const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+      if (foundTarget) {
+        transferAccountId = foundTarget;
+        payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+      }
+    }
 
     let catId = categoryIdMap.get(t.categoryId) || null;
     if (
       t.categoryId === "Category/__ImmediateIncome__" ||
-      t.categoryId === "Category/__DeferredIncome__"
+      t.categoryId === "Category/__DeferredIncome__" ||
+      t.categoryId === "Category/__Split__"
     ) {
       catId = null;
     }
 
-    await db.insert(transactions).values({
-      accountId: accId,
-      categoryId: catId,
-      date: t.date,
-      payee,
-      memo: t.memo || "",
-      amount: t.amount || 0,
-      cleared: t.cleared !== "Uncleared",
-    });
+    const [insertedT] = await db
+      .insert(transactions)
+      .values({
+        accountId: accId,
+        categoryId: catId,
+        date: t.date,
+        payee,
+        memo: t.memo || "",
+        amount: t.amount || 0,
+        cleared: t.cleared !== "Uncleared",
+        transferAccountId,
+      })
+      .returning();
+
+    if (t.subTransactions && t.subTransactions.length > 0 && insertedT) {
+      for (const st of t.subTransactions) {
+        if (st.isTombstone) continue;
+        let subCatId = categoryIdMap.get(st.categoryId) || null;
+        let subTransferAccId = st.targetAccountId ? accountIdMap.get(st.targetAccountId) || null : null;
+        let subPayee = "";
+        
+        if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
+          const targetId = st.payeeId.split(":")[1];
+          const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+          if (foundTarget) {
+            subTransferAccId = foundTarget;
+            subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+          }
+        } else if (st.targetAccountId) {
+           const foundTarget = accountIdMap.get(st.targetAccountId);
+           if (foundTarget) {
+             subTransferAccId = foundTarget;
+             subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+           }
+        }
+        
+        await db.insert(transactions).values({
+          accountId: accId,
+          categoryId: subCatId,
+          date: t.date,
+          payee: subPayee,
+          memo: st.memo || "",
+          amount: st.amount || 0,
+          cleared: t.cleared !== "Uncleared",
+          transferAccountId: subTransferAccId,
+          parentId: insertedT.id
+        });
+      }
+    }
   }
 
   // 6. Compute real balances of accounts

@@ -7,8 +7,8 @@ import { isSeeded } from "./queries/budget.js";
 // Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
 export { DEMO_MONTH };
 
-export async function ensureTables(db: Db): Promise<void> {
-  await db.run(sql`
+export function ensureTables(db: Db): void {
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -19,7 +19,7 @@ export async function ensureTables(db: Db): Promise<void> {
       sort INTEGER NOT NULL DEFAULT 0
     );
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS category_groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -27,7 +27,7 @@ export async function ensureTables(db: Db): Promise<void> {
       is_credit_card_payments INTEGER NOT NULL DEFAULT 0
     );
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       group_id INTEGER NOT NULL REFERENCES category_groups(id) ON DELETE CASCADE,
@@ -38,7 +38,7 @@ export async function ensureTables(db: Db): Promise<void> {
       linked_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE
     );
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS assignments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
@@ -46,10 +46,10 @@ export async function ensureTables(db: Db): Promise<void> {
       amount REAL NOT NULL DEFAULT 0
     );
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS assignments_cat_month_uniq ON assignments (category_id, month);
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -59,10 +59,12 @@ export async function ensureTables(db: Db): Promise<void> {
       memo TEXT NOT NULL DEFAULT '',
       amount REAL NOT NULL DEFAULT 0,
       cleared INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT ''
+      created_at TEXT NOT NULL DEFAULT '',
+      parent_id INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
+      transfer_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
     );
   `);
-  await db.run(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS recurring (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -83,7 +85,7 @@ export async function ensureTables(db: Db): Promise<void> {
  * The next call to seedDatabase() will re-populate from scratch.
  */
 export async function resetDatabase(db: Db): Promise<void> {
-  await ensureTables(db);
+  ensureTables(db);
   await db.delete(recurring);
   await db.delete(transactions);
   await db.delete(assignments);
@@ -95,7 +97,7 @@ export async function resetDatabase(db: Db): Promise<void> {
 }
 
 export async function seedDatabase(db: Db) {
-  await ensureTables(db);
+  ensureTables(db);
   if (await isSeeded(db)) return;
 
   // ---------------------------------------------------------------------------

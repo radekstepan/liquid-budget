@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { GroupRow, Account, CatRow } from "@ynab/logic";
-import { fmt, num, MONTHS, parseMonthKey, monthKey } from "@ynab/logic";
+import type { GroupRow, Account, CatRow, BudgetResult } from "@ynab/logic";
+import { fmt, num } from "@ynab/logic";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -16,19 +16,26 @@ import {
   IconTrash,
 } from "./icons.js";
 
-const COL_A = "w-[132px]";
-const COL_O = "w-[132px]";
-const COL_V = "w-[148px]";
+const COL_A = "w-[90px]";
+const COL_O = "w-[90px]";
+const COL_V = "w-[100px]";
+
+export type MonthBudget = {
+  month: string;
+  year: number;
+  monthName: string;
+  result: BudgetResult;
+};
 
 export function BudgetView({
-  groups,
-  month,
-  year,
+  budgets,
+  currentMonth,
   accounts,
   collapsed,
   onToggleGroup,
   onAssign,
   onSelectMonth,
+  onShiftMonth,
   onAddCategory,
   onAddGroup,
   onEditCategory,
@@ -40,14 +47,14 @@ export function BudgetView({
   onReorderCategory,
   onReorderGroup,
 }: {
-  groups: GroupRow[];
-  month: string;
-  year: number;
+  budgets: MonthBudget[];
+  currentMonth: string;
   accounts: Account[];
   collapsed: Record<number, boolean>;
   onToggleGroup: (id: number) => void;
-  onAssign: (catId: number, amount: number) => void;
+  onAssign: (catId: number, amount: number, month: string) => void;
   onSelectMonth: (key: string) => void;
+  onShiftMonth: (delta: number) => void;
   onAddCategory: (groupId: number) => void;
   onAddGroup: () => void;
   onEditCategory: (catId: number) => void;
@@ -59,13 +66,14 @@ export function BudgetView({
   onReorderCategory?: (id: number, sort: number) => void;
   onReorderGroup?: (id: number, sort: number) => void;
 }) {
-  const { month0 } = parseMonthKey(month);
-  const totalBudget = groups.reduce((s, g) => s + g.available, 0);
-  const creditGroup = groups.find((g) => g.group.isCreditCardPayments);
+  // We use the first month to establish the category/group structure since the list is identical across months
+  const structureGroups = budgets[0]!.result.groups;
+  const creditGroup = structureGroups.find((g) => g.group.isCreditCardPayments);
   const creditAccounts = accounts.filter((a) => a.kind === "credit");
+  
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // ── Group drag-and-drop state ──
+  // Drag state
   const dragGroupId = useRef<number | null>(null);
   const [groupOverId, setGroupOverId] = useState<number | null>(null);
 
@@ -77,11 +85,11 @@ export function BudgetView({
     (targetId: number) => {
       const srcId = dragGroupId.current;
       if (srcId == null || srcId === targetId || !onReorderGroup) return;
-      const nonCC = groups.filter((g) => !g.group.isCreditCardPayments);
+      const nonCC = structureGroups.filter((g) => !g.group.isCreditCardPayments);
       const srcIdx = nonCC.findIndex((g) => g.group.id === srcId);
       const tgtIdx = nonCC.findIndex((g) => g.group.id === targetId);
       if (srcIdx === -1 || tgtIdx === -1) return;
-      // Assign sequential sort values reflecting the new order.
+      
       const reordered = [...nonCC];
       const [moved] = reordered.splice(srcIdx, 1);
       reordered.splice(tgtIdx, 0, moved!);
@@ -91,114 +99,86 @@ export function BudgetView({
       dragGroupId.current = null;
       setGroupOverId(null);
     },
-    [groups, onReorderGroup]
+    [structureGroups, onReorderGroup]
   );
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="flex items-center gap-1 px-5 py-3.5"
-        style={{ borderBottom: "1px solid var(--border)" }}
-      >
-        {MONTHS.map((m, i) => {
-          const key = monthKey(year, i);
-          const active = i === month0;
-          const past = i < month0;
-          return (
-            <button
-              key={m}
-              onClick={() => onSelectMonth(key)}
-              className="rounded-lg px-3.5 py-1.5 text-[15px] transition-all"
-              style={{
-                background: active ? "var(--accent)" : "transparent",
-                color: active ? "var(--accent-fg)" : past ? "var(--faint)" : "var(--text-2)",
-                fontWeight: active ? 700 : 500,
-                textDecoration: past ? "line-through" : "none",
-                fontStyle: active || past ? "italic" : "normal",
-              }}
-            >
-              {m}
-            </button>
-          );
-        })}
+      {/* Month Navigation & Headers */}
+      <div className="flex items-center gap-1 px-5 py-3.5" style={{ borderBottom: "1px solid var(--border)" }}>
+        <button onClick={() => onShiftMonth(-1)} className="rounded p-1 hover:bg-[var(--panel-3)] mr-4">
+          <IconChevronRight width={16} height={16} className="rotate-180" />
+        </button>
+        
+        <div className="flex flex-1 gap-4">
+          {budgets.map((b) => (
+             <div key={b.month} className="flex-1 text-center">
+                <button
+                  onClick={() => onSelectMonth(b.month)}
+                  className="rounded-lg px-3.5 py-1.5 text-[15px] transition-all"
+                  style={{
+                    background: b.month === currentMonth ? "var(--accent)" : "transparent",
+                    color: b.month === currentMonth ? "var(--accent-fg)" : "var(--text-2)",
+                    fontWeight: b.month === currentMonth ? 700 : 500,
+                  }}
+                >
+                  {b.monthName} {b.year}
+                </button>
+                <div className="mt-1 text-[12px] text-[var(--muted)]">
+                  <div>Income: {fmt(b.result.totalIncome)}</div>
+                  <div>Assigned: {fmt(b.result.totalAssigned)}</div>
+                </div>
+             </div>
+          ))}
+        </div>
+        
+        <button onClick={() => onShiftMonth(1)} className="rounded p-1 hover:bg-[var(--panel-3)] ml-4">
+          <IconChevronRight width={16} height={16} />
+        </button>
       </div>
 
-      <div
-        className="flex items-center px-5 py-2.5"
-        style={{ borderBottom: "1px solid var(--border)", background: "var(--panel-2)" }}
-      >
-        <div className="flex items-center gap-1" style={{ color: "var(--faint)" }}>
+      {/* Grid Headers */}
+      <div className="flex items-center px-5 py-2.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--panel-2)" }}>
+        <div className="flex items-center gap-1 w-[220px] shrink-0" style={{ color: "var(--faint)" }}>
           <IconChevronDown width={16} height={16} />
           <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
           <div className="relative">
-            <button
-              onClick={() => setMenuOpen((o) => !o)}
-              className="ml-1 rounded-md p-1 transition-colors hover:bg-[var(--panel)]"
-              aria-label="Open budget menu"
-              aria-expanded={menuOpen}
-            >
+            <button onClick={() => setMenuOpen((o) => !o)} className="ml-1 rounded-md p-1 transition-colors hover:bg-[var(--panel)]">
               <IconDots width={16} height={16} />
             </button>
             {menuOpen && (
-              <div
-                className="animate-fade absolute left-0 top-[28px] z-20 min-w-[180px] overflow-hidden rounded-xl"
-                style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}
-                role="menu"
-              >
-                <button
-                  onClick={() => {
-                    onCollapseAll();
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--panel-3)]"
-                  style={{ color: "var(--text-2)" }}
-                  role="menuitem"
-                >
+              <div className="animate-fade absolute left-0 top-[28px] z-20 min-w-[180px] overflow-hidden rounded-xl bg-[var(--panel)] border border-[var(--border)] shadow-[var(--shadow-lg)]">
+                <button onClick={() => { onCollapseAll(); setMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-[13px] hover:bg-[var(--panel-3)] text-[var(--text-2)]">
                   Collapse all groups
                 </button>
-                <button
-                  onClick={() => {
-                    onExpandAll();
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--panel-3)]"
-                  style={{ color: "var(--text-2)" }}
-                  role="menuitem"
-                >
+                <button onClick={() => { onExpandAll(); setMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-[13px] hover:bg-[var(--panel-3)] text-[var(--text-2)]">
                   Expand all groups
                 </button>
               </div>
             )}
           </div>
-          <button
-            className="rounded-md p-1 opacity-50"
-            style={{ color: "var(--faint)", cursor: "not-allowed" }}
-            aria-label="Filter (coming soon)"
-            disabled
-            title="Filters coming in a future update"
-          >
-            <IconFilter width={16} height={16} />
-          </button>
         </div>
-        <div className="flex-1" />
-        <div className={`${COL_A} text-right text-[11.5px] font-semibold uppercase tracking-[0.07em]`} style={{ color: "var(--muted)" }}>
-          Assigned
-        </div>
-        <div className={`${COL_O} text-right text-[11.5px] font-semibold uppercase tracking-[0.07em]`} style={{ color: "var(--muted)" }}>
-          Outflow
-        </div>
-        <div className={`${COL_V} pr-1 text-right text-[11.5px] font-semibold uppercase tracking-[0.07em]`} style={{ color: "var(--muted)" }}>
-          Available
+        
+        <div className="flex flex-1 gap-4 overflow-hidden">
+          {budgets.map(b => (
+            <div key={b.month} className="flex flex-1 justify-end gap-2 pr-2">
+              <div className={`${COL_A} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Assign</div>
+              <div className={`${COL_O} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Actvty</div>
+              <div className={`${COL_V} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Avail</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {groups
+      {/* Grid Body */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        {structureGroups
           .filter((g) => !g.group.isCreditCardPayments)
           .map((g) => (
             <GroupBlock
               key={g.group.id}
-              g={g}
+              groupDef={g.group}
+              budgets={budgets}
               collapsed={!!collapsed[g.group.id]}
               onToggle={() => onToggleGroup(g.group.id)}
               onAssign={onAssign}
@@ -216,113 +196,33 @@ export function BudgetView({
             />
           ))}
 
-        <button
-          onClick={onAddGroup}
-          className="flex w-full items-center gap-2 px-6 py-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--panel-3)]"
-          style={{ color: "var(--muted)" }}
-        >
+        <button onClick={onAddGroup} className="flex w-full items-center gap-2 px-6 py-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--panel-3)] text-[var(--muted)]">
           <IconPlus width={15} height={15} /> Add Category Group
         </button>
-
+        
         {creditGroup && (
-          <CreditGroupHeader
-            g={creditGroup}
-            collapsed={!!collapsed[creditGroup.group.id]}
-            onToggle={() => onToggleGroup(creditGroup.group.id)}
+          <GroupBlock
+             groupDef={creditGroup.group}
+             budgets={budgets}
+             collapsed={!!collapsed[creditGroup.group.id]}
+             onToggle={() => onToggleGroup(creditGroup.group.id)}
+             onAssign={onAssign}
+             onAddCategory={() => onAddCategory(creditGroup.group.id)}
+             onEditCategory={onEditCategory}
+             onDeleteCategory={onDeleteCategory}
+             onEditGroup={() => onEditGroup(creditGroup.group.id)}
+             onDeleteGroup={() => onDeleteGroup(creditGroup.group.id)}
+             onReorderCategory={onReorderCategory}
           />
         )}
-        {creditGroup && !collapsed[creditGroup.group.id] && (
-          <div>
-            {creditGroup.rows.map((r) => (
-              <CategoryRow
-                key={r.category.id}
-                r={r}
-                onAssign={onAssign}
-                onEdit={() => onEditCategory(r.category.id)}
-                onDelete={() => onDeleteCategory(r.category.id)}
-              />
-            ))}
-          </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-4 px-5 py-5">
-          {creditAccounts.map((a) => {
-            const cat = creditGroup?.rows.find((r) => r.category.linkedAccountId === a.id);
-            const pool = cat?.available ?? 0;
-            const debt = Math.max(0, -num(a.balance));
-            const coveredPct = debt > 0 ? Math.min(1, pool / debt) : 1;
-            const remaining = Math.max(0, debt - pool);
-            const fullyCovered = remaining <= 0.004;
-            return (
-              <div
-                key={a.id}
-                className="rounded-2xl p-4"
-                style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="text-[15px] font-bold" style={{ color: "var(--text)" }}>
-                      {a.name}
-                    </div>
-                    <div className="text-[13px]" style={{ color: "var(--muted)" }}>
-                      Payment Pool
-                    </div>
-                  </div>
-                  <span
-                    className="tnum rounded-lg px-2.5 py-1 text-[13.5px] font-bold"
-                    style={{
-                      background: fullyCovered ? "var(--accent)" : "var(--warn)",
-                      color: "#fff",
-                    }}
-                  >
-                    {fmt(pool)}
-                  </span>
-                </div>
-                <div className="mt-3.5 h-2.5 overflow-hidden rounded-full" style={{ background: "var(--track)" }}>
-                  <div
-                    className={fullyCovered ? "stripe h-full rounded-full" : "stripe-warn h-full rounded-full"}
-                    style={{ width: `${Math.max(4, coveredPct * 100)}%` }}
-                  />
-                </div>
-                <div className="mt-2.5 text-[13px]" style={{ color: "var(--text-2)" }}>
-                  {fullyCovered ? (
-                    <>
-                      <span className="font-bold" style={{ color: "var(--text)" }}>100%</span> of your debt
-                      is covered!
-                    </>
-                  ) : (
-                    <>
-                      <span className="tnum font-bold" style={{ color: "var(--warn)" }}>{fmt(remaining)}</span> of
-                      debt is remaining.
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div
-        className="flex items-center px-5 py-3.5"
-        style={{ borderTop: "1px solid var(--border)", background: "var(--panel-2)" }}
-      >
-        <span style={{ color: "var(--muted)" }}>
-          <IconTotal width={19} height={19} />
-        </span>
-        <span className="ml-2.5 text-[15.5px] font-bold" style={{ color: "var(--text)" }}>
-          Total Budget
-        </span>
-        <span className="tnum ml-auto pr-1 text-[16px] font-bold" style={{ color: "var(--text)" }}>
-          {fmt(totalBudget)}
-        </span>
       </div>
     </div>
   );
 }
 
 function GroupBlock({
-  g,
+  groupDef,
+  budgets,
   collapsed,
   onToggle,
   onAssign,
@@ -337,26 +237,14 @@ function GroupBlock({
   onDragOver,
   onDragLeave,
   onDrop,
-}: {
-  g: GroupRow;
-  collapsed: boolean;
-  onToggle: () => void;
-  onAssign: (id: number, amt: number) => void;
-  onAddCategory: () => void;
-  onEditCategory: (id: number) => void;
-  onDeleteCategory: (id: number) => void;
-  onEditGroup: () => void;
-  onDeleteGroup: () => void;
-  onReorderCategory?: (id: number, sort: number) => void;
-  isDragOver?: boolean;
-  onDragStart?: () => void;
-  onDragOver?: () => void;
-  onDragLeave?: () => void;
-  onDrop?: () => void;
-}) {
-  // ── Category drag state within this group ──
+}: any) {
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
+  
+  // Get this group's data for all months
+  const groupDataByMonth = budgets.map((b: MonthBudget) => {
+     return b.result.groups.find(g => g.group.id === groupDef.id)!;
+  });
 
   return (
     <div
@@ -370,7 +258,6 @@ function GroupBlock({
       }}
       draggable
       onDragStart={(e) => {
-        // Only trigger group drag when the drag originates on the header, not on category rows.
         const target = e.target as HTMLElement;
         if (target.closest("[data-cat-row]")) { e.stopPropagation(); return; }
         e.dataTransfer.effectAllowed = "move";
@@ -380,52 +267,37 @@ function GroupBlock({
       onDragLeave={onDragLeave}
       onDrop={(e) => { e.preventDefault(); onDrop?.(); }}
     >
-      <div className="group/gh flex items-center px-5 py-2.5" style={{ background: "var(--panel-2)" }}>
-        <button onClick={onToggle} className="flex items-center gap-1" style={{ color: "var(--faint)" }}>
-          {collapsed ? <IconChevronRight width={16} height={16} /> : <IconChevronDown width={16} height={16} />}
-        </button>
-        <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
-        <button onClick={onEditGroup} className="ml-2.5 text-[15px] font-bold" style={{ color: "var(--text)" }}>
-          {g.group.name}
-        </button>
-        <button
-          onClick={onAddCategory}
-          className="ml-2 rounded-md p-1 opacity-0 transition-opacity group-hover/gh:opacity-100"
-          style={{ color: "var(--muted)" }}
-          title="Add category"
-        >
-          <IconPlus width={15} height={15} />
-        </button>
-        <button
-          onClick={() => {
-            if (confirm(`Delete group "${g.group.name}"? This also deletes all of its categories and their assignment history.`)) {
-              onDeleteGroup();
-            }
-          }}
-          className="ml-1 rounded-md p-1 opacity-0 transition-opacity group-hover/gh:opacity-100"
-          style={{ color: "var(--muted)" }}
-          title="Delete group"
-          aria-label={`Delete group ${g.group.name}`}
-        >
-          <IconTrash width={14} height={14} />
-        </button>
-        <div className="flex-1" />
-        <div className={`${COL_A} tnum text-right text-[14.5px] font-bold`} style={{ color: "var(--text)" }}>
-          {fmt(g.assigned)}
+      <div className="group/gh flex items-center px-5 py-2.5 bg-[var(--panel-2)]">
+        <div className="flex items-center gap-1 w-[220px] shrink-0">
+          <button onClick={onToggle} className="text-[var(--faint)]">
+            {collapsed ? <IconChevronRight width={16} height={16} /> : <IconChevronDown width={16} height={16} />}
+          </button>
+          <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full border-[1.6px] border-[var(--border-strong)]" />
+          <button onClick={onEditGroup} className="ml-2.5 text-[15px] font-bold text-[var(--text)] text-left truncate w-[140px]">
+            {groupDef.name}
+          </button>
+          <button onClick={onAddCategory} className="ml-1 rounded-md p-1 opacity-0 transition-opacity group-hover/gh:opacity-100 text-[var(--muted)]">
+            <IconPlus width={15} height={15} />
+          </button>
         </div>
-        <div className={`${COL_O} tnum text-right text-[14.5px] font-bold`} style={{ color: g.outflow < 0 ? "var(--text)" : "var(--muted)" }}>
-          {fmt(g.outflow)}
-        </div>
-        <div className={`${COL_V} tnum pr-1 text-right text-[14.5px] font-bold`} style={{ color: g.available < 0 ? "var(--danger)" : "var(--text)" }}>
-          {fmt(g.available)}
+        
+        <div className="flex flex-1 gap-4">
+          {groupDataByMonth.map((gd: GroupRow, i: number) => (
+             <div key={i} className="flex flex-1 justify-end gap-2 pr-2">
+               <div className={`${COL_A} tnum text-right text-[14.5px] font-bold text-[var(--text)]`}>{fmt(gd.assigned)}</div>
+               <div className={`${COL_O} tnum text-right text-[14.5px] font-bold ${gd.outflow < 0 ? 'text-[var(--text)]' : 'text-[var(--muted)]'}`}>{fmt(gd.outflow)}</div>
+               <div className={`${COL_V} tnum text-right text-[14.5px] font-bold ${gd.available < 0 ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>{fmt(gd.available)}</div>
+             </div>
+          ))}
         </div>
       </div>
 
       {!collapsed &&
-        g.rows.map((r) => (
+        groupDataByMonth[0].rows.map((r: CatRow) => (
           <CategoryRow
             key={r.category.id}
-            r={r}
+            catDef={r.category}
+            budgets={budgets}
             onAssign={onAssign}
             onEdit={() => onEditCategory(r.category.id)}
             onDelete={() => onDeleteCategory(r.category.id)}
@@ -436,13 +308,13 @@ function GroupBlock({
             onDrop={() => {
               const srcId = dragCatId.current;
               if (srcId == null || srcId === r.category.id || !onReorderCategory) return;
-              const srcIdx = g.rows.findIndex((x) => x.category.id === srcId);
-              const tgtIdx = g.rows.findIndex((x) => x.category.id === r.category.id);
+              const srcIdx = groupDataByMonth[0].rows.findIndex((x: CatRow) => x.category.id === srcId);
+              const tgtIdx = groupDataByMonth[0].rows.findIndex((x: CatRow) => x.category.id === r.category.id);
               if (srcIdx === -1 || tgtIdx === -1) return;
-              const reordered = [...g.rows];
+              const reordered = [...groupDataByMonth[0].rows];
               const [moved] = reordered.splice(srcIdx, 1);
               reordered.splice(tgtIdx, 0, moved!);
-              reordered.forEach((row, i) => {
+              reordered.forEach((row: CatRow, i: number) => {
                 if (row.category.sort !== i) onReorderCategory(row.category.id, i);
               });
               dragCatId.current = null;
@@ -454,42 +326,9 @@ function GroupBlock({
   );
 }
 
-function CreditGroupHeader({
-  g,
-  collapsed,
-  onToggle,
-}: {
-  g: GroupRow;
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="flex items-center px-5 py-2.5" style={{ background: "var(--panel-2)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-      <button onClick={onToggle} className="flex items-center gap-1" style={{ color: "var(--faint)" }}>
-        {collapsed ? <IconChevronRight width={16} height={16} /> : <IconChevronDown width={16} height={16} />}
-      </button>
-      <span className="ml-2" style={{ color: "var(--muted)" }}>
-        <IconCard width={17} height={17} />
-      </span>
-      <span className="ml-2 text-[15px] font-bold" style={{ color: "var(--text)" }}>
-        {g.group.name}
-      </span>
-      <div className="flex-1" />
-      <div className={`${COL_A} tnum text-right text-[14.5px] font-bold`} style={{ color: "var(--text)" }}>
-        {fmt(g.assigned)}
-      </div>
-      <div className={`${COL_O} tnum text-right text-[14.5px] font-bold`} style={{ color: g.outflow < 0 ? "var(--text)" : "var(--muted)" }}>
-        {fmt(g.outflow)}
-      </div>
-      <div className={`${COL_V} tnum pr-1 text-right text-[14.5px] font-bold`} style={{ color: "var(--text)" }}>
-        {fmt(g.available)}
-      </div>
-    </div>
-  );
-}
-
 function CategoryRow({
-  r,
+  catDef,
+  budgets,
   onAssign,
   onEdit,
   onDelete,
@@ -499,24 +338,50 @@ function CategoryRow({
   onDragOver,
   onDragLeave,
   onDrop,
-}: {
-  r: CatRow;
-  onAssign: (id: number, amt: number) => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  readOnly?: boolean;
-  isDragOver?: boolean;
-  onDragStart?: () => void;
-  onDragOver?: () => void;
-  onDragLeave?: () => void;
-  onDrop?: () => void;
-}) {
+}: any) {
+  return (
+    <div
+      data-cat-row
+      className="group/row flex items-center px-5 py-2 hover:bg-[var(--panel-3)] transition-colors"
+      style={{
+        borderTop: isDragOver ? "2px solid var(--accent)" : "1px solid var(--border)",
+        background: isDragOver ? "var(--accent-soft)" : undefined,
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
+      onDragLeave={(e) => { e.stopPropagation(); onDragLeave?.(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop?.(); }}
+    >
+      <div className="flex items-center gap-1 w-[220px] shrink-0">
+        <span className="cursor-grab text-[var(--faint)]" draggable onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = "move"; onDragStart?.(); }}>
+          <IconGrip width={16} height={16} />
+        </span>
+        <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full border-[1.6px] border-[var(--border-strong)]" />
+        <span className="ml-2.5 truncate text-[14.5px] font-medium text-[var(--text)] w-[140px]">{catDef.name}</span>
+        {!readOnly && (
+           <span className="flex items-center opacity-0 transition-opacity group-hover/row:opacity-100 ml-1">
+             <button onClick={onEdit} className="rounded p-0.5 text-[var(--muted)]"><IconPencil width={13} height={13} /></button>
+             <button onClick={onDelete} className="rounded p-0.5 text-[var(--muted)]"><IconTrash width={13} height={13} /></button>
+           </span>
+        )}
+      </div>
+
+      <div className="flex flex-1 gap-4">
+        {budgets.map((b: MonthBudget, i: number) => {
+           const groupRows = b.result.groups.find(g => g.group.id === catDef.groupId)!.rows;
+           const catData = groupRows.find(r => r.category.id === catDef.id)!;
+           return (
+             <CategoryMonthCell key={b.month} month={b.month} catData={catData} readOnly={readOnly} onAssign={onAssign} />
+           );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CategoryMonthCell({ month, catData, readOnly, onAssign }: any) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const goal = r.category.goalTarget ? num(r.category.goalTarget) : null;
-  const goalFunded = goal ? Math.max(0, Math.min(r.available, goal)) : 0;
-  const goalPct = goal ? Math.round((goalFunded / goal) * 100) : 0;
 
   useEffect(() => {
     if (editing) {
@@ -527,90 +392,12 @@ function CategoryRow({
 
   const commit = () => {
     const v = parseFloat(draft.replace(/[^0-9.-]/g, ""));
-    if (!Number.isNaN(v)) onAssign(r.category.id, v);
+    if (!Number.isNaN(v)) onAssign(catData.category.id, v, month);
     setEditing(false);
   };
 
-  const availColor =
-    r.available < 0 ? "var(--danger)" : r.available === 0 ? "var(--muted)" : "var(--accent)";
-
   return (
-    <div
-      data-cat-row
-      className="group/row flex items-center px-5 py-2 transition-colors hover:bg-[var(--panel-3)]"
-      style={{
-        borderTop: isDragOver ? "2px solid var(--accent)" : "1px solid var(--border)",
-        background: isDragOver ? "var(--accent-soft)" : undefined,
-        transition: "background 0.1s, border-top-color 0.1s",
-      }}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
-      onDragLeave={(e) => { e.stopPropagation(); onDragLeave?.(); }}
-      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop?.(); }}
-    >
-      {/* Grip handle — only this part is draggable so clicking the row still works */}
-      <span
-        className="cursor-grab active:cursor-grabbing"
-        style={{ color: "var(--faint)" }}
-        draggable
-        onDragStart={(e) => {
-          e.stopPropagation();
-          e.dataTransfer.effectAllowed = "move";
-          onDragStart?.();
-        }}
-        aria-label={`Drag to reorder ${r.category.name}`}
-      >
-        <IconGrip width={16} height={16} />
-      </span>
-      <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
-
-      <div className="ml-2.5 flex w-[168px] shrink-0 flex-col gap-0">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-[14.5px] font-medium" style={{ color: "var(--text)" }}>
-            {r.category.name}
-          </span>
-          {!readOnly && (
-            <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
-              <button onClick={onEdit} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Edit">
-                <IconPencil width={13} height={13} />
-              </button>
-              <button onClick={onDelete} className="rounded p-0.5" style={{ color: "var(--muted)" }} title="Delete">
-                <IconTrash width={13} height={13} />
-              </button>
-            </span>
-          )}
-        </div>
-        {Math.abs(r.carryoverIn) > 0.004 && (
-          <span className="tnum text-[10.5px]" style={{ color: r.carryoverIn < 0 ? "var(--danger)" : "var(--faint)" }}>
-            ↩ {fmt(r.carryoverIn)} carried
-          </span>
-        )}
-      </div>
-
-      <div className="mx-4 flex-1">
-        {goal ? (
-          <div>
-            <div className="h-2 overflow-hidden rounded-full" style={{ background: "var(--track)" }}>
-              <div className="h-full rounded-full" style={{ width: `${Math.max(2, goalPct)}%`, background: "var(--accent)" }} />
-            </div>
-            <div className="mt-1 flex justify-between text-[11.5px]">
-              <span style={{ color: "var(--accent)" }}>
-                <span className="tnum font-semibold">{fmt(goalFunded)}</span>{" "}
-                <span style={{ color: "var(--muted)" }}>of {fmt(goal)}</span>
-              </span>
-              <span className="tnum font-semibold" style={{ color: "var(--muted)" }}>
-                {goalPct}%
-              </span>
-            </div>
-          </div>
-        ) : r.available < 0 ? (
-          <div className="h-2 rounded-full" style={{ background: "var(--track)" }} />
-        ) : (
-          <div className="h-2 overflow-hidden rounded-full" style={{ background: "var(--track)" }}>
-            <div className="h-full rounded-full" style={{ width: `${Math.max(2, r.fundedPct * 100)}%`, background: "var(--accent)" }} />
-          </div>
-        )}
-      </div>
-
+    <div className="flex flex-1 justify-end gap-2 pr-2">
       <div className={`${COL_A} text-right`}>
         {editing ? (
           <input
@@ -622,40 +409,30 @@ function CategoryRow({
               if (e.key === "Enter") commit();
               if (e.key === "Escape") setEditing(false);
             }}
-            className="tnum w-[110px] rounded-md px-2 py-1 text-right text-[14.5px] outline-none focus:ring-2"
-            style={{ background: "var(--panel)", border: "1px solid var(--accent)", color: "var(--text)" }}
+            className="tnum w-[80px] rounded-md px-2 py-1 text-right text-[14.5px] outline-none focus:ring-2 border border-[var(--accent)] bg-[var(--panel)] text-[var(--text)]"
           />
         ) : (
           <button
             onClick={() => {
               if (readOnly) return;
-              setDraft(r.assigned.toFixed(2));
+              setDraft(catData.assigned.toFixed(2));
               setEditing(true);
             }}
-            className="tnum rounded-md px-2 py-1 text-[14.5px] font-semibold transition-colors hover:bg-[var(--panel)]"
-            style={{ color: "var(--text)", cursor: readOnly ? "default" : "text" }}
+            className={`tnum rounded-md px-2 py-1 text-[14.5px] font-semibold hover:bg-[var(--panel)] ${readOnly ? 'cursor-default' : 'cursor-text'} text-[var(--text)]`}
           >
-            {fmt(r.assigned)}
+            {fmt(catData.assigned)}
           </button>
         )}
       </div>
-
-      <div className={`${COL_O} tnum text-right text-[14.5px] font-semibold`} style={{ color: r.outflow < 0 ? "var(--text-2)" : "var(--muted)" }}>
-        {fmt(r.outflow)}
+      <div className={`${COL_O} tnum text-right text-[14.5px] font-semibold ${catData.outflow < 0 ? 'text-[var(--text-2)]' : 'text-[var(--muted)]'}`}>
+        {fmt(catData.outflow)}
       </div>
-
       <div className={`${COL_V} flex justify-end pr-1`}>
-        <span
-          className="tnum inline-block min-w-[76px] rounded-lg px-2.5 py-1 text-center text-[13.5px] font-bold"
-          style={
-            r.available === 0
-              ? { background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--muted)" }
-              : r.available < 0
-              ? { background: "var(--danger)", color: "#fff" }
-              : { background: "var(--accent)", color: "#fff" }
-          }
-        >
-          {fmt(r.available)}
+        <span className={`tnum inline-block min-w-[70px] rounded-lg px-2.5 py-1 text-center text-[13.5px] font-bold ${
+            catData.available === 0 ? 'bg-[var(--panel)] border border-[var(--border-strong)] text-[var(--muted)]' :
+            catData.available < 0 ? 'bg-[var(--danger)] text-white' : 'bg-[var(--accent)] text-white'
+        }`}>
+          {fmt(catData.available)}
         </span>
       </div>
     </div>
