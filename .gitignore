@@ -34,3 +34,6 @@ coverage/
 
 budget.db*
 apps/web/budget.db*
+
+*.y4backup
+backup_extracted
