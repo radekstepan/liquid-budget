@@ -1,24 +1,14 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { GroupRow, Account, CatRow, BudgetResult } from "@ynab/logic";
-import { fmt, num } from "@ynab/logic";
-import {
-  IconChevronDown,
-  IconChevronRight,
-  IconDots,
-  IconFilter,
-  IconGrip,
-  IconCard,
-  IconTotal,
-  IconPlus,
-  IconPencil,
-  IconTrash,
-} from "./icons.js";
+import { fmt } from "@ynab/logic";
+import { Icon, MonthNav, BudgetHeader, cx, money } from "@ynab/theme";
+import type { BudgetHeaderPart } from "@ynab/theme";
 
-const COL_A = "w-[90px]";
-const COL_O = "w-[90px]";
-const COL_V = "w-[100px]";
+const COL_A = "w-[110px]";
+const COL_O = "w-[110px]";
+const COL_V = "w-[120px]";
 
 export type MonthBudget = {
   month: string;
@@ -27,14 +17,29 @@ export type MonthBudget = {
   result: BudgetResult;
 };
 
+function formatMonthLong(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${MONTHS[(m ?? 1) - 1] ?? ""} ${y ?? ""}`;
+}
+
+function previousMonthKey(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const idx = (y ?? 2024) * 12 + (m ?? 1) - 2;
+  const yy = Math.floor(idx / 12);
+  const mm = idx - yy * 12 + 1;
+  return `${yy}-${String(mm).padStart(2, "0")}`;
+}
+
 export function BudgetView({
-  budgets,
+  budget,
   currentMonth,
-  accounts,
   collapsed,
   onToggleGroup,
   onAssign,
-  onSelectMonth,
   onShiftMonth,
   onAddCategory,
   onAddGroup,
@@ -46,14 +51,13 @@ export function BudgetView({
   onExpandAll,
   onReorderCategory,
   onReorderGroup,
+  onClearOverdraft,
 }: {
-  budgets: MonthBudget[];
+  budget: BudgetResult;
   currentMonth: string;
-  accounts: Account[];
   collapsed: Record<number, boolean>;
   onToggleGroup: (id: number) => void;
   onAssign: (catId: number, amount: number, month: string) => void;
-  onSelectMonth: (key: string) => void;
   onShiftMonth: (delta: number) => void;
   onAddCategory: (groupId: number) => void;
   onAddGroup: () => void;
@@ -65,164 +69,204 @@ export function BudgetView({
   onExpandAll: () => void;
   onReorderCategory?: (id: number, sort: number) => void;
   onReorderGroup?: (id: number, sort: number) => void;
+  onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
-  // We use the first month to establish the category/group structure since the list is identical across months
-  const structureGroups = budgets[0]!.result.groups;
+  const structureGroups = budget.groups;
   const creditGroup = structureGroups.find((g) => g.group.isCreditCardPayments);
-  const creditAccounts = accounts.filter((a) => a.kind === "credit");
-  
+
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Drag state
   const dragGroupId = useRef<number | null>(null);
   const [groupOverId, setGroupOverId] = useState<number | null>(null);
 
-  const handleGroupDragStart = useCallback((id: number) => {
-    dragGroupId.current = id;
-  }, []);
+  const handleGroupDrop = (targetId: number) => {
+    const srcId = dragGroupId.current;
+    if (srcId == null || srcId === targetId || !onReorderGroup) return;
+    const nonCC = structureGroups.filter((g) => !g.group.isCreditCardPayments);
+    const srcIdx = nonCC.findIndex((g) => g.group.id === srcId);
+    const tgtIdx = nonCC.findIndex((g) => g.group.id === targetId);
+    if (srcIdx === -1 || tgtIdx === -1) return;
 
-  const handleGroupDrop = useCallback(
-    (targetId: number) => {
-      const srcId = dragGroupId.current;
-      if (srcId == null || srcId === targetId || !onReorderGroup) return;
-      const nonCC = structureGroups.filter((g) => !g.group.isCreditCardPayments);
-      const srcIdx = nonCC.findIndex((g) => g.group.id === srcId);
-      const tgtIdx = nonCC.findIndex((g) => g.group.id === targetId);
-      if (srcIdx === -1 || tgtIdx === -1) return;
-      
-      const reordered = [...nonCC];
-      const [moved] = reordered.splice(srcIdx, 1);
-      reordered.splice(tgtIdx, 0, moved!);
-      reordered.forEach((g, i) => {
-        if (g.group.sort !== i) onReorderGroup(g.group.id, i);
-      });
-      dragGroupId.current = null;
-      setGroupOverId(null);
+    const reordered = [...nonCC];
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(tgtIdx, 0, moved!);
+    reordered.forEach((g, i) => {
+      if (g.group.sort !== i) onReorderGroup(g.group.id, i);
+    });
+    dragGroupId.current = null;
+    setGroupOverId(null);
+  };
+
+  const headerParts: BudgetHeaderPart[] = [
+    {
+      label: `Not Budgeted in ${formatMonthLong(previousMonthKey(currentMonth))}`,
+      value: budget.priorSurplus,
     },
-    [structureGroups, onReorderGroup]
-  );
+    {
+      label: "Overspent in Previous",
+      value: Math.max(
+        0,
+        budget.groups
+          .filter((g) => !g.group.isCreditCardPayments)
+          .reduce((s, g) => s + (g.available < 0 ? -g.available : 0), 0) -
+          budget.priorSurplus
+      ),
+    },
+    { label: `Income for ${formatMonthLong(currentMonth)}`, value: budget.totalIncome },
+    { label: `Budgeted in ${formatMonthLong(currentMonth)}`, value: budget.totalAssigned },
+  ];
 
   return (
     <div className="flex h-full flex-col">
-      {/* Month Navigation & Headers */}
-      <div className="flex items-center gap-1 px-5 py-3.5" style={{ borderBottom: "1px solid var(--border)" }}>
-        <button onClick={() => onShiftMonth(-1)} className="rounded p-1 hover:bg-[var(--panel-3)] mr-4">
-          <IconChevronRight width={16} height={16} className="rotate-180" />
+      <div className="y-toolbar">
+        <MonthNav
+          month={formatMonthLong(currentMonth)}
+          onPrev={() => onShiftMonth(-1)}
+          onNext={() => onShiftMonth(1)}
+        />
+        <div className="y-tb-sep" />
+        <button onClick={onAddGroup} className="y-btn y-btn--sm">
+          <Icon name="plus" size={11} /> Master Category
         </button>
-        
-        <div className="flex flex-1 gap-4">
-          {budgets.map((b) => (
-             <div key={b.month} className="flex-1 text-center">
-                <button
-                  onClick={() => onSelectMonth(b.month)}
-                  className="rounded-lg px-3.5 py-1.5 text-[15px] transition-all"
-                  style={{
-                    background: b.month === currentMonth ? "var(--accent)" : "transparent",
-                    color: b.month === currentMonth ? "var(--accent-fg)" : "var(--text-2)",
-                    fontWeight: b.month === currentMonth ? 700 : 500,
-                  }}
-                >
-                  {b.monthName} {b.year}
-                </button>
-                <div className="mt-1 text-[12px] text-[var(--muted)]">
-                  <div>Income: {fmt(b.result.totalIncome)}</div>
-                  <div>Assigned: {fmt(b.result.totalAssigned)}</div>
-                </div>
-             </div>
-          ))}
+        <div className="y-seg">
+          <button className="y-btn y-btn--sm is-on">Budget</button>
+          <button className="y-btn y-btn--sm">Show Hidden</button>
         </div>
-        
-        <button onClick={() => onShiftMonth(1)} className="rounded p-1 hover:bg-[var(--panel-3)] ml-4">
-          <IconChevronRight width={16} height={16} />
-        </button>
-      </div>
-
-      {/* Grid Headers */}
-      <div className="flex items-center px-5 py-2.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--panel-2)" }}>
-        <div className="flex items-center gap-1 w-[220px] shrink-0" style={{ color: "var(--faint)" }}>
-          <IconChevronDown width={16} height={16} />
-          <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full" style={{ border: "1.6px solid var(--border-strong)" }} />
+        <div className="ml-auto flex items-center gap-2">
           <div className="relative">
-            <button onClick={() => setMenuOpen((o) => !o)} className="ml-1 rounded-md p-1 transition-colors hover:bg-[var(--panel)]">
-              <IconDots width={16} height={16} />
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              className="y-btn y-btn--sm"
+              aria-label="Group options"
+            >
+              <Icon name="dots" size={14} />
             </button>
             {menuOpen && (
-              <div className="animate-fade absolute left-0 top-[28px] z-20 min-w-[180px] overflow-hidden rounded-xl bg-[var(--panel)] border border-[var(--border)] shadow-[var(--shadow-lg)]">
-                <button onClick={() => { onCollapseAll(); setMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-[13px] hover:bg-[var(--panel-3)] text-[var(--text-2)]">
+              <div
+                className="y-modal absolute right-0 top-[28px] z-20 min-w-[180px]"
+                style={{ width: 200, padding: 4 }}
+              >
+                <button
+                  onClick={() => {
+                    onCollapseAll();
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full text-left text-[12px] px-3 py-[5px] rounded-[2px] hover:bg-[#e8e8e5]"
+                >
                   Collapse all groups
                 </button>
-                <button onClick={() => { onExpandAll(); setMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-[13px] hover:bg-[var(--panel-3)] text-[var(--text-2)]">
+                <button
+                  onClick={() => {
+                    onExpandAll();
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full text-left text-[12px] px-3 py-[5px] rounded-[2px] hover:bg-[#e8e8e5]"
+                >
                   Expand all groups
                 </button>
               </div>
             )}
           </div>
         </div>
-        
-        <div className="flex flex-1 gap-4 overflow-hidden">
-          {budgets.map(b => (
-            <div key={b.month} className="flex flex-1 justify-end gap-2 pr-2">
-              <div className={`${COL_A} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Assign</div>
-              <div className={`${COL_O} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Actvty</div>
-              <div className={`${COL_V} text-right text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--muted)]`}>Avail</div>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* Grid Body */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {structureGroups
-          .filter((g) => !g.group.isCreditCardPayments)
-          .map((g) => (
-            <GroupBlock
-              key={g.group.id}
-              groupDef={g.group}
-              budgets={budgets}
-              collapsed={!!collapsed[g.group.id]}
-              onToggle={() => onToggleGroup(g.group.id)}
-              onAssign={onAssign}
-              onAddCategory={() => onAddCategory(g.group.id)}
-              onEditCategory={onEditCategory}
-              onDeleteCategory={onDeleteCategory}
-              onEditGroup={() => onEditGroup(g.group.id)}
-              onDeleteGroup={() => onDeleteGroup(g.group.id)}
-              onReorderCategory={onReorderCategory}
-              isDragOver={groupOverId === g.group.id}
-              onDragStart={() => handleGroupDragStart(g.group.id)}
-              onDragOver={() => setGroupOverId(g.group.id)}
-              onDragLeave={() => setGroupOverId(null)}
-              onDrop={() => handleGroupDrop(g.group.id)}
-            />
-          ))}
+      <BudgetHeader
+        parts={headerParts}
+        ops={["+", "+", "+", "−"]}
+        atb={budget.tbb}
+      />
 
-        <button onClick={onAddGroup} className="flex w-full items-center gap-2 px-6 py-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--panel-3)] text-[var(--muted)]">
-          <IconPlus width={15} height={15} /> Add Category Group
+      {budget.overBudgeted && onClearOverdraft && (
+        <div className="px-3 py-2" style={{ background: "var(--y-red-pale)", borderBottom: "1px solid #dfa9a1" }}>
+          <span className="text-[11.5px]" style={{ color: "var(--y-red-dk)" }}>
+            You've overbudgeted by <strong className="y-num">{money(Math.abs(budget.tbb))}</strong> this month.
+          </span>
+          <button
+            onClick={() =>
+              onClearOverdraft(
+                budget.groups
+                  .flatMap((g) => g.rows)
+                  .filter((r) => r.available < 0)
+                  .map((r) => r.category.id)
+              )
+            }
+            className="ml-3 y-btn y-btn--sm y-btn--danger"
+          >
+            Zero out overdrafts
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto overflow-x-hidden y-scroll">
+        <table className="y-table">
+          <thead className="y-thead">
+            <tr>
+              <th style={{ width: 26 }} />
+              <th>Category</th>
+              <th className={`num ${COL_A}`}>Budgeted</th>
+              <th className={`num ${COL_O}`}>Outflows</th>
+              <th className={`num ${COL_V}`}>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {structureGroups
+              .filter((g) => !g.group.isCreditCardPayments)
+              .map((g) => (
+                <GroupBlock
+                  key={g.group.id}
+                  group={g}
+                  month={currentMonth}
+                  collapsed={!!collapsed[g.group.id]}
+                  onToggle={() => onToggleGroup(g.group.id)}
+                  onAssign={onAssign}
+                  onAddCategory={() => onAddCategory(g.group.id)}
+                  onEditCategory={() => onEditCategory(g.group.id)}
+                  onDeleteCategory={onDeleteCategory}
+                  onEditGroup={() => onEditGroup(g.group.id)}
+                  onDeleteGroup={() => onDeleteGroup(g.group.id)}
+                  onReorderCategory={onReorderCategory}
+                  isDragOver={groupOverId === g.group.id}
+                  onDragStart={() => {
+                    dragGroupId.current = g.group.id;
+                  }}
+                  onDragOver={() => setGroupOverId(g.group.id)}
+                  onDragLeave={() => setGroupOverId(null)}
+                  onDrop={() => handleGroupDrop(g.group.id)}
+                />
+              ))}
+            {creditGroup && (
+              <GroupBlock
+                group={creditGroup}
+                month={currentMonth}
+                collapsed={!!collapsed[creditGroup.group.id]}
+                onToggle={() => onToggleGroup(creditGroup.group.id)}
+                onAssign={onAssign}
+                onAddCategory={() => onAddCategory(creditGroup.group.id)}
+                onEditCategory={() => onEditCategory(creditGroup.group.id)}
+                onDeleteCategory={onDeleteCategory}
+                onEditGroup={() => onEditGroup(creditGroup.group.id)}
+                onDeleteGroup={() => onDeleteGroup(creditGroup.group.id)}
+                onReorderCategory={onReorderCategory}
+              />
+            )}
+          </tbody>
+        </table>
+
+        <button
+          onClick={onAddGroup}
+          className="flex w-full items-center gap-2 px-3 py-2 text-[11.5px] font-medium hover:bg-[#eef0ee]"
+          style={{ color: "var(--y-ink-soft)" }}
+        >
+          <Icon name="plus" size={11} /> Add Category Group
         </button>
-        
-        {creditGroup && (
-          <GroupBlock
-             groupDef={creditGroup.group}
-             budgets={budgets}
-             collapsed={!!collapsed[creditGroup.group.id]}
-             onToggle={() => onToggleGroup(creditGroup.group.id)}
-             onAssign={onAssign}
-             onAddCategory={() => onAddCategory(creditGroup.group.id)}
-             onEditCategory={onEditCategory}
-             onDeleteCategory={onDeleteCategory}
-             onEditGroup={() => onEditGroup(creditGroup.group.id)}
-             onDeleteGroup={() => onDeleteGroup(creditGroup.group.id)}
-             onReorderCategory={onReorderCategory}
-          />
-        )}
       </div>
     </div>
   );
 }
 
 function GroupBlock({
-  groupDef,
-  budgets,
+  group,
+  month,
   collapsed,
   onToggle,
   onAssign,
@@ -237,148 +281,197 @@ function GroupBlock({
   onDragOver,
   onDragLeave,
   onDrop,
-}: any) {
+}: {
+  group: GroupRow;
+  month: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  onAssign: (catId: number, amount: number, month: string) => void;
+  onAddCategory: () => void;
+  onEditCategory: () => void;
+  onDeleteCategory: (catId: number) => void;
+  onEditGroup: () => void;
+  onDeleteGroup: (groupId: number) => void;
+  onReorderCategory?: (id: number, sort: number) => void;
+  isDragOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDragLeave?: () => void;
+  onDrop?: () => void;
+}) {
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
-  
-  // Get this group's data for all months
-  const groupDataByMonth = budgets.map((b: MonthBudget) => {
-     return b.result.groups.find(g => g.group.id === groupDef.id)!;
-  });
+
+  const sumBudgeted = group.rows.reduce((t, r) => t + r.assigned, 0);
+  const sumOutflow = group.rows.reduce((t, r) => t + r.outflow, 0);
+  const sumBalance = group.rows.reduce((t, r) => t + r.available, 0);
 
   return (
-    <div
-      style={{
-        borderBottom: "1px solid var(--border)",
-        outline: isDragOver ? "2px solid var(--accent)" : "none",
-        outlineOffset: "-2px",
-        borderRadius: isDragOver ? "4px" : undefined,
-        opacity: isDragOver ? 0.85 : 1,
-        transition: "opacity 0.15s, outline 0.1s",
-      }}
-      draggable
-      onDragStart={(e) => {
-        const target = e.target as HTMLElement;
-        if (target.closest("[data-cat-row]")) { e.stopPropagation(); return; }
-        e.dataTransfer.effectAllowed = "move";
-        onDragStart?.();
-      }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
-      onDragLeave={onDragLeave}
-      onDrop={(e) => { e.preventDefault(); onDrop?.(); }}
-    >
-      <div className="group/gh flex items-center px-5 py-2.5 bg-[var(--panel-2)]">
-        <div className="flex items-center gap-1 w-[220px] shrink-0">
-          <button onClick={onToggle} className="text-[var(--faint)]">
-            {collapsed ? <IconChevronRight width={16} height={16} /> : <IconChevronDown width={16} height={16} />}
-          </button>
-          <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full border-[1.6px] border-[var(--border-strong)]" />
-          <button onClick={onEditGroup} className="ml-2.5 text-[15px] font-bold text-[var(--text)] text-left truncate w-[140px]">
-            {groupDef.name}
-          </button>
-          <button onClick={onAddCategory} className="ml-1 rounded-md p-1 opacity-0 transition-opacity group-hover/gh:opacity-100 text-[var(--muted)]">
-            <IconPlus width={15} height={15} />
-          </button>
-        </div>
-        
-        <div className="flex flex-1 gap-4">
-          {groupDataByMonth.map((gd: GroupRow, i: number) => (
-             <div key={i} className="flex flex-1 justify-end gap-2 pr-2">
-               <div className={`${COL_A} tnum text-right text-[14.5px] font-bold text-[var(--text)]`}>{fmt(gd.assigned)}</div>
-               <div className={`${COL_O} tnum text-right text-[14.5px] font-bold ${gd.outflow < 0 ? 'text-[var(--text)]' : 'text-[var(--muted)]'}`}>{fmt(gd.outflow)}</div>
-               <div className={`${COL_V} tnum text-right text-[14.5px] font-bold ${gd.available < 0 ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>{fmt(gd.available)}</div>
-             </div>
-          ))}
-        </div>
-      </div>
+    <>
+      <tr
+        className="y-master"
+        draggable
+        style={{
+          outline: isDragOver ? "2px solid var(--y-blue)" : "none",
+          outlineOffset: "-2px",
+        }}
+        onDragStart={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-cat-row]")) {
+            e.stopPropagation();
+            return;
+          }
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart?.();
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          onDragOver?.();
+        }}
+        onDragLeave={onDragLeave}
+        onDrop={(e) => {
+          e.preventDefault();
+          onDrop?.();
+        }}
+      >
+        <td className="text-center" style={{ width: 26 }}>
+          <span className="inline-block cursor-grab" style={{ color: "var(--y-ink-faint)" }} title="Drag to reorder">
+            <Icon name="grip" size={13} />
+          </span>
+        </td>
+        <td>
+          <div className="flex items-center gap-[7px]">
+            <button onClick={onToggle} className="flex items-center gap-[6px]">
+              <span className={cx("y-tri", !collapsed && "is-open")} />
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditGroup();
+                }}
+                className="cursor-text hover:underline"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") onEditGroup();
+                }}
+              >
+                {group.group.name}
+              </span>
+            </button>
+            <button
+              onClick={() => onAddCategory()}
+              className="ml-1 grid h-[18px] w-[18px] place-items-center rounded hover:bg-[#cbd5dd]"
+              style={{ color: "var(--y-ink-soft)" }}
+              aria-label="Add category"
+              title="Add category"
+            >
+              <Icon name="plus" size={11} />
+            </button>
+          </div>
+        </td>
+        <td className="num y-num text-right">{fmt(sumBudgeted)}</td>
+        <td className="num y-num text-right" style={{ color: sumOutflow < 0 ? "var(--y-ink)" : "var(--y-ink-soft)" }}>
+          {fmt(sumOutflow)}
+        </td>
+        <td className="num y-num text-right" style={{ color: sumBalance < 0 ? "var(--y-red)" : "var(--y-ink)" }}>
+          {fmt(sumBalance)}
+        </td>
+      </tr>
 
       {!collapsed &&
-        groupDataByMonth[0].rows.map((r: CatRow) => (
-          <CategoryRow
+        group.rows.map((r: CatRow, i: number) => (
+          <tr
             key={r.category.id}
-            catDef={r.category}
-            budgets={budgets}
-            onAssign={onAssign}
-            onEdit={() => onEditCategory(r.category.id)}
-            onDelete={() => onDeleteCategory(r.category.id)}
-            isDragOver={catOverId === r.category.id}
-            onDragStart={() => { dragCatId.current = r.category.id; }}
-            onDragOver={() => setCatOverId(r.category.id)}
-            onDragLeave={() => setCatOverId(null)}
-            onDrop={() => {
+            data-cat-row
+            className={cx("y-row", i % 2 === 1 && "alt")}
+            style={{
+              borderTop: catOverId === r.category.id ? "2px solid var(--y-blue)" : undefined,
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+              setCatOverId(r.category.id);
+            }}
+            onDragLeave={(e) => {
+              e.stopPropagation();
+              setCatOverId(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
               const srcId = dragCatId.current;
               if (srcId == null || srcId === r.category.id || !onReorderCategory) return;
-              const srcIdx = groupDataByMonth[0].rows.findIndex((x: CatRow) => x.category.id === srcId);
-              const tgtIdx = groupDataByMonth[0].rows.findIndex((x: CatRow) => x.category.id === r.category.id);
+              const srcIdx = group.rows.findIndex((x) => x.category.id === srcId);
+              const tgtIdx = group.rows.findIndex((x) => x.category.id === r.category.id);
               if (srcIdx === -1 || tgtIdx === -1) return;
-              const reordered = [...groupDataByMonth[0].rows];
+              const reordered = [...group.rows];
               const [moved] = reordered.splice(srcIdx, 1);
               reordered.splice(tgtIdx, 0, moved!);
-              reordered.forEach((row: CatRow, i: number) => {
+              reordered.forEach((row, i) => {
                 if (row.category.sort !== i) onReorderCategory(row.category.id, i);
               });
               dragCatId.current = null;
               setCatOverId(null);
             }}
-          />
+          >
+            <td className="text-center" style={{ width: 26 }}>
+              <span
+                className="inline-block cursor-grab"
+                style={{ color: "var(--y-ink-faint)" }}
+                draggable
+                onDragStart={(e) => {
+                  e.stopPropagation();
+                  e.dataTransfer.effectAllowed = "move";
+                  dragCatId.current = r.category.id;
+                }}
+                title="Drag to reorder"
+              >
+                <Icon name="grip" size={13} />
+              </span>
+            </td>
+            <td className="pl-[26px]">
+              <div className="group/row flex items-center">
+                <span className="truncate">{r.category.name}</span>
+                <span className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
+                  <button
+                    onClick={onEditCategory}
+                    className="grid h-[18px] w-[18px] place-items-center rounded hover:bg-[#eef0ee]"
+                    style={{ color: "var(--y-ink-soft)" }}
+                    aria-label={`Edit ${r.category.name}`}
+                    title="Edit category"
+                  >
+                    <Icon name="edit" size={11} />
+                  </button>
+                </span>
+              </div>
+            </td>
+            <td className="num">
+              <CategoryMonthCell
+                value={r.assigned}
+                onAssign={(v) => onAssign(r.category.id, v, month)}
+              />
+            </td>
+            <td className="num y-num" style={{ color: r.outflow < 0 ? "var(--y-ink-soft)" : "var(--y-ink-faint)" }}>
+              {fmt(r.outflow)}
+            </td>
+            <td className="num">
+              <CategoryBalancePill value={r.available} />
+            </td>
+          </tr>
         ))}
-    </div>
+    </>
   );
 }
 
-function CategoryRow({
-  catDef,
-  budgets,
+function CategoryMonthCell({
+  value,
   onAssign,
-  onEdit,
-  onDelete,
-  readOnly,
-  isDragOver,
-  onDragStart,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-}: any) {
-  return (
-    <div
-      data-cat-row
-      className="group/row flex items-center px-5 py-2 hover:bg-[var(--panel-3)] transition-colors"
-      style={{
-        borderTop: isDragOver ? "2px solid var(--accent)" : "1px solid var(--border)",
-        background: isDragOver ? "var(--accent-soft)" : undefined,
-      }}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; onDragOver?.(); }}
-      onDragLeave={(e) => { e.stopPropagation(); onDragLeave?.(); }}
-      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop?.(); }}
-    >
-      <div className="flex items-center gap-1 w-[220px] shrink-0">
-        <span className="cursor-grab text-[var(--faint)]" draggable onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = "move"; onDragStart?.(); }}>
-          <IconGrip width={16} height={16} />
-        </span>
-        <span className="ml-1 grid h-[18px] w-[18px] place-items-center rounded-full border-[1.6px] border-[var(--border-strong)]" />
-        <span className="ml-2.5 truncate text-[14.5px] font-medium text-[var(--text)] w-[140px]">{catDef.name}</span>
-        {!readOnly && (
-           <span className="flex items-center opacity-0 transition-opacity group-hover/row:opacity-100 ml-1">
-             <button onClick={onEdit} className="rounded p-0.5 text-[var(--muted)]"><IconPencil width={13} height={13} /></button>
-             <button onClick={onDelete} className="rounded p-0.5 text-[var(--muted)]"><IconTrash width={13} height={13} /></button>
-           </span>
-        )}
-      </div>
-
-      <div className="flex flex-1 gap-4">
-        {budgets.map((b: MonthBudget, i: number) => {
-           const groupRows = b.result.groups.find(g => g.group.id === catDef.groupId)!.rows;
-           const catData = groupRows.find(r => r.category.id === catDef.id)!;
-           return (
-             <CategoryMonthCell key={b.month} month={b.month} catData={catData} readOnly={readOnly} onAssign={onAssign} />
-           );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CategoryMonthCell({ month, catData, readOnly, onAssign }: any) {
+}: {
+  value: number;
+  onAssign: (v: number) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -392,49 +485,46 @@ function CategoryMonthCell({ month, catData, readOnly, onAssign }: any) {
 
   const commit = () => {
     const v = parseFloat(draft.replace(/[^0-9.-]/g, ""));
-    if (!Number.isNaN(v)) onAssign(catData.category.id, v, month);
+    if (!Number.isNaN(v)) onAssign(v);
     setEditing(false);
   };
 
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="y-inline-amt"
+      />
+    );
+  }
+
   return (
-    <div className="flex flex-1 justify-end gap-2 pr-2">
-      <div className={`${COL_A} text-right`}>
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            className="tnum w-[80px] rounded-md px-2 py-1 text-right text-[14.5px] outline-none focus:ring-2 border border-[var(--accent)] bg-[var(--panel)] text-[var(--text)]"
-          />
-        ) : (
-          <button
-            onClick={() => {
-              if (readOnly) return;
-              setDraft(catData.assigned.toFixed(2));
-              setEditing(true);
-            }}
-            className={`tnum rounded-md px-2 py-1 text-[14.5px] font-semibold hover:bg-[var(--panel)] ${readOnly ? 'cursor-default' : 'cursor-text'} text-[var(--text)]`}
-          >
-            {fmt(catData.assigned)}
-          </button>
-        )}
-      </div>
-      <div className={`${COL_O} tnum text-right text-[14.5px] font-semibold ${catData.outflow < 0 ? 'text-[var(--text-2)]' : 'text-[var(--muted)]'}`}>
-        {fmt(catData.outflow)}
-      </div>
-      <div className={`${COL_V} flex justify-end pr-1`}>
-        <span className={`tnum inline-block min-w-[70px] rounded-lg px-2.5 py-1 text-center text-[13.5px] font-bold ${
-            catData.available === 0 ? 'bg-[var(--panel)] border border-[var(--border-strong)] text-[var(--muted)]' :
-            catData.available < 0 ? 'bg-[var(--danger)] text-white' : 'bg-[var(--accent)] text-white'
-        }`}>
-          {fmt(catData.available)}
-        </span>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={() => {
+        setDraft(value.toFixed(2));
+        setEditing(true);
+      }}
+      className="y-inline-amt cursor-text"
+      style={{ color: "var(--y-ink)" }}
+    >
+      {fmt(value)}
+    </button>
+  );
+}
+
+function CategoryBalancePill({ value }: { value: number }) {
+  const tone = value > 0 ? "green" : value < 0 ? "red" : "grey";
+  return (
+    <span className={cx("y-pill", `y-pill--${tone}`)} style={{ minWidth: 72 }}>
+      {fmt(value)}
+    </span>
   );
 }

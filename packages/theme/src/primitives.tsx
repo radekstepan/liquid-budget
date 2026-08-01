@@ -60,6 +60,46 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
     x: <path d="M4 4l8 8M12 4l-8 8" strokeWidth="2.2" strokeLinecap="round" />,
     left: <path d="M10 3 5 8l5 5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
     right: <path d="M6 3l5 5-5 5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    chevronDown: <path d="M3.5 6 8 10.5 12.5 6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    chevronRight: <path d="M6 3.5 10.5 8 6 12.5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    dots: (
+      <>
+        <circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
+      </>
+    ),
+    grip: (
+      <>
+        <circle cx="6" cy="3.5" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="6" cy="8" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="6" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="10" cy="3.5" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="10" cy="8" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="10" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+      </>
+    ),
+    swap: <path d="M3 6h9M9 3l3 3-3 3M13 10H4M7 13l-3-3 3-3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    clock: (
+      <>
+        <circle cx="8" cy="8" r="5.6" strokeWidth="1.5" />
+        <path d="M8 5v3.2L10.2 9" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      </>
+    ),
+    projections: <path d="M2.5 13.5V3m0 10h11M5 11.2 8 8.3 10.5 10.4 13.5 6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    reset: (
+      <>
+        <path d="M3.5 8a4.5 4.5 0 1 0 1.3-3.2" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+        <path d="M3.5 3.2v2.6h2.6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      </>
+    ),
+    drop: (
+      <path
+        d="M8 1.8c-2.4 3-4.2 5-4.2 7.4a4.2 4.2 0 0 0 8.4 0c0-2.4-1.8-4.4-4.2-7.4z"
+        fill="currentColor"
+        stroke="none"
+      />
+    ),
     edit: <path d="M11.2 2.4 13.6 4.8 5.6 12.8 2.4 13.6 3.2 10.4z" strokeWidth="1.4" strokeLinejoin="round" />,
     trash: (
       <>

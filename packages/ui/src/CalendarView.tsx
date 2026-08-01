@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, parseMonthKey, monthLabel, monthKey } from "@ynab/logic";
-import { IconCalendar, IconChevronRight, IconChevronDown } from "./icons.js";
+import { fmt, num, parseMonthKey, monthLabel } from "@ynab/logic";
+import { Icon, Toolbar } from "@ynab/theme";
 
 export function CalendarView({
   data,
@@ -19,7 +19,10 @@ export function CalendarView({
   onAdd: (date: string) => void;
 }) {
   const { year, month0 } = parseMonthKey(month);
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
+  const catMap = useMemo(
+    () => new Map(data.categories.map((c) => [c.id, c.name])),
+    [data.categories]
+  );
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
 
   const firstDay = new Date(year, month0, 1).getDay();
@@ -30,7 +33,11 @@ export function CalendarView({
     if (!t.date.startsWith(month)) continue;
     const day = Number(t.date.slice(8, 10));
     const arr = byDay.get(day) ?? [];
-    arr.push({ payee: t.payee, amount: num(t.amount), cat: t.categoryId ? catMap.get(t.categoryId) ?? "" : "" });
+    arr.push({
+      payee: t.payee,
+      amount: num(t.amount),
+      cat: t.categoryId ? catMap.get(t.categoryId) ?? "" : "",
+    });
     byDay.set(day, arr);
   }
 
@@ -52,27 +59,45 @@ export function CalendarView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-        <span style={{ color: "var(--accent)" }}><IconCalendar width={20} height={20} /></span>
-        <h1 className="text-[18px] font-bold" style={{ color: "var(--text)" }}>Calendar</h1>
-        <div className="ml-4 flex items-center gap-1">
-          <button onClick={onPrev} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text-2)" }}>
-            <span className="rotate-180"><IconChevronRight width={16} height={16} /></span>
-          </button>
-          <span className="w-[150px] text-center text-[15px] font-bold" style={{ color: "var(--text)" }}>{monthLabel(month)}</span>
-          <button onClick={onNext} className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text-2)" }}>
-            <IconChevronRight width={16} height={16} />
-          </button>
+      <Toolbar>
+        <div className="flex items-center gap-2">
+          <Icon name="calendar" size={14} color="#3f4649" />
+          <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Calendar</span>
         </div>
-        <span className="ml-auto text-[13.5px]" style={{ color: "var(--muted)" }}>
-          Net this month: <span className="tnum font-bold" style={{ color: monthTotal >= 0 ? "var(--accent)" : "var(--danger)" }}>{fmt(monthTotal)}</span>
+        <div className="y-tb-sep" />
+        <button onClick={onPrev} className="y-btn y-btn--sm" aria-label="Previous month">
+          <Icon name="left" size={11} />
+        </button>
+        <span
+          className="text-[13.5px] font-bold min-w-[130px] text-center"
+          style={{ color: "var(--y-ink)" }}
+        >
+          {monthLabel(month)}
         </span>
-      </div>
+        <button onClick={onNext} className="y-btn y-btn--sm" aria-label="Next month">
+          <Icon name="right" size={11} />
+        </button>
+        <span className="ml-auto y-hint">
+          Net this month:{" "}
+          <span
+            className="y-num font-bold"
+            style={{ color: monthTotal >= 0 ? "var(--y-green-dk)" : "var(--y-red)" }}
+          >
+            {fmt(monthTotal)}
+          </span>
+        </span>
+      </Toolbar>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-7 gap-2">
+      <div className="flex-1 overflow-y-auto p-3 y-scroll">
+        <div className="grid grid-cols-7 gap-1">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="pb-1 text-center text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>{d}</div>
+            <div
+              key={d}
+              className="y-caps pb-1 text-center"
+              style={{ color: "var(--y-ink-soft)" }}
+            >
+              {d}
+            </div>
           ))}
           {cells.map((d, i) => {
             const items = d ? byDay.get(d) ?? [] : [];
@@ -83,10 +108,11 @@ export function CalendarView({
             return (
               <div
                 key={i}
-                className="min-h-[104px] rounded-xl p-2 transition-colors"
+                className="min-h-[100px] p-1.5 transition-colors"
                 style={{
-                  background: d ? "var(--panel)" : "transparent",
-                  border: d ? "1px solid var(--border)" : "1px solid transparent",
+                  background: d ? "var(--y-row)" : "transparent",
+                  border: d ? "1px solid var(--y-line-soft)" : "1px solid transparent",
+                  borderRadius: 3,
                   cursor: d ? "pointer" : "default",
                 }}
                 onClick={() => {
@@ -100,21 +126,34 @@ export function CalendarView({
                 {d && (
                   <>
                     <div className="flex items-center justify-between">
-                      <span className="tnum text-[12.5px] font-semibold" style={{ color: "var(--text-2)" }}>{d}</span>
+                      <span
+                        className="y-num text-[12px] font-semibold"
+                        style={{ color: "var(--y-ink)" }}
+                      >
+                        {d}
+                      </span>
                       {dayNet !== 0 && (
-                        <span className="tnum text-[11px] font-bold" style={{ color: dayNet >= 0 ? "var(--accent)" : "var(--danger)" }}>{fmt(dayNet)}</span>
+                        <span
+                          className="y-num text-[10.5px] font-bold"
+                          style={{ color: dayNet >= 0 ? "var(--y-green-dk)" : "var(--y-red)" }}
+                        >
+                          {fmt(dayNet)}
+                        </span>
                       )}
                     </div>
-                    <div className="mt-1 space-y-1">
+                    <div className="mt-1 space-y-[2px]">
                       {visible.map((x, j) => (
                         <div
                           key={j}
-                          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]"
-                          style={{ background: x.amount < 0 ? "var(--danger-bg)" : "var(--accent-soft)", color: x.amount < 0 ? "var(--danger)" : "var(--accent)" }}
+                          className="flex items-center gap-1 rounded px-1 py-[1px] text-[10px]"
+                          style={{
+                            background: x.amount < 0 ? "var(--y-red-pale)" : "var(--y-blue-pale)",
+                            color: x.amount < 0 ? "var(--y-red-dk)" : "var(--y-blue-dark)",
+                          }}
                           title={`${x.payee}${x.cat ? ` · ${x.cat}` : ""} · ${fmt(x.amount)}`}
                         >
                           <span className="truncate flex-1">{x.payee}</span>
-                          <span className="tnum shrink-0">{fmt(x.amount)}</span>
+                          <span className="y-num shrink-0">{fmt(x.amount)}</span>
                         </div>
                       ))}
                       {overflow > 0 && (
@@ -124,8 +163,8 @@ export function CalendarView({
                             e.stopPropagation();
                             setExpandedDay(d);
                           }}
-                          className="text-left text-[10.5px] underline-offset-2 hover:underline"
-                          style={{ color: "var(--muted)" }}
+                          className="text-left text-[10px] underline-offset-2 hover:underline"
+                          style={{ color: "var(--y-ink-soft)" }}
                         >
                           +{overflow} more
                         </button>
@@ -137,8 +176,8 @@ export function CalendarView({
                             e.stopPropagation();
                             setExpandedDay(null);
                           }}
-                          className="text-[10.5px] underline-offset-2 hover:underline"
-                          style={{ color: "var(--muted)" }}
+                          className="text-[10px] underline-offset-2 hover:underline"
+                          style={{ color: "var(--y-ink-soft)" }}
                         >
                           Show less
                         </button>

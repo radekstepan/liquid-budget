@@ -18,7 +18,7 @@
     "build": "tsc -b",
     "clean": "rm -rf dist .tsbuildinfo",
     "lint": "echo \"(no lint configured)\" && exit 0",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -27,7 +27,8 @@
     "react-dom": "19.2.6"
   },
   "dependencies": {
-    "@ynab/logic": "workspace:*"
+    "@ynab/logic": "workspace:*",
+    "@ynab/theme": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.0",
