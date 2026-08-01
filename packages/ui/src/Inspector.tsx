@@ -1,16 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { GroupRow } from "@ynab/logic";
-import { fmt, monthLabel, MONTHS, parseMonthKey } from "@ynab/logic";
-import { IconChevronDown, IconMenu, IconMoon, IconSun, IconChevronUpDown, IconPalette, IconReset } from "./icons.js";
-
-const ACCENTS = [
-  { key: "liquid", label: "Liquid Theme", dot: "#2f6d95" },
-  { key: "forest", label: "Forest Theme", dot: "#2e7d5b" },
-  { key: "grape", label: "Grape Theme", dot: "#6b4a9e" },
-  { key: "sunset", label: "Sunset Theme", dot: "#c15b34" },
-];
+import { MONTHS, parseMonthKey } from "@ynab/logic";
+import { Icon, cx, money } from "@ynab/theme";
 
 export function Inspector({
   groups,
@@ -21,10 +14,6 @@ export function Inspector({
   tbb,
   overBudgeted,
   priorSurplus,
-  theme,
-  accent,
-  onToggleTheme,
-  onSetAccent,
   onSelectMonth,
   onResetDemo,
   onImportYnab4,
@@ -38,356 +27,182 @@ export function Inspector({
   tbb: number;
   overBudgeted: boolean;
   priorSurplus: number;
-  theme: "light" | "dark";
-  accent: string;
-  onToggleTheme: () => void;
-  onSetAccent: (a: string) => void;
-  onSelectMonth?: (key: string) => void;
-  onResetDemo?: () => void;
-  onImportYnab4?: (file: File) => void;
-  onClearOverdraft?: (categoryIds: number[]) => void;
+  onSelectMonth: (key: string) => void;
+  onResetDemo?: () => Promise<void> | void;
+  onImportYnab4?: (file: File) => Promise<void>;
+  onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
-  const [sumOpen, setSumOpen] = useState(true);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const overdrafted: { id: number; name: string }[] = [];
-  for (const g of groups) {
-    if (g.group.isCreditCardPayments) continue;
-    for (const r of g.rows) {
-      if (r.available < 0) {
-        overdrafted.push({ id: r.category.id, name: r.category.name });
-      }
-    }
-  }
-  const overdraft = overdrafted[0]?.name ?? null;
-
-  const maxHist = Math.max(1, ...history.map((h) => h.assigned));
-
-  const first = history[0];
-  const last = history[history.length - 1];
-  const lbl = (k: string) => {
-    const { year, month0 } = parseMonthKey(k);
-    return `${MONTHS[month0]} ${year}`;
-  };
-
-  const accentLabel = ACCENTS.find((a) => a.key === accent)?.label ?? "Liquid Theme";
+  const { year, month0 } = parseMonthKey(month);
+  const monthName = MONTHS[month0] ?? "";
+  const overdraftCats = groups
+    .flatMap((g) => g.rows)
+    .filter((r) => r.available < 0)
+    .map((r) => r.category.id);
 
   return (
     <aside
-      className="flex h-full w-[340px] shrink-0 flex-col"
-      style={{ background: "var(--bg)", borderLeft: "1px solid var(--border)" }}
+      className="w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto"
+      style={{
+        background: "linear-gradient(#f2f2f0,#e8e8e5)",
+        borderLeft: "1px solid #c4c4bf",
+        boxShadow: "1px 0 0 rgba(255,255,255,.7) inset",
+      }}
     >
-      <div className="flex items-center justify-between px-5 pb-3 pt-5">
-        <h2 className="text-[17px] font-bold tracking-tight" style={{ color: "var(--text)" }}>
-          Demo Budget
-        </h2>
-        <div className="relative">
+      <div className="flex items-center px-1">
+        <div>
+          <div className="y-caps">Demo Budget</div>
+          <div className="text-[12.5px] font-bold mt-[1px]" style={{ color: "var(--y-ink)" }}>
+            {monthName} {year}
+          </div>
+        </div>
+        <div className="ml-auto relative">
           <button
-            onClick={() => setSettingsOpen((o) => !o)}
-            className="grid h-8 w-8 place-items-center rounded-lg transition-colors hover:bg-[var(--panel-3)]"
-            style={{ color: "var(--muted)" }}
-            aria-label="Open settings"
-            aria-expanded={settingsOpen}
+            onClick={() => setMenuOpen((o) => !o)}
+            className="y-btn y-btn--sm"
+            aria-label="Settings"
+            title="Settings"
           >
-            <IconMenu width={18} height={18} />
+            <Icon name="gear" size={12} />
           </button>
-          {settingsOpen && (
+          {menuOpen && (
             <div
-              className="animate-fade absolute right-0 top-[36px] z-30 min-w-[200px] overflow-hidden rounded-xl"
-              style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}
-              role="menu"
+              className="y-modal absolute right-0 top-[28px] z-20"
+              style={{ width: 220, padding: 4 }}
             >
               <button
                 onClick={() => {
-                  setSettingsOpen(false);
-                  onToggleTheme();
+                  fileRef.current?.click();
+                  setMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
-                style={{ color: "var(--text-2)" }}
-                role="menuitem"
+                className="flex w-full items-center gap-[6px] text-left text-[12px] px-3 py-[6px] rounded-[2px] hover:bg-[#e8e8e5]"
               >
-                {theme === "dark" ? <IconSun width={15} height={15} /> : <IconMoon width={15} height={15} />}
-                {theme === "dark" ? "Switch to light" : "Switch to dark"}
+                <Icon name="import" size={12} /> Import YNAB4 Backup
               </button>
               {onResetDemo && (
                 <button
-                  onClick={() => {
-                    setSettingsOpen(false);
-                    if (confirm("Reset all data and re-seed the demo budget? This cannot be undone.")) {
-                      onResetDemo();
+                  onClick={async () => {
+                    if (confirm("Reset to demo data? This wipes all your changes.")) {
+                      await onResetDemo();
                     }
+                    setMenuOpen(false);
                   }}
-                  className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
-                  style={{ color: "var(--danger)" }}
-                  role="menuitem"
+                  className="flex w-full items-center gap-[6px] text-left text-[12px] px-3 py-[6px] rounded-[2px] hover:bg-[#e8e8e5]"
                 >
-                  <IconReset width={15} height={15} />
-                  Reset demo data
+                  <Icon name="reset" size={12} /> Reset demo data
                 </button>
-              )}
-              {onImportYnab4 && (
-                <label
-                  className="flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
-                  style={{ color: "var(--text-2)" }}
-                  role="menuitem"
-                >
-                  <IconReset width={15} height={15} />
-                  <span>Import YNAB4 Backup</span>
-                  <input
-                    type="file"
-                    accept=".y4backup"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setSettingsOpen(false);
-                        onImportYnab4(file);
-                      }
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
-      {/* ── TBB Card (YNAB4's primary number) ── */}
-        <div
-          className="mb-4 overflow-hidden rounded-2xl"
-          style={{
-            border: `1px solid ${overBudgeted ? "var(--danger-border)" : "var(--border)"}`,
-            boxShadow: "var(--shadow)",
-          }}
-        >
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ background: overBudgeted ? "var(--danger)" : "var(--accent)", color: overBudgeted ? "var(--danger-fg)" : "var(--accent-fg)" }}
-          >
-            <span className="text-[13.5px] font-bold tracking-wide">
-              {overBudgeted ? "⚠ Over Budgeted" : "To Be Budgeted"}
-            </span>
-            <span className="tnum text-[20px] font-extrabold">{fmt(tbb)}</span>
-          </div>
-          <div
-            className="px-4 py-3"
-            style={{ background: overBudgeted ? "var(--danger-bg)" : "var(--accent-soft)" }}
-          >
-            {overBudgeted ? (
-              <>
-                <p className="text-[13px] leading-relaxed" style={{ color: "var(--danger)" }}>
-                  {overdraft ? (
-                    <>
-                      You've assigned more than you've earned.{" "}
-                      <span className="font-semibold">{overdraft}</span> is also
-                      overdrafted. Balance your budget to get back on track.
-                    </>
-                  ) : (
-                    <>You've assigned more than you've earned this month. Remove some assignments to get back to zero.</>
-                  )}
-                </p>
-                {overdrafted.length > 0 && onClearOverdraft && (
-                  <button
-                    onClick={() => onClearOverdraft(overdrafted.map((o) => o.id))}
-                    className="mt-2.5 w-full rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition-all hover:brightness-[1.04]"
-                    style={{ background: "var(--danger)", color: "var(--danger-fg)" }}
-                    title="Zero out the assignment on every overdrafted category"
-                  >
-                    Zero out {overdrafted.length === 1
-                      ? `"${overdrafted[0]!.name}"`
-                      : `${overdrafted.length} overdrafted categories`}
-                  </button>
-                )}
-              </>
-            ) : overdraft ? (
-              <p className="text-[13px] leading-relaxed" style={{ color: "var(--accent)" }}>
-                A <span className="font-semibold">{overdraft}</span> splurge
-                overdrafted that category — move money from other buckets to cover it.
-              </p>
-            ) : (
-              <p className="text-[13px] leading-relaxed" style={{ color: "var(--accent)" }}>
-                Every bucket is funded. Nicely balanced budget for {monthLabel(month)}!
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div
-          className="mb-4 rounded-2xl p-4"
-          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
-        >
-          <button onClick={() => setSumOpen((o) => !o)} className="flex w-full items-center gap-1.5">
-            <span style={{ color: "var(--faint)" }}>
-              <IconChevronDown width={15} height={15} />
-            </span>
-            <span className="text-[15px] font-bold" style={{ color: "var(--text)" }}>
-              Summary
-            </span>
-          </button>
-
-          {sumOpen && (
-            <>
-              <div
-                className="mt-3 rounded-xl px-3.5 py-3"
-                style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
-              >
-                <Row label="Assigned" value={fmt(summary.assigned)} bold />
-                <Row label="Outflow" value={fmt(summary.outflow)} muted />
-                <Row label="Available" value={fmt(summary.available)} muted />
-                {priorSurplus > 0.004 && (
-                  <Row label="↪ Carried Forward" value={fmt(priorSurplus)} accent />
-                )}
-                <Row label="Total Available" value={fmt(summary.totalAvailable)} muted />
-                <Row
-                  label="To Be Budgeted"
-                  value={fmt(tbb)}
-                  accent={!overBudgeted}
-                  danger={overBudgeted}
-                  bold
-                  last
-                />
-              </div>
-
-              <div className="mt-5 text-center">
-                <div className="text-[13px]" style={{ color: "var(--muted)" }}>
-                  Average Assigned
-                </div>
-                <div className="tnum mt-0.5 text-[26px] font-bold" style={{ color: "var(--text)" }}>
-                  {fmt(avg)}
-                </div>
-              </div>
-
-              <div className="mt-4 flex h-[110px] items-end justify-between gap-[3px]">
-                {history.map((h) => {
-                  const isCurrent = h.key === month;
-                  const height = h.real ? Math.max(6, (h.assigned / maxHist) * 100) : 4;
-                  const interactive = !!onSelectMonth && h.real;
-                  return (
-                    <button
-                      key={h.key}
-                      type="button"
-                      title={`${lbl(h.key)}: ${h.real ? fmt(h.assigned) : "no data"}`}
-                      aria-label={`Jump to ${lbl(h.key)}`}
-                      disabled={!interactive}
-                      onClick={interactive ? () => onSelectMonth!(h.key) : undefined}
-                      className="flex-1 rounded-t-[3px] transition-all"
-                      style={{
-                        height: `${height}%`,
-                        background: isCurrent
-                          ? "var(--accent)"
-                          : h.real
-                            ? "var(--accent-2)"
-                            : "var(--track)",
-                        opacity: isCurrent ? 1 : h.real ? 0.68 : 0.45,
-                        cursor: interactive ? "pointer" : "default",
-                        border: "none",
-                        padding: 0,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-              <div className="mt-1.5 flex justify-between text-[11.5px]" style={{ color: "var(--muted)" }}>
-                <span>{first ? lbl(first.key) : ""}</span>
-                <span>{last ? lbl(last.key) : ""}</span>
-              </div>
-              <div className="mt-2 text-center text-[12.5px] font-semibold" style={{ color: "var(--text-2)" }}>
-                12-Month History
-              </div>
-            </>
+          {onImportYnab4 && (
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".y4backup,.zip"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onImportYnab4(f).catch((err) => alert(String(err)));
+                e.target.value = "";
+              }}
+            />
           )}
         </div>
       </div>
 
-      <div className="relative flex items-center gap-2 p-4">
-        {pickerOpen && (
-          <div
-            className="animate-fade absolute bottom-[62px] left-4 right-[70px] z-20 overflow-hidden rounded-xl"
-            style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}
+      <div
+        className={cx("y-atb", overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange")}
+      >
+        <div className="text-[20px] font-bold leading-[1.1] y-num">{money(tbb)}</div>
+        <div className="text-[9px] font-bold tracking-[.09em] uppercase opacity-90">
+          {overBudgeted ? "Overbudgeted" : "To Be Budgeted"}
+        </div>
+        {overBudgeted && onClearOverdraft && overdraftCats.length > 0 && (
+          <button
+            onClick={() => onClearOverdraft(overdraftCats)}
+            className="mt-2 y-btn y-btn--sm y-btn--danger"
+            style={{ width: "100%" }}
           >
-            {ACCENTS.map((a) => (
-              <button
-                key={a.key}
-                onClick={() => {
-                  onSetAccent(a.key);
-                  setPickerOpen(false);
-                }}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-[var(--panel-3)]"
-                style={{ color: "var(--text)", fontWeight: a.key === accent ? 700 : 500 }}
-              >
-                <span className="h-3.5 w-3.5 rounded-full" style={{ background: a.dot }} />
-                {a.label}
-              </button>
-            ))}
-          </div>
+            Zero out {overdraftCats.length} overdrafted
+          </button>
         )}
-        <button
-          onClick={() => setPickerOpen((o) => !o)}
-          className="flex flex-1 items-center gap-2 rounded-xl px-3.5 py-2.5"
-          style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text)" }}
-        >
-          <span style={{ color: "var(--accent)" }}>
-            <IconPalette width={17} height={17} />
-          </span>
-          <span className="text-[13.5px] font-semibold">{accentLabel}</span>
-          <span className="ml-auto" style={{ color: "var(--muted)" }}>
-            <IconChevronUpDown width={15} height={15} />
-          </span>
-        </button>
-        <button
-          onClick={onToggleTheme}
-          className="grid h-[44px] w-[46px] place-items-center rounded-xl"
-          style={{ background: "var(--panel)", border: "1px solid var(--border-strong)", color: "var(--text-2)" }}
-          title="Toggle dark mode"
-        >
-          {theme === "dark" ? <IconSun width={18} height={18} /> : <IconMoon width={18} height={18} />}
-        </button>
+      </div>
+
+      <div className="y-panel">
+        <div className="y-panel-head">Summary</div>
+        <div className="p-[10px] space-y-[5px] text-[11.5px]">
+          {[
+            ["Assigned", money(summary.assigned)],
+            ["Outflow", money(-summary.outflow)],
+            ["Available", money(summary.available)],
+            ["Carried Forward", money(priorSurplus)],
+            ["Total Available", money(summary.totalAvailable)],
+            ["To Be Budgeted", money(tbb)],
+          ].map(([k, v]) => (
+            <div key={k} className="flex justify-between">
+              <span style={{ color: "var(--y-ink-soft)" }}>{k}</span>
+              <span className="y-num" style={{ color: "var(--y-ink)" }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="y-panel">
+        <div className="y-panel-head">Average Assigned</div>
+        <div className="p-[10px]">
+          <div className="text-[18px] font-bold y-num" style={{ color: "var(--y-ink)" }}>{money(avg)}</div>
+          <div className="y-hint mt-[2px]">across {history.filter((h) => h.real).length} real months</div>
+        </div>
+      </div>
+
+      <div className="y-panel">
+        <div className="y-panel-head">History (12 mo)</div>
+        <div className="p-[10px]">
+          <div className="flex items-end gap-[3px]" style={{ height: 92 }}>
+            {(() => {
+              const max = Math.max(1, ...history.map((h) => h.assigned));
+              return history.map((h) => {
+                const pct = (h.assigned / max) * 100;
+                const isCurrent = h.key === month;
+                const { month0: m0, year: y } = parseMonthKey(h.key);
+                const label = `${MONTHS[m0]?.slice(0, 3) ?? ""} ${y}`;
+                return (
+                  <button
+                    key={h.key}
+                    onClick={() => h.real && onSelectMonth(h.key)}
+                    disabled={!h.real}
+                    aria-label={`Jump to ${MONTHS[m0]} ${y}`}
+                    title={`${MONTHS[m0]} ${y}: ${money(h.assigned)}`}
+                    className="flex-1 min-w-0 rounded-[2px] transition-all"
+                    style={{
+                      height: `${Math.max(2, pct)}%`,
+                      background: !h.real
+                        ? "#dcdcd8"
+                        : isCurrent
+                        ? "var(--y-blue)"
+                        : "var(--y-blue-pale)",
+                      border: isCurrent ? "1px solid var(--y-blue-dark)" : "1px solid transparent",
+                      opacity: !h.real ? 0.5 : isCurrent ? 1 : 0.85,
+                      cursor: h.real ? "pointer" : "default",
+                    }}
+                  />
+                );
+              });
+            })()}
+          </div>
+          <div className="flex justify-between mt-1 y-hint">
+            <span>{history[0] ? formatShortMonth(history[0].key) : ""}</span>
+            <span>{history[history.length - 1] ? formatShortMonth(history[history.length - 1]!.key) : ""}</span>
+          </div>
+        </div>
       </div>
     </aside>
   );
 }
 
-function Row({
-  label,
-  value,
-  bold,
-  muted,
-  accent,
-  danger,
-  last,
-}: {
-  label: string;
-  value: string;
-  bold?: boolean;
-  muted?: boolean;
-  accent?: boolean;
-  danger?: boolean;
-  last?: boolean;
-}) {
-  const valueColor = danger
-    ? "var(--danger)"
-    : accent
-      ? "var(--accent)"
-      : bold
-        ? "var(--text)"
-        : "var(--text-2)";
-  return (
-    <div
-      className="flex items-center justify-between py-1.5"
-      style={{ borderBottom: last ? "none" : "1px solid var(--border)" }}
-    >
-      <span className="text-[13.5px]" style={{ color: muted ? "var(--muted)" : "var(--text-2)", fontWeight: bold ? 600 : 500 }}>
-        {label}
-      </span>
-      <span
-        className="tnum text-[13.5px]"
-        style={{ color: valueColor, fontWeight: bold ? 700 : 600 }}
-      >
-        {value}
-      </span>
-    </div>
-  );
+function formatShortMonth(key: string): string {
+  const { year: y, month0 } = parseMonthKey(key);
+  return `${MONTHS[month0]?.slice(0, 3) ?? ""} ${String(y).slice(2)}`;
 }

@@ -76,8 +76,9 @@ describe("BudgetApp", () => {
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(screen.getAllByText("To Be Budgeted").length).toBeGreaterThan(0);
-    // 12 month tabs are rendered in BudgetView
-    expect(screen.getAllByRole("button", { name: /jan/i }).length).toBeGreaterThan(0);
+    // The single-month budget view has a MonthNav with prev/next buttons
+    expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next month/i })).toBeInTheDocument();
   });
 
   it("switches view when a sidebar nav item is clicked", () => {
@@ -133,12 +134,7 @@ describe("BudgetApp", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
 
-    // Account names are buttons; the trash button sits next to them.
-    // Find the "TD Unlimited Chequing" account button by its balance span
-    // and then walk up to the wrapper that contains the delete button.
     const accountBtns = screen.getAllByRole("button", { name: /td unlimited chequing/i });
-    // The first match is the account row; the second is the trash button
-    // (aria-label "Delete account TD Unlimited Chequing"). Find the row.
     const accountRow = accountBtns.find(
       (b) => !b.getAttribute("aria-label")?.startsWith("Delete account")
     )!;
@@ -152,22 +148,12 @@ describe("BudgetApp", () => {
     confirmSpy.mockRestore();
   });
 
-  it("toggles theme and persists to localStorage", () => {
-    const { api } = makeApi();
-    localStorage.setItem("liquid-theme", "light");
-    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    fireEvent.click(screen.getByText("Switch to dark"));
-    expect(localStorage.getItem("liquid-theme")).toBe("dark");
-  });
-
   it("calls api.resetDemo when the menu item is clicked", async () => {
     const { api, calls } = makeApi();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
     expect(calls.some((c) => c.method === "resetDemo")).toBe(true);
     confirmSpy.mockRestore();

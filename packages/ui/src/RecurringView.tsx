@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { IconPlus, IconTrash, IconClock, IconPencil } from "./icons.js";
+import { Icon, Toolbar, cx } from "@ynab/theme";
 
 export function RecurringView({
   data,
@@ -32,103 +32,107 @@ export function RecurringView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-        <span style={{ color: "var(--accent)" }}>
-          <IconClock width={20} height={20} />
-        </span>
-        <h1 className="text-[18px] font-bold" style={{ color: "var(--text)" }}>
-          Recurring Transactions
-        </h1>
-        <button
-          onClick={onAdd}
-          className="ml-auto flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[13px] font-semibold"
-          style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
-        >
-          <IconPlus width={15} height={15} /> Add Recurring
-        </button>
+      <Toolbar>
+        <div className="flex items-center gap-2">
+          <Icon name="clock" size={14} color="#3f4649" />
+          <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Recurring Transactions</span>
+        </div>
+        <div className="ml-auto">
+          <button onClick={onAdd} className="y-btn y-btn--primary">
+            <Icon name="plus" size={11} color="#fff" /> Add Recurring
+          </button>
+        </div>
+      </Toolbar>
+
+      <div
+        className="flex gap-3 px-3 py-2.5"
+        style={{ borderBottom: "1px solid #bdbdb8", background: "var(--y-panel-alt)" }}
+      >
+        <Stat label="Monthly Income" value={fmt(monthlyIn)} tone="green" />
+        <Stat label="Monthly Bills" value={fmt(monthlyOut)} tone="red" />
+        <Stat label="Net Monthly" value={fmt(monthlyIn + monthlyOut)} tone={monthlyIn + monthlyOut >= 0 ? "green" : "red"} />
       </div>
 
-      <div className="flex gap-3 px-6 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-        <Card label="Monthly Income" value={fmt(monthlyIn)} color="var(--accent)" />
-        <Card label="Monthly Bills" value={fmt(monthlyOut)} color="var(--danger)" />
-        <Card label="Net Monthly" value={fmt(monthlyIn + monthlyOut)} />
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+      <div className="flex-1 overflow-y-auto p-4 y-scroll">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {data.recurring.map((r) => {
             const amt = num(r.amount);
             return (
               <div
                 key={r.id}
-                className="group rounded-2xl p-4"
-                style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
+                className="y-panel p-3"
               >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
-                    <div className="truncate text-[15px] font-bold" style={{ color: "var(--text)" }}>
+                    <div className="truncate text-[14px] font-bold" style={{ color: "var(--y-ink)" }}>
                       {r.payee}
                     </div>
-                    <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--muted)" }}>
+                    <div className="y-hint mt-[1px]">
                       {accMap.get(r.accountId)}
                       {r.categoryId ? ` · ${catMap.get(r.categoryId)}` : ""}
                     </div>
                   </div>
-                  <span className="tnum text-[15px] font-bold" style={{ color: amt < 0 ? "var(--danger)" : "var(--accent)" }}>
+                  <span
+                    className="y-num text-[14px] font-bold ml-2"
+                    style={{ color: amt < 0 ? "var(--y-red)" : "var(--y-green-dk)" }}
+                  >
                     {fmt(amt)}
                   </span>
                 </div>
                 <div className="mt-2">
                   <button
                     onClick={() => onToggleActive(r.id, !r.active)}
-                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-opacity hover:opacity-80"
-                    style={{
-                      background: r.active ? "var(--accent-soft)" : "var(--panel-3)",
-                      color: r.active ? "var(--accent)" : "var(--muted)",
-                    }}
+                    className={cx(
+                      "y-pill cursor-pointer transition-all",
+                      r.active ? "y-pill--green" : "y-pill--grey"
+                    )}
+                    style={{ minWidth: 0, padding: "1px 8px" }}
                     title={r.active ? "Click to pause" : "Click to resume"}
                     aria-label={r.active ? `Pause ${r.payee}` : `Resume ${r.payee}`}
                   >
                     <span
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ background: r.active ? "var(--accent)" : "var(--muted)" }}
+                      className="inline-block h-[6px] w-[6px] rounded-full mr-[5px]"
+                      style={{ background: "#fff" }}
                     />
                     {r.active ? "Active" : "Paused"}
                   </button>
                 </div>
                 <div className="mt-3 flex items-center justify-between">
-                  <span className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold capitalize" style={{ background: "var(--panel-3)", color: "var(--text-2)" }}>
+                  <span
+                    className="y-caps"
+                    style={{
+                      background: "var(--y-panel-alt)",
+                      color: "var(--y-ink-soft)",
+                      padding: "2px 7px",
+                      borderRadius: 8,
+                      border: "1px solid #cfcfca",
+                    }}
+                  >
                     {r.frequency}
                   </span>
-                  <span className="text-[12.5px]" style={{ color: "var(--muted)" }}>
-                    Next: <span className="tnum font-medium" style={{ color: "var(--text-2)" }}>{r.nextDate}</span>
+                  <span className="y-hint">
+                    Next: <span className="y-num" style={{ color: "var(--y-ink-soft)" }}>{r.nextDate}</span>
                   </span>
                 </div>
                 <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => onPost(r.id)}
-                    className="flex-1 rounded-lg py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                  >
+                  <button onClick={() => onPost(r.id)} className="y-btn y-btn--sm y-btn--blue flex-1">
                     Post Now
                   </button>
                   <button
                     onClick={() => onEdit(r.id)}
-                    className="grid w-9 place-items-center rounded-lg"
-                    style={{ background: "var(--panel-3)", color: "var(--muted)" }}
+                    className="y-btn y-btn--sm"
                     aria-label={`Edit ${r.payee}`}
                     title="Edit"
                   >
-                    <IconPencil width={14} height={14} />
+                    <Icon name="edit" size={12} />
                   </button>
                   <button
                     onClick={() => onDelete(r.id)}
-                    className="grid w-9 place-items-center rounded-lg"
-                    style={{ background: "var(--panel-3)", color: "var(--muted)" }}
+                    className="y-btn y-btn--sm"
                     aria-label={`Delete ${r.payee}`}
                     title="Delete"
                   >
-                    <IconTrash width={15} height={15} />
+                    <Icon name="trash" size={12} />
                   </button>
                 </div>
               </div>
@@ -136,7 +140,7 @@ export function RecurringView({
           })}
         </div>
         {data.recurring.length === 0 && (
-          <div className="py-16 text-center text-[14px]" style={{ color: "var(--muted)" }}>
+          <div className="py-12 text-center y-hint">
             No recurring transactions yet.
           </div>
         )}
@@ -145,11 +149,11 @@ export function RecurringView({
   );
 }
 
-function Card({ label, value, color }: { label: string; value: string; color?: string }) {
+function Stat({ label, value, tone }: { label: string; value: string; tone: "green" | "red" }) {
   return (
-    <div className="rounded-xl px-4 py-2.5" style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
-      <div className="text-[11px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>{label}</div>
-      <div className="tnum text-[16px] font-bold" style={{ color: color ?? "var(--text)" }}>{value}</div>
+    <div className="y-mathbox" style={{ minWidth: 120 }}>
+      <div className="y-math-label">{label}</div>
+      <div className="y-math-val" style={{ color: tone === "green" ? "var(--y-green-dk)" : "var(--y-red)" }}>{value}</div>
     </div>
   );
 }

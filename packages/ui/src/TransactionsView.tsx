@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState, Fragment } from "react";
+import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { IconPlus, IconTrash, IconSwap, IconX, IconPencil, IconChevronDown, IconChevronRight } from "./icons.js";
+import { Icon, ClearedFlag, Toolbar, money } from "@ynab/theme";
+
+type Txn = Omit<Transaction, "amount"> & { amount: number };
 
 export function TransactionsView({
   data,
@@ -21,233 +23,205 @@ export function TransactionsView({
   onDelete: (id: number) => void;
 }) {
   const [search, setSearch] = useState("");
-  const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
-  const [expandedSplits, setExpandedSplits] = useState<Record<number, boolean>>({});
+  const accountById = useMemo(
+    () => new Map(data.accounts.map((a) => [a.id, a] as const)),
+    [data.accounts]
+  );
+  const categoryById = useMemo(
+    () => new Map(data.categories.map((c) => [c.id, c] as const)),
+    [data.categories]
+  );
 
-  const childrenByParent = useMemo(() => {
-    const map = new Map<number, Transaction[]>();
-    for (const t of data.transactions) {
-      if (t.parentId) {
-        if (!map.has(t.parentId)) map.set(t.parentId, []);
-        map.get(t.parentId)!.push(t);
-      }
+  const rows = useMemo<Txn[]>(() => {
+    return data.transactions
+      .filter((t) => {
+        if (accountFilter == null) return true;
+        if (t.accountId === accountFilter) return true;
+        if (t.transferAccountId != null && t.transferAccountId === accountFilter) return true;
+        return false;
+      })
+      .map((t) => ({ ...t, amount: num(t.amount) }))
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }, [data.transactions, accountFilter]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    const childIds = new Set(rows.filter((r) => r.parentId != null).map((r) => r.parentId!));
+    return rows.filter(
+      (r) =>
+        r.payee.toLowerCase().includes(q) ||
+        (categoryById.get(r.categoryId ?? -1)?.name ?? "").toLowerCase().includes(q) ||
+        (r.memo ?? "").toLowerCase().includes(q) ||
+        (r.parentId != null && childIds.has(r.id))
+    );
+  }, [rows, search, categoryById]);
+
+  const totals = useMemo(() => {
+    let inflow = 0;
+    let outflow = 0;
+    for (const r of filtered) {
+      if (r.parentId != null) continue;
+      if (r.amount > 0) inflow += r.amount;
+      else outflow += -r.amount;
     }
-    return map;
-  }, [data.transactions]);
+    return { inflow, outflow, net: inflow - outflow, count: filtered.filter((r) => r.parentId == null).length };
+  }, [filtered]);
 
-  const parentsList = useMemo(() => data.transactions.filter(t => !t.parentId), [data.transactions]);
-
-  const filteredParents = parentsList.filter((t) => {
-    if (accountFilter && t.accountId !== accountFilter) return false;
-    if (search) {
-      const s = search.toLowerCase();
-      const matchT = `${t.payee} ${t.memo} ${catMap.get(t.categoryId ?? -1) ?? ""}`.toLowerCase().includes(s);
-      if (matchT) return true;
-      const children = childrenByParent.get(t.id) || [];
-      const matchChild = children.some(c => `${c.payee} ${c.memo} ${catMap.get(c.categoryId ?? -1) ?? ""}`.toLowerCase().includes(s));
-      if (matchChild) return true;
-      return false;
-    }
-    return true;
-  });
-
-  const inflow = filteredParents.reduce((sum, t) => {
-    const a = num(t.amount);
-    return a > 0 ? sum + a : sum;
-  }, 0);
-  const outflow = filteredParents.reduce((sum, t) => {
-    const a = num(t.amount);
-    return a < 0 ? sum + a : sum;
-  }, 0);
+  const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-        <span style={{ color: "var(--accent)" }}>
-          <IconSwap width={20} height={20} />
-        </span>
-        <h1 className="text-[18px] font-bold" style={{ color: "var(--text)" }}>
-          All Transactions
-        </h1>
-        {accountFilter && (
-          <button
-            onClick={() => setAccountFilter(null)}
-            className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
-            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-          >
-            {accMap.get(accountFilter)} <IconX width={13} height={13} />
-          </button>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search payee, memo…"
-            className="w-[220px] rounded-lg px-3 py-2 text-[13.5px] outline-none focus:ring-2"
-            style={{ background: "var(--panel-2)", border: "1px solid var(--border-strong)", color: "var(--text)" }}
-          />
-          <button
-            onClick={onAdd}
-            className="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[13px] font-semibold"
-            style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
-          >
-            <IconPlus width={15} height={15} /> Add Transaction
-          </button>
+      <Toolbar>
+        <div className="flex items-center gap-2">
+          <Icon name="swap" size={14} color="#3f4649" />
+          <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>
+            {filterAccount ? filterAccount.name : "All Transactions"}
+          </span>
+          {filterAccount && (
+            <span className="y-pill y-pill--blue" style={{ minWidth: 0, padding: "1px 7px 2px" }}>
+              {fmt(num(filterAccount.balance))}
+              <button
+                type="button"
+                onClick={() => setAccountFilter(null)}
+                className="ml-1"
+                aria-label="Clear account filter"
+              >
+                <Icon name="x" size={9} color="#fff" />
+              </button>
+            </span>
+          )}
         </div>
+        <div className="y-tb-sep" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search register"
+          className="y-input y-search"
+          style={{ width: 168 }}
+        />
+        <button onClick={onAdd} className="y-btn y-btn--primary ml-auto">
+          <Icon name="plus" size={11} color="#fff" /> Add Transaction
+        </button>
+      </Toolbar>
+
+      <div
+        className="flex items-center gap-3 px-3 py-1.5 text-[11px]"
+        style={{ borderBottom: "1px solid #bdbdb8", background: "var(--y-panel-alt)" }}
+      >
+        <span className="y-caps">{totals.count} transactions</span>
+        <span className="y-num font-bold" style={{ color: "var(--y-ink)" }}>
+          Inflow {money(totals.inflow)}
+        </span>
+        <span className="y-num font-bold" style={{ color: "var(--y-ink-soft)" }}>
+          Outflow −{money(totals.outflow)}
+        </span>
+        <span
+          className="y-num font-bold ml-auto"
+          style={{ color: totals.net >= 0 ? "var(--y-green-dk)" : "var(--y-red)" }}
+        >
+          Net {money(totals.net)}
+        </span>
       </div>
 
-      <div className="flex gap-3 px-6 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-        <Chip label="Transactions" value={String(filteredParents.length)} />
-        <Chip label="Inflow" value={fmt(inflow)} color="var(--accent)" />
-        <Chip label="Outflow" value={fmt(outflow)} color="var(--danger)" />
-        <Chip label="Net" value={fmt(inflow + outflow)} />
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        <table className="w-full border-collapse">
-          <thead className="sticky top-0 z-10" style={{ background: "var(--panel-2)" }}>
-            <tr className="text-left text-[11.5px] uppercase tracking-[0.06em]" style={{ color: "var(--muted)" }}>
-              <Th>Date</Th>
-              <Th>Account</Th>
-              <Th>Payee</Th>
-              <Th>Category</Th>
-              <Th>Memo</Th>
-              <Th>Status</Th>
-              <Th right>Outflow</Th>
-              <Th right>Inflow</Th>
-              <Th />
+      <div className="flex-1 min-h-0 overflow-auto y-scroll">
+        <table className="y-table">
+          <thead className="y-thead">
+            <tr>
+              <th style={{ width: 22 }} />
+              <th style={{ width: 92 }}>Date</th>
+              <th style={{ width: 130 }}>Account</th>
+              <th>Payee</th>
+              <th style={{ width: 210 }}>Category</th>
+              <th>Memo</th>
+              <th className="num" style={{ width: 92 }}>
+                Outflow
+              </th>
+              <th className="num" style={{ width: 92 }}>
+                Inflow
+              </th>
+              <th style={{ width: 32 }} className="text-center">
+                C
+              </th>
             </tr>
           </thead>
           <tbody>
-            {filteredParents.map((t) => {
-              const renderRow = (txn: Transaction, isChild = false) => {
-                const amt = num(txn.amount);
-                const hasChildren = !isChild && childrenByParent.has(txn.id);
-                const children = hasChildren ? childrenByParent.get(txn.id)! : [];
-                const expanded = !!expandedSplits[txn.id];
-
-                let payeeDisplay = txn.payee;
-                let icon = null;
-                if (txn.transferAccountId) {
-                  payeeDisplay = `Transfer : ${accMap.get(txn.transferAccountId) || "Unknown"}`;
-                  icon = <IconSwap width={14} height={14} className="mr-1.5 inline-block opacity-70" />;
-                }
-
-                return (
-                  <Fragment key={txn.id}>
-                    <tr className={`group transition-colors ${isChild ? "bg-[var(--panel-3)]" : "hover:bg-[var(--panel-3)]"}`} style={{ borderTop: isChild ? "none" : "1px solid var(--border)" }}>
-                      <Td className="tnum" style={{ color: "var(--muted)" }}>{!isChild ? txn.date : ""}</Td>
-                      <Td>{!isChild ? accMap.get(txn.accountId) : ""}</Td>
-                      <Td className={isChild ? "pl-8" : "font-medium"} style={{ color: "var(--text)" }}>
-                        {icon}
-                        {payeeDisplay}
-                      </Td>
-                      <Td>
-                        {hasChildren ? (
-                          <button
-                            onClick={() => setExpandedSplits(s => ({ ...s, [txn.id]: !s[txn.id] }))}
-                            className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--accent-strong)]"
-                            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                          >
-                            {expanded ? <IconChevronDown width={14} height={14} /> : <IconChevronRight width={14} height={14} />}
-                            Split (Multiple Categories)...
-                          </button>
-                        ) : txn.categoryId ? (
-                          <span className="rounded-md px-2 py-0.5 text-[12.5px] font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                            {catMap.get(txn.categoryId)}
-                          </span>
-                        ) : (
-                          <span style={{ color: "var(--faint)" }}>—</span>
-                        )}
-                      </Td>
-                      <Td style={{ color: "var(--muted)" }}>{txn.memo || "—"}</Td>
-                      <Td>
-                        {!isChild && (
-                          txn.cleared ? (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-                              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                              title="Cleared"
-                            >
-                              ● Cleared
-                            </span>
-                          ) : (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-                              style={{ background: "var(--warn-bg, var(--panel-3))", color: "var(--warn, var(--text-2))" }}
-                              title="Uncleared"
-                            >
-                              ○ Uncleared
-                            </span>
-                          )
-                        )}
-                      </Td>
-                      <Td right className="tnum" style={{ color: amt < 0 ? "var(--danger)" : "var(--faint)" }}>
-                        {amt < 0 ? fmt(amt) : ""}
-                      </Td>
-                      <Td right className="tnum" style={{ color: amt > 0 ? "var(--accent)" : "var(--faint)" }}>
-                        {amt > 0 ? fmt(amt) : ""}
-                      </Td>
-                      <Td right>
-                        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button onClick={() => onEdit(txn.id)} className="rounded p-1 text-[var(--muted)] hover:text-[var(--text)]" title="Edit">
-                            <IconPencil width={14} height={14} />
-                          </button>
-                          <button onClick={() => onDelete(txn.id)} className="rounded p-1 text-[var(--muted)] hover:text-[var(--danger)]" title="Delete">
-                            <IconTrash width={15} height={15} />
-                          </button>
-                        </div>
-                      </Td>
-                    </tr>
-                    {expanded && children.map(c => renderRow(c, true))}
-                  </Fragment>
-                );
-              };
-              
-              return renderRow(t);
-            })}
-            {filteredParents.length === 0 && (
+            {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-[14px]" style={{ color: "var(--muted)" }}>
-                  No transactions found.
+                <td colSpan={9} className="text-center py-6 y-hint">
+                  No transactions match your filter.
                 </td>
               </tr>
+            ) : (
+              filtered.map((t, i) => {
+                const isChild = t.parentId != null;
+                const outflow = t.amount < 0 ? -t.amount : 0;
+                const inflow = t.amount > 0 ? t.amount : 0;
+                const catName =
+                  t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
+                const displayCat = catName || (t.transferAccountId ? "Transfer" : "");
+                return (
+                  <tr
+                    key={t.id}
+                    className={`group y-row ${i % 2 === 1 ? "alt" : ""} ${
+                      isChild ? "!bg-[var(--y-panel-alt)]" : ""
+                    }`}
+                    onClick={() => !isChild && onEdit(t.id)}
+                    style={{ cursor: isChild ? "default" : "pointer" }}
+                  >
+                    <td className="text-center" />
+                    <td className="y-num">{t.date}</td>
+                    <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
+                      {accountById.get(t.accountId)?.name ?? ""}
+                    </td>
+                    <td className="truncate" style={{ color: "var(--y-ink)" }}>
+                      {isChild && (
+                        <span
+                          className="inline-block mr-[5px] align-[-2px]"
+                          style={{ color: "var(--y-ink-faint)" }}
+                        >
+                          ↳
+                        </span>
+                      )}
+                      {!isChild && t.parentId == null && t.transferAccountId == null && null}
+                      {t.payee}
+                    </td>
+                    <td
+                      className="truncate"
+                      style={{
+                        color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
+                      }}
+                    >
+                      {displayCat || (
+                        <span className="italic" style={{ color: "var(--y-ink-faint)" }}>
+                          Transfer
+                        </span>
+                      )}
+                    </td>
+                    <td className="truncate italic" style={{ color: "var(--y-ink-faint)" }}>
+                      {t.memo}
+                    </td>
+                    <td className="num y-num">{outflow ? money(outflow) : ""}</td>
+                    <td
+                      className="num y-num"
+                      style={{
+                        color: inflow ? "var(--y-green-dk)" : undefined,
+                        fontWeight: inflow ? 700 : 400,
+                      }}
+                    >
+                      {inflow ? money(inflow) : ""}
+                    </td>
+                    <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                      {isChild ? null : <ClearedFlag state={t.cleared ? "c" : "u"} />}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
     </div>
-  );
-}
-
-function Chip({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="rounded-xl px-3.5 py-2" style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
-      <div className="text-[11px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>{label}</div>
-      <div className="tnum text-[15px] font-bold" style={{ color: color ?? "var(--text)" }}>{value}</div>
-    </div>
-  );
-}
-
-function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {
-  return <th className={`px-4 py-2.5 font-semibold ${right ? "text-right" : "text-left"}`}>{children}</th>;
-}
-function Td({
-  children,
-  right,
-  className,
-  style,
-}: {
-  children?: React.ReactNode;
-  right?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <td className={`px-4 py-2.5 text-[13.5px] ${right ? "text-right" : "text-left"} ${className ?? ""}`} style={{ color: "var(--text-2)", ...style }}>
-      {children}
-    </td>
   );
 }

@@ -114,90 +114,32 @@ export function BudgetApp({
 }) {
   const [view, setView] = useState<View>("budget");
   const [month, setMonth] = useState(DEMO_MONTH);
-  // Lazy initializer — runs once on mount, not on every render, so reading
-  // data.groups here is cheap. A useMemo would re-derive on every data
-  // reload and clobber the user's manual collapse/expand choices.
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
     const cc = data.groups.find((g) => g.isCreditCardPayments);
     return cc ? { [cc.id]: true } : {};
   });
   const [accountFilter, setAccountFilter] = useState<number | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    if (typeof document === "undefined") return "light";
-    const stored = document.documentElement.getAttribute("data-theme");
-    return stored === "dark" ? "dark" : "light";
-  });
-  const [accent, setAccent] = useState<string>(() => {
-    if (typeof document === "undefined") return "liquid";
-    return document.documentElement.getAttribute("data-accent") ?? "liquid";
-  });
-
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === "light" ? "dark" : "light";
-      if (typeof document !== "undefined") {
-        document.documentElement.setAttribute("data-theme", next);
-        try {
-          localStorage.setItem("liquid-theme", next);
-        } catch {
-          // ignore quota / privacy errors
-        }
-      }
-      return next;
-    });
-  }, []);
-
-  const setAccentTheme = useCallback((a: string) => {
-    setAccent(a);
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-accent", a);
-      try {
-        localStorage.setItem("liquid-accent", a);
-      } catch {
-        // ignore quota / privacy errors
-      }
-    }
-  }, []);
 
   const { year } = parseMonthKey(month);
 
-  const monthsWindow = useMemo(() => {
-    const { year: y, month0 } = parseMonthKey(month);
-    const m1 = monthKey(y + Math.floor((month0 - 1) / 12), ((month0 - 1) % 12 + 12) % 12);
-    const m2 = month;
-    const m3 = monthKey(y + Math.floor((month0 + 1) / 12), ((month0 + 1) % 12 + 12) % 12);
-    return [m1, m2, m3];
-  }, [month]);
+  const budget = useMemo(() => computeBudget(data, month), [data, month]);
 
-  const budgets = useMemo(() => {
-    return monthsWindow.map(mk => {
-      const { year: y, month0: m0 } = parseMonthKey(mk);
-      return {
-        month: mk,
-        year: y,
-        monthName: MONTHS[m0] ?? "",
-        result: computeBudget(data, mk)
-      };
-    });
-  }, [data, monthsWindow]);
-
-  const budget = budgets[1]!.result; // Current month's result for summary
   const groups = budget.groups;
   const budgetGroups = groups.filter((g) => !g.group.isCreditCardPayments);
   const summary = {
     assigned: budget.totalAssigned,
-    // Exclude CC payment group outflow — it's debt repayment, not a budget expense
     outflow: budgetGroups.reduce((s, g) => s + g.outflow, 0),
     available: budgetGroups.reduce((s, g) => s + g.available, 0),
     totalAvailable: groups.reduce((s, g) => s + g.available, 0),
   };
 
-
   const { history, avg } = useMemo(() => {
     const realMonths = new Set(data.assignments.map((a) => a.month));
     const assignedFor = (key: string) =>
-      data.assignments.filter((a) => a.month === key).reduce((s, a) => s + num(a.amount), 0);
+      data.assignments
+        .filter((a) => a.month === key)
+        .reduce((s, a) => s + num(a.amount), 0);
     const { year: y, month0 } = parseMonthKey(month);
     const hist: { key: string; assigned: number; real: boolean }[] = [];
     for (let i = -4; i <= 7; i++) {
@@ -205,8 +147,6 @@ export function BudgetApp({
       const yy = y + Math.floor((month0 + i) / 12);
       const key = monthKey(yy, mm);
       const real = realMonths.has(key);
-      // Only use real data. Months without assignments render as 0 so the bar
-      // chart shows an honest empty slot rather than a fabricated value.
       const assigned = real ? assignedFor(key) : 0;
       hist.push({ key, assigned, real });
     }
@@ -226,8 +166,9 @@ export function BudgetApp({
   );
 
   const clearOverdraft = useCallback(
-    (categoryIds: number[]) =>
-      Promise.all(categoryIds.map((id) => api.assign(id, 0, month))),
+    async (categoryIds: number[]): Promise<void> => {
+      await Promise.all(categoryIds.map((id) => api.assign(id, 0, month)));
+    },
     [api, month]
   );
 
@@ -266,7 +207,7 @@ export function BudgetApp({
     modal.kind === "editAccount" ? data.accounts.find((a) => a.id === modal.accountId) : undefined;
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: "var(--app)" }}>
+    <div className="flex h-screen overflow-hidden" style={{ background: "var(--y-app-bg)" }}>
       <Sidebar
         view={view}
         setView={setView}
@@ -280,16 +221,14 @@ export function BudgetApp({
         onDeleteAccount={api.deleteAccount}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--panel)" }}>
+      <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
         {view === "budget" && (
           <BudgetView
-            budgets={budgets}
+            budget={budget}
             currentMonth={month}
-            accounts={data.accounts}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
             onAssign={assign}
-            onSelectMonth={setMonth}
             onShiftMonth={shiftMonth}
             onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
             onAddGroup={() => setModal({ kind: "addGroup" })}
@@ -301,6 +240,7 @@ export function BudgetApp({
             onExpandAll={expandAll}
             onReorderCategory={api.reorderCategory}
             onReorderGroup={api.reorderGroup}
+            onClearOverdraft={clearOverdraft}
           />
         )}
         {view === "transactions" && (
@@ -345,10 +285,6 @@ export function BudgetApp({
         tbb={budget.tbb}
         overBudgeted={budget.overBudgeted}
         priorSurplus={budget.priorSurplus}
-        theme={theme}
-        accent={accent}
-        onToggleTheme={toggleTheme}
-        onSetAccent={setAccentTheme}
         onSelectMonth={setMonth}
         onResetDemo={api.resetDemo}
         onImportYnab4={api.importYnab4}

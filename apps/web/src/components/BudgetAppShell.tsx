@@ -196,10 +196,13 @@ export function BudgetAppShell() {
 
   if (error) {
     return (
-      <div className="grid h-screen place-items-center" style={{ background: "var(--app)" }}>
-        <div className="rounded-2xl p-6" style={{ background: "var(--panel)", border: "1px solid var(--danger)" }}>
-          <h2 className="text-[15px] font-bold" style={{ color: "var(--danger)" }}>Error</h2>
-          <p className="mt-2 text-[13.5px]" style={{ color: "var(--text-2)" }}>{error}</p>
+      <div className="grid h-screen place-items-center">
+        <div className="y-notice y-notice--danger" style={{ maxWidth: 480 }}>
+          <span className="mt-[1px]">!</span>
+          <div>
+            <div className="font-bold mb-[2px]">Error</div>
+            <div>{error}</div>
+          </div>
         </div>
       </div>
     );
@@ -207,10 +210,16 @@ export function BudgetAppShell() {
 
   if (!data) {
     return (
-      <div className="grid h-screen place-items-center" style={{ background: "var(--app)" }}>
+      <div className="grid h-screen place-items-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)]" />
-          <span className="text-[14px]" style={{ color: "var(--muted)" }}>Loading budget…</span>
+          <div
+            className="h-8 w-8 animate-spin rounded-full"
+            style={{
+              border: "2px solid var(--y-line)",
+              borderTopColor: "var(--y-blue)",
+            }}
+          />
+          <span className="y-hint">Loading budget…</span>
         </div>
       </div>
     );

@@ -11,10 +11,7 @@ const baseProps = {
   tbb: 0,
   overBudgeted: false,
   priorSurplus: 0,
-  theme: "light" as const,
-  accent: "liquid",
-  onToggleTheme: () => {},
-  onSetAccent: () => {},
+  onSelectMonth: () => {},
 };
 
 describe("Inspector", () => {
@@ -23,24 +20,12 @@ describe("Inspector", () => {
     expect(screen.getByText("Demo Budget")).toBeInTheDocument();
   });
 
-  it("opens the settings menu when the hamburger is clicked", () => {
+  it("opens the settings menu when the gear is clicked", () => {
     render(<Inspector {...baseProps} />);
-    // Menu is closed by default
-    expect(screen.queryByText("Switch to dark")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reset demo data")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    expect(screen.getByText("Switch to dark")).toBeInTheDocument();
-  });
-
-  it("calls onToggleTheme when the dark/light menu item is clicked", () => {
-    const onToggleTheme = vi.fn();
-    render(<Inspector {...baseProps} onToggleTheme={onToggleTheme} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    fireEvent.click(screen.getByText("Switch to dark"));
-    expect(onToggleTheme).toHaveBeenCalledTimes(1);
-    // Menu should close after action
-    expect(screen.queryByText("Switch to dark")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+    expect(screen.getByText("Import YNAB4 Backup")).toBeInTheDocument();
   });
 
   it("calls onResetDemo (after confirm) when Reset demo data is clicked", () => {
@@ -48,7 +33,7 @@ describe("Inspector", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
     expect(confirmSpy).toHaveBeenCalled();
     expect(onResetDemo).toHaveBeenCalledTimes(1);
@@ -60,7 +45,7 @@ describe("Inspector", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
     expect(onResetDemo).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
@@ -68,7 +53,7 @@ describe("Inspector", () => {
 
   it("hides the Reset menu item when onResetDemo is not provided", () => {
     render(<Inspector {...baseProps} />);
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     expect(screen.queryByText("Reset demo data")).not.toBeInTheDocument();
   });
 

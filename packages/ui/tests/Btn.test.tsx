@@ -17,14 +17,16 @@ describe("Btn", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("renders primary and danger variants with distinct colors", () => {
+  it("renders primary and danger variants with distinct classes", () => {
     const { rerender } = render(<Btn variant="primary">P</Btn>);
-    const primary = screen.getByRole("button", { name: /p/i }) as HTMLButtonElement;
-    expect(primary.style.background).toBe("var(--accent)");
+    const primary = screen.getByRole("button", { name: /p/i });
+    expect(primary.className).toMatch(/y-btn/);
+    expect(primary.className).toMatch(/y-btn--primary/);
 
     rerender(<Btn variant="danger">D</Btn>);
-    const danger = screen.getByRole("button", { name: /d/i }) as HTMLButtonElement;
-    expect(danger.style.background).toBe("var(--danger)");
+    const danger = screen.getByRole("button", { name: /d/i });
+    expect(danger.className).toMatch(/y-btn/);
+    expect(danger.className).toMatch(/y-btn--danger/);
   });
 
   it("respects disabled prop", () => {

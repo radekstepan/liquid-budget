@@ -2530,6 +2530,21 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@ynab/theme@workspace:*, @ynab/theme@workspace:packages/theme":
+  version: 0.0.0-use.local
+  resolution: "@ynab/theme@workspace:packages/theme"
+  dependencies:
+    "@types/react": "npm:19.2.14"
+    "@types/react-dom": "npm:19.2.3"
+    react: "npm:19.2.6"
+    react-dom: "npm:19.2.6"
+    typescript: "npm:5.9.3"
+  peerDependencies:
+    react: 19.2.6
+    react-dom: 19.2.6
+  languageName: unknown
+  linkType: soft
+
 "@ynab/ui@workspace:*, @ynab/ui@workspace:packages/ui":
   version: 0.0.0-use.local
   resolution: "@ynab/ui@workspace:packages/ui"
@@ -2541,6 +2556,7 @@ __metadata:
     "@types/react-dom": "npm:19.2.3"
     "@vitejs/plugin-react": "npm:4.3.4"
     "@ynab/logic": "workspace:*"
+    "@ynab/theme": "workspace:*"
     jsdom: "npm:25.0.1"
     react: "npm:19.2.6"
     react-dom: "npm:19.2.6"

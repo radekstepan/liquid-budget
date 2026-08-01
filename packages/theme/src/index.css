@@ -1,5 +1,3 @@
-@import "tailwindcss";
-
 /* ============================================================
    YNAB 4 WEB TOOLKIT  —  faithful recreation of the 2012
    Adobe AIR desktop app's visual language.
@@ -762,13 +760,4 @@ body {
   border-radius: 6px;
 }
 
-/* toolkit page chrome (docs, not YNAB) */
-.doc-anchor {
-  scroll-margin-top: 74px;
-}
-.swatch {
-  height: 46px;
-  border-radius: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.18);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
-}
+/* (docs-only classes removed when the demo was retired) */
