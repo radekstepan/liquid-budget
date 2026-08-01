@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { computeBudget, num, parseMonthKey, monthKey, todayISO, DEMO_MONTH } from "@ynab/logic";
+import { computeBudget, num, parseMonthKey, monthKey, todayISO, DEMO_MONTH, MONTHS } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
@@ -162,7 +162,27 @@ export function BudgetApp({
 
   const { year } = parseMonthKey(month);
 
-  const budget = useMemo(() => computeBudget(data, month), [data, month]);
+  const monthsWindow = useMemo(() => {
+    const { year: y, month0 } = parseMonthKey(month);
+    const m1 = monthKey(y + Math.floor((month0 - 1) / 12), ((month0 - 1) % 12 + 12) % 12);
+    const m2 = month;
+    const m3 = monthKey(y + Math.floor((month0 + 1) / 12), ((month0 + 1) % 12 + 12) % 12);
+    return [m1, m2, m3];
+  }, [month]);
+
+  const budgets = useMemo(() => {
+    return monthsWindow.map(mk => {
+      const { year: y, month0: m0 } = parseMonthKey(mk);
+      return {
+        month: mk,
+        year: y,
+        monthName: MONTHS[m0] ?? "",
+        result: computeBudget(data, mk)
+      };
+    });
+  }, [data, monthsWindow]);
+
+  const budget = budgets[1]!.result; // Current month's result for summary
   const groups = budget.groups;
   const budgetGroups = groups.filter((g) => !g.group.isCreditCardPayments);
   const summary = {
@@ -263,14 +283,14 @@ export function BudgetApp({
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--panel)" }}>
         {view === "budget" && (
           <BudgetView
-            groups={groups}
-            month={month}
-            year={year}
+            budgets={budgets}
+            currentMonth={month}
             accounts={data.accounts}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
             onAssign={assign}
             onSelectMonth={setMonth}
+            onShiftMonth={shiftMonth}
             onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
             onAddGroup={() => setModal({ kind: "addGroup" })}
             onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}

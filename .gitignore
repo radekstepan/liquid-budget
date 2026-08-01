@@ -33,3 +33,4 @@ coverage/
 .turbo/
 
 budget.db*
+apps/web/budget.db*

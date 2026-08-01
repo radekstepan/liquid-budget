@@ -10,7 +10,7 @@
  */
 import { openDb, resetDatabase, seedDatabase } from "./index.js";
 
-const DB_PATH = process.env.DATABASE_URL ?? "./budget.db";
+const DB_PATH = process.env.DATABASE_URL ?? "../../budget.db";
 const db = openDb(DB_PATH);
 
 try {
