@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Database } from "../client.js";
-import { recurring } from "../schema.js";
+import { recurring, recurringSubTransactions } from "../schema.js";
+import type { SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
 
 export type CreateRecurringInput = {
   accountId: number;
@@ -10,6 +11,20 @@ export type CreateRecurringInput = {
   frequency: string;
   nextDate: string;
   active?: boolean;
+  /**
+   * If set, this recurring entry is a transfer: it lives on `accountId`
+   * and the corresponding balance movement lands on `transferAccountId`
+   * when posted. `categoryId` is forced to null and `subTransactions`
+   * must be omitted.
+   */
+  transferAccountId?: number | null;
+  /**
+   * If set, this recurring entry is a split: the parent's amount is
+   * informational (sum of children) and only children are applied to
+   * account / category balances at post time. Mutually exclusive with
+   * `transferAccountId`.
+   */
+  subTransactions?: TxnSubTransactionInput[];
 };
 
 export type UpdateRecurringInput = {
@@ -20,37 +35,215 @@ export type UpdateRecurringInput = {
   frequency?: string;
   nextDate?: string;
   active?: boolean;
+  transferAccountId?: number | null;
+  /**
+   * If the key is present in the patch, the children of this recurring
+   * entry are FULLY REPLACED with the supplied list (mirror of how
+   * `updateSplit` works for transactions). Omit the key to leave
+   * existing children untouched.
+   */
+  subTransactions?: TxnSubTransactionInput[];
 };
 
+/**
+ * Thrown by the recurring queries to signal a validation failure that
+ * should surface as a 4xx HTTP response (rather than a 5xx).
+ */
+export class RecurringError extends Error {
+  constructor(message: string, public readonly status = 400) {
+    super(message);
+    this.name = "RecurringError";
+  }
+}
+
+/**
+ * Validate a set of recurring sub-transactions. Mirrors the
+ * transaction-side `assertSplitsBalanced`.
+ */
+function assertSplitsBalanced(
+  parentAmount: number,
+  children: TxnSubTransactionInput[]
+): void {
+  if (children.length < 2) {
+    throw new RecurringError("split must have at least two sub-transactions");
+  }
+  for (const c of children) {
+    if (!c.categoryId) {
+      throw new RecurringError("each sub-transaction must have a category");
+    }
+  }
+  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
+  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
+    throw new RecurringError(
+      `split children do not sum to parent: ${sum.toFixed(2)} vs ${Math.abs(parentAmount).toFixed(2)}`
+    );
+  }
+}
+
+function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
+  isTransfer: boolean;
+  isSplit: boolean;
+  effectiveCategoryId: number | null;
+  effectiveTransferAccountId: number | null;
+  effectiveAccountId: number | null;
+  subTransactions: TxnSubTransactionInput[] | undefined;
+} {
+  const isTransfer =
+    "transferAccountId" in input && (input as CreateRecurringInput).transferAccountId != null;
+  const isSplit =
+    "subTransactions" in input &&
+    Array.isArray((input as CreateRecurringInput).subTransactions) &&
+    ((input as CreateRecurringInput).subTransactions!.length ?? 0) > 0;
+
+  if (isTransfer && isSplit) {
+    throw new RecurringError("recurring cannot be both a transfer and a split");
+  }
+
+  const effectiveTransferAccountId = isTransfer
+    ? Number((input as CreateRecurringInput).transferAccountId)
+    : null;
+  const effectiveAccountId =
+    "accountId" in input && (input as CreateRecurringInput).accountId != null
+      ? Number((input as CreateRecurringInput).accountId)
+      : null;
+
+  if (isTransfer && effectiveAccountId != null && effectiveTransferAccountId === effectiveAccountId) {
+    throw new RecurringError("transfer account must differ from source account");
+  }
+
+  const explicitCategoryId =
+    "categoryId" in input ? (input as CreateRecurringInput).categoryId : undefined;
+  const effectiveCategoryId =
+    isTransfer || isSplit ? null : (explicitCategoryId ?? null);
+
+  const subTransactions = isSplit
+    ? ((input as CreateRecurringInput).subTransactions as TxnSubTransactionInput[])
+    : undefined;
+
+  return {
+    isTransfer,
+    isSplit,
+    effectiveCategoryId,
+    effectiveTransferAccountId,
+    effectiveAccountId,
+    subTransactions,
+  };
+}
+
 export async function createRecurring(db: Database, input: CreateRecurringInput) {
-  const [row] = await db
+  const norm = normaliseInput(input);
+  if (norm.isSplit) {
+    assertSplitsBalanced(input.amount, norm.subTransactions!);
+  }
+
+  const [parent] = await db
     .insert(recurring)
     .values({
       accountId: input.accountId,
-      categoryId: input.categoryId,
+      categoryId: norm.effectiveCategoryId,
       payee: input.payee,
       amount: input.amount,
       frequency: input.frequency,
       nextDate: input.nextDate,
       active: input.active ?? true,
+      transferAccountId: norm.effectiveTransferAccountId,
     })
     .returning();
-  return row;
+
+  if (norm.isSplit && parent) {
+    let sort = 0;
+    for (const c of norm.subTransactions!) {
+      await db.insert(recurringSubTransactions).values({
+        recurringId: parent.id,
+        categoryId: c.categoryId,
+        amount: c.amount,
+        memo: c.memo ?? "",
+        sort: sort++,
+      });
+    }
+  }
+
+  return parent;
 }
 
 export async function updateRecurring(db: Database, id: number, patch: UpdateRecurringInput) {
+  // Read the existing row to support rules that depend on the current state.
+  const [existing] = await db.select().from(recurring).where(eq(recurring.id, id));
+  if (!existing) return null;
+
+  const norm = normaliseInput(patch);
+
+  // Validate split children if supplied.
+  if (norm.isSplit) {
+    // If the patch updates `amount`, validate against the new amount;
+    // otherwise validate against the existing amount.
+    const parentAmount =
+      "amount" in patch && (patch as UpdateRecurringInput).amount != null
+        ? Number((patch as UpdateRecurringInput).amount)
+        : Number(existing.amount);
+    assertSplitsBalanced(parentAmount, norm.subTransactions!);
+  }
+
+  // If neither `subTransactions` nor `transferAccountId` are being
+  // changed, but `amount` is — for an existing split entry, the
+  // children must still sum to the new amount.
+  if (
+    existing.transferAccountId == null &&
+    !norm.isSplit &&
+    !("subTransactions" in patch) &&
+    "amount" in patch &&
+    (patch as UpdateRecurringInput).amount != null
+  ) {
+    const existingChildren = await db
+      .select()
+      .from(recurringSubTransactions)
+      .where(eq(recurringSubTransactions.recurringId, id));
+    if (existingChildren.length > 0) {
+      assertSplitsBalanced(Number((patch as UpdateRecurringInput).amount), existingChildren);
+    }
+  }
+
   const p: Record<string, unknown> = {};
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if ("categoryId" in patch) p.categoryId = patch.categoryId ?? null;
+  if ("categoryId" in patch) p.categoryId = norm.effectiveCategoryId;
   if (patch.payee != null) p.payee = String(patch.payee);
   if (patch.amount != null) p.amount = Number(patch.amount);
   if (patch.frequency != null) p.frequency = String(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
-  const [row] = await db.update(recurring).set(p).where(eq(recurring.id, id)).returning();
-  return row;
+  if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
+
+  // Wrap parent update + child replace in a transaction-like block.
+  // SQLite via better-sqlite3 is sequential per-connection; a single
+  // helper ensures ordering of the parent's UPDATE and the children's
+  // DELETE+INSERT.
+  if (Object.keys(p).length > 0) {
+    await db.update(recurring).set(p).where(eq(recurring.id, id));
+  }
+
+  if ("subTransactions" in patch) {
+    await db
+      .delete(recurringSubTransactions)
+      .where(eq(recurringSubTransactions.recurringId, id));
+    if (norm.isSplit) {
+      let sort = 0;
+      for (const c of norm.subTransactions!) {
+        await db.insert(recurringSubTransactions).values({
+          recurringId: id,
+          categoryId: c.categoryId,
+          amount: c.amount,
+          memo: c.memo ?? "",
+          sort: sort++,
+        });
+      }
+    }
+  }
+
+  const [row] = await db.select().from(recurring).where(eq(recurring.id, id));
+  return row ?? null;
 }
 
 export async function deleteRecurring(db: Database, id: number) {
-  await db.delete(recurring).where(eq(recurring.id, id));
+  // Cascade in the schema handles removing children.
+  await db.delete(recurring).where(and(eq(recurring.id, id)));
 }

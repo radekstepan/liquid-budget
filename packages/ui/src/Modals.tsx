@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Account, Category, Transaction, SubTransaction } from "@ynab/logic";
-import { todayISO, num, getSplitChildren, validateSubTransactions } from "@ynab/logic";
+import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
+import { todayISO, num, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 
@@ -557,7 +557,7 @@ export function RecurringModal({
 }: {
   accounts: Account[];
   categories: Category[];
-  initial?: import("@ynab/logic").Recurring;
+  initial?: Recurring & { subTransactions?: RecurringSubTransaction[] };
   onClose: () => void;
   onSave: (v: {
     id?: number;
@@ -568,67 +568,183 @@ export function RecurringModal({
     frequency: string;
     nextDate: string;
     active: boolean;
+    transferAccountId?: number | null;
+    subTransactions?: { categoryId: number; amount: number; memo?: string }[];
   }) => void;
 }) {
   const initialAmt = initial ? num(initial.amount) : 0;
+  const initialChildren = initial?.subTransactions ?? [];
+
+  const isInitialTransfer = !!initial?.transferAccountId;
+  const isInitialSplit = !isInitialTransfer && initialChildren.length > 0;
+
+  const [mode, setMode] = useState<"single" | "transfer" | "split">(
+    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
+  );
+
   const [accountId, setAccountId] = useState(initial?.accountId ?? accounts[0]?.id ?? 0);
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [payee, setPayee] = useState(initial?.payee ?? "");
-  const [amount, setAmount] = useState(initial ? Math.abs(initialAmt).toFixed(2) : "");
-  const [type, setType] = useState<"outflow" | "inflow">(
-    initial ? (initialAmt >= 0 ? "inflow" : "outflow") : "outflow"
-  );
+  const [amount, setAmount] = useState(initial ? initialAmt.toFixed(2) : "");
   const [frequency, setFrequency] = useState(initial?.frequency ?? "monthly");
   const [nextDate, setNextDate] = useState(initial?.nextDate ?? todayISO());
   const [active, setActive] = useState(initial?.active ?? true);
 
+  // Transfer destination
+  const [transferAccountId, setTransferAccountId] = useState<number | "">(
+    initial?.transferAccountId ?? ""
+  );
+
+  // Split sub-rows
+  const [subRows, setSubRows] = useState<SubTransaction[]>(
+    initialChildren.length > 0
+      ? initialChildren.map((c) => ({
+          categoryId: c.categoryId,
+          amount: Math.abs(num(c.amount)),
+          memo: c.memo ?? "",
+        }))
+      : [
+          { categoryId: 0, amount: 0, memo: "" },
+          { categoryId: 0, amount: 0, memo: "" },
+        ]
+  );
+
+  const otherAccounts = accounts.filter((a) => a.id !== accountId);
+
+  const parentAmount = Math.abs(parseFloat(amount)) || 0;
+  const subTotal = subRows.reduce(
+    (s, r) => s + Math.abs(Number(r.amount) || 0),
+    0
+  );
+  const subValidation = useMemo(() => {
+    if (mode !== "split") return null;
+    return validateRecurringSubTransactions(parentAmount, subRows);
+  }, [mode, parentAmount, subRows]);
+
+  const switchingMode = (next: "single" | "transfer" | "split") => {
+    setMode(next);
+    if (next === "single") {
+      setTransferAccountId("");
+      setSubRows([
+        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: 0, amount: 0, memo: "" },
+      ]);
+    } else if (next === "transfer") {
+      setCategoryId("");
+      setSubRows([
+        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: 0, amount: 0, memo: "" },
+      ]);
+    } else {
+      setTransferAccountId("");
+      setCategoryId("");
+    }
+  };
+
   const save = () => {
-    const a = Math.abs(parseFloat(amount));
-    if (Number.isNaN(a) || !payee.trim()) return;
+    const a = parseFloat(amount);
+    if (Number.isNaN(a) || !accountId) return;
+
+    if (mode === "transfer") {
+      if (!transferAccountId) return;
+      if (Number(transferAccountId) === accountId) return;
+      const destName = otherAccounts.find((x) => x.id === Number(transferAccountId))?.name ?? "";
+      onSave({
+        id: initial?.id,
+        accountId,
+        categoryId: null,
+        payee: payee.trim() || `Transfer : ${destName}`,
+        amount: a,
+        frequency,
+        nextDate,
+        active,
+        transferAccountId: Number(transferAccountId),
+      });
+      return;
+    }
+
+    if (mode === "split") {
+      if (!payee.trim()) return;
+      if (subValidation) return; // disable save via validation
+      onSave({
+        id: initial?.id,
+        accountId,
+        categoryId: null,
+        payee: payee.trim(),
+        amount: a,
+        frequency,
+        nextDate,
+        active,
+        subTransactions: subRows.map((r) => ({
+          categoryId: r.categoryId,
+          // Sub-row amounts inherit the sign of the parent. The user
+          // types positive values; the modal applies the sign so the
+          // server-side balance accounting treats them consistently.
+          amount: a < 0 ? -Math.abs(Number(r.amount)) : Math.abs(Number(r.amount)),
+          memo: r.memo,
+        })),
+      });
+      return;
+    }
+
+    // single
+    if (!payee.trim()) return;
     onSave({
       id: initial?.id,
       accountId,
       categoryId: categoryId === "" ? null : Number(categoryId),
       payee: payee.trim(),
-      amount: type === "outflow" ? -a : a,
+      amount: a,
       frequency,
       nextDate,
       active,
     });
   };
 
+  const canSave = (() => {
+    const a = Math.abs(parseFloat(amount));
+    if (Number.isNaN(a) || !accountId) return false;
+    if (mode === "transfer") {
+      return Boolean(transferAccountId) && Number(transferAccountId) !== accountId;
+    }
+    if (mode === "split") {
+      return Boolean(payee.trim()) && subValidation === null;
+    }
+    return Boolean(payee.trim());
+  })();
+
   return (
     <Modal
+      wide={mode === "split"}
       title={initial ? "Edit Recurring Transaction" : "Add Recurring Transaction"}
       onClose={onClose}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save}>
+          <Btn variant="primary" onClick={save} disabled={!canSave}>
             {initial ? "Save Changes" : "Save"}
           </Btn>
         </>
       }
     >
       <div className="y-seg mb-3 w-full">
-        {(["outflow", "inflow"] as const).map((t) => (
+        {(["single", "transfer", "split"] as const).map((m) => (
           <Button
-            key={t}
+            key={m}
             size="sm"
-            variant={type === t ? "primary" : "default"}
-            active={type === t}
-            onClick={() => setType(t)}
+            variant={mode === m ? "primary" : "default"}
+            active={mode === m}
+            onClick={() => switchingMode(m)}
             className="flex-1 capitalize"
+            disabled={!!isInitialSplit && m === "single"}
           >
-            {t}
+            {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
           </Button>
         ))}
       </div>
-      <Field label="Payee">
-        <TextField value={payee} onChange={(e) => setPayee(e.target.value)} className={inputClass} />
-      </Field>
+
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Amount">
+        <Field label={mode === "split" ? "Total" : "Amount"}>
           <TextField
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -650,45 +766,171 @@ export function RecurringModal({
           </Select>
         </Field>
       </div>
+
+      {mode !== "transfer" && (
+        <Field label="Payee">
+          <TextField
+            value={payee}
+            onChange={(e) => setPayee(e.target.value)}
+            placeholder="e.g. Whole Foods"
+            className={inputClass}
+          />
+        </Field>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <Field label="Account">
           <Select
             value={accountId}
             onChange={(e) => setAccountId(Number(e.target.value))}
             className="w-full"
+            disabled={mode === "transfer"}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </Select>
         </Field>
-        <Field label="Category">
-          <Select
-            value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-full"
-          >
-            <option value="">Uncategorized</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </Select>
-        </Field>
+        {mode === "transfer" ? (
+          <Field label="Transfer to">
+            <Select
+              value={transferAccountId}
+              onChange={(e) => setTransferAccountId(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-full"
+            >
+              <option value="">Select account…</option>
+              {otherAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </Select>
+          </Field>
+        ) : mode === "split" ? null : (
+          <Field label="Category">
+            <Select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-full"
+            >
+              <option value="">Uncategorized</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
       </div>
-      <Field label="Next Date">
-        <TextField
-          type="date"
-          value={nextDate}
-          onChange={(e) => setNextDate(e.target.value)}
-          className={inputClass}
-        />
-      </Field>
-      <div className="mt-2 mb-0">
-        <Checkbox
-          checked={active}
-          onChange={setActive}
-          label="Active"
-        />
+
+      {mode === "transfer" && (
+        <Field label="Payee (auto-generated, override optional)">
+          <TextField
+            value={payee}
+            onChange={(e) => setPayee(e.target.value)}
+            placeholder={
+              transferAccountId
+                ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                : "Transfer : <other account>"
+            }
+            className={inputClass}
+          />
+        </Field>
+      )}
+
+      {mode === "split" && (
+        <div className="mt-1">
+          <div className="y-label mb-1.5 block">Sub-transactions</div>
+          <div className="space-y-1.5">
+            {subRows.map((row, i) => (
+              <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
+                <Select
+                  value={row.categoryId || ""}
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? 0 : Number(e.target.value);
+                    setSubRows((rs) =>
+                      rs.map((r, j) => (i === j ? { ...r, categoryId: v } : r))
+                    );
+                  }}
+                  className="w-full"
+                >
+                  <option value="">Category…</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+                <TextField
+                  value={row.amount || ""}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setSubRows((rs) =>
+                      rs.map((r, j) => (i === j ? { ...r, amount: Number.isNaN(v) ? 0 : v } : r))
+                    );
+                  }}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  aria-label="Remove sub-transaction"
+                  className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                  onClick={() =>
+                    setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
+                  }
+                  disabled={subRows.length <= 2}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <Button
+              size="sm"
+              onClick={() =>
+                setSubRows((rs) => [...rs, { categoryId: 0, amount: 0, memo: "" }])
+              }
+            >
+              + Add sub-transaction
+            </Button>
+            <span
+              className="ml-auto text-[11.5px] y-num"
+              style={{
+                color:
+                  Math.abs(subTotal - parentAmount) < 0.005
+                    ? "var(--y-green-dk)"
+                    : "var(--y-red)",
+                fontWeight: 700,
+              }}
+            >
+              Σ {subTotal.toFixed(2)} / {parentAmount.toFixed(2)}
+            </span>
+          </div>
+          {subValidation && (
+            <div
+              className="mt-1 text-[11px]"
+              style={{ color: "var(--y-red)" }}
+            >
+              {subValidation}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Next Date">
+          <TextField
+            type="date"
+            value={nextDate}
+            onChange={(e) => setNextDate(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <div className="flex items-end pb-1">
+          <Checkbox
+            checked={active}
+            onChange={setActive}
+            label="Active"
+          />
+        </div>
       </div>
     </Modal>
   );

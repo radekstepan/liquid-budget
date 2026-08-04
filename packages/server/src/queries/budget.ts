@@ -1,16 +1,17 @@
 import { asc, desc, sql } from "drizzle-orm";
 import type { BudgetData } from "@ynab/logic";
 import type { Db } from "../client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, transactions } from "../schema.js";
+import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 
 export async function getBudgetData(db: Db): Promise<BudgetData> {
-  const [accts, groups, cats, assigns, txns, recur] = await Promise.all([
+  const [accts, groups, cats, assigns, txns, recur, recurSubs] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort)),
     db.select().from(categories).orderBy(asc(categories.sort)),
     db.select().from(assignments),
     db.select().from(transactions).orderBy(desc(transactions.date), desc(transactions.id)),
     db.select().from(recurring).orderBy(asc(recurring.nextDate)),
+    db.select().from(recurringSubTransactions).orderBy(asc(recurringSubTransactions.sort), asc(recurringSubTransactions.id)),
   ]);
 
   return {
@@ -33,7 +34,13 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       // createdAt is already a text string in SQLite
       createdAt: t.createdAt,
     })),
-    recurring: recur.map((r) => ({ ...r, amount: String(r.amount) })),
+    recurring: recur.map((r) => ({
+      ...r,
+      amount: String(r.amount),
+      subTransactions: recurSubs
+        .filter((s) => s.recurringId === r.id)
+        .map((s) => ({ ...s, amount: String(s.amount) })),
+    })),
   };
 }
 

@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 
 export async function importYnab4(db: Db, ynabData: any) {
@@ -243,13 +243,33 @@ export async function importYnab4(db: Db, ynabData: any) {
     const accId = accountIdMap.get(st.accountId);
     if (!accId) continue;
 
-    const payee = payeeMap.get(st.payeeId) || "";
+    let payee = payeeMap.get(st.payeeId) || "";
+    let transferAccountId = st.targetAccountId ? accountIdMap.get(st.targetAccountId) || null : null;
+
+    // YNAB4's transfer convention is `Payee/Transfer:<AccountId>`. Honour it
+    // for scheduled transactions the same way the transactions importer
+    // does (lines 158-165 above).
+    if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
+      const targetId = st.payeeId.split(":")[1];
+      const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+      if (foundTarget) {
+        transferAccountId = foundTarget;
+        payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+      }
+    }
 
     let catId = categoryIdMap.get(st.categoryId) || null;
     if (
       st.categoryId === "Category/__ImmediateIncome__" ||
-      st.categoryId === "Category/__DeferredIncome__"
+      st.categoryId === "Category/__DeferredIncome__" ||
+      st.categoryId === "Category/__Split__"
     ) {
+      catId = null;
+    }
+
+    // Transfers and splits cannot have a top-level category.
+    const hasSubs = Array.isArray(st.subTransactions) && st.subTransactions.length > 0;
+    if (transferAccountId != null || hasSubs) {
       catId = null;
     }
 
@@ -259,15 +279,46 @@ export async function importYnab4(db: Db, ynabData: any) {
       frequency = "monthly"; // default fallback
     }
 
-    await db.insert(recurring).values({
-      accountId: accId,
-      categoryId: catId,
-      payee,
-      amount: st.amount || 0,
-      frequency,
-      nextDate: st.date,
-      active: true,
-    });
+    const [insertedR] = await db
+      .insert(recurring)
+      .values({
+        accountId: accId,
+        categoryId: catId,
+        payee,
+        amount: st.amount || 0,
+        frequency,
+        nextDate: st.date,
+        active: true,
+        transferAccountId,
+      })
+      .returning();
+
+    if (hasSubs && insertedR) {
+      // Recurring splits don't support transfer sub-rows (the
+      // `recurring_sub_transactions` schema has no transferAccountId),
+      // matching the no-transfer-in-a-split YNAB4 rule. Sub-row
+      // `targetAccountId` is intentionally ignored.
+      let sort = 0;
+      for (const sub of st.subTransactions) {
+        if (sub.isTombstone) continue;
+        let subCatId = categoryIdMap.get(sub.categoryId) || null;
+        if (
+          sub.categoryId === "Category/__ImmediateIncome__" ||
+          sub.categoryId === "Category/__DeferredIncome__" ||
+          sub.categoryId === "Category/__Split__"
+        ) {
+          subCatId = null;
+        }
+        if (!subCatId) continue;
+        await db.insert(recurringSubTransactions).values({
+          recurringId: insertedR.id,
+          categoryId: subCatId,
+          amount: sub.amount || 0,
+          memo: sub.memo || "",
+          sort: sort++,
+        });
+      }
+    }
   }
 
   return {

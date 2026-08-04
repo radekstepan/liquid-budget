@@ -8,16 +8,24 @@ describe("budget queries", () => {
     mock = createMockDb();
   });
 
-  it("getBudgetData issues 6 select queries in parallel", async () => {
+  it("getBudgetData issues 7 select queries in parallel", async () => {
     mock.respondWith("select:*", []);
     const callsBefore = mock.calls.length;
     await getBudgetData(mock.db);
     const newCalls = mock.calls.slice(callsBefore);
     const selects = newCalls.filter((c) => c.op === "select");
-    expect(selects).toHaveLength(6);
+    expect(selects).toHaveLength(7);
     const tables = selects.map((c) => c.table).sort();
     expect(tables).toEqual(
-      ["accounts", "assignments", "category_groups", "categories", "recurring", "transactions"].sort()
+      [
+        "accounts",
+        "assignments",
+        "category_groups",
+        "categories",
+        "recurring",
+        "recurring_sub_transactions",
+        "transactions",
+      ].sort()
     );
   });
 
@@ -28,6 +36,7 @@ describe("budget queries", () => {
     mock.respondWith("select:assignments", []);
     mock.respondWith("select:transactions", []);
     mock.respondWith("select:recurring", []);
+    mock.respondWith("select:recurring_sub_transactions", []);
 
     const data = await getBudgetData(mock.db);
     expect(data.accounts).toHaveLength(1);

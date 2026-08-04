@@ -89,17 +89,67 @@ export function BudgetAppShell() {
       const r = data.recurring.find((x) => x.id === id);
       if (!r) return;
       const today = todayISO();
-      await jsonReq("/api/transactions", {
-        method: "POST",
-        body: JSON.stringify({
-          accountId: r.accountId,
-          categoryId: r.categoryId,
-          date: today,
-          payee: r.payee,
-          memo: "Recurring",
-          amount: num(r.amount),
-        }),
-      });
+
+      const children = r.subTransactions ?? [];
+      const isSplit = r.transferAccountId == null && children.length > 0;
+      const isTransfer = r.transferAccountId != null;
+
+      if (isSplit) {
+        // The parent amount's sign is propagated to each child so the
+        // server-side balance accounting treats them consistently with
+        // the regular split flow.
+        const parentSign = num(r.amount) < 0 ? -1 : 1;
+        await jsonReq("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            accountId: r.accountId,
+            categoryId: null,
+            date: today,
+            payee: r.payee,
+            memo: "Recurring",
+            amount: num(r.amount),
+            cleared: true,
+            subTransactions: children.map((c) => ({
+              categoryId: c.categoryId,
+              amount: parentSign * Math.abs(num(c.amount)),
+              memo: c.memo,
+            })),
+          }),
+        });
+      } else if (isTransfer) {
+        // If the recurring payee is blank the server will auto-fill
+        // "Transfer : <dest>". For UI consistency we set the same here
+        // when blank.
+        const destName =
+          data.accounts.find((a) => a.id === r.transferAccountId)?.name ?? "";
+        await jsonReq("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            accountId: r.accountId,
+            categoryId: null,
+            date: today,
+            payee: r.payee.trim() || `Transfer : ${destName}`,
+            memo: "Recurring",
+            amount: num(r.amount),
+            cleared: true,
+            transferAccountId: r.transferAccountId,
+          }),
+        });
+      } else {
+        await jsonReq("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            accountId: r.accountId,
+            categoryId: r.categoryId,
+            date: today,
+            payee: r.payee,
+            memo: "Recurring",
+            amount: num(r.amount),
+            cleared: true,
+          }),
+        });
+      }
+
       // Advance nextDate by one frequency step so the next "Post Now" is
       // a fresh cycle and the recurring card reflects a new schedule.
       const next = nextDateFor(r.frequency, r.nextDate);

@@ -77,6 +77,8 @@ export type BudgetAppApi = {
     amount: number;
     frequency: string;
     nextDate: string;
+    transferAccountId?: number | null;
+    subTransactions?: { categoryId: number; amount: number; memo?: string }[];
   }) => Promise<void>;
   updateRecurring: (
     id: number,
@@ -88,6 +90,8 @@ export type BudgetAppApi = {
       frequency?: string;
       nextDate?: string;
       active?: boolean;
+      transferAccountId?: number | null;
+      subTransactions?: { categoryId: number; amount: number; memo?: string }[];
     }
   ) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;

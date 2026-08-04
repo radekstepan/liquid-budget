@@ -5,7 +5,13 @@ import {
   TransactionModal,
   RecurringModal,
 } from "../src/Modals.js";
-import type { Account, Category, Transaction, Recurring } from "@ynab/logic";
+import type {
+  Account,
+  Category,
+  Transaction,
+  Recurring,
+  RecurringSubTransaction,
+} from "@ynab/logic";
 
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100.00", onBudget: true, sort: 0 },
@@ -408,7 +414,7 @@ describe("RecurringModal", () => {
     expect(options).toContain("yearly");
   });
 
-  it("calls onSave with the biweekly frequency when chosen", () => {
+  it("calls onSave with a signed amount (no Outflow/Inflow toggle)", () => {
     const onSave = vi.fn();
     render(
       <RecurringModal
@@ -421,7 +427,7 @@ describe("RecurringModal", () => {
     fireEvent.change(screen.getByLabelText(/^payee$/i), {
       target: { value: "Hydro" },
     });
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "80" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-80" } });
     fireEvent.change(screen.getByRole("combobox", { name: /frequency/i }), {
       target: { value: "biweekly" },
     });
@@ -458,5 +464,149 @@ describe("RecurringModal", () => {
     expect(screen.getByDisplayValue("Spotify")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 7, payee: "Spotify", active: true });
+  });
+
+  it("renders Transfer mode and emits transferAccountId on save", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+    // Source account stays the first one (Chequing); pick the destination.
+    fireEvent.change(screen.getByLabelText(/transfer to/i), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-500" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      accountId: 1,
+      transferAccountId: 2,
+      amount: -500,
+    });
+    expect(payload.categoryId).toBeNull();
+    // Payee auto-derived as "Transfer : Credit" since blank.
+    expect(payload.payee).toBe("Transfer : Credit");
+  });
+
+  it("renders Split mode and emits subTransactions on save", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      target: { value: "Costco" },
+    });
+    const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+    const total = allZeros[0]!;
+    fireEvent.change(total, { target: { value: "-200" } });
+
+    const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+    const subCatSelects = screen
+      .getAllByRole("combobox")
+      .filter(
+        (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
+      ) as HTMLSelectElement[];
+    fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
+    fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+    fireEvent.change(subAmounts[0]!, { target: { value: "120" } });
+    fireEvent.change(subAmounts[1]!, { target: { value: "80" } });
+
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![0] as {
+      amount: number;
+      subTransactions: { categoryId: number; amount: number }[];
+      categoryId: number | null;
+      payee: string;
+    };
+    expect(payload.amount).toBe(-200);
+    expect(payload.categoryId).toBeNull();
+    expect(payload.payee).toBe("Costco");
+    expect(payload.subTransactions).toHaveLength(2);
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -120 });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -80 });
+  });
+
+  it("re-uses transferAccountId and subTransactions when editing", () => {
+    const onSave = vi.fn();
+    const initial = {
+      id: 9,
+      accountId: 1,
+      categoryId: null,
+      payee: "AMEX Payment",
+      amount: "-1000",
+      frequency: "monthly",
+      nextDate: "2026-07-20",
+      active: true,
+      transferAccountId: 2,
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    // The Transfer toggle should be active.
+    const transferBtn = screen.getByRole("button", { name: /^transfer$/i });
+    expect(transferBtn.className).toMatch(/primary|active/);
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      id: 9,
+      accountId: 1,
+      transferAccountId: 2,
+      payee: "AMEX Payment",
+      amount: -1000,
+    });
+  });
+
+  it("opens a split row in split mode with its children pre-populated", () => {
+    const onSave = vi.fn();
+    const subs: RecurringSubTransaction[] = [
+      { id: 1, recurringId: 9, categoryId: 10, amount: "-120", memo: "g", sort: 0 },
+      { id: 2, recurringId: 9, categoryId: 11, amount: "-80",  memo: "h", sort: 1 },
+    ];
+    const initial = {
+      id: 9,
+      accountId: 1,
+      categoryId: null,
+      payee: "Costco",
+      amount: "-200",
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+      active: true,
+      subTransactions: subs,
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    const splitBtn = screen.getByRole("button", { name: /^split$/i });
+    expect(splitBtn.className).toMatch(/primary|active/);
+    // Single is disabled when the initial is a split.
+    const singleBtn = screen.getByRole("button", { name: /^single$/i });
+    expect(singleBtn).toBeDisabled();
   });
 });

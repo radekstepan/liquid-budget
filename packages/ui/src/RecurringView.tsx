@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num } from "@ynab/logic";
+import { fmt, num, netMonthlyAmount, recurringFlavour } from "@ynab/logic";
 import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
 
 export function RecurringView({
@@ -23,12 +23,19 @@ export function RecurringView({
   const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
+  // Per-row net rule: single = its amount; transfer = 0; split = sum of children.
   const monthlyOut = data.recurring
-    .filter((r) => r.active && num(r.amount) < 0 && r.frequency === "monthly")
-    .reduce((s, r) => s + num(r.amount), 0);
+    .filter((r) => r.active && r.frequency === "monthly")
+    .reduce((s, r) => {
+      const v = netMonthlyAmount(r, r.subTransactions ?? []);
+      return s + (v < 0 ? v : 0);
+    }, 0);
   const monthlyIn = data.recurring
-    .filter((r) => r.active && num(r.amount) > 0 && r.frequency === "monthly")
-    .reduce((s, r) => s + num(r.amount), 0);
+    .filter((r) => r.active && r.frequency === "monthly")
+    .reduce((s, r) => {
+      const v = netMonthlyAmount(r, r.subTransactions ?? []);
+      return s + (v > 0 ? v : 0);
+    }, 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -59,7 +66,15 @@ export function RecurringView({
       <div className="flex-1 overflow-y-auto p-4 y-scroll">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {data.recurring.map((r) => {
-            const amt = num(r.amount);
+            const flavour = recurringFlavour(r, r.subTransactions ?? []);
+            const sourceName = accMap.get(r.accountId) ?? "";
+            const destName =
+              flavour === "transfer" && r.transferAccountId != null
+                ? accMap.get(r.transferAccountId) ?? ""
+                : "";
+            const children = r.subTransactions ?? [];
+            const displayAmt =
+              flavour === "split" ? children.reduce((s, c) => s + num(c.amount), 0) : num(r.amount);
             return (
               <Panel key={r.id} bodyClass="!p-3">
                 <div className="flex items-start justify-between">
@@ -68,18 +83,30 @@ export function RecurringView({
                       {r.payee}
                     </div>
                     <div className="y-hint mt-[1px]">
-                      {accMap.get(r.accountId)}
-                      {r.categoryId ? ` · ${catMap.get(r.categoryId)}` : ""}
+                      {flavour === "transfer" ? (
+                        <>
+                          {sourceName} → {destName}
+                        </>
+                      ) : flavour === "split" ? (
+                        <>
+                          {sourceName} · {children.length} categories
+                        </>
+                      ) : (
+                        <>
+                          {sourceName}
+                          {r.categoryId ? ` · ${catMap.get(r.categoryId)}` : ""}
+                        </>
+                      )}
                     </div>
                   </div>
                   <span
                     className="y-num text-[14px] font-bold ml-2"
-                    style={{ color: amt < 0 ? "var(--y-red)" : "var(--y-green-dk)" }}
+                    style={{ color: displayAmt < 0 ? "var(--y-red)" : "var(--y-green-dk)" }}
                   >
-                    {fmt(amt)}
+                    {fmt(displayAmt)}
                   </span>
                 </div>
-                <div className="mt-2">
+                <div className="mt-2 flex items-center gap-2">
                   <Pill
                     tone={r.active ? "green" : "grey"}
                     onClick={() => onToggleActive(r.id, !r.active)}
@@ -93,6 +120,21 @@ export function RecurringView({
                     />
                     {r.active ? "Active" : "Paused"}
                   </Pill>
+                  {flavour !== "single" && (
+                    <span
+                      className="y-caps"
+                      style={{
+                        background: "var(--y-panel-alt)",
+                        color: "var(--y-ink-soft)",
+                        padding: "1px 7px",
+                        borderRadius: 8,
+                        border: "1px solid var(--y-line)",
+                        fontSize: 10.5,
+                      }}
+                    >
+                      {flavour}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <span

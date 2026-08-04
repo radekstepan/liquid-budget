@@ -1,7 +1,7 @@
 "use client";
 
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, MONTHS_LONG, parseMonthKey } from "@ynab/logic";
+import { fmt, num, netMonthlyAmount, MONTHS_LONG, parseMonthKey } from "@ynab/logic";
 import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
 
 export function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
@@ -10,15 +10,16 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
     .filter((a) => a.kind === "liquid")
     .reduce((s, a) => s + num(a.balance), 0);
 
+  // Per-row net rule: single = its amount; transfer = 0; split = sum of children.
   const monthlyNet = data.recurring
     .filter((r) => r.active && r.frequency === "monthly")
-    .reduce((s, r) => s + num(r.amount), 0);
+    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []), 0);
   const weeklyNet = data.recurring
     .filter((r) => r.active && r.frequency === "weekly")
-    .reduce((s, r) => s + num(r.amount) * 4.33, 0);
+    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) * 4.33, 0);
   const yearlyNet = data.recurring
     .filter((r) => r.active && r.frequency === "yearly")
-    .reduce((s, r) => s + num(r.amount) / 12, 0);
+    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) / 12, 0);
   const perMonth = monthlyNet + weeklyNet + yearlyNet;
 
   const points: { label: string; value: number }[] = [];
