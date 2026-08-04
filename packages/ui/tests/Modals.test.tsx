@@ -60,7 +60,7 @@ describe("CategoryModal", () => {
 });
 
 describe("TransactionModal", () => {
-  it("calls onSave with a negative amount when type is outflow (default)", () => {
+  it("calls onSave with the typed amount (sign convention: positive = inflow)", () => {
     const onSave = vi.fn();
     render(
       <TransactionModal
@@ -74,8 +74,9 @@ describe("TransactionModal", () => {
     fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Whole Foods" },
     });
+    // The only "0.00" placeholder in single mode is the amount field.
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
-      target: { value: "42.50" },
+      target: { value: "-42.50" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -86,7 +87,7 @@ describe("TransactionModal", () => {
     });
   });
 
-  it("calls onSave with a positive amount when type is inflow", () => {
+  it("calls onSave with a positive amount when the user types a positive number", () => {
     const onSave = vi.fn();
     render(
       <TransactionModal
@@ -97,7 +98,6 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /inflow/i }));
     fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Payroll" },
     });
@@ -166,10 +166,227 @@ describe("TransactionModal", () => {
       />
     );
     expect(screen.getByDisplayValue("IGA")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("12.34")).toBeInTheDocument();
+    // The amount field shows the signed value.
+    expect(screen.getByDisplayValue("-12.34")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 99, payee: "IGA" });
+  });
+
+  describe("transfer mode", () => {
+    it("hides the Category field and shows the destination account dropdown", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      expect(screen.queryByRole("combobox", { name: /category/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: /transfer to/i })).toBeInTheDocument();
+    });
+
+    it("calls onSave with transferAccountId and the destination name as payee", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
+      fireEvent.change(screen.getByRole("combobox", { name: /transfer to/i }), {
+        target: { value: "2" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave.mock.calls[0]![0]).toMatchObject({
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        amount: -100,
+        payee: "Transfer : Credit",
+      });
+    });
+
+    it("does not call onSave when no destination account is chosen", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
+      fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+      expect(onSave).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("split mode", () => {
+    it("reveals a sub-row editor with the parent amount as 'Total'", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      expect(screen.getByText("Total")).toBeInTheDocument();
+      expect(screen.getByText("Sub-transactions")).toBeInTheDocument();
+    });
+
+    it("disables save until children sum equals the parent total", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+        target: { value: "Costco" },
+      });
+      // Type the parent total first.
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "-100" } });
+      // Type child amounts that DON'T sum to 100 yet.
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      fireEvent.change(subAmounts[0]!, { target: { value: "60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "39.99" } });
+      // Sum 99.99 ≠ 100 → save disabled.
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it("enables save and emits subTransactions when children sum matches the parent", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+        target: { value: "Costco" },
+      });
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "-100" } });
+
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      const subCatSelects = screen
+        .getAllByRole("combobox")
+        .filter(
+          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
+        ) as HTMLSelectElement[];
+      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
+      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      fireEvent.change(subAmounts[0]!, { target: { value: "60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "40" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        amount: number;
+        subTransactions: { categoryId: number; amount: number }[];
+        categoryId: number | null;
+      };
+      expect(payload.amount).toBe(-100);
+      expect(payload.categoryId).toBeNull();
+      expect(payload.subTransactions).toHaveLength(2);
+      // Children inherit the parent's sign so balance accounting works
+      // consistently (parent -100, children -60 and -40).
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -60 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -40 });
+    });
+
+    it("pre-populates sub-rows when editing an existing split parent", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Costco",
+        memo: "",
+        amount: "-100",
+        cleared: true,
+      };
+      const allTransactions: Transaction[] = [
+        initial,
+        {
+          id: 2,
+          accountId: 1,
+          categoryId: 10,
+          date: "2026-07-01",
+          payee: "Costco",
+          memo: "",
+          amount: "-60",
+          cleared: true,
+          parentId: 1,
+        },
+        {
+          id: 3,
+          accountId: 1,
+          categoryId: 11,
+          date: "2026-07-01",
+          payee: "Costco",
+          memo: "",
+          amount: "-40",
+          cleared: true,
+          parentId: 1,
+        },
+      ];
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          allTransactions={allTransactions}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      const saveBtn = screen.getByRole("button", { name: /save changes/i });
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        id: number;
+        subTransactions: { categoryId: number; amount: number }[];
+      };
+      expect(payload.id).toBe(1);
+      expect(payload.subTransactions).toHaveLength(2);
+    });
   });
 });
 
