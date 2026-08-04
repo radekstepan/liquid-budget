@@ -182,7 +182,12 @@ export async function importYnab4(db: Db, ynabData: any) {
         payee,
         memo: t.memo || "",
         amount: t.amount || 0,
-        cleared: t.cleared !== "Uncleared",
+        status:
+          t.cleared === "Reconciled"
+            ? "r"
+            : t.cleared === "Uncleared"
+              ? "u"
+              : "c",
         transferAccountId,
       })
       .returning();
@@ -216,7 +221,12 @@ export async function importYnab4(db: Db, ynabData: any) {
           payee: subPayee,
           memo: st.memo || "",
           amount: st.amount || 0,
-          cleared: t.cleared !== "Uncleared",
+          status:
+            t.cleared === "Reconciled"
+              ? "r"
+              : t.cleared === "Uncleared"
+                ? "u"
+                : "c",
           transferAccountId: subTransferAccId,
           parentId: insertedT.id
         });

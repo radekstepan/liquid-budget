@@ -162,6 +162,26 @@ describe("transactions queries", () => {
         })
       ).rejects.toBeInstanceOf(TransactionError);
     });
+
+    it("rejects direct creation of a reconciled transaction", async () => {
+      // Reconciled status can only be set by the reconcile flow, never
+      // by a direct insert. The invariant keeps `lastReconciledAt`
+      // metadata trustworthy.
+      await expect(
+        createTransaction(mock.db, {
+          accountId: 1,
+          categoryId: 2,
+          date: "2026-07-01",
+          payee: "Locked",
+          memo: "",
+          amount: -5,
+          status: "r",
+        })
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: /reconcile flow/,
+      });
+    });
   });
 
   describe("assertSplitsBalanced", () => {

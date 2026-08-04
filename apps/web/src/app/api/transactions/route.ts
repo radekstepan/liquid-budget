@@ -6,6 +6,7 @@ import {
   TransactionError,
   updateSplit,
   updateTransaction,
+  type ClearedStatus,
   type SubTransactionInput,
 } from "@ynab/server";
 
@@ -33,6 +34,17 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
       memo: typeof o.memo === "string" ? o.memo : undefined,
     };
   });
+}
+
+function parseStatus(raw: unknown, fallback: ClearedStatus = "c"): ClearedStatus {
+  if (raw === "u" || raw === "c" || raw === "r") return raw;
+  // Backwards-compat: older clients sent `cleared: boolean`. Map to
+  // the equivalent tri-state value. Reconciled ("r") is not
+  // accepted from a direct PATCH/POST — only from the reconcile
+  // flow.
+  if (raw === false) return "u";
+  if (raw === true) return fallback;
+  return fallback;
 }
 
 function errorResponse(e: unknown): Response {
@@ -63,7 +75,7 @@ export async function POST(req: Request) {
           payee: String(body.payee ?? ""),
           memo: String(body.memo ?? ""),
           amount,
-          cleared: body.cleared ?? true,
+          status: parseStatus(body.status ?? body.cleared, "c"),
         },
         children
       );
@@ -81,7 +93,7 @@ export async function POST(req: Request) {
       payee: String(body.payee ?? ""),
       memo: String(body.memo ?? ""),
       amount,
-      cleared: body.cleared ?? true,
+      status: parseStatus(body.status ?? body.cleared, "c"),
       transferAccountId: body.transferAccountId ? Number(body.transferAccountId) : null,
       parentId: body.parentId ? Number(body.parentId) : null,
       skipBalance: !!body.skipBalance,
@@ -109,7 +121,10 @@ export async function PATCH(req: Request) {
           date: body.date,
           payee: body.payee,
           memo: body.memo,
-          cleared: body.cleared,
+          status:
+            "status" in body || "cleared" in body
+              ? parseStatus(body.status ?? body.cleared, "c")
+              : undefined,
         },
         children
       );
@@ -128,7 +143,10 @@ export async function PATCH(req: Request) {
       payee: body.payee,
       memo: body.memo,
       amount: body.amount != null ? Number(body.amount) : undefined,
-      cleared: body.cleared,
+      status:
+        "status" in body || "cleared" in body
+          ? parseStatus(body.status ?? body.cleared, "c")
+          : undefined,
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);

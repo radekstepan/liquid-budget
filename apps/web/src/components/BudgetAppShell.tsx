@@ -108,7 +108,7 @@ export function BudgetAppShell() {
             payee: r.payee,
             memo: "Recurring",
             amount: num(r.amount),
-            cleared: true,
+            status: "c",
             subTransactions: children.map((c) => ({
               categoryId: c.categoryId,
               amount: parentSign * Math.abs(num(c.amount)),
@@ -131,7 +131,7 @@ export function BudgetAppShell() {
             payee: r.payee.trim() || `Transfer : ${destName}`,
             memo: "Recurring",
             amount: num(r.amount),
-            cleared: true,
+            status: "c",
             transferAccountId: r.transferAccountId,
           }),
         });
@@ -145,7 +145,7 @@ export function BudgetAppShell() {
             payee: r.payee,
             memo: "Recurring",
             amount: num(r.amount),
-            cleared: true,
+            status: "c",
           }),
         });
       }
@@ -223,6 +223,25 @@ export function BudgetAppShell() {
       await jsonReq("/api/accounts", {
         method: "PATCH",
         body: JSON.stringify({ id, ...patch }),
+      });
+      await reload();
+    },
+    reconcileAccount: async ({ accountId, statementBalance, adjustmentCategoryId }) => {
+      await jsonReq("/api/reconcile", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "reconcile",
+          accountId,
+          statementBalance,
+          adjustmentCategoryId,
+        }),
+      });
+      await reload();
+    },
+    unreconcileAccount: async (accountId) => {
+      await jsonReq("/api/reconcile", {
+        method: "POST",
+        body: JSON.stringify({ action: "unreconcile", accountId }),
       });
       await reload();
     },

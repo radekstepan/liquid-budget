@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
@@ -58,7 +58,7 @@ export function ensureTables(db: Db): void {
       payee TEXT NOT NULL DEFAULT '',
       memo TEXT NOT NULL DEFAULT '',
       amount REAL NOT NULL DEFAULT 0,
-      cleared INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'c' CHECK (status IN ('u','c','r')),
       created_at TEXT NOT NULL DEFAULT '',
       parent_id INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
       transfer_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
@@ -96,6 +96,45 @@ export function ensureTables(db: Db): void {
   } catch (e) {
     const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
     if (!msg.includes("duplicate column")) throw e;
+  }
+  // Migrate from boolean `cleared` column to tri-state `status` column.
+  // Fresh installs get `status` from the CREATE TABLE above; existing
+  // installs keep the legacy `cleared` column until a follow-up release
+  // drops it. The query layer prefers `status` and falls back to
+  // `cleared` only when status is missing.
+  try {
+    db.run(sql`ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'c';`);
+  } catch (e) {
+    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
+    if (!msg.includes("duplicate column")) throw e;
+  }
+  // Per-account reconciliation metadata. Used to render the
+  // "Last reconciled" pill in the TransactionsView toolbar and the
+  // sidebar hover icon.
+  try {
+    db.run(sql`ALTER TABLE accounts ADD COLUMN last_reconciled_at TEXT;`);
+  } catch (e) {
+    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
+    if (!msg.includes("duplicate column")) throw e;
+  }
+  try {
+    db.run(sql`ALTER TABLE accounts ADD COLUMN last_reconciled_balance REAL;`);
+  } catch (e) {
+    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
+    if (!msg.includes("duplicate column")) throw e;
+  }
+  // Backfill the new `status` column for any rows where it still
+  // mirrors the default `'c'`. This picks up rows from a previous
+  // schema version that stored `cleared: 0` and never had `status`
+  // written. Safe to re-run (idempotent: only updates where
+  // `cleared = 0` and the current row's date is reasonable).
+  try {
+    db.run(
+      sql`UPDATE transactions SET status = 'u' WHERE cleared = 0 AND status = 'c';`
+    );
+  } catch {
+    // The legacy `cleared` column may not exist on fresh installs —
+    // ignore.
   }
 }
 
@@ -300,7 +339,7 @@ export async function seedDatabase(db: Db) {
     payee: string,
     amount: number,
     memo = "",
-    cleared = true
+    status: "u" | "c" | "r" = "c"
   ) => ({
     accountId: a(account),
     categoryId: category ? byName(category) : null,
@@ -308,7 +347,7 @@ export async function seedDatabase(db: Db) {
     payee,
     amount,
     memo,
-    cleared,
+    status,
   });
 
   // ---------------------------------------------------------------------------
@@ -320,11 +359,14 @@ export async function seedDatabase(db: Db) {
     // Payroll deposits (SAP Payroll biweekly → TD Chequing via EQ Bank transfers)
     T("EQ Bank", null, "2026-04-15", "SAP Concur", 4428.65, "Income for April"),
     T("EQ Bank", null, "2026-04-29", "SAP Concur", 4428.65, "Income for April"),
-    // Mortgage payment to TD (principal + interest split)
-    T("TD Unlimited Chequing", "Mortgage Principal", "2026-04-01", "TD Bank", -1800.00, "Housing: Mortgage Principal"),
-    T("TD Unlimited Chequing", "Mortgage Interest",  "2026-04-01", "TD Bank", -2352.97, "Housing: Mortgage Interest"),
+    // Mortgage payment to TD (principal + interest split) — these were
+    // already on the previous bank statement, so they ship as
+    // "reconciled" in the demo so the R glyph is visible without the
+    // user having to run a flow first.
+    T("TD Unlimited Chequing", "Mortgage Principal", "2026-04-01", "TD Bank", -1800.00, "Housing: Mortgage Principal", "r"),
+    T("TD Unlimited Chequing", "Mortgage Interest",  "2026-04-01", "TD Bank", -2352.97, "Housing: Mortgage Interest", "r"),
     // Condo fees
-    T("TD Unlimited Chequing", "Condo Fees/HOA", "2026-04-01", "Mountain's Edge MSP", -439.00, "BC405"),
+    T("TD Unlimited Chequing", "Condo Fees/HOA", "2026-04-01", "Mountain's Edge MSP", -439.00, "BC405", "r"),
     // Utilities — Fortis BC
     T("AMEX Cobalt", "Utilities, Electricity, Water", "2026-04-25", "Fortis BC", -303.85, ""),
     // Groceries
@@ -336,8 +378,8 @@ export async function seedDatabase(db: Db) {
     T("AMEX Cobalt", "Eat/Drink Out, Alcohol", "2026-04-17", "Jam Café",       -54.20,  ""),
     T("AMEX Cobalt", "Eat/Drink Out, Alcohol", "2026-04-22", "Parallel 49 Brewing", -67.40, "Split with Susie"),
     // Internet
-    T("TD Unlimited Chequing", "Internet, iPhone", "2026-04-10", "Telus", -110.00, ""),
-    T("TD Unlimited Chequing", "Internet, iPhone", "2026-04-10", "Fido",  -90.00,  ""),
+    T("TD Unlimited Chequing", "Internet, iPhone", "2026-04-10", "Telus", -110.00, "", "r"),
+    T("TD Unlimited Chequing", "Internet, iPhone", "2026-04-10", "Fido",  -90.00,  "", "r"),
     // Susie reimbursement received
     T("Susie", null, "2026-04-30", "Susie", 320.15, "April shared expenses reimbursement"),
 
@@ -432,6 +474,16 @@ export async function seedDatabase(db: Db) {
     // Fees
     T("TD Unlimited Chequing", "Fees, Charges, Loans", "2026-06-30", "TD Bank", -17.95, "Monthly bank fee"),
   ]);
+
+  // Mark the TD account as having been previously reconciled on
+  // 2026-04-10, so the "Last reconciled" pill and the demo's
+  // already-reconciled R rows are consistent. The seeded R rows all
+  // have a date <= 2026-04-10, so unreconcileAccount's date bound
+  // (date <= lastReconciledAt) will cleanly target just this batch.
+  await db
+    .update(accounts)
+    .set({ lastReconciledAt: "2026-04-10", lastReconciledBalance: 6083.58 })
+    .where(eq(accounts.name, "TD Unlimited Chequing"));
 
   // ---------------------------------------------------------------------------
   // RECURRING — scheduled transactions (next dates are 2026-07 or later)

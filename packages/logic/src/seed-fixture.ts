@@ -170,7 +170,7 @@ const T = (
   payee: string,
   amount: string,
   memo = "",
-  cleared = true
+  status: "u" | "c" | "r" = "c"
 ): Transaction => ({
   id: _tid++,
   accountId,
@@ -179,7 +179,7 @@ const T = (
   payee,
   amount,
   memo,
-  cleared,
+  status,
 });
 
 // Account IDs by name (must match accounts array above)

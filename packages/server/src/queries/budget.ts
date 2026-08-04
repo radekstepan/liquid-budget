@@ -1,5 +1,5 @@
 import { asc, desc, sql } from "drizzle-orm";
-import type { BudgetData } from "@ynab/logic";
+import type { BudgetData, ClearedStatus } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 
@@ -20,6 +20,8 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       kind: a.kind as "liquid" | "credit" | "offbudget",
       // SQLite stores real as number; logic types expect string
       balance: String(a.balance),
+      lastReconciledBalance:
+        a.lastReconciledBalance != null ? String(a.lastReconciledBalance) : null,
     })),
     groups,
     categories: cats.map((c) => ({
@@ -31,6 +33,7 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
     transactions: txns.map((t) => ({
       ...t,
       amount: String(t.amount),
+      status: (t.status as ClearedStatus) ?? "c",
       // createdAt is already a text string in SQLite
       createdAt: t.createdAt,
     })),

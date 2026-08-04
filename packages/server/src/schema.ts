@@ -15,6 +15,8 @@ export const accounts = sqliteTable("accounts", {
   balance: real("balance").notNull().default(0),
   onBudget: integer("on_budget", { mode: "boolean" }).notNull().default(true),
   sort: integer("sort").notNull().default(0),
+  lastReconciledAt: text("last_reconciled_at"),
+  lastReconciledBalance: real("last_reconciled_balance"),
 });
 
 export const categoryGroups = sqliteTable("category_groups", {
@@ -65,7 +67,7 @@ export const transactions = sqliteTable("transactions", {
   payee: text("payee").notNull().default(""),
   memo: text("memo").notNull().default(""),
   amount: real("amount").notNull().default(0),
-  cleared: integer("cleared", { mode: "boolean" }).notNull().default(true),
+  status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
   createdAt: text("created_at").notNull().default(""),
   parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
   transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),

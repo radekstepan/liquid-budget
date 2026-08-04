@@ -1,4 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import type { ClearedStatus } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
@@ -9,7 +10,7 @@ export type CreateTransactionInput = {
   payee: string;
   memo: string;
   amount: number;
-  cleared?: boolean;
+  status?: ClearedStatus;
   /**
    * If set, this row is one half of a transfer. The other side is the
    * destination account identified by `transferAccountId`; no row is
@@ -39,7 +40,7 @@ export type UpdateTransactionInput = {
   payee?: string;
   memo?: string;
   amount?: number;
-  cleared?: boolean;
+  status?: ClearedStatus;
 };
 
 export type SubTransactionInput = {
@@ -139,10 +140,19 @@ export function assertSplitsBalanced(
  *
  * A row with both `transferAccountId` and `parentId` is rejected; YNAB4
  * does not allow transfers inside a split, and neither do we.
+ *
+ * Reconciled status is never set by direct insert — only the reconcile
+ * flow may set `"r"`. This keeps a single source of truth for the
+ * "lastReconciledAt" account metadata and prevents orphan-R rows.
  */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
   if (input.transferAccountId != null && input.parentId != null) {
     throw new TransactionError("sub-transaction cannot be a transfer");
+  }
+  if (input.status === "r") {
+    throw new TransactionError(
+      "cannot directly create a reconciled transaction; use the reconcile flow"
+    );
   }
   if (input.transferAccountId != null) {
     if (input.transferAccountId === input.accountId) {
@@ -160,7 +170,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       payee: input.payee,
       memo: input.memo,
       amount: input.amount,
-      cleared: input.cleared ?? true,
+      status: input.status ?? "c",
       transferAccountId: null,
       parentId: input.parentId ?? null,
     })
@@ -209,7 +219,7 @@ export async function createTransfer(
       payee,
       memo: baseInput.memo,
       amount: baseInput.amount,
-      cleared: baseInput.cleared ?? true,
+      status: baseInput.status ?? "c",
       transferAccountId,
       parentId: null,
     })
@@ -234,11 +244,18 @@ export async function createSplitWithChildren(
     payee: string;
     memo: string;
     amount: number;
-    cleared?: boolean;
+    status?: ClearedStatus;
   },
   children: SubTransactionInput[]
 ) {
   assertSplitsBalanced(parent.amount, children);
+
+  const parentStatus = parent.status ?? "c";
+  if (parentStatus === "r") {
+    throw new TransactionError(
+      "cannot directly create a reconciled transaction; use the reconcile flow"
+    );
+  }
 
   const [parentRow] = await db
     .insert(transactions)
@@ -249,7 +266,7 @@ export async function createSplitWithChildren(
       payee: parent.payee,
       memo: parent.memo,
       amount: parent.amount,
-      cleared: parent.cleared ?? true,
+      status: parentStatus,
       transferAccountId: null,
       parentId: null,
     })
@@ -266,7 +283,7 @@ export async function createSplitWithChildren(
         payee: parent.payee,
         memo: c.memo ?? "",
         amount: c.amount,
-        cleared: parent.cleared ?? true,
+        status: parentStatus,
         transferAccountId: null,
         parentId: parentRow!.id,
       })
@@ -308,7 +325,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.payee != null) p.payee = String(patch.payee);
   if (patch.memo != null) p.memo = String(patch.memo);
   if (patch.amount != null) p.amount = Number(patch.amount);
-  if (patch.cleared != null) p.cleared = !!patch.cleared;
+  if (patch.status != null) p.status = patch.status;
 
   const isParent = existing.parentId == null && existing.transferAccountId == null;
   // Always query child count for cleanliness; the count is used to decide
@@ -362,7 +379,7 @@ export async function updateSplit(
     date?: string;
     payee?: string;
     memo?: string;
-    cleared?: boolean;
+    status?: ClearedStatus;
   },
   children: SubTransactionInput[]
 ) {
@@ -391,7 +408,7 @@ export async function updateSplit(
   if (parentFields.date != null) pf.date = String(parentFields.date);
   if (parentFields.payee != null) pf.payee = String(parentFields.payee);
   if (parentFields.memo != null) pf.memo = String(parentFields.memo);
-  if (parentFields.cleared != null) pf.cleared = !!parentFields.cleared;
+  if (parentFields.status != null) pf.status = parentFields.status;
   if (Object.keys(pf).length > 0) {
     await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
   }
@@ -399,7 +416,8 @@ export async function updateSplit(
   const newMemo = (pf.memo as string | undefined) ?? parent.memo;
   const newDate = (pf.date as string | undefined) ?? parent.date;
   const newPayee = (pf.payee as string | undefined) ?? parent.payee;
-  const newCleared = (pf.cleared as boolean | undefined) ?? parent.cleared;
+  const newStatus: ClearedStatus =
+    (pf.status as ClearedStatus | undefined) ?? (parent.status as ClearedStatus);
 
   const newChildren = [];
   for (const c of children) {
@@ -413,7 +431,7 @@ export async function updateSplit(
         // Children inherit the parent's memo unless they have their own.
         memo: c.memo ?? newMemo ?? "",
         amount: c.amount,
-        cleared: newCleared,
+        status: newStatus,
         transferAccountId: null,
         parentId,
       })
