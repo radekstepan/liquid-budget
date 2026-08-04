@@ -14,6 +14,10 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
+    "e2e": "yarn workspace @ynab/web e2e",
+    "e2e:headed": "yarn workspace @ynab/web e2e:headed",
+    "e2e:ui": "yarn workspace @ynab/web e2e:ui",
+    "e2e:install": "yarn workspace @ynab/web e2e:install",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:reset": "yarn workspace @ynab/server db:reset"
   },

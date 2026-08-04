@@ -11,7 +11,11 @@
     "lint": "echo \"(no lint configured)\" && exit 0",
     "typecheck": "tsc -b --noEmit",
     "test": "echo \"(no tests in web app)\" && exit 0",
-    "test:watch": "echo \"(no tests in web app)\" && exit 0"
+    "test:watch": "echo \"(no tests in web app)\" && exit 0",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:install": "playwright install --with-deps chromium",
+    "e2e:server": "E2E_TESTING=true yarn dev --port 3000"
   },
   "dependencies": {
     "@ynab/logic": "workspace:*",
@@ -23,6 +27,7 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "4.1.17",
     "@types/adm-zip": "^0.5.8",
     "@types/node": "22.19.15",

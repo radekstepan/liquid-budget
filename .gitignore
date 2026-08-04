@@ -37,3 +37,9 @@ apps/web/budget.db*
 
 *.y4backup
 backup_extracted
+
+# playwright
+playwright-report/
+test-results/
+apps/web/test-results/
+apps/web/playwright-report/
