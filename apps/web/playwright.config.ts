@@ -20,9 +20,11 @@
 //     nothing reads it; it's the same seam therascript uses.
 //
 // DB: the running dev server is responsible for the DB it points at
-// (apps/web/.env.local → ../../budget.db). This basic smoke test
-// only reads the budget view, so it works against any seeded state.
-// Add a global setup that POSTs /api/reset if you need determinism.
+// (apps/web/.env.local → ../../budget.db). Read-only specs work against
+// any seeded state. Mutating specs rely on `tests/e2e/global-setup.ts`
+// to POST /api/reset before the suite; that setup is gated on CI so a
+// developer's locally-running dev server is never reset out from under
+// them.
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3000;
@@ -30,6 +32,7 @@ const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
