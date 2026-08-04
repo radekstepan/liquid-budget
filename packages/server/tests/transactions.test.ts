@@ -197,6 +197,39 @@ describe("transactions queries", () => {
         ])
       ).toThrow(/do not sum to parent/);
     });
+
+    it("accepts a positive parent with mixed-sign children (Paycheck with taxes)", () => {
+      // The bug fix: previously rejected because
+      // |+5000| + |-1000| = 6000 ≠ |+4000|. The validation now uses
+      // signed sums, so a gross pay + tax deduction is allowed.
+      expect(() =>
+        assertSplitsBalanced(4000, [
+          { categoryId: 1, amount: 5000 },
+          { categoryId: 2, amount: -1000 },
+        ])
+      ).not.toThrow();
+    });
+
+    it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
+      expect(() =>
+        assertSplitsBalanced(4000, [
+          { categoryId: 1, amount: 5000 },
+          { categoryId: 2, amount: -1001 },
+        ])
+      ).toThrow(/do not sum to parent/);
+    });
+
+    it("rejects when sign conventions conflict (negative parent with positive children)", () => {
+      // Negative parent + all-positive children: the signed sum is +100
+      // which does not equal the parent's -100. Magnitude-only validation
+      // would (incorrectly) accept this; the new signed validation rejects.
+      expect(() =>
+        assertSplitsBalanced(-100, [
+          { categoryId: 1, amount: 60 },
+          { categoryId: 2, amount: 40 },
+        ])
+      ).toThrow(/do not sum to parent/);
+    });
   });
 
   describe("createSplitWithChildren", () => {

@@ -80,7 +80,7 @@ export function ensureTables(db: Db): void {
     CREATE TABLE IF NOT EXISTS recurring_sub_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       recurring_id INTEGER NOT NULL REFERENCES recurring(id) ON DELETE CASCADE,
-      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
       amount REAL NOT NULL DEFAULT 0,
       memo TEXT NOT NULL DEFAULT '',
       sort INTEGER NOT NULL DEFAULT 0

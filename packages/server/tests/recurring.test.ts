@@ -153,6 +153,78 @@ describe("recurring queries", () => {
         })
       ).rejects.toBeInstanceOf(RecurringError);
     });
+
+    it("creates a mixed-sign split (Paycheck + tax deduction)", async () => {
+      // The bug fix: the old validation rejected this because it required
+      // |sum of children| === |parent|. With signed validation, a +5000
+      // gross paycheck with a -1000 tax deduction (net +4000) is allowed.
+      mock.respondWith("insert:recurring", [{ id: 8 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+
+      const row = await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "Employer Inc.",
+        amount: 4000,
+        frequency: "biweekly",
+        nextDate: "2026-07-15",
+        subTransactions: [
+          { categoryId: 5, amount: 5000, memo: "gross" },
+          { categoryId: 6, amount: -1000, memo: "taxes" },
+        ],
+      });
+
+      expect(row).toMatchObject({ id: 8 });
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      // Sub-amounts are passed through verbatim (signed).
+      expect(subInserts[0]?.values).toMatchObject({ amount: 5000 });
+      expect(subInserts[1]?.values).toMatchObject({ amount: -1000 });
+    });
+
+    it("rejects a split with a missing category on update", async () => {
+      // The DB allows null categoryId (so category deletes don't crash),
+      // but the API still rejects them at insert/update time so the
+      // caller is forced to be explicit about uncategorised children.
+      const splitRow = { ...existingRow, amount: 200, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+
+      await expect(
+        updateRecurring(mock.db, 1, {
+          subTransactions: [
+            { categoryId: 5, amount: 100 },
+            { categoryId: 0, amount: 100 },
+          ],
+        })
+      ).rejects.toBeInstanceOf(RecurringError);
+    });
+
+    it("updateRecurring: replacing children with a mixed-sign split succeeds", async () => {
+      const splitRow = { ...existingRow, amount: 4000, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("delete:recurring_sub_transactions", []);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+      mock.respondWith("select:recurring", [splitRow]);
+
+      await updateRecurring(mock.db, 1, {
+        subTransactions: [
+          { categoryId: 5, amount: 5000 },
+          { categoryId: 6, amount: -1000 },
+        ],
+      });
+
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      expect(subInserts[0]?.values).toMatchObject({ amount: 5000 });
+      expect(subInserts[1]?.values).toMatchObject({ amount: -1000 });
+    });
   });
 
   describe("updateRecurring", () => {

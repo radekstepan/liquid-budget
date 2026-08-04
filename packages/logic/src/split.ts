@@ -73,6 +73,10 @@ export function isSplitBalanced(parent: Transaction, all: Transaction[]): boolea
 /**
  * Classify a set of sub-transactions for the UI. Mirrors the
  * server-side `assertSplitsBalanced` — returns an error string or null.
+ *
+ * Children use their *signed* amounts so mixed-sign splits (e.g. a
+ * Paycheck with a negative tax deduction) are supported. The signed
+ * sum must equal the parent's signed amount to the cent.
  */
 export function validateSubTransactions(
   parentAmount: number,
@@ -84,9 +88,9 @@ export function validateSubTransactions(
       return `Sub-transaction ${i + 1} is missing a category.`;
     }
   }
-  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
-  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
-    return `Sub-transactions sum to ${sum.toFixed(2)} but parent is ${Math.abs(parentAmount).toFixed(2)}.`;
+  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
+  if (Math.abs(sum - parentAmount) > 0.005) {
+    return `Sub-transactions sum to ${sum.toFixed(2)} but parent is ${parentAmount.toFixed(2)}.`;
   }
   return null;
 }

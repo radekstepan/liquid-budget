@@ -128,4 +128,25 @@ describe("validateRecurringSubTransactions", () => {
       ])
     ).toMatch(/sum to/);
   });
+
+  it("accepts a mixed-sign split (Paycheck + tax deduction)", () => {
+    // Previously rejected because |+5000| + |-1000| = 6000 ≠ |+4000|.
+    // The fix: validation uses signed sums so a +5000 gross with a
+    // -1000 tax deduction netted to +4000 is valid.
+    expect(
+      validateRecurringSubTransactions(4000, [
+        { categoryId: 1, amount: 5000 },
+        { categoryId: 2, amount: -1000 },
+      ])
+    ).toBeNull();
+  });
+
+  it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
+    expect(
+      validateRecurringSubTransactions(4000, [
+        { categoryId: 1, amount: 5000 },
+        { categoryId: 2, amount: -1001 },
+      ])
+    ).toMatch(/sum to/);
+  });
 });

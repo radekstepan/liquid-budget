@@ -76,5 +76,20 @@ describe("categories queries", () => {
       await deleteCategoryGroup(mock.db, 1);
       expect(mock.calls.find((c) => c.op === "delete")?.table).toBe("category_groups");
     });
+
+    it("deleteCategory does not pre-check children (FK handles cascade at the DB layer)", async () => {
+      // Schema fix: `recurring_sub_transactions.categoryId` is nullable
+      // with ON DELETE SET NULL (matching `transactions.categoryId`), so
+      // deleting a category that is referenced by a recurring split no
+      // longer crashes with a FK constraint violation. The recurring
+      // sub-rows simply become uncategorised. The query helper just
+      // emits a single DELETE — no extra lookup is needed.
+      await deleteCategory(mock.db, 42);
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls).toHaveLength(1);
+      expect(deleteCalls[0]?.table).toBe("categories");
+      const setCalls = mock.calls.filter((c) => c.op === "update");
+      expect(setCalls).toHaveLength(0);
+    });
   });
 });

@@ -20,7 +20,10 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
   const yearlyNet = data.recurring
     .filter((r) => r.active && r.frequency === "yearly")
     .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) / 12, 0);
-  const perMonth = monthlyNet + weeklyNet + yearlyNet;
+  const biweeklyNet = data.recurring
+    .filter((r) => r.active && r.frequency === "biweekly")
+    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) * 2.16, 0);
+  const perMonth = monthlyNet + weeklyNet + biweeklyNet + yearlyNet;
 
   const points: { label: string; value: number }[] = [];
   let bal = liquidNow;

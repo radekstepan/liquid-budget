@@ -102,7 +102,10 @@ export function TransactionModal({
     initialChildren
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId ?? 0,
-          amount: Math.abs(num(c.amount)),
+          // Preserve the child's signed amount on edit (no Math.abs coercion).
+          // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
+          // by the validation layer.
+          amount: num(c.amount),
           memo: c.memo ?? "",
         }))
       : [
@@ -113,11 +116,10 @@ export function TransactionModal({
 
   const otherAccounts = accounts.filter((a) => a.id !== accountId);
 
-  const parentAmount = Math.abs(parseFloat(amount)) || 0;
-  const subTotal = subRows.reduce(
-    (s, r) => s + Math.abs(Number(r.amount) || 0),
-    0
-  );
+  // Signed parent amount and signed child total — validation is sign-aware
+  // and the sub-row "Σ … / …" footer uses Math.abs() for the colour check only.
+  const parentAmount = parseFloat(amount) || 0;
+  const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     return validateSubTransactions(parentAmount, subRows);
@@ -183,10 +185,11 @@ export function TransactionModal({
         cleared,
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId,
-          // Sub-row amounts inherit the sign of the parent. The user
-          // types positive values; the modal applies the sign so the
-          // server-side balance accounting treats them consistently.
-          amount: a < 0 ? -Math.abs(Number(r.amount)) : Math.abs(Number(r.amount)),
+          // Sub-row amounts are passed through verbatim (signed) so the
+          // server-side validation sees the same numbers the user typed.
+          // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
+          // supported by the validation layer.
+          amount: Number(r.amount),
           memo: r.memo,
         })),
       });
@@ -569,7 +572,7 @@ export function RecurringModal({
     nextDate: string;
     active: boolean;
     transferAccountId?: number | null;
-    subTransactions?: { categoryId: number; amount: number; memo?: string }[];
+    subTransactions?: { categoryId: number | null; amount: number; memo?: string }[];
   }) => void;
 }) {
   const initialAmt = initial ? num(initial.amount) : 0;
@@ -600,7 +603,10 @@ export function RecurringModal({
     initialChildren.length > 0
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId,
-          amount: Math.abs(num(c.amount)),
+          // Preserve the child's signed amount on edit (no Math.abs coercion).
+          // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
+          // by the validation layer.
+          amount: num(c.amount),
           memo: c.memo ?? "",
         }))
       : [
@@ -611,11 +617,9 @@ export function RecurringModal({
 
   const otherAccounts = accounts.filter((a) => a.id !== accountId);
 
-  const parentAmount = Math.abs(parseFloat(amount)) || 0;
-  const subTotal = subRows.reduce(
-    (s, r) => s + Math.abs(Number(r.amount) || 0),
-    0
-  );
+  // Signed parent amount and signed child total — validation is sign-aware.
+  const parentAmount = parseFloat(amount) || 0;
+  const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     return validateRecurringSubTransactions(parentAmount, subRows);
@@ -677,10 +681,11 @@ export function RecurringModal({
         active,
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId,
-          // Sub-row amounts inherit the sign of the parent. The user
-          // types positive values; the modal applies the sign so the
-          // server-side balance accounting treats them consistently.
-          amount: a < 0 ? -Math.abs(Number(r.amount)) : Math.abs(Number(r.amount)),
+          // Sub-row amounts are passed through verbatim (signed) so the
+          // server-side validation sees the same numbers the user typed.
+          // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
+          // supported by the validation layer.
+          amount: Number(r.amount),
           memo: r.memo,
         })),
       });

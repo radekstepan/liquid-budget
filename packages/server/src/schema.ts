@@ -94,9 +94,13 @@ export const recurringSubTransactions = sqliteTable("recurring_sub_transactions"
   recurringId: integer("recurring_id")
     .notNull()
     .references(() => recurring.id, { onDelete: "cascade" }),
-  categoryId: integer("category_id")
-    .notNull()
-    .references(() => categories.id, { onDelete: "restrict" }),
+  // Nullable + ON DELETE SET NULL (matches `transactions.categoryId`) so that
+  // deleting a category that happens to be used in a recurring split
+  // does not crash with a foreign key constraint violation. The recurring
+  // children simply end up uncategorised.
+  categoryId: integer("category_id").references(() => categories.id, {
+    onDelete: "set null",
+  }),
   amount: real("amount").notNull().default(0),
   memo: text("memo").notNull().default(""),
   sort: integer("sort").notNull().default(0),
