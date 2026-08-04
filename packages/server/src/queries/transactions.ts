@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
@@ -10,6 +10,26 @@ export type CreateTransactionInput = {
   memo: string;
   amount: number;
   cleared?: boolean;
+  /**
+   * If set, this row is one half of a transfer. The other side is the
+   * destination account identified by `transferAccountId`; no row is
+   * created there, but its balance is updated in the opposite direction
+   * so the destination's running total stays accurate. The `categoryId`
+   * is forced to null for transfers.
+   */
+  transferAccountId?: number | null;
+  /**
+   * If set, this row is a child of a split transaction. The parent's
+   * `amount` is informational (the sum of children) and is not applied
+   * to balance; each child IS applied to balance independently.
+   */
+  parentId?: number | null;
+  /**
+   * Suppress the balance update for this insert. Used for split parents,
+   * whose balance effect is the sum of their children. Has no effect on
+   * child rows (children always apply their own balance).
+   */
+  skipBalance?: boolean;
 };
 
 export type UpdateTransactionInput = {
@@ -22,6 +42,23 @@ export type UpdateTransactionInput = {
   cleared?: boolean;
 };
 
+export type SubTransactionInput = {
+  categoryId: number;
+  amount: number;
+  memo?: string;
+};
+
+/**
+ * Thrown by the transactions queries to signal a validation failure
+ * that should surface as a 4xx HTTP response (rather than a 5xx).
+ */
+export class TransactionError extends Error {
+  constructor(message: string, public readonly status = 400) {
+    super(message);
+    this.name = "TransactionError";
+  }
+}
+
 async function applyBalance(db: Database, accountId: number, delta: number) {
   await db
     .update(accounts)
@@ -29,7 +66,85 @@ async function applyBalance(db: Database, accountId: number, delta: number) {
     .where(eq(accounts.id, accountId));
 }
 
+async function getAccountName(db: Database, accountId: number): Promise<string | null> {
+  const [row] = await db
+    .select({ name: accounts.name })
+    .from(accounts)
+    .where(eq(accounts.id, accountId));
+  return row?.name ?? null;
+}
+
+async function childCount(db: Database, parentId: number): Promise<number> {
+  const rows = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.parentId, parentId));
+  return rows.length;
+}
+
+async function getChildren(
+  db: Database,
+  parentId: number
+): Promise<{ id: number; accountId: number; amount: number }[]> {
+  return db
+    .select({
+      id: transactions.id,
+      accountId: transactions.accountId,
+      amount: transactions.amount,
+    })
+    .from(transactions)
+    .where(eq(transactions.parentId, parentId));
+}
+
+/**
+ * Validate that a set of sub-transactions constitutes a balanced split.
+ * Throws TransactionError if not. Rules:
+ *   - at least 2 children
+ *   - every child has a category
+ *   - the sum of child amounts matches the |parent amount| to the cent
+ *     (the parent's sign is propagated to children by the caller; this
+ *     check is magnitude-only so callers can use any sign convention)
+ */
+export function assertSplitsBalanced(
+  parentAmount: number,
+  children: SubTransactionInput[]
+): void {
+  if (children.length < 2) {
+    throw new TransactionError("split must have at least two sub-transactions");
+  }
+  for (const c of children) {
+    if (!c.categoryId) {
+      throw new TransactionError("each sub-transaction must have a category");
+    }
+  }
+  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
+  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
+    throw new TransactionError(
+      `split children do not sum to parent: ${sum.toFixed(2)} vs ${Math.abs(parentAmount).toFixed(2)}`
+    );
+  }
+}
+
+/**
+ * Insert a single transaction row. Branches on `transferAccountId` to
+ * perform a transfer (one row, mirrored balance updates) versus a plain
+ * insert. For a transfer the row's `categoryId` is forced to null and
+ * the `payee` is auto-set to "Transfer : <other account name>" if blank.
+ *
+ * A row with both `transferAccountId` and `parentId` is rejected; YNAB4
+ * does not allow transfers inside a split, and neither do we.
+ */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
+  if (input.transferAccountId != null && input.parentId != null) {
+    throw new TransactionError("sub-transaction cannot be a transfer");
+  }
+  if (input.transferAccountId != null) {
+    if (input.transferAccountId === input.accountId) {
+      throw new TransactionError("transfer account must differ from source account");
+    }
+    return createTransfer(db, input, input.transferAccountId);
+  }
+
   const [row] = await db
     .insert(transactions)
     .values({
@@ -40,16 +155,145 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       memo: input.memo,
       amount: input.amount,
       cleared: input.cleared ?? true,
+      transferAccountId: null,
+      parentId: input.parentId ?? null,
     })
     .returning();
 
-  await applyBalance(db, input.accountId, input.amount);
+  // Children and regular rows apply their own balance; split parents do not.
+  // `skipBalance` is only honoured for parents (parentId == null). Children
+  // always apply their own balance, regardless of any `skipBalance` flag.
+  const isSplitParent = input.parentId == null && input.skipBalance === true;
+  if (!isSplitParent) {
+    await applyBalance(db, input.accountId, input.amount);
+  }
   return row;
 }
 
+/**
+ * Insert a transfer row and update both account balances. The row
+ * stores the source account and the destination via `transferAccountId`;
+ * YNAB4's convention is a single row per transfer (the destination's
+ * register sees the same transfer via the `transferAccountId` linkage).
+ */
+export async function createTransfer(
+  db: Database,
+  baseInput: CreateTransactionInput,
+  transferAccountId: number
+) {
+  if (transferAccountId === baseInput.accountId) {
+    throw new TransactionError("transfer account must differ from source account");
+  }
+  if (baseInput.parentId != null) {
+    throw new TransactionError("sub-transaction cannot be a transfer");
+  }
+
+  let payee = baseInput.payee;
+  if (!payee.trim()) {
+    const destName = await getAccountName(db, transferAccountId);
+    payee = `Transfer : ${destName ?? "Unknown"}`;
+  }
+
+  const [row] = await db
+    .insert(transactions)
+    .values({
+      accountId: baseInput.accountId,
+      categoryId: null,
+      date: baseInput.date,
+      payee,
+      memo: baseInput.memo,
+      amount: baseInput.amount,
+      cleared: baseInput.cleared ?? true,
+      transferAccountId,
+      parentId: null,
+    })
+    .returning();
+
+  await applyBalance(db, baseInput.accountId, baseInput.amount);
+  await applyBalance(db, transferAccountId, -baseInput.amount);
+  return row;
+}
+
+/**
+ * Atomically create a split parent + N sub-rows. The parent's amount
+ * is informational (matches the sum of children) and is NOT applied
+ * to balance; only the children are. Returns the parent and children
+ * rows in their inserted order.
+ */
+export async function createSplitWithChildren(
+  db: Database,
+  parent: {
+    accountId: number;
+    date: string;
+    payee: string;
+    memo: string;
+    amount: number;
+    cleared?: boolean;
+  },
+  children: SubTransactionInput[]
+) {
+  assertSplitsBalanced(parent.amount, children);
+
+  const [parentRow] = await db
+    .insert(transactions)
+    .values({
+      accountId: parent.accountId,
+      categoryId: null,
+      date: parent.date,
+      payee: parent.payee,
+      memo: parent.memo,
+      amount: parent.amount,
+      cleared: parent.cleared ?? true,
+      transferAccountId: null,
+      parentId: null,
+    })
+    .returning();
+
+  const childRows = [];
+  for (const c of children) {
+    const [child] = await db
+      .insert(transactions)
+      .values({
+        accountId: parent.accountId,
+        categoryId: c.categoryId,
+        date: parent.date,
+        payee: parent.payee,
+        memo: c.memo ?? "",
+        amount: c.amount,
+        cleared: parent.cleared ?? true,
+        transferAccountId: null,
+        parentId: parentRow!.id,
+      })
+      .returning();
+    await applyBalance(db, parent.accountId, c.amount);
+    childRows.push(child);
+  }
+
+  return { parent: parentRow, children: childRows };
+}
+
+/**
+ * Update a single transaction. Restrictions:
+ *   - `parentId` is immutable after creation (split structure is set at
+ *     insert time).
+ *   - Split parents may not change `amount` (derived from children) or
+ *     `accountId` (the whole split lives on one account).
+ *   - Transfers may not change `transferAccountId` (would require
+ *     re-routing the mirrored balance). Use delete + recreate.
+ *
+ * Balance accounting:
+ *   - regular: reverse old, apply new
+ *   - child of a split: reverse old, apply new (own balance only)
+ *   - split parent: no balance effect
+ *   - transfer: reverse both source and destination, then apply both
+ */
 export async function updateTransaction(db: Database, id: number, patch: UpdateTransactionInput) {
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
+
+  if ("parentId" in (patch as Record<string, unknown>)) {
+    throw new TransactionError("parentId cannot be changed via update");
+  }
 
   const p: Record<string, unknown> = {};
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
@@ -60,28 +304,151 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.amount != null) p.amount = Number(patch.amount);
   if (patch.cleared != null) p.cleared = !!patch.cleared;
 
-  const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
-  const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
+  const isParent = existing.parentId == null && existing.transferAccountId == null;
+  // Always query child count for cleanliness; the count is used to decide
+  // whether this row is a split parent. Costs one extra cheap query for
+  // non-parent rows but keeps the logic linear.
+  const hasChildren = (await childCount(db, id)) > 0;
+  const isSplitParent = isParent && hasChildren;
 
-  const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
-
-  // If account or amount changed, reverse the old balance change and apply the new one.
-  if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
-    await applyBalance(db, existing.accountId, -Number(existing.amount));
-    if (newAccountId !== existing.accountId) {
-      await applyBalance(db, newAccountId, newAmount);
-    } else {
-      await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+  if (isSplitParent) {
+    if ("amount" in p) {
+      throw new TransactionError("cannot change amount of a split parent; edit children");
+    }
+    if ("accountId" in p) {
+      throw new TransactionError("cannot change account of a split parent");
     }
   }
 
+  const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
+  const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
+
+  if (existing.transferAccountId != null) {
+    await applyBalance(db, existing.accountId, -Number(existing.amount));
+    await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+    await applyBalance(db, newAccountId, newAmount);
+    await applyBalance(db, existing.transferAccountId, -newAmount);
+  } else if (!isSplitParent) {
+    if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
+      await applyBalance(db, existing.accountId, -Number(existing.amount));
+      if (newAccountId !== existing.accountId) {
+        await applyBalance(db, newAccountId, newAmount);
+      } else {
+        await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+      }
+    }
+  }
+
+  const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
   return row;
 }
 
+/**
+ * Full-replace update of a split: validates the new children, reverses
+ * the old children's balance, deletes them, optionally updates the
+ * parent fields, then inserts the new children. Used by PATCH when the
+ * caller passes `subTransactions: []`.
+ */
+export async function updateSplit(
+  db: Database,
+  parentId: number,
+  parentFields: {
+    date?: string;
+    payee?: string;
+    memo?: string;
+    cleared?: boolean;
+  },
+  children: SubTransactionInput[]
+) {
+  const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
+  if (!parent) {
+    throw new TransactionError("split parent not found", 404);
+  }
+  if (parent.parentId != null || parent.transferAccountId != null) {
+    throw new TransactionError("target row is not a split parent");
+  }
+  if ((await childCount(db, parentId)) === 0) {
+    throw new TransactionError("target row has no children; use a regular update");
+  }
+
+  assertSplitsBalanced(parent.amount, children);
+
+  const oldChildren = await getChildren(db, parentId);
+  for (const c of oldChildren) {
+    await applyBalance(db, parent.accountId, -Number(c.amount));
+  }
+  if (oldChildren.length > 0) {
+    await db.delete(transactions).where(eq(transactions.parentId, parentId));
+  }
+
+  const pf: Record<string, unknown> = {};
+  if (parentFields.date != null) pf.date = String(parentFields.date);
+  if (parentFields.payee != null) pf.payee = String(parentFields.payee);
+  if (parentFields.memo != null) pf.memo = String(parentFields.memo);
+  if (parentFields.cleared != null) pf.cleared = !!parentFields.cleared;
+  if (Object.keys(pf).length > 0) {
+    await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
+  }
+
+  const newMemo = (pf.memo as string | undefined) ?? parent.memo;
+  const newDate = (pf.date as string | undefined) ?? parent.date;
+  const newPayee = (pf.payee as string | undefined) ?? parent.payee;
+  const newCleared = (pf.cleared as boolean | undefined) ?? parent.cleared;
+
+  const newChildren = [];
+  for (const c of children) {
+    const [row] = await db
+      .insert(transactions)
+      .values({
+        accountId: parent.accountId,
+        categoryId: c.categoryId,
+        date: newDate,
+        payee: newPayee,
+        // Children inherit the parent's memo unless they have their own.
+        memo: c.memo ?? newMemo ?? "",
+        amount: c.amount,
+        cleared: newCleared,
+        transferAccountId: null,
+        parentId,
+      })
+      .returning();
+    await applyBalance(db, parent.accountId, c.amount);
+    newChildren.push(row);
+  }
+
+  return { parent: { ...parent, ...pf }, children: newChildren };
+}
+
+/**
+ * Delete a transaction. Cascade in the schema handles removing children
+ * of a split parent when the parent is deleted, but we must still
+ * reverse the children's balance effects beforehand.
+ *
+ *   - split parent: reverse each child's balance, then cascade deletes them
+ *   - split child: reverse only its own balance
+ *   - transfer: reverse both source and destination balances
+ *   - regular: reverse its own balance
+ */
 export async function deleteTransaction(db: Database, id: number) {
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
+
+  if (existing.parentId != null) {
+    await applyBalance(db, existing.accountId, -Number(existing.amount));
+  } else if (existing.transferAccountId != null) {
+    await applyBalance(db, existing.accountId, -Number(existing.amount));
+    await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+  } else {
+    const children = await getChildren(db, id);
+    if (children.length > 0) {
+      for (const c of children) {
+        await applyBalance(db, existing.accountId, -Number(c.amount));
+      }
+    } else {
+      await applyBalance(db, existing.accountId, -Number(existing.amount));
+    }
+  }
+
   await db.delete(transactions).where(eq(transactions.id, id));
-  await applyBalance(db, existing.accountId, -Number(existing.amount));
   return existing;
 }

@@ -36,6 +36,21 @@ export type Assignment = {
   amount: string;
 };
 
+/**
+ * A transaction row.
+ *
+ * Three flavours, distinguished by which optional fields are set:
+ *
+ *   - Regular:   `parentId` and `transferAccountId` are both null.
+ *   - Transfer:  `transferAccountId` is set; `categoryId` should be null.
+ *                The row lives on the source account; the destination
+ *                sees the same transfer via the `transferAccountId`
+ *                linkage (no mirrored row).
+ *   - Split:     `parentId` is null on the parent and set on each child.
+ *                The parent's `amount` is informational (sum of
+ *                children); only children contribute to account
+ *                balances and to category outflows.
+ */
 export type Transaction = {
   id: number;
   accountId: number;
@@ -48,6 +63,12 @@ export type Transaction = {
   createdAt?: string;
   parentId?: number | null;
   transferAccountId?: number | null;
+};
+
+export type SubTransaction = {
+  categoryId: number;
+  amount: number;
+  memo?: string;
 };
 
 export type Recurring = {

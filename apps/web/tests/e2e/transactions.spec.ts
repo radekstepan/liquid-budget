@@ -94,12 +94,24 @@ test("account filter pill clears and restores the unfiltered title", async ({ pa
 });
 
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {
-  // The seed contains a known payee; just click the first row.
-  const firstRow = page.locator("tbody tr.y-row").first();
-  const payeeText = (await firstRow.locator("td").nth(3).textContent())?.trim();
+  // Find the first clickable row (skip split children, which are not
+  // clickable in TransactionsView). The first .alt-row with the ↳ glyph
+  // is a child; pick a row without that.
+  const rows = page.locator("tbody tr.y-row");
+  const count = await rows.count();
+  let targetRow = rows.nth(0);
+  for (let i = 0; i < count; i++) {
+    const row = rows.nth(i);
+    const hasArrow = await row.locator("td").nth(3).locator("text=↳").count();
+    if (hasArrow === 0) {
+      targetRow = row;
+      break;
+    }
+  }
+  const payeeText = (await targetRow.locator("td").nth(3).textContent())?.trim();
   expect(payeeText).toBeTruthy();
 
-  await firstRow.click();
+  await targetRow.click();
 
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();

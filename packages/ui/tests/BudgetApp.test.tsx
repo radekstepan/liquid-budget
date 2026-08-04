@@ -108,7 +108,7 @@ describe("BudgetApp", () => {
       target: { value: "Coffee" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
-      target: { value: "5.50" },
+      target: { value: "-5.50" },
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));

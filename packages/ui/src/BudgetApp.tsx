@@ -43,17 +43,30 @@ export type BudgetAppApi = {
     memo: string;
     amount: number;
     cleared: boolean;
+    transferAccountId?: number | null;
+    parentId?: number | null;
+    skipBalance?: boolean;
+    subTransactions?: {
+      categoryId: number;
+      amount: number;
+      memo?: string;
+    }[];
   }) => Promise<void>;
   updateTransaction: (
     id: number,
     t: {
-      accountId: number;
-      categoryId: number | null;
-      date: string;
-      payee: string;
-      memo: string;
-      amount: number;
-      cleared: boolean;
+      accountId?: number;
+      categoryId?: number | null;
+      date?: string;
+      payee?: string;
+      memo?: string;
+      amount?: number;
+      cleared?: boolean;
+      subTransactions?: {
+        categoryId: number;
+        amount: number;
+        memo?: string;
+      }[];
     }
   ) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
@@ -297,9 +310,11 @@ export function BudgetApp({
           categories={data.categories}
           defaultAccountId={accountFilter}
           defaultDate={modal.defaultDate}
+          allTransactions={data.transactions}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
-            await api.addTransaction(t);
+            const { id: _ignored, ...rest } = t;
+            await api.addTransaction(rest);
             setModal({ kind: "none" });
           }}
         />
@@ -310,6 +325,7 @@ export function BudgetApp({
           categories={data.categories}
           defaultAccountId={accountFilter}
           initial={editingTransaction}
+          allTransactions={data.transactions}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
             const { id, ...rest } = t;
