@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { GroupRow, Account, CatRow, BudgetResult } from "@ynab/logic";
-import { fmt } from "@ynab/logic";
+import { evalAmount, fmt } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -497,8 +497,8 @@ function CategoryMonthCell({
   }, [editing]);
 
   const commit = () => {
-    const v = parseFloat(draft.replace(/[^0-9.-]/g, ""));
-    if (!Number.isNaN(v)) onAssign(v);
+    const v = evalAmount(draft);
+    if (v != null) onAssign(v);
     setEditing(false);
   };
 
@@ -513,6 +513,12 @@ function CategoryMonthCell({
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setEditing(false);
         }}
+        title={(() => {
+          const n = evalAmount(draft);
+          if (n == null || !Number.isFinite(n)) return undefined;
+          if (!/[+\-*/]/.test(draft.replace(/^[+-]/, ""))) return undefined;
+          return `= $${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        })()}
         className="y-inline-amt"
       />
     );

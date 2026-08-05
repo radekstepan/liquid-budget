@@ -2,9 +2,10 @@
 
 import { useState, useMemo } from "react";
 import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
-import { todayISO, num, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
+import { AmountPreview } from "./AmountInput.js";
 
 const inputClass = "w-full py-[3px]";
 
@@ -118,7 +119,7 @@ export function TransactionModal({
 
   // Signed parent amount and signed child total — validation is sign-aware
   // and the sub-row "Σ … / …" footer uses Math.abs() for the colour check only.
-  const parentAmount = parseFloat(amount) || 0;
+  const parentAmount = evalAmount(amount) ?? 0;
   const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
@@ -149,8 +150,8 @@ export function TransactionModal({
     // Use the typed value as-is (sign is part of the input). The user
     // is expected to type the sign: positive for inflows, negative for
     // outflows. (No outflow/inflow toggle in this modal.)
-    const a = parseFloat(amount);
-    if (Number.isNaN(a) || !accountId) return;
+    const a = evalAmount(amount);
+    if (a == null || !accountId) return;
 
     if (mode === "transfer") {
       if (!payee.trim() && !transferAccountId) return;
@@ -211,7 +212,7 @@ export function TransactionModal({
   };
 
   const canSave = (() => {
-    const a = Math.abs(parseFloat(amount));
+    const a = Math.abs(evalAmount(amount) ?? NaN);
     if (Number.isNaN(a) || !accountId) return false;
     if (mode === "transfer") {
       return Boolean(transferAccountId) && Number(transferAccountId) !== accountId;
@@ -261,6 +262,7 @@ export function TransactionModal({
             inputMode="decimal"
             className={inputClass}
           />
+          <AmountPreview value={amount} />
         </Field>
         <Field label="Date">
           <TextField
@@ -364,9 +366,9 @@ export function TransactionModal({
                 <TextField
                   value={row.amount || ""}
                   onChange={(e) => {
-                    const v = parseFloat(e.target.value);
+                    const v = evalAmount(e.target.value);
                     setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, amount: Number.isNaN(v) ? 0 : v } : r))
+                      rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
                     );
                   }}
                   placeholder="0.00"
@@ -465,8 +467,8 @@ export function CategoryModal({
               name.trim() &&
               onSave({
                 name: name.trim(),
-                goalTarget: hasGoal ? Number(goal) || 0 : null,
-                carryover: hasCarryover ? parseFloat(carryover) || 0 : undefined,
+                goalTarget: hasGoal ? evalAmount(goal) ?? 0 : null,
+                carryover: hasCarryover ? evalAmount(carryover) ?? 0 : undefined,
               })
             }
           >
@@ -494,6 +496,7 @@ export function CategoryModal({
             inputMode="decimal"
             className={inputClass}
           />
+          <AmountPreview value={goal} />
         </Field>
       )}
       <div className="mb-2">
@@ -512,6 +515,7 @@ export function CategoryModal({
             inputMode="decimal"
             className={inputClass}
           />
+          <AmountPreview value={carryover} />
         </Field>
       )}
     </Modal>
@@ -618,7 +622,7 @@ export function RecurringModal({
   const otherAccounts = accounts.filter((a) => a.id !== accountId);
 
   // Signed parent amount and signed child total — validation is sign-aware.
-  const parentAmount = parseFloat(amount) || 0;
+  const parentAmount = evalAmount(amount) ?? 0;
   const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
@@ -646,8 +650,8 @@ export function RecurringModal({
   };
 
   const save = () => {
-    const a = parseFloat(amount);
-    if (Number.isNaN(a) || !accountId) return;
+    const a = evalAmount(amount);
+    if (a == null || !accountId) return;
 
     if (mode === "transfer") {
       if (!transferAccountId) return;
@@ -707,7 +711,7 @@ export function RecurringModal({
   };
 
   const canSave = (() => {
-    const a = Math.abs(parseFloat(amount));
+    const a = Math.abs(evalAmount(amount) ?? NaN);
     if (Number.isNaN(a) || !accountId) return false;
     if (mode === "transfer") {
       return Boolean(transferAccountId) && Number(transferAccountId) !== accountId;
@@ -757,6 +761,7 @@ export function RecurringModal({
             inputMode="decimal"
             className={inputClass}
           />
+          <AmountPreview value={amount} />
         </Field>
         <Field label="Frequency">
           <Select
@@ -864,9 +869,9 @@ export function RecurringModal({
                 <TextField
                   value={row.amount || ""}
                   onChange={(e) => {
-                    const v = parseFloat(e.target.value);
+                    const v = evalAmount(e.target.value);
                     setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, amount: Number.isNaN(v) ? 0 : v } : r))
+                      rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
                     );
                   }}
                   placeholder="0.00"
@@ -965,7 +970,7 @@ export function AccountModal({
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
   const save = () => {
     if (!name.trim()) return;
-    const b = parseFloat(balance) || 0;
+    const b = evalAmount(balance) ?? 0;
     onSave({ name: name.trim(), kind, groupLabel, balance: b, onBudget: kind !== "offbudget" });
   };
   const isEdit = !!initial;
@@ -1004,6 +1009,7 @@ export function AccountModal({
           inputMode="decimal"
           className={inputClass}
         />
+        <AmountPreview value={balance} />
       </Field>
     </Modal>
   );

@@ -48,6 +48,203 @@ export function num(s: string | number | null | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
+type _Token = { kind: "num"; value: number } | { kind: "op"; op: string };
+
+const _VALID = /^[-+*/().\d\s]+$/;
+
+export function evalAmount(
+  s: string | number | null | undefined,
+): number | null {
+  if (s == null) return null;
+  const raw = typeof s === "number" ? String(s) : s;
+  const stripped = raw.replace(/[$,_]/g, "");
+  if (stripped.replace(/\s+/g, "") === "") return null;
+  if (!_VALID.test(stripped)) return null;
+
+  const isDigit = (ch: string | undefined): ch is string =>
+    typeof ch === "string" && ch >= "0" && ch <= "9";
+  const isBinOp = (ch: string | undefined): ch is string =>
+    ch === "+" || ch === "-" || ch === "*" || ch === "/";
+
+  const tokens: _Token[] = [];
+  let i = 0;
+  let lastEmitted: "num" | "op" | null = null;
+  while (i < stripped.length) {
+    const c = stripped[i] as string;
+    if (c === " " || c === "\t" || c === "\n") {
+      i++;
+      continue;
+    }
+    if (c === "(") {
+      if (lastEmitted === "num") return null;
+      tokens.push({ kind: "op", op: c });
+      lastEmitted = "op";
+      i++;
+      continue;
+    }
+    if (c === ")") {
+      tokens.push({ kind: "op", op: c });
+      lastEmitted = "op";
+      i++;
+      continue;
+    }
+    if (isBinOp(c)) {
+      const lastTok = tokens[tokens.length - 1];
+      const lastOp =
+        lastEmitted === "op" && lastTok?.kind === "op" ? lastTok.op : null;
+      const isUnary =
+        c === "-" &&
+        (lastEmitted === null ||
+          lastOp === "(" ||
+          lastOp === "+" ||
+          lastOp === "-" ||
+          lastOp === "*" ||
+          lastOp === "/");
+      if (isUnary) {
+        i++;
+        let num = "";
+        let sawDot = false;
+        while (i < stripped.length) {
+          const cc = stripped[i] as string;
+          if (isDigit(cc)) {
+            num += cc;
+            i++;
+          } else if (cc === "." && !sawDot) {
+            num += cc;
+            sawDot = true;
+            i++;
+          } else if (cc === " " || cc === "\t" || cc === "\n") {
+            i++;
+          } else {
+            break;
+          }
+        }
+        if (num === "" || num === ".") return null;
+        const v = Number(num);
+        if (!Number.isFinite(v)) return null;
+        tokens.push({ kind: "num", value: -v });
+        lastEmitted = "num";
+        continue;
+      }
+      if (lastOp === "+" || lastOp === "-" || lastOp === "*" || lastOp === "/") return null;
+      tokens.push({ kind: "op", op: c });
+      lastEmitted = "op";
+      i++;
+      continue;
+    }
+    if (isDigit(c)) {
+      if (lastEmitted === "num") return null;
+      let num = "";
+      let sawDot = false;
+      while (i < stripped.length) {
+        const cc = stripped[i] as string;
+        if (isDigit(cc)) {
+          num += cc;
+          i++;
+        } else if (cc === "." && !sawDot) {
+          num += cc;
+          sawDot = true;
+          i++;
+        } else {
+          break;
+        }
+      }
+      const v = Number(num);
+      if (!Number.isFinite(v)) return null;
+      tokens.push({ kind: "num", value: v });
+      lastEmitted = "num";
+      continue;
+    }
+    if (c === ".") {
+      if (lastEmitted === "num") return null;
+      const next = stripped[i + 1];
+      if (isDigit(next)) {
+        let num = "0.";
+        i++;
+        while (i < stripped.length) {
+          const cc = stripped[i] as string;
+          if (isDigit(cc)) {
+            num += cc;
+            i++;
+          } else {
+            break;
+          }
+        }
+        const v = Number(num);
+        if (!Number.isFinite(v)) return null;
+        tokens.push({ kind: "num", value: v });
+        lastEmitted = "num";
+        continue;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  const out: _Token[] = [];
+  const ops: string[] = [];
+  const prec: Record<string, number> = { "+": 1, "-": 1, "*": 2, "/": 2 };
+  for (const t of tokens) {
+    if (t.kind === "num") {
+      out.push(t);
+    } else {
+      if (t.op === "(") {
+        ops.push(t.op);
+      } else if (t.op === ")") {
+        let found = false;
+        while (ops.length) {
+          const top = ops.pop();
+          if (top === undefined) break;
+          if (top === "(") {
+            found = true;
+            break;
+          }
+          out.push({ kind: "op", op: top });
+        }
+        if (!found) return null;
+      } else {
+        while (
+          ops.length > 0 &&
+          ops[ops.length - 1] !== "(" &&
+          (prec[ops[ops.length - 1] as string] ?? 0) >= (prec[t.op] ?? 0)
+        ) {
+          const popped = ops.pop();
+          if (popped === undefined) break;
+          out.push({ kind: "op", op: popped });
+        }
+        ops.push(t.op);
+      }
+    }
+  }
+  while (ops.length) {
+    const op = ops.pop();
+    if (op === undefined) break;
+    if (op === "(") return null;
+    out.push({ kind: "op", op });
+  }
+
+  const stack: number[] = [];
+  for (const t of out) {
+    if (t.kind === "num") {
+      stack.push(t.value);
+    } else {
+      if (stack.length < 2) return null;
+      const b = stack.pop();
+      const a = stack.pop();
+      if (a === undefined || b === undefined) return null;
+      let r: number;
+      if (t.op === "+") r = a + b;
+      else if (t.op === "-") r = a - b;
+      else if (t.op === "*") r = a * b;
+      else r = a / b;
+      if (!Number.isFinite(r)) return null;
+      stack.push(r);
+    }
+  }
+  if (stack.length !== 1) return null;
+  return stack[0] as number;
+}
+
 export function monthKey(year: number, monthIndex0: number): string {
   return `${year}-${String(monthIndex0 + 1).padStart(2, "0")}`;
 }

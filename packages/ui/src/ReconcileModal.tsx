@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Category, CategoryGroup } from "@ynab/logic";
+import { evalAmount } from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
+import { AmountPreview } from "./AmountInput.js";
 
 /**
  * Server response from `POST /api/reconcile` with `action: "reconcile"`.
@@ -70,8 +72,8 @@ export function ReconcileModal({
   );
 
   const statementBalance = useMemo(() => {
-    const n = parseFloat(statementInput);
-    return Number.isFinite(n) ? n : NaN;
+    const n = evalAmount(statementInput);
+    return n != null && Number.isFinite(n) ? n : NaN;
   }, [statementInput]);
 
   const diff = useMemo(() => {
@@ -176,6 +178,7 @@ export function ReconcileModal({
           autoFocus
           className="w-full"
         />
+        <AmountPreview value={statementInput} />
       </Field>
 
       <div
