@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
-import { fmt, num } from "@ynab/logic";
+import { computeRunningBalances, fmt, num } from "@ynab/logic";
 import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, Pill, money } from "@ynab/theme";
 
-type Txn = Omit<Transaction, "amount"> & { amount: number };
+type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
 export function TransactionsView({
   data,
@@ -36,18 +36,23 @@ export function TransactionsView({
     () => new Map(data.categories.map((c) => [c.id, c] as const)),
     [data.categories]
   );
+  const accountBalances = useMemo(
+    () => new Map(data.accounts.map((a) => [a.id, num(a.balance)] as const)),
+    [data.accounts]
+  );
 
   const rows = useMemo<Txn[]>(() => {
-    return data.transactions
-      .filter((t) => {
-        if (accountFilter == null) return true;
-        if (t.accountId === accountFilter) return true;
-        if (t.transferAccountId != null && t.transferAccountId === accountFilter) return true;
-        return false;
-      })
+    const filtered = data.transactions.filter((t) => {
+      if (accountFilter == null) return true;
+      if (t.accountId === accountFilter) return true;
+      if (t.transferAccountId != null && t.transferAccountId === accountFilter) return true;
+      return false;
+    });
+    const sorted = filtered
       .map((t) => ({ ...t, amount: num(t.amount) }))
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }, [data.transactions, accountFilter]);
+    return computeRunningBalances(sorted, accountBalances, accountFilter ?? undefined);
+  }, [data.transactions, accountFilter, accountBalances]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -170,12 +175,15 @@ export function TransactionsView({
               <th style={{ width: 32 }} className="text-center">
                 C
               </th>
+              <th className="num" style={{ width: 108 }}>
+                Balance
+              </th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} className="text-center py-6 y-hint">
+                <td colSpan={10} className="text-center py-6 y-hint">
                   No transactions match your filter.
                 </td>
               </tr>
@@ -246,6 +254,15 @@ export function TransactionsView({
                           disabled={t.status === "r"}
                         />
                       )}
+                    </td>
+                    <td
+                      className="num y-num"
+                      style={{
+                        color: t.runningBalance < 0 ? "var(--y-red)" : "var(--y-ink)",
+                        fontWeight: t.runningBalance < 0 ? 700 : 400,
+                      }}
+                    >
+                      {money(t.runningBalance)}
                     </td>
                   </tr>
                 );
