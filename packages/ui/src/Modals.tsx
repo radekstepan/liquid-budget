@@ -16,7 +16,7 @@ export type TransactionSavePayload = {
   payee: string;
   memo: string;
   amount: number;
-  cleared: boolean;
+  status: "u" | "c" | "r";
   transferAccountId?: number | null;
   /**
    * When set, the server will create a split: insert the parent with
@@ -90,7 +90,7 @@ export function TransactionModal({
   const [amount, setAmount] = useState(
     initial ? initialAmt.toFixed(2) : ""
   );
-  const [cleared, setCleared] = useState(initial?.cleared ?? true);
+  const [cleared, setCleared] = useState<boolean>(initial?.status === "c" || initial?.status === "r" || initial?.status == null);
 
   // Transfer destination
   const [transferAccountId, setTransferAccountId] = useState<number | "">(
@@ -165,7 +165,7 @@ export function TransactionModal({
         payee: payee.trim() || `Transfer : ${destName}`,
         memo: memo.trim(),
         amount: a,
-        cleared,
+        status: cleared ? "c" : "u",
         transferAccountId: Number(transferAccountId),
       });
       return;
@@ -182,7 +182,7 @@ export function TransactionModal({
         payee: payee.trim(),
         memo: memo.trim(),
         amount: a,
-        cleared,
+        status: cleared ? "c" : "u",
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId,
           // Sub-row amounts are passed through verbatim (signed) so the
@@ -206,7 +206,7 @@ export function TransactionModal({
       payee: payee.trim(),
       memo: memo.trim(),
       amount: a,
-      cleared,
+      status: cleared ? "c" : "u",
     });
   };
 

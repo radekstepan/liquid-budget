@@ -31,6 +31,7 @@ export function Sidebar({
   onAddAccount,
   onEditAccount,
   onDeleteAccount,
+  onReconcileAccount,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -39,6 +40,7 @@ export function Sidebar({
   onAddAccount: () => void;
   onEditAccount?: (id: number) => void;
   onDeleteAccount?: (id: number) => void;
+  onReconcileAccount?: (id: number) => void;
 }) {
   const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
   const seen = new Set(accounts.map((a) => a.groupLabel));
@@ -149,6 +151,20 @@ export function Sidebar({
                         aria-label={`Edit account ${a.name}`}
                       >
                         <Icon name="edit" size={11} />
+                      </button>
+                    )}
+                    {onReconcileAccount && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReconcileAccount(a.id);
+                        }}
+                        className="mr-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded opacity-0 transition-opacity group-hover:opacity-100"
+                        style={{ color: "var(--y-side-ink-dim)" }}
+                        title="Reconcile account"
+                        aria-label={`Reconcile account ${a.name}`}
+                      >
+                        <Icon name="reconcile" size={11} />
                       </button>
                     )}
                     {onDeleteAccount && (

@@ -13,5 +13,10 @@ export {
   RecurringModal,
   AccountModal,
 } from "./Modals.js";
+export {
+  ReconcileModal,
+  type ReconcileModalState,
+  type ReconcileResultPayload,
+} from "./ReconcileModal.js";
 export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";
 export { Modal, Field, Btn, inputCls } from "./ui.js";

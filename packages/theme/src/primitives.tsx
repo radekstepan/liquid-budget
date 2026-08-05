@@ -354,11 +354,36 @@ export const Panel: React.FC<{
 );
 
 /* -------------------------------------------------- Cleared flag */
-export const ClearedFlag: React.FC<{ state: "c" | "u" | "r" }> = ({ state }) => (
-  <span
-    className={cx("y-cleared", `y-cleared--${state}`)}
-    title={state === "c" ? "Cleared" : state === "r" ? "Reconciled" : "Uncleared"}
-  >
-    {state === "u" ? "U" : state === "r" ? "R" : "C"}
-  </span>
-);
+export const ClearedFlag: React.FC<{
+  state: "c" | "u" | "r";
+  onCycle?: () => void;
+  disabled?: boolean;
+}> = ({ state, onCycle, disabled }) => {
+  const interactive = !!onCycle && !disabled;
+  const inner = (
+    <span
+      className={cx(
+        "y-cleared",
+        `y-cleared--${state}`,
+        interactive && "cursor-pointer"
+      )}
+      title={state === "c" ? "Cleared" : state === "r" ? "Reconciled" : "Uncleared"}
+      onClick={onCycle}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onCycle?.();
+              }
+            }
+          : undefined
+      }
+    >
+      {state === "u" ? "U" : state === "r" ? "R" : "C"}
+    </span>
+  );
+  return inner;
+};

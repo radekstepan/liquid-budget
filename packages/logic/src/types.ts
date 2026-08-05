@@ -6,6 +6,8 @@ export type Account = {
   balance: string;
   onBudget: boolean;
   sort: number;
+  lastReconciledAt?: string | null;
+  lastReconciledBalance?: number | string | null;
 };
 
 export type CategoryGroup = {
@@ -51,6 +53,16 @@ export type Assignment = {
  *                children); only children contribute to account
  *                balances and to category outflows.
  */
+/**
+ * Cleared / Uncleared / Reconciled flag. YNAB4's tri-state:
+ *   - "u" Uncleared: entered into the register but not yet seen on a bank statement.
+ *   - "c" Cleared:    appeared on a bank statement; still mutable.
+ *   - "r" Reconciled: matched to a specific statement date; locked.
+ * Reconciled status is only set by the reconcile flow — direct
+ * creation via the transaction modal always sets "c" or "u".
+ */
+export type ClearedStatus = "u" | "c" | "r";
+
 export type Transaction = {
   id: number;
   accountId: number;
@@ -59,7 +71,7 @@ export type Transaction = {
   payee: string;
   memo: string;
   amount: string;
-  cleared: boolean;
+  status: ClearedStatus;
   createdAt?: string;
   parentId?: number | null;
   transferAccountId?: number | null;

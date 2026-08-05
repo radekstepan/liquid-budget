@@ -18,6 +18,7 @@ import {
   RecurringModal,
   AccountModal,
 } from "./Modals.js";
+import { ReconcileModal } from "./ReconcileModal.js";
 
 type ModalState =
   | { kind: "none" }
@@ -30,7 +31,8 @@ type ModalState =
   | { kind: "addCategory"; groupId: number }
   | { kind: "editCategory"; categoryId: number }
   | { kind: "addGroup" }
-  | { kind: "editGroup"; groupId: number };
+  | { kind: "editGroup"; groupId: number }
+  | { kind: "reconcile"; accountId: number };
 
 export type BudgetAppApi = {
   reload: () => Promise<void>;
@@ -42,7 +44,7 @@ export type BudgetAppApi = {
     payee: string;
     memo: string;
     amount: number;
-    cleared: boolean;
+    status: "u" | "c" | "r";
     transferAccountId?: number | null;
     parentId?: number | null;
     skipBalance?: boolean;
@@ -61,7 +63,7 @@ export type BudgetAppApi = {
       payee?: string;
       memo?: string;
       amount?: number;
-      cleared?: boolean;
+      status?: "u" | "c" | "r";
       subTransactions?: {
         categoryId: number | null;
         amount: number;
@@ -118,6 +120,12 @@ export type BudgetAppApi = {
     id: number,
     patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number }
   ) => Promise<void>;
+  reconcileAccount: (input: {
+    accountId: number;
+    statementBalance: number;
+    adjustmentCategoryId: number | null;
+  }) => Promise<void>;
+  unreconcileAccount: (accountId: number) => Promise<void>;
   resetDemo: () => Promise<void>;
   importYnab4?: (file: File) => Promise<void>;
 };
@@ -182,6 +190,24 @@ export function BudgetApp({
     [api, month]
   );
 
+  const openReconcile = useCallback(
+    (accountId: number) => setModal({ kind: "reconcile", accountId }),
+    []
+  );
+
+  const cycleStatus = useCallback(
+    async (id: number) => {
+      const t = data.transactions.find((x) => x.id === id);
+      if (!t) return;
+      // U ↔ C only via the in-register toggle. R is set exclusively
+      // by the reconcile flow and is locked; users un-reconcile via
+      // the modal's "undo the last reconciliation" link.
+      const next: "u" | "c" = t.status === "c" ? "u" : "c";
+      await api.updateTransaction(id, { status: next });
+    },
+    [api, data.transactions]
+  );
+
   const clearOverdraft = useCallback(
     async (categoryIds: number[]): Promise<void> => {
       await Promise.all(categoryIds.map((id) => api.assign(id, 0, month)));
@@ -223,6 +249,35 @@ export function BudgetApp({
   const editingAccount =
     modal.kind === "editAccount" ? data.accounts.find((a) => a.id === modal.accountId) : undefined;
 
+  // Derive the reconcile state for the currently-open account from
+  // the in-memory data — no extra API call needed because the
+  // working balance is just account.balance − sum(uncleared.amounts).
+  const reconcileState = useMemo(() => {
+    if (modal.kind !== "reconcile") return null;
+    const acct = data.accounts.find((a) => a.id === modal.accountId);
+    if (!acct) return null;
+    const txns = data.transactions.filter((t) => t.accountId === acct.id);
+    const unclearedTotal = txns
+      .filter((t) => t.status === "u")
+      .reduce((s, t) => s + num(t.amount), 0);
+    const unclearedCount = txns.filter((t) => t.status === "u").length;
+    const clearedCount = txns.filter((t) => t.status === "c").length;
+    const reconciledCount = txns.filter((t) => t.status === "r").length;
+    const workingBalance = round2(num(acct.balance) - unclearedTotal);
+    return {
+      accountId: acct.id,
+      accountName: acct.name,
+      workingBalance,
+      unclearedTotal: round2(unclearedTotal),
+      unclearedCount,
+      clearedCount,
+      reconciledCount,
+      lastReconciledAt: acct.lastReconciledAt ?? null,
+      lastReconciledBalance:
+        acct.lastReconciledBalance != null ? num(acct.lastReconciledBalance) : null,
+    };
+  }, [modal, data.accounts, data.transactions]);
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--y-app-bg)" }}>
       <Sidebar
@@ -236,6 +291,7 @@ export function BudgetApp({
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onDeleteAccount={api.deleteAccount}
+        onReconcileAccount={openReconcile}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
@@ -268,6 +324,8 @@ export function BudgetApp({
             onAdd={() => setModal({ kind: "addTransaction" })}
             onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
             onDelete={api.deleteTransaction}
+            onReconcile={openReconcile}
+            onCycleStatus={cycleStatus}
           />
         )}
         {view === "recurring" && (
@@ -423,8 +481,28 @@ export function BudgetApp({
           }}
         />
       )}
+      {modal.kind === "reconcile" && reconcileState && (
+        <ReconcileModal
+          state={reconcileState}
+          categories={data.categories}
+          groups={data.groups}
+          onClose={() => setModal({ kind: "none" })}
+          onReconcile={async (input) => {
+            await api.reconcileAccount(input);
+            setModal({ kind: "none" });
+          }}
+          onUnreconcile={async (accountId) => {
+            await api.unreconcileAccount(accountId);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export const __demoConstants = { DEMO_MONTH, todayISO };

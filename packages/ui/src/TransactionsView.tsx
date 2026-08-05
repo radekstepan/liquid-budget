@@ -14,6 +14,8 @@ export function TransactionsView({
   onAdd,
   onEdit,
   onDelete,
+  onReconcile,
+  onCycleStatus,
 }: {
   data: BudgetData;
   accountFilter: number | null;
@@ -21,6 +23,8 @@ export function TransactionsView({
   onAdd: () => void;
   onEdit: (id: number) => void;
   onDelete: (id: number) => void;
+  onReconcile: (accountId: number) => void;
+  onCycleStatus: (id: number) => void;
 }) {
   const [search, setSearch] = useState("");
 
@@ -95,7 +99,29 @@ export function TransactionsView({
               </button>
             </Pill>
           )}
+          {filterAccount?.lastReconciledAt && (
+            <Pill
+              tone="green"
+              title={`Last reconciled: ${filterAccount.lastReconciledAt} (${fmt(
+                num(filterAccount.lastReconciledBalance ?? 0)
+              )})`}
+            >
+              <Icon name="reconcile" size={10} color="#fff" />
+              <span className="ml-1">{filterAccount.lastReconciledAt}</span>
+            </Pill>
+          )}
         </div>
+        {filterAccount && (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => onReconcile(filterAccount.id)}
+            title="Reconcile this account against your bank statement"
+          >
+            <Icon name="reconcile" size={11} color="var(--y-ink)" />
+            <span className="ml-1">Reconcile</span>
+          </Button>
+        )}
         <ToolbarSep />
         <TextField
           search
@@ -213,7 +239,13 @@ export function TransactionsView({
                       {inflow ? money(inflow) : ""}
                     </td>
                     <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                      {isChild ? null : <ClearedFlag state={t.cleared ? "c" : "u"} />}
+                      {isChild ? null : (
+                        <ClearedFlag
+                          state={t.status}
+                          onCycle={() => onCycleStatus(t.id)}
+                          disabled={t.status === "r"}
+                        />
+                      )}
                     </td>
                   </tr>
                 );
