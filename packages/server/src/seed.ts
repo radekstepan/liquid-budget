@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
 
 // Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
@@ -76,6 +76,27 @@ export function ensureTables(db: Db): void {
       active INTEGER NOT NULL DEFAULT 1
     );
   `);
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS recurring_sub_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      recurring_id INTEGER NOT NULL REFERENCES recurring(id) ON DELETE CASCADE,
+      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+      amount REAL NOT NULL DEFAULT 0,
+      memo TEXT NOT NULL DEFAULT '',
+      sort INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  // Idempotent column adds for existing databases. SQLite doesn't have
+  // "ADD COLUMN IF NOT EXISTS", so we run each ALTER and swallow the
+  // "duplicate column" error that arises on subsequent boots. Drizzle
+  // wraps the underlying SqliteError in a DrizzleError, so we inspect
+  // both the message and the `cause` chain.
+  try {
+    db.run(sql`ALTER TABLE recurring ADD COLUMN transfer_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL;`);
+  } catch (e) {
+    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
+    if (!msg.includes("duplicate column")) throw e;
+  }
 }
 
 /**
@@ -86,6 +107,7 @@ export function ensureTables(db: Db): void {
  */
 export async function resetDatabase(db: Db): Promise<void> {
   ensureTables(db);
+  await db.delete(recurringSubTransactions);
   await db.delete(recurring);
   await db.delete(transactions);
   await db.delete(assignments);

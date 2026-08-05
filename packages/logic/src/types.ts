@@ -80,6 +80,16 @@ export type Recurring = {
   frequency: string;
   nextDate: string;
   active: boolean;
+  transferAccountId?: number | null;
+};
+
+export type RecurringSubTransaction = {
+  id: number;
+  recurringId: number;
+  categoryId: number;
+  amount: string;
+  memo: string;
+  sort: number;
 };
 
 export type BudgetData = {
@@ -88,7 +98,7 @@ export type BudgetData = {
   categories: Category[];
   assignments: Assignment[];
   transactions: Transaction[];
-  recurring: Recurring[];
+  recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[];
 };
 
 export type CatRow = {

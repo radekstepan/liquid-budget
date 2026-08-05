@@ -84,6 +84,22 @@ export const recurring = sqliteTable("recurring", {
   frequency: text("frequency").notNull().default("monthly"),
   nextDate: text("next_date").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  transferAccountId: integer("transfer_account_id").references(() => accounts.id, {
+    onDelete: "set null",
+  }),
+});
+
+export const recurringSubTransactions = sqliteTable("recurring_sub_transactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  recurringId: integer("recurring_id")
+    .notNull()
+    .references(() => recurring.id, { onDelete: "cascade" }),
+  categoryId: integer("category_id")
+    .notNull()
+    .references(() => categories.id, { onDelete: "restrict" }),
+  amount: real("amount").notNull().default(0),
+  memo: text("memo").notNull().default(""),
+  sort: integer("sort").notNull().default(0),
 });
 
 export type Account = typeof accounts.$inferSelect;
@@ -92,3 +108,4 @@ export type Category = typeof categories.$inferSelect;
 export type Assignment = typeof assignments.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type Recurring = typeof recurring.$inferSelect;
+export type RecurringSubTransaction = typeof recurringSubTransactions.$inferSelect;

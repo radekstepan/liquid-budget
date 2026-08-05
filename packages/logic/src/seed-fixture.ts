@@ -1,4 +1,4 @@
-import type { Account, Assignment, BudgetData, Category, CategoryGroup, Recurring, Transaction } from "./types.js";
+import type { Account, Assignment, BudgetData, Category, CategoryGroup, Recurring, RecurringSubTransaction, Transaction } from "./types.js";
 
 // Demo month: June 2026 — matches the highlighted month in the YNAB4 screenshots.
 export const DEMO_MONTH = "2026-06";
@@ -301,24 +301,24 @@ const transactions: Transaction[] = [
 // ---------------------------------------------------------------------------
 // RECURRING — scheduled transactions next firing in 2026-07
 // ---------------------------------------------------------------------------
-const recurring: Recurring[] = [
+const recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[] = [
   // Mortgage
-  { id: 1,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Mortgage Principal"),            payee: "TD Bank",                  amount: "-1800.00",    frequency: "monthly", nextDate: "2026-07-01", active: true },
-  { id: 2,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Mortgage Interest"),             payee: "TD Bank",                  amount: "-2352.97",    frequency: "monthly", nextDate: "2026-07-01", active: true },
+  { id: 1,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Mortgage Principal"),            payee: "TD Bank",                  amount: "-1800.00",    frequency: "monthly", nextDate: "2026-07-01", active: true, subTransactions: [] },
+  { id: 2,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Mortgage Interest"),             payee: "TD Bank",                  amount: "-2352.97",    frequency: "monthly", nextDate: "2026-07-01", active: true, subTransactions: [] },
   // Condo
-  { id: 3,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Condo Fees/HOA"),                payee: "Mountain's Edge MSP",       amount: "-439.00",     frequency: "monthly", nextDate: "2026-07-01", active: true },
+  { id: 3,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Condo Fees/HOA"),                payee: "Mountain's Edge MSP",       amount: "-439.00",     frequency: "monthly", nextDate: "2026-07-01", active: true, subTransactions: [] },
   // Internet / phone
-  { id: 4,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Internet, iPhone"),              payee: "Telus",                     amount: "-110.00",     frequency: "monthly", nextDate: "2026-07-10", active: true },
-  { id: 5,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Internet, iPhone"),              payee: "Fido",                      amount: "-90.00",      frequency: "monthly", nextDate: "2026-07-10", active: true },
+  { id: 4,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Internet, iPhone"),              payee: "Telus",                     amount: "-110.00",     frequency: "monthly", nextDate: "2026-07-10", active: true, subTransactions: [] },
+  { id: 5,  accountId: aid("TD Unlimited Chequing"), categoryId: cid("Internet, iPhone"),              payee: "Fido",                      amount: "-90.00",      frequency: "monthly", nextDate: "2026-07-10", active: true, subTransactions: [] },
   // Utilities
-  { id: 6,  accountId: aid("AMEX Cobalt"),           categoryId: cid("Utilities, Electricity, Water"), payee: "Fortis BC",                 amount: "-300.00",     frequency: "monthly", nextDate: "2026-07-25", active: true },
+  { id: 6,  accountId: aid("AMEX Cobalt"),           categoryId: cid("Utilities, Electricity, Water"), payee: "Fortis BC",                 amount: "-300.00",     frequency: "monthly", nextDate: "2026-07-25", active: true, subTransactions: [] },
   // Payroll — biweekly (two entries)
-  { id: 7,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "4152.97",     frequency: "monthly", nextDate: "2026-07-16", active: true },
-  { id: 8,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "4152.97",     frequency: "monthly", nextDate: "2026-07-30", active: true },
+  { id: 7,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "4152.97",     frequency: "monthly", nextDate: "2026-07-16", active: true, subTransactions: [] },
+  { id: 8,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "4152.97",     frequency: "monthly", nextDate: "2026-07-30", active: true, subTransactions: [] },
   // TFSA contribution
-  { id: 9,  accountId: aid("EQ Bank"),               categoryId: cid("Retirement"),                    payee: "Wealthsimple TFSA",         amount: "-455.50",     frequency: "monthly", nextDate: "2026-07-01", active: true },
+  { id: 9,  accountId: aid("EQ Bank"),               categoryId: cid("Retirement"),                    payee: "Wealthsimple TFSA",         amount: "-455.50",     frequency: "monthly", nextDate: "2026-07-01", active: true, subTransactions: [] },
   // Sailing (annual)
-  { id: 10, accountId: aid("TD Unlimited Chequing"), categoryId: cid("Lessons (Sailing, Guitar)"),     payee: "Jericho Sailing Centre",    amount: "-718.60",     frequency: "yearly",  nextDate: "2027-05-01", active: true },
+  { id: 10, accountId: aid("TD Unlimited Chequing"), categoryId: cid("Lessons (Sailing, Guitar)"),     payee: "Jericho Sailing Centre",    amount: "-718.60",     frequency: "yearly",  nextDate: "2027-05-01", active: true, subTransactions: [] },
 ];
 
 // ---------------------------------------------------------------------------

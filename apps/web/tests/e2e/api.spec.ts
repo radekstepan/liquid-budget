@@ -261,3 +261,110 @@ test("POST /api/transactions rejects a transfer to the same account with 400", a
   expect(res.status()).toBe(400);
   await ctx.dispose();
 });
+
+test("POST /api/recurring creates and posts a recurring transfer", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const source = budget.accounts.find(
+    (a: { name: string }) => a.name === "Cash"
+  );
+  const dest = budget.accounts.find(
+    (a: { name: string }) => a.name === "Scotia e-Chequing"
+  );
+  expect(source?.id).toBeTruthy();
+  expect(dest?.id).toBeTruthy();
+
+  const sourceBalBefore = Number(source.balance);
+  const destBalBefore = Number(dest.balance);
+
+  const created = await ctx.post("/api/recurring", {
+    data: {
+      accountId: source.id,
+      categoryId: null,
+      payee: "Recurring AMEX Payment",
+      amount: -77.77,
+      frequency: "monthly",
+      nextDate: "2099-07-20",
+      transferAccountId: dest.id,
+    },
+  });
+  expect(created.status()).toBe(200);
+  const row = await created.json();
+  expect(row.transferAccountId).toBe(dest.id);
+  expect(row.categoryId).toBeNull();
+
+  // Self-transfer is rejected.
+  const bad = await ctx.post("/api/recurring", {
+    data: {
+      accountId: source.id,
+      categoryId: null,
+      payee: "Self",
+      amount: -10,
+      frequency: "monthly",
+      nextDate: "2099-07-20",
+      transferAccountId: source.id,
+    },
+  });
+  expect(bad.status()).toBe(400);
+
+  // Delete to keep the budget clean for downstream tests.
+  await ctx.delete(`/api/recurring?id=${row.id}`);
+  await ctx.dispose();
+});
+
+test("POST /api/recurring creates a recurring split with subTransactions", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const account = budget.accounts.find(
+    (a: { name: string }) => a.name === "TD Unlimited Chequing"
+  );
+  const cats = budget.categories;
+  expect(account?.id).toBeTruthy();
+
+  const created = await ctx.post("/api/recurring", {
+    data: {
+      accountId: account.id,
+      categoryId: null,
+      payee: "Recurring Costco",
+      amount: -50,
+      frequency: "monthly",
+      nextDate: "2099-07-01",
+      subTransactions: [
+        { categoryId: cats[0].id, amount: -30 },
+        { categoryId: cats[1].id, amount: -20 },
+      ],
+    },
+  });
+  expect(created.status()).toBe(200);
+  const row = await created.json();
+  expect(row.transferAccountId).toBeNull();
+  expect(row.categoryId).toBeNull();
+
+  // Verify the budget payload carries the children on the recurring row.
+  const after = await (await ctx.get("/api/budget")).json();
+  const stored = after.recurring.find(
+    (r: { id: number }) => r.id === row.id
+  );
+  expect(stored).toBeTruthy();
+  expect(stored.subTransactions).toHaveLength(2);
+
+  // Unbalanced children are rejected.
+  const bad = await ctx.post("/api/recurring", {
+    data: {
+      accountId: account.id,
+      categoryId: null,
+      payee: "Bad split",
+      amount: -50,
+      frequency: "monthly",
+      nextDate: "2099-07-01",
+      subTransactions: [
+        { categoryId: cats[0].id, amount: -30 },
+        { categoryId: cats[1].id, amount: -19.99 },
+      ],
+    },
+  });
+  expect(bad.status()).toBe(400);
+
+  await ctx.delete(`/api/recurring?id=${row.id}`);
+  await ctx.dispose();
+});
