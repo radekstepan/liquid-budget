@@ -47,7 +47,7 @@ export type BudgetAppApi = {
     parentId?: number | null;
     skipBalance?: boolean;
     subTransactions?: {
-      categoryId: number;
+      categoryId: number | null;
       amount: number;
       memo?: string;
     }[];
@@ -63,7 +63,7 @@ export type BudgetAppApi = {
       amount?: number;
       cleared?: boolean;
       subTransactions?: {
-        categoryId: number;
+        categoryId: number | null;
         amount: number;
         memo?: string;
       }[];
@@ -78,7 +78,7 @@ export type BudgetAppApi = {
     frequency: string;
     nextDate: string;
     transferAccountId?: number | null;
-    subTransactions?: { categoryId: number; amount: number; memo?: string }[];
+    subTransactions?: { categoryId: number | null; amount: number; memo?: string }[];
   }) => Promise<void>;
   updateRecurring: (
     id: number,
@@ -91,7 +91,7 @@ export type BudgetAppApi = {
       nextDate?: string;
       active?: boolean;
       transferAccountId?: number | null;
-      subTransactions?: { categoryId: number; amount: number; memo?: string }[];
+      subTransactions?: { categoryId: number | null; amount: number; memo?: string }[];
     }
   ) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;

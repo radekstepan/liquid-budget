@@ -66,7 +66,12 @@ export type Transaction = {
 };
 
 export type SubTransaction = {
-  categoryId: number;
+  /**
+   * Nullable to match the DB schema for `recurring_sub_transactions.category_id`
+   * (ON DELETE SET NULL). The server still rejects null categories at insert
+   * time; nullability is only relevant for reads.
+   */
+  categoryId: number | null;
   amount: number;
   memo?: string;
 };
@@ -86,7 +91,13 @@ export type Recurring = {
 export type RecurringSubTransaction = {
   id: number;
   recurringId: number;
-  categoryId: number;
+  /**
+   * Nullable to match the DB schema: `recurring_sub_transactions.category_id`
+   * is `ON DELETE SET NULL` (mirroring `transactions.categoryId`) so that
+   * deleting a category used in a recurring split does not crash with a FK
+   * constraint violation — the sub-row simply becomes uncategorised.
+   */
+  categoryId: number | null;
   amount: string;
   memo: string;
   sort: number;

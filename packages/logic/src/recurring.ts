@@ -68,11 +68,12 @@ export function netMonthlyAmount(
  *
  *   - at least 2 children
  *   - every child has a category
- *   - the |sum of children| equals the |parent amount| to the cent
+ *   - the signed sum of children equals the signed parent amount to the cent
+ *     (mixed signs allowed: e.g. +5000 gross, -1000 taxes → +4000 net parent)
  */
 export function validateRecurringSubTransactions(
   parentAmount: number,
-  children: { categoryId: number; amount: number }[]
+  children: { categoryId: number | null; amount: number }[]
 ): string | null {
   if (children.length < 2) {
     return "Add at least two sub-transactions.";
@@ -82,9 +83,9 @@ export function validateRecurringSubTransactions(
       return `Sub-transaction ${i + 1} is missing a category.`;
     }
   }
-  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
-  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
-    return `Sub-transactions sum to ${sum.toFixed(2)} but parent is ${Math.abs(parentAmount).toFixed(2)}.`;
+  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
+  if (Math.abs(sum - parentAmount) > 0.005) {
+    return `Sub-transactions sum to ${sum.toFixed(2)} but parent is ${parentAmount.toFixed(2)}.`;
   }
   return null;
 }

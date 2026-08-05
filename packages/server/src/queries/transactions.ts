@@ -43,7 +43,13 @@ export type UpdateTransactionInput = {
 };
 
 export type SubTransactionInput = {
-  categoryId: number;
+  /**
+   * Nullable to match the DB schema: `recurring_sub_transactions.category_id`
+   * is `ON DELETE SET NULL` (mirroring `transactions.categoryId`). The
+   * server still rejects null categories at insert time via
+   * `assertSplitsBalanced`; nullability is only relevant for reads.
+   */
+  categoryId: number | null;
   amount: number;
   memo?: string;
 };
@@ -101,9 +107,9 @@ async function getChildren(
  * Throws TransactionError if not. Rules:
  *   - at least 2 children
  *   - every child has a category
- *   - the sum of child amounts matches the |parent amount| to the cent
- *     (the parent's sign is propagated to children by the caller; this
- *     check is magnitude-only so callers can use any sign convention)
+ *   - the *signed* sum of child amounts matches the *signed* parent amount
+ *     to the cent. Mixed signs are allowed (e.g. a Paycheck with a negative
+ *     tax deduction) so the children retain their original sign.
  */
 export function assertSplitsBalanced(
   parentAmount: number,
@@ -117,10 +123,10 @@ export function assertSplitsBalanced(
       throw new TransactionError("each sub-transaction must have a category");
     }
   }
-  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
-  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
+  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
+  if (Math.abs(sum - parentAmount) > 0.005) {
     throw new TransactionError(
-      `split children do not sum to parent: ${sum.toFixed(2)} vs ${Math.abs(parentAmount).toFixed(2)}`
+      `split children do not sum to parent: ${sum.toFixed(2)} vs ${parentAmount.toFixed(2)}`
     );
   }
 }

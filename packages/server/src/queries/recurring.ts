@@ -59,6 +59,10 @@ export class RecurringError extends Error {
 /**
  * Validate a set of recurring sub-transactions. Mirrors the
  * transaction-side `assertSplitsBalanced`.
+ *
+ * Children use their *signed* amounts so mixed-sign splits (e.g. a
+ * Paycheck with a negative tax deduction) are supported. The signed
+ * sum must equal the signed parent amount to the cent.
  */
 function assertSplitsBalanced(
   parentAmount: number,
@@ -72,10 +76,10 @@ function assertSplitsBalanced(
       throw new RecurringError("each sub-transaction must have a category");
     }
   }
-  const sum = children.reduce((s, c) => s + Math.abs(c.amount), 0);
-  if (Math.abs(sum - Math.abs(parentAmount)) > 0.005) {
+  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
+  if (Math.abs(sum - parentAmount) > 0.005) {
     throw new RecurringError(
-      `split children do not sum to parent: ${sum.toFixed(2)} vs ${Math.abs(parentAmount).toFixed(2)}`
+      `split children do not sum to parent: ${sum.toFixed(2)} vs ${parentAmount.toFixed(2)}`
     );
   }
 }

@@ -313,8 +313,10 @@ describe("TransactionModal", () => {
         ) as HTMLSelectElement[];
       fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
       fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
-      fireEvent.change(subAmounts[0]!, { target: { value: "60" } });
-      fireEvent.change(subAmounts[1]!, { target: { value: "40" } });
+      // Children retain the sign the user types. Parent is -100, so we
+      // type -60 and -40; the sum matches the parent.
+      fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
 
       const saveBtn = screen.getByRole("button", { name: /save transaction/i });
       expect(saveBtn).not.toBeDisabled();
@@ -328,10 +330,91 @@ describe("TransactionModal", () => {
       expect(payload.amount).toBe(-100);
       expect(payload.categoryId).toBeNull();
       expect(payload.subTransactions).toHaveLength(2);
-      // Children inherit the parent's sign so balance accounting works
-      // consistently (parent -100, children -60 and -40).
+      // Children are passed through with their typed sign (no coercion).
       expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -60 });
       expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -40 });
+    });
+
+    it("enables save for a mixed-sign split (Paycheck + tax deduction)", () => {
+      // Bug fix: a +4000 net paycheck with a +5000 gross pay and a
+      // -1000 tax deduction. The new signed-sum validation must accept
+      // this and the modal must pass the signed values through to onSave.
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+        target: { value: "Employer Inc." },
+      });
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "4000" } });
+
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      const subCatSelects = screen
+        .getAllByRole("combobox")
+        .filter(
+          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
+        ) as HTMLSelectElement[];
+      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
+      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        amount: number;
+        subTransactions: { categoryId: number; amount: number }[];
+      };
+      expect(payload.amount).toBe(4000);
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 5000 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -1000 });
+    });
+
+    it("keeps save disabled when signed child sum doesn't match parent", () => {
+      // Parent +4000, children +5000 and -2000 → +3000 ≠ +4000.
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+        target: { value: "X" },
+      });
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "4000" } });
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      const subCatSelects = screen
+        .getAllByRole("combobox")
+        .filter(
+          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
+        ) as HTMLSelectElement[];
+      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
+      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-2000" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).not.toHaveBeenCalled();
     });
 
     it("pre-populates sub-rows when editing an existing split parent", () => {
@@ -521,8 +604,9 @@ describe("RecurringModal", () => {
       ) as HTMLSelectElement[];
     fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
     fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
-    fireEvent.change(subAmounts[0]!, { target: { value: "120" } });
-    fireEvent.change(subAmounts[1]!, { target: { value: "80" } });
+    // Children retain the typed sign (no coercion by the modal).
+    fireEvent.change(subAmounts[0]!, { target: { value: "-120" } });
+    fireEvent.change(subAmounts[1]!, { target: { value: "-80" } });
 
     const saveBtn = screen.getByRole("button", { name: /^save$/i });
     expect(saveBtn).not.toBeDisabled();
@@ -608,5 +692,49 @@ describe("RecurringModal", () => {
     // Single is disabled when the initial is a split.
     const singleBtn = screen.getByRole("button", { name: /^single$/i });
     expect(singleBtn).toBeDisabled();
+  });
+
+  it("emits a mixed-sign split (Paycheck + tax deduction)", () => {
+    // Bug fix: a +4000 net biweekly paycheck with a +5000 gross pay
+    // and a -1000 tax deduction is valid under the new signed validation.
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      target: { value: "Employer Inc." },
+    });
+    const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+    const total = allZeros[0]!;
+    fireEvent.change(total, { target: { value: "4000" } });
+
+    const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+    const subCatSelects = screen
+      .getAllByRole("combobox")
+      .filter(
+        (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
+      ) as HTMLSelectElement[];
+    fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
+    fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+    fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
+    fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
+
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![0] as {
+      amount: number;
+      subTransactions: { categoryId: number; amount: number }[];
+    };
+    expect(payload.amount).toBe(4000);
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 5000 });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -1000 });
   });
 });
