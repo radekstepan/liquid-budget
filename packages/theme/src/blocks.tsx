@@ -1,36 +1,108 @@
 import React from "react";
-import { Icon, cx, money } from "./primitives";
+import { Icon, Select, cx, money } from "./primitives";
 
 /* ==================================================================
    MONTH NAVIGATOR
    ================================================================== */
+const MONTHS_LONG = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function parseKey(key: string): { year: number; month0: number } {
+  const [y, m] = key.split("-").map(Number);
+  return { year: y ?? 0, month0: (m ?? 1) - 1 };
+}
+
+function keyOf(year: number, month0: number): string {
+  return `${year}-${String(month0 + 1).padStart(2, "0")}`;
+}
+
 export const MonthNav: React.FC<{
   month: string;
   onPrev?: () => void;
   onNext?: () => void;
-}> = ({ month, onPrev, onNext }) => (
-  <div className="flex items-center gap-2">
-    <button
-      type="button"
-      className="y-btn y-btn--sm"
-      aria-label="Previous month"
-      onClick={onPrev}
-    >
-      <Icon name="left" size={11} />
-    </button>
-    <div className="text-[15px] font-bold min-w-[132px] text-center [text-shadow:0_1px_0_rgba(255,255,255,.8)]" style={{ color: "var(--y-ink)" }}>
-      {month}
+  onSetMonth?: (key: string) => void;
+  minYear?: number;
+  maxYear?: number;
+}> = ({ month, onPrev, onNext, onSetMonth, minYear, maxYear }) => {
+  const { year, month0 } = parseKey(month);
+  const yMin = minYear ?? year - 10;
+  const yMax = maxYear ?? year + 5;
+  const years: number[] = [];
+  for (let y = yMin; y <= yMax; y++) years.push(y);
+  const yearsSet = new Set(years);
+  const safeYear = yearsSet.has(year) ? year : Math.min(yMax, Math.max(yMin, year));
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        className="y-btn y-btn--sm"
+        aria-label="Previous month"
+        onClick={onPrev}
+      >
+        <Icon name="left" size={11} />
+      </button>
+      {onSetMonth ? (
+        <div
+          className="flex items-center gap-1 min-w-[132px] justify-center"
+          data-testid="month-nav-picker"
+        >
+          <Select
+            value={String(month0)}
+            onChange={(e) => onSetMonth(keyOf(safeYear, Number(e.target.value)))}
+            aria-label="Month"
+            className="y-select--lg"
+          >
+            {MONTHS_LONG.map((m, i) => (
+              <option key={m} value={String(i)}>
+                {m}
+              </option>
+            ))}
+          </Select>
+          <Select
+            value={String(safeYear)}
+            onChange={(e) => onSetMonth(keyOf(Number(e.target.value), month0))}
+            aria-label="Year"
+            className="y-select--lg"
+          >
+            {years.map((y) => (
+              <option key={y} value={String(y)}>
+                {y}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : (
+        <div
+          className="text-[15px] font-bold min-w-[132px] text-center [text-shadow:0_1px_0_rgba(255,255,255,.8)]"
+          style={{ color: "var(--y-ink)" }}
+        >
+          {`${MONTHS_LONG[month0] ?? ""} ${year}`}
+        </div>
+      )}
+      <button
+        type="button"
+        className="y-btn y-btn--sm"
+        aria-label="Next month"
+        onClick={onNext}
+      >
+        <Icon name="right" size={11} />
+      </button>
     </div>
-    <button
-      type="button"
-      className="y-btn y-btn--sm"
-      aria-label="Next month"
-      onClick={onNext}
-    >
-      <Icon name="right" size={11} />
-    </button>
-  </div>
-);
+  );
+};
 
 /* ==================================================================
    BUDGET HEADER  —  the "math strip" + Available to Budget box.

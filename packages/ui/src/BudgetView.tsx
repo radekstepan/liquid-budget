@@ -51,6 +51,9 @@ export function BudgetView({
   onToggleGroup,
   onAssign,
   onShiftMonth,
+  onSetMonth,
+  minYear,
+  maxYear,
   onAddCategory,
   onAddGroup,
   onEditCategory,
@@ -69,6 +72,9 @@ export function BudgetView({
   onToggleGroup: (id: number) => void;
   onAssign: (catId: number, amount: number, month: string) => void;
   onShiftMonth: (delta: number) => void;
+  onSetMonth?: (key: string) => void;
+  minYear?: number;
+  maxYear?: number;
   onAddCategory: (groupId: number) => void;
   onAddGroup: () => void;
   onEditCategory: (catId: number) => void;
@@ -130,9 +136,12 @@ export function BudgetView({
     <div className="flex h-full flex-col">
       <div className="y-toolbar">
         <MonthNav
-          month={formatMonthLong(currentMonth)}
+          month={currentMonth}
           onPrev={() => onShiftMonth(-1)}
           onNext={() => onShiftMonth(1)}
+          onSetMonth={onSetMonth}
+          minYear={minYear}
+          maxYear={maxYear}
         />
         <ToolbarSep />
         <Button onClick={onAddGroup} size="sm">

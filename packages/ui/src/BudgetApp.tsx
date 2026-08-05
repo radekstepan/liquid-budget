@@ -234,6 +234,23 @@ export function BudgetApp({
     [month]
   );
 
+  const { minYear, maxYear } = useMemo(() => {
+    const thisYear = Number(todayISO().slice(0, 4));
+    const futureCap = thisYear + 5;
+    let minY = thisYear;
+    let maxY = futureCap;
+    const consider = (key: string) => {
+      const y = Number(key.slice(0, 4));
+      if (Number.isFinite(y)) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    };
+    for (const t of data.transactions) consider(t.date);
+    for (const a of data.assignments) consider(a.month);
+    return { minYear: minY, maxYear: maxY };
+  }, [data.transactions, data.assignments]);
+
   const editingCategory =
     modal.kind === "editCategory" ? data.categories.find((c) => c.id === modal.categoryId) : undefined;
   const editingGroup =
@@ -303,6 +320,9 @@ export function BudgetApp({
             onToggleGroup={toggleGroup}
             onAssign={assign}
             onShiftMonth={shiftMonth}
+            onSetMonth={setMonth}
+            minYear={minYear}
+            maxYear={maxYear}
             onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
             onAddGroup={() => setModal({ kind: "addGroup" })}
             onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
@@ -345,6 +365,9 @@ export function BudgetApp({
             month={month}
             onPrev={() => shiftMonth(-1)}
             onNext={() => shiftMonth(1)}
+            onSetMonth={setMonth}
+            minYear={minYear}
+            maxYear={maxYear}
             onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
           />
         )}
