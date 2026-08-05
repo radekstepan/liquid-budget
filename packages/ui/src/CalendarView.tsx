@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, parseMonthKey, monthLabel } from "@ynab/logic";
+import { fmt, num, parseMonthKey } from "@ynab/logic";
 import { Icon, Toolbar, ToolbarSep, MonthNav } from "@ynab/theme";
 
 export function CalendarView({
@@ -10,12 +10,18 @@ export function CalendarView({
   month,
   onPrev,
   onNext,
+  onSetMonth,
+  minYear,
+  maxYear,
   onAdd,
 }: {
   data: BudgetData;
   month: string;
   onPrev: () => void;
   onNext: () => void;
+  onSetMonth?: (key: string) => void;
+  minYear?: number;
+  maxYear?: number;
   onAdd: (date: string) => void;
 }) {
   const { year, month0 } = parseMonthKey(month);
@@ -65,7 +71,14 @@ export function CalendarView({
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Calendar</span>
         </div>
         <ToolbarSep />
-        <MonthNav month={monthLabel(month)} onPrev={onPrev} onNext={onNext} />
+        <MonthNav
+          month={month}
+          onPrev={onPrev}
+          onNext={onNext}
+          onSetMonth={onSetMonth}
+          minYear={minYear}
+          maxYear={maxYear}
+        />
         <span className="ml-auto y-hint">
           Net this month:{" "}
           <span

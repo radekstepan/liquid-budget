@@ -20,8 +20,31 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("toolbar reflects the active month", async ({ page }) => {
-  // CalendarView.tsx:68 reads the month label off the MonthNav block.
-  await expect(page.getByText("June 2026", { exact: true })).toBeVisible();
+  // The MonthNav now exposes a month+year picker (blocks.tsx:57-86)
+  // instead of a static text label, so we read the active month off
+  // the Inspector badge (Inspector.tsx:38-53) which stays in sync.
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Jun 2026");
+});
+
+test("year dropdown jumps to the same month in the chosen year", async ({ page }) => {
+  // Same MonthNav as the Budget view, so the picker is wired through
+  // CalendarView.tsx:60-72 and shares the year+month selects.
+  const picker = page.getByTestId("month-nav-picker");
+  const yearSelect = picker.getByLabel("Year", { exact: true });
+  await expect(yearSelect).toHaveValue("2026");
+
+  await yearSelect.selectOption("2028");
+
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Jun 2028");
+  await expect(picker.getByLabel("Month", { exact: true })).toHaveValue("5");
 });
 
 test("clicking an empty day opens the Add Transaction modal pre-dated to that day", async ({ page }) => {

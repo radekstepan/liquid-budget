@@ -41,16 +41,77 @@ test("inline-edits a category assigned amount and updates To Be Budgeted", async
 });
 
 test("MonthNav prev/next shifts the active month", async ({ page }) => {
-  // The BudgetView MonthNav renders "June 2026" for the seed month
-  // (BudgetView.tsx:30-37, formatMonthLong uses MONTHS_LONG).
-  const monthLabel = page.locator(".y-toolbar .text-\\[15px\\]").first();
-  await expect(monthLabel).toHaveText("June 2026");
+  // The Inspector reflects the active month/year (Inspector.tsx:38-53)
+  // and the MonthNav exposes a month+year picker (blocks.tsx:57-86).
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Jun 2026");
 
   await page.getByRole("button", { name: "Next month" }).click();
-  await expect(monthLabel).toHaveText("July 2026");
+  await expect(monthBadge).toHaveText("Jul 2026");
 
   await page.getByRole("button", { name: "Previous month" }).click();
-  await expect(monthLabel).toHaveText("June 2026");
+  await expect(monthBadge).toHaveText("Jun 2026");
+});
+
+test("year dropdown jumps to the same month in the chosen year", async ({ page }) => {
+  // The MonthNav year select (blocks.tsx:74-85) is keyed off
+  // `aria-label="Year"` and is scoped to the picker container
+  // (data-testid="month-nav-picker") so the surrounding prev/next
+  // buttons don't match.
+  const picker = page.getByTestId("month-nav-picker");
+  const yearSelect = picker.getByLabel("Year", { exact: true });
+  await expect(yearSelect).toHaveValue("2026");
+
+  // One click jumps to a different year — replaces the multi-click
+  // prev-arrow flow for any in-range year.
+  await yearSelect.selectOption("2028");
+
+  // Inspector reflects the new month; the Month and Year selects stay
+  // in sync (month preserved, year updated).
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Jun 2028");
+  await expect(yearSelect).toHaveValue("2028");
+  await expect(picker.getByLabel("Month", { exact: true })).toHaveValue("5");
+});
+
+test("month dropdown jumps to the chosen month in the current year", async ({ page }) => {
+  const picker = page.getByTestId("month-nav-picker");
+  const monthSelect = picker.getByLabel("Month", { exact: true });
+  const yearSelect = picker.getByLabel("Year", { exact: true });
+
+  await expect(monthSelect).toHaveValue("5"); // June is index 5
+  await expect(yearSelect).toHaveValue("2026");
+
+  await monthSelect.selectOption("2"); // March is index 2
+
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Mar 2026");
+  await expect(monthSelect).toHaveValue("2");
+  await expect(yearSelect).toHaveValue("2026");
+});
+
+test("year dropdown range is derived from data and includes a future cap", async ({ page }) => {
+  // The year select should include 2026 (the data's anchor year) and
+  // extend at least 5 years into the future so users can budget ahead
+  // (BudgetApp.tsx derives {minYear, maxYear} from data + thisYear + 5).
+  const picker = page.getByTestId("month-nav-picker");
+  const yearSelect = picker.getByLabel("Year", { exact: true });
+  const optionsText = await yearSelect.locator("option").allTextContents();
+  expect(optionsText).toContain("2026");
+  const years = optionsText.map((t) => Number(t)).filter((n) => Number.isFinite(n));
+  const maxOption = Math.max(...years);
+  // The current year is 2026 (per today's date and the seed); the
+  // future cap adds 5 more years for a max of 2031.
+  expect(maxOption).toBeGreaterThanOrEqual(2031);
 });
 
 test("Group options menu collapses and expands all groups", async ({ page }) => {
@@ -78,12 +139,15 @@ test("clicking a real history bar in the Inspector jumps to that month", async (
   // assignments in the seed). Shift one month forward so the jump
   // produces a visible change.
   await page.getByRole("button", { name: "Next month" }).click();
-  const monthLabel = page.locator(".y-toolbar .text-\\[15px\\]").first();
-  await expect(monthLabel).toHaveText("July 2026");
+  const monthBadge = page
+    .locator(".y-inspector")
+    .locator("div.text-\\[12\\.5px\\].font-bold")
+    .first();
+  await expect(monthBadge).toHaveText("Jul 2026");
 
   // Inspector history bar (Inspector.tsx:151-181) uses aria-label
   // "Jump to <MonthShort> <Year>" — MONTHS is the 3-letter array
   // (Inspector.tsx:5, format.ts:1-14), so it's "Jun 2026", not "June 2026".
   await page.getByRole("button", { name: "Jump to Jun 2026" }).click();
-  await expect(monthLabel).toHaveText("June 2026");
+  await expect(monthBadge).toHaveText("Jun 2026");
 });
