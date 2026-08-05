@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
+import { evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers", () => {
@@ -104,8 +104,88 @@ describe("format", () => {
       expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
     });
 
-    it("returns input unchanged for invalid date", () => {
-      expect(nextDateFor("monthly", "not-a-date")).toBe("not-a-date");
-    });
+  it("returns input unchanged for invalid date", () => {
+    expect(nextDateFor("monthly", "not-a-date")).toBe("not-a-date");
   });
+});
+
+describe("evalAmount", () => {
+  it("returns null for nullish / empty input", () => {
+    expect(evalAmount(null)).toBeNull();
+    expect(evalAmount(undefined)).toBeNull();
+    expect(evalAmount("")).toBeNull();
+    expect(evalAmount("   ")).toBeNull();
+  });
+
+  it("parses plain numbers", () => {
+    expect(evalAmount("0")).toBe(0);
+    expect(evalAmount("100")).toBe(100);
+    expect(evalAmount("3.14")).toBeCloseTo(3.14);
+    expect(evalAmount(42)).toBe(42);
+  });
+
+  it("evaluates +, -, *, / with correct precedence", () => {
+    expect(evalAmount("100 + 50")).toBe(150);
+    expect(evalAmount("100 - 50")).toBe(50);
+    expect(evalAmount("100 * 2")).toBe(200);
+    expect(evalAmount("100 / 4")).toBe(25);
+    expect(evalAmount("100 + 50 * 2")).toBe(200);
+    expect(evalAmount("2 + 3 * 4")).toBe(14);
+  });
+
+  it("honours parentheses", () => {
+    expect(evalAmount("(10 + 5) * 2")).toBe(30);
+    expect(evalAmount("((1 + 2) * 3) - 1")).toBe(8);
+  });
+
+  it("handles unary minus and plus", () => {
+    expect(evalAmount("-50 + 100")).toBe(50);
+    expect(evalAmount("100 + -50")).toBe(50);
+    expect(evalAmount("2 * -3")).toBe(-6);
+    expect(evalAmount("(-5)")).toBe(-5);
+  });
+
+  it("is left-associative for same-precedence ops", () => {
+    expect(evalAmount("10 - 3 - 2")).toBe(5);
+    expect(evalAmount("20 / 4 / 5")).toBe(1);
+  });
+
+  it("strips $ , _ and whitespace before parsing", () => {
+    expect(evalAmount("$1,234.56")).toBeCloseTo(1234.56);
+    expect(evalAmount("$1,234.56 + 10")).toBeCloseTo(1244.56);
+    expect(evalAmount("1_000 + 500")).toBe(1500);
+    expect(evalAmount("  100  +  50  ")).toBe(150);
+  });
+
+  it("accepts leading and trailing dots", () => {
+    expect(evalAmount(".5")).toBe(0.5);
+    expect(evalAmount(".5 + .25")).toBeCloseTo(0.75);
+    expect(evalAmount("5.")).toBe(5);
+  });
+
+  it("returns null for incomplete expressions", () => {
+    expect(evalAmount("100 +")).toBeNull();
+    expect(evalAmount("* 5")).toBeNull();
+    expect(evalAmount("(")).toBeNull();
+    expect(evalAmount("(100 + 50")).toBeNull();
+    expect(evalAmount("100 50")).toBeNull();
+  });
+
+  it("returns null for invalid characters", () => {
+    expect(evalAmount("abc")).toBeNull();
+    expect(evalAmount("1; alert(1)")).toBeNull();
+    expect(evalAmount("1 + abc")).toBeNull();
+    expect(evalAmount("sqrt(4)")).toBeNull();
+    expect(evalAmount("2 ^ 3")).toBeNull();
+  });
+
+  it("returns null for division by zero", () => {
+    expect(evalAmount("100 / 0")).toBeNull();
+    expect(evalAmount("0 / 0")).toBeNull();
+  });
+
+  it("returns null for double-dot numbers", () => {
+    expect(evalAmount("1.2.3")).toBeNull();
+  });
+});
 });
