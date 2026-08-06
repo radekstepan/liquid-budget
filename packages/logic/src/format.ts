@@ -260,7 +260,14 @@ export function monthLabel(key: string): string {
 }
 
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Use the local timezone, not UTC. `toISOString()` always renders
+  // in UTC, which would silently post-date a transaction entered late
+  // in the evening in a westerly timezone (e.g. 9 PM PST on Aug 5 is
+  // already Aug 6 UTC). Offset by the local tz delta, then slice the
+  // now-local "YYYY-MM-DD" prefix.
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
 }
 
 /**

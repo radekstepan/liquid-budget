@@ -3,7 +3,7 @@ import { vi } from "vitest";
 import type { Database } from "../../src/client.js";
 
 export type CallLog = {
-  op: "select" | "insert" | "update" | "delete" | "execute";
+  op: "select" | "insert" | "update" | "delete" | "execute" | "run";
   table?: string;
   values?: unknown;
   where?: unknown;
@@ -27,6 +27,46 @@ export interface MockDb {
 }
 
 type Row = Record<string, unknown>;
+
+/**
+ * Render a Drizzle SQL AST node to a flat string. The real driver
+ * calls `node.toQuery()` and feeds the result into better-sqlite3's
+ * `db.prepare()`, which handles parameter substitution. We only care
+ * about the static SQL for assertion purposes (e.g. "did the importer
+ * issue BEGIN before the first INSERT?"), so we concatenate the
+ * StringChunk parts and stringify any non-chunk values (parameters).
+ *
+ * Each chunk is one of:
+ *   - StringChunk: { value: string[] }        → join the array
+ *   - Param:        { value: unknown, … }     → bind as ?
+ *   - SQL:          { queryChunks: Chunk[] }  → recurse
+ *   - Table/SQLiteColumn/Identifier:           → render as the table/column name
+ */
+function extractSqlText(node: unknown): string {
+  if (node == null) return "";
+  const n = node as { queryChunks?: unknown[]; value?: unknown; constructor?: { name?: string } };
+  if (!n.queryChunks) {
+    if (Array.isArray(n.value)) return n.value.join("");
+    if (n.value !== undefined) return String(n.value);
+    return "";
+  }
+  const parts: string[] = [];
+  for (const c of n.queryChunks) {
+    if (c == null) continue;
+    const cc = c as { constructor?: { name?: string }; value?: unknown; queryChunks?: unknown[] };
+    const name = cc.constructor?.name;
+    if (name === "StringChunk" && Array.isArray(cc.value)) {
+      parts.push(cc.value.join(""));
+    } else if (name === "Param" || name === "Name") {
+      parts.push("?");
+    } else if (cc.queryChunks) {
+      parts.push(extractSqlText(c));
+    } else if (typeof cc === "string") {
+      parts.push(cc);
+    }
+  }
+  return parts.join("");
+}
 
 interface Chain {
   from(table: unknown): Chain;
@@ -126,14 +166,17 @@ export function createMockDb(): MockDb {
       return makeChain(calls, responses, perCallCounters, "delete", entry);
     },
     execute: vi.fn(async (sqlAst: unknown) => {
-      const node = sqlAst as { queryChunks: Array<{ value: unknown; type: string }> };
-      const parts: string[] = [];
-      for (const c of node.queryChunks) {
-        if (c.type === "text") parts.push(String(c.value));
-      }
-      const text = parts.join("");
+      const text = extractSqlText(sqlAst);
       calls.push({ op: "execute", sql: text });
       return { rows: [{ count: "0" }] };
+    }),
+    run: vi.fn((sqlAst: unknown) => {
+      // drizzle-orm's `db.run(sql)` (BaseSQLiteDatabase.run) lowers
+      // to `session.run(sequel)`. For our purposes we just need to
+      // record the SQL text so tests can assert on it (e.g. that
+      // importYnab4 issues BEGIN/COMMIT/ROLLBACK in the right order).
+      calls.push({ op: "run", sql: extractSqlText(sqlAst) });
+      return undefined;
     }),
   } as unknown as Database;
 

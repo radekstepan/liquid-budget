@@ -23,6 +23,17 @@ describe("categories queries", () => {
       const row = await createCategoryGroup(mock.db, { name: "Bills" });
       expect(row).toMatchObject({ id: 1, sort: 5 });
     });
+
+    it("wraps the read-then-write in BEGIN/COMMIT (race fix)", async () => {
+      mock.respondWith("select:category_groups", [{ max: 4 }]);
+      mock.respondWith("insert:category_groups", [{ id: 1, sort: 5 }]);
+      await createCategoryGroup(mock.db, { name: "Bills" });
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls).not.toContain("ROLLBACK");
+    });
   });
 
   describe("createCategory", () => {
@@ -31,6 +42,17 @@ describe("categories queries", () => {
       mock.respondWith("insert:categories", [{ id: 1, sort: 3 }]);
       const row = await createCategory(mock.db, { groupId: 1, name: "Test" });
       expect(row).toMatchObject({ id: 1, sort: 3 });
+    });
+
+    it("wraps the read-then-write in BEGIN/COMMIT (race fix)", async () => {
+      mock.respondWith("select:categories", [{ max: 2 }]);
+      mock.respondWith("insert:categories", [{ id: 1, sort: 3 }]);
+      await createCategory(mock.db, { groupId: 1, name: "Test" });
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls).not.toContain("ROLLBACK");
     });
   });
 
@@ -92,4 +114,54 @@ describe("categories queries", () => {
       expect(setCalls).toHaveLength(0);
     });
   });
+
+  describe("transaction rollback on failure", () => {
+    it("createCategoryGroup issues ROLLBACK when the insert throws", async () => {
+      mock.respondWith("select:category_groups", [{ max: 4 }]);
+      // Force the next insert to throw by wrapping the mock.
+      const wrapped = throwOnNextInsert(mock, "category_groups");
+      await expect(
+        createCategoryGroup(wrapped.db, { name: "Boom" })
+      ).rejects.toBeDefined();
+      const sqls = wrapped.calls
+        .filter((c) => c.op === "run")
+        .map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+    });
+
+    it("createCategory issues ROLLBACK when the insert throws", async () => {
+      mock.respondWith("select:categories", [{ max: 2 }]);
+      const wrapped = throwOnNextInsert(mock, "categories");
+      await expect(
+        createCategory(wrapped.db, { groupId: 1, name: "Boom" })
+      ).rejects.toBeDefined();
+      const sqls = wrapped.calls
+        .filter((c) => c.op === "run")
+        .map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+    });
+  });
 });
+
+/**
+ * Patch a MockDb so the next `insert:<tableName>` call throws
+ * (mimicking a real FK / unique / NOT NULL violation). The mock's
+ * call recorder and the `run` / `execute` recorders pass through
+ * unchanged.
+ */
+function throwOnNextInsert(mock: ReturnType<typeof createMockDb>, tableName: string): ReturnType<typeof createMockDb> {
+  const realInsert = (mock.db.insert as unknown as (t: unknown) => unknown);
+  const NAME = Symbol.for("drizzle:Name");
+  (mock.db as unknown as { insert: (t: unknown) => unknown }).insert = (t: unknown) => {
+    const name = (t as Record<symbol, unknown>)[NAME] as string | undefined;
+    if (name === tableName) {
+      throw new Error(`synthetic ${tableName} insert failure`);
+    }
+    return realInsert(t);
+  };
+  return mock;
+}

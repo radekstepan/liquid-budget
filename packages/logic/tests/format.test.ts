@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
 
 describe("format", () => {
@@ -74,6 +74,33 @@ describe("format", () => {
 
   it("todayISO returns YYYY-MM-DD", () => {
     expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("todayISO uses the local timezone, not UTC", () => {
+    // The bug: `new Date().toISOString().slice(0, 10)` renders the
+    // UTC date. A user entering a transaction at 9:30 PM PDT on
+    // Aug 5, 2026 sees it post-dated to Aug 6, 2026.
+    //
+    // The fix: shift the date by the local TZ offset before slicing.
+    //
+    // We mock `Date.prototype.getTimezoneOffset` to simulate a
+    // host running in PDT (offset = 420 min = 7h west of UTC),
+    // freeze the clock at the exact instant that exposes the bug,
+    // and assert the function returns the local-calendar date.
+    // This works regardless of the host's actual TZ.
+    const realOffset = Date.prototype.getTimezoneOffset;
+    Date.prototype.getTimezoneOffset = () => 420; // PDT, UTC-7
+
+    // 2026-08-06T04:30:00Z = 2026-08-05 21:30 PDT — the exact
+    // instant where UTC says Aug 6 but local says Aug 5.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-06T04:30:00Z"));
+    try {
+      expect(todayISO()).toBe("2026-08-05");
+    } finally {
+      vi.useRealTimers();
+      Date.prototype.getTimezoneOffset = realOffset;
+    }
   });
 
   describe("nextDateFor", () => {

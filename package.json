@@ -19,7 +19,9 @@
     "e2e:ui": "yarn workspace @ynab/web e2e:ui",
     "e2e:install": "yarn workspace @ynab/web e2e:install",
     "clean": "turbo run clean && rm -rf node_modules",
-    "db:reset": "yarn workspace @ynab/server db:reset"
+    "db:reset": "yarn workspace @ynab/server db:reset",
+    "db:generate": "yarn workspace @ynab/web db:generate",
+    "db:migrate": "yarn workspace @ynab/server db:migrate"
   },
   "devDependencies": {
     "turbo": "2.5.0",

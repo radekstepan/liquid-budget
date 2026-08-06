@@ -34,8 +34,16 @@ export function BudgetAppShell() {
   const api: BudgetAppApi = {
     reload,
     assign: async (categoryId, amount, month) => {
+      // Capture the pre-mutation snapshot so we can roll back if the
+      // PUT to /api/assignments fails. Without this, a network blip
+      // or 500 leaves the UI showing money successfully assigned
+      // while the server never recorded it — the user would then
+      // operate on a budget that's quietly out of sync until the
+      // next page refresh.
+      let snapshot: BudgetData | null = null;
       setData((prev) => {
         if (!prev) return prev;
+        snapshot = prev;
         const existing = prev.assignments.find(
           (a) => a.categoryId === categoryId && a.month === month
         );
@@ -49,10 +57,20 @@ export function BudgetAppShell() {
             ];
         return { ...prev, assignments };
       });
-      await jsonReq("/api/assignments", {
-        method: "PUT",
-        body: JSON.stringify({ categoryId, month, amount }),
-      });
+      try {
+        await jsonReq("/api/assignments", {
+          method: "PUT",
+          body: JSON.stringify({ categoryId, month, amount }),
+        });
+      } catch (e) {
+        if (snapshot) setData(snapshot);
+        // Best-effort resync: pull the server's view so the UI
+        // reflects whatever the DB has now (other in-flight mutations,
+        // a 500 that partially wrote, etc.). Swallow the reload
+        // error — the original error is the one the caller cares about.
+        await reload().catch(() => {});
+        throw e;
+      }
     },
     addTransaction: async (t) => {
       await jsonReq("/api/transactions", { method: "POST", body: JSON.stringify(t) });

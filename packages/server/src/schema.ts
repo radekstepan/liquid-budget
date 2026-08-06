@@ -86,10 +86,10 @@ export const recurring = sqliteTable("recurring", {
   frequency: text("frequency").notNull().default("monthly"),
   nextDate: text("next_date").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
-  transferAccountId: integer("transfer_account_id").references(() => accounts.id, {
-    onDelete: "set null",
-  }),
+  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
 });
+// ^ `transfer_account_id` is in the schema from day one (was previously
+//   added at boot by an ALTER TABLE inside a try/catch in seed.ts).
 
 export const recurringSubTransactions = sqliteTable("recurring_sub_transactions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
