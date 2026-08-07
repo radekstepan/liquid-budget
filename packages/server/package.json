@@ -15,13 +15,14 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && rm -rf dist/migrations && cp -R src/migrations dist/migrations",
     "clean": "rm -rf dist .tsbuildinfo",
     "lint": "echo \"(no lint configured)\" && exit 0",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:reset": "yarn build && node dist/db-reset.js"
+    "db:reset": "yarn build && node dist/db-reset.js",
+    "db:migrate": "yarn build && node dist/migrate.js"
   },
   "dependencies": {
     "@ynab/logic": "workspace:*",

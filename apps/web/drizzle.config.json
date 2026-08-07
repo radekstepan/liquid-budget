@@ -1,6 +1,7 @@
 {
   "dialect": "sqlite",
   "schema": "../../packages/server/src/schema.ts",
+  "out": "../../packages/server/src/migrations",
   "dbCredentials": {
     "url": "./budget.db"
   }

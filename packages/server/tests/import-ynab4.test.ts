@@ -12,9 +12,14 @@
  * (it touches accounts, categories, assignments, transactions, scheduled).
  * The interesting logic — "given N transactions, compute balances" — is
  * extracted into `recomputeAccountBalances` and tested directly here.
+ *
+ * Also covers the BEGIN/COMMIT/ROLLBACK transaction that wraps the
+ * entire import (see `importYnab4` in import-ynab4.ts) — a critical
+ * data-safety guard against partial imports leaving the user with a
+ * wiped, corrupt database.
  */
 import { describe, expect, it, beforeEach } from "vitest";
-import { recomputeAccountBalances } from "../src/import-ynab4.js";
+import { importYnab4, recomputeAccountBalances } from "../src/import-ynab4.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
 
 describe("recomputeAccountBalances (importer transfer-math fix)", () => {
@@ -133,3 +138,142 @@ describe("recomputeAccountBalances (importer transfer-math fix)", () => {
     expect(updates[0]?.set).toEqual({ balance: -50 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Transaction wrapping (data-loss safety)
+// ---------------------------------------------------------------------------
+//
+// The YNAB4 importer wipes the existing DB and then bulk-inserts accounts,
+// categories, assignments, transactions, and scheduled transactions. If any
+// insert throws mid-flight, the user would be left with a wiped but
+// incomplete budget. The whole flow is wrapped in BEGIN/COMMIT, with
+// ROLLBACK on any thrown error. These tests pin that contract.
+describe("importYnab4 transaction wrapping", () => {
+  let mock: MockDb;
+  beforeEach(() => {
+    mock = createMockDb();
+  });
+
+  it("issues BEGIN before any insert and COMMIT on success", async () => {
+    // Minimal payload: one account, one transaction, no budgets, no
+    // scheduled. The control flow hits every section of importYnab4.
+    const ynabData = {
+      accounts: [{ entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true }],
+      payees: [],
+      masterCategories: [],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc1",
+          date: "2026-01-01",
+          amount: -100,
+          cleared: "Cleared",
+          payeeId: null,
+          categoryId: null,
+        },
+      ],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    // Reset/seed calls (resetDatabase) + insert account + insert tx +
+    // recompute select accounts.
+    mock.respondWith("select:accounts", []);
+    mock.respondWith("insert:accounts", [{ id: 1 }]);
+    mock.respondWith("select:accounts#2", [{ id: 1, name: "Chequing" }]);
+    mock.respondWith("insert:transactions", [{ id: 1 }]);
+    // recomputeAccountBalances: select accounts, then per-account select/update.
+    mock.respondWith("select:accounts#3", [{ id: 1, name: "Chequing" }]);
+    mock.respondWith("select:transactions#1", [{ sum: -100 }]);
+    mock.respondWith("select:transactions#2", [{ sum: 0 }]);
+    mock.respondWith("update:accounts#1", [{}]);
+
+    const result = await importYnab4(mock.db, ynabData);
+    expect(result.accounts).toBe(1);
+
+    const runCalls = mock.calls.filter((c) => c.op === "run");
+    const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+    // The first run must be BEGIN and the last must be COMMIT,
+    // with no ROLLBACK in between.
+    expect(sqls[0]).toBe("BEGIN");
+    expect(sqls[sqls.length - 1]).toBe("COMMIT");
+    expect(sqls).not.toContain("ROLLBACK");
+  });
+
+  it("issues ROLLBACK (not COMMIT) when the body throws", async () => {
+    // Same minimal payload, but the first insert (accounts) fails.
+    // Without a transaction this would leave the DB wiped; the test
+    // asserts that ROLLBACK is issued so the wipe is undone.
+    const ynabData = {
+      accounts: [{ entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true }],
+      payees: [],
+      masterCategories: [],
+      transactions: [],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    // resetDatabase's pre-insert `select:accounts` for sqlite_sequence bookkeeping.
+    mock.respondWith("select:accounts", []);
+    // The first insert (the account) rejects.
+    const accountsInsert = mock.calls.find; // (placeholder — used below)
+    void accountsInsert;
+    mock.respondWith("insert:accounts", []);
+    // We need insert:accounts to throw. Override the chain so the next
+    // insert:accounts call resolves to nothing AND we throw from it.
+    // The mock chain's `then` resolves whatever the response map says;
+    // we want a rejection. Easiest: pre-set the response to a value that
+    // we can detect, and have the function fall through to a state that
+    // throws. In practice, the simplest is to make `returning()` throw.
+    // The mock's `returning` doesn't throw — so instead, we trigger an
+    // exception by making the next select (after the insert) throw via
+    // a malformed payload that the JS engine can't access (not realistic
+    // in this mock). Instead, register a response that causes
+    // `insertedT.id` (line ~193) to dereference `undefined`, throwing.
+    // We achieve that by returning [] from insert:transactions once we
+    // reach the transactions loop — but we never reach there. Use a
+    // different approach: have the FIRST insert:accounts returning()
+    // return [] and the code path uses `row!.id` → TypeError. Mock
+    // does not enforce this. Instead, we'll throw explicitly by
+    // making the next select throw — but the mock's select resolves
+    // gracefully. So we use a different strategy: make
+    // `resetDatabase` (which the function calls first) fail by
+    // throwing inside a select. The mock's `then` always resolves.
+    //
+    // Simplest robust path: we use a wrapper around mock.db that
+    // intercepts the *first* `insert:accounts` call and throws.
+    // (See `throwingInsertAccounts` below.)
+    const wrapped = throwOnInsertAccounts(mock);
+
+    await expect(importYnab4(wrapped.db, ynabData)).rejects.toBeDefined();
+
+    const runCalls = wrapped.calls.filter((c) => c.op === "run");
+    const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+    // The first run must be BEGIN, and the last must be ROLLBACK.
+    expect(sqls[0]).toBe("BEGIN");
+    expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
+    expect(sqls).not.toContain("COMMIT");
+  });
+});
+
+/**
+ * Wrap a MockDb so that the first `insert:accounts` call throws.
+ * The real better-sqlite3 driver would surface FK violations, NOT NULL
+ * failures, or unique-constraint hits as synchronous exceptions —
+ * our mock resolves gracefully, so we patch around it for this
+ * regression test. The mock's call recorder (`mock.calls`) and the
+ * `execute` recorder still pass through unchanged.
+ */
+function throwOnInsertAccounts(mock: MockDb): MockDb {
+  const realInsert = (mock.db.insert as unknown as (t: unknown) => unknown);
+  let fired = false;
+  (mock.db as unknown as { insert: (t: unknown) => unknown }).insert = (t: unknown) => {
+    const tableName = (t as { _: { name: string } })._?.name;
+    if (!fired && tableName === "accounts") {
+      fired = true;
+      throw new Error("synthetic FK violation on insert:accounts");
+    }
+    return realInsert(t);
+  };
+  return mock;
+}

@@ -43,3 +43,5 @@ playwright-report/
 test-results/
 apps/web/test-results/
 apps/web/playwright-report/
+
+repomix-output.xml

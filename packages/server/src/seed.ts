@@ -7,145 +7,19 @@ import { isSeeded } from "./queries/budget.js";
 // Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
 export { DEMO_MONTH };
 
-export function ensureTables(db: Db): void {
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS accounts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      group_label TEXT NOT NULL,
-      balance REAL NOT NULL DEFAULT 0,
-      on_budget INTEGER NOT NULL DEFAULT 1,
-      sort INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS category_groups (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      sort INTEGER NOT NULL DEFAULT 0,
-      is_credit_card_payments INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      group_id INTEGER NOT NULL REFERENCES category_groups(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      sort INTEGER NOT NULL DEFAULT 0,
-      carryover REAL NOT NULL DEFAULT 0,
-      goal_target REAL,
-      linked_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE
-    );
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS assignments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-      month TEXT NOT NULL,
-      amount REAL NOT NULL DEFAULT 0
-    );
-  `);
-  db.run(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS assignments_cat_month_uniq ON assignments (category_id, month);
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-      date TEXT NOT NULL,
-      payee TEXT NOT NULL DEFAULT '',
-      memo TEXT NOT NULL DEFAULT '',
-      amount REAL NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'c' CHECK (status IN ('u','c','r')),
-      created_at TEXT NOT NULL DEFAULT '',
-      parent_id INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
-      transfer_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
-    );
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS recurring (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-      payee TEXT NOT NULL DEFAULT '',
-      amount REAL NOT NULL DEFAULT 0,
-      frequency TEXT NOT NULL DEFAULT 'monthly',
-      next_date TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1
-    );
-  `);
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS recurring_sub_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      recurring_id INTEGER NOT NULL REFERENCES recurring(id) ON DELETE CASCADE,
-      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-      amount REAL NOT NULL DEFAULT 0,
-      memo TEXT NOT NULL DEFAULT '',
-      sort INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  // Idempotent column adds for existing databases. SQLite doesn't have
-  // "ADD COLUMN IF NOT EXISTS", so we run each ALTER and swallow the
-  // "duplicate column" error that arises on subsequent boots. Drizzle
-  // wraps the underlying SqliteError in a DrizzleError, so we inspect
-  // both the message and the `cause` chain.
-  try {
-    db.run(sql`ALTER TABLE recurring ADD COLUMN transfer_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL;`);
-  } catch (e) {
-    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
-    if (!msg.includes("duplicate column")) throw e;
-  }
-  // Migrate from boolean `cleared` column to tri-state `status` column.
-  // Fresh installs get `status` from the CREATE TABLE above; existing
-  // installs keep the legacy `cleared` column until a follow-up release
-  // drops it. The query layer prefers `status` and falls back to
-  // `cleared` only when status is missing.
-  try {
-    db.run(sql`ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'c';`);
-  } catch (e) {
-    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
-    if (!msg.includes("duplicate column")) throw e;
-  }
-  // Per-account reconciliation metadata. Used to render the
-  // "Last reconciled" pill in the TransactionsView toolbar and the
-  // sidebar hover icon.
-  try {
-    db.run(sql`ALTER TABLE accounts ADD COLUMN last_reconciled_at TEXT;`);
-  } catch (e) {
-    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
-    if (!msg.includes("duplicate column")) throw e;
-  }
-  try {
-    db.run(sql`ALTER TABLE accounts ADD COLUMN last_reconciled_balance REAL;`);
-  } catch (e) {
-    const msg = String(e) + " " + String((e as { cause?: unknown })?.cause ?? "");
-    if (!msg.includes("duplicate column")) throw e;
-  }
-  // Backfill the new `status` column for any rows where it still
-  // mirrors the default `'c'`. This picks up rows from a previous
-  // schema version that stored `cleared: 0` and never had `status`
-  // written. Safe to re-run (idempotent: only updates where
-  // `cleared = 0` and the current row's date is reasonable).
-  try {
-    db.run(
-      sql`UPDATE transactions SET status = 'u' WHERE cleared = 0 AND status = 'c';`
-    );
-  } catch {
-    // The legacy `cleared` column may not exist on fresh installs —
-    // ignore.
-  }
-}
-
 /**
  * Wipe all budget data.
  * SQLite has no TRUNCATE — delete in dependency order so FK constraints
  * don't fire, then reset the autoincrement sequences.
  * The next call to seedDatabase() will re-populate from scratch.
+ *
+ * Schema management is handled by Drizzle migrations, applied once at
+ * boot inside `getDefaultDb()` (see client.ts). This function no
+ * longer needs to call `ensureTables` — that hand-rolled
+ * CREATE-TABLE-IF-NOT-EXISTS + try/catch ALTER block dance was
+ * retired in favour of `drizzle-kit generate` + `migrate()`.
  */
 export async function resetDatabase(db: Db): Promise<void> {
-  ensureTables(db);
   await db.delete(recurringSubTransactions);
   await db.delete(recurring);
   await db.delete(transactions);
@@ -158,7 +32,6 @@ export async function resetDatabase(db: Db): Promise<void> {
 }
 
 export async function seedDatabase(db: Db) {
-  ensureTables(db);
   if (await isSeeded(db)) return;
 
   // ---------------------------------------------------------------------------
