@@ -34,6 +34,9 @@ export function openDb(path: string): Db {
   // Enable WAL mode and foreign keys for every connection.
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
+  // Checkpoint the WAL automatically after 100 pages so the WAL file
+  // doesn't grow unboundedly across long-running server sessions.
+  sqlite.pragma("wal_autocheckpoint = 100");
   return drizzle(sqlite, { schema });
 }
 

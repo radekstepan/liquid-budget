@@ -40,7 +40,8 @@ function errorResponse(e: unknown): Response {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const accountId = Number(body.accountId);
   const amount = Number(body.amount);
   if (!accountId || Number.isNaN(amount)) {
@@ -75,7 +76,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = Number(body.id);
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
 
