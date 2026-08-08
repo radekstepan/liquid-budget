@@ -20,11 +20,16 @@
 //     nothing reads it; it's the same seam therascript uses.
 //
 // DB: the running dev server is responsible for the DB it points at
-// (apps/web/.env.local → ../../budget.db). Read-only specs work against
-// any seeded state. Mutating specs rely on `tests/e2e/global-setup.ts`
-// to POST /api/reset before the suite; that setup is gated on CI so a
-// developer's locally-running dev server is never reset out from under
-// them.
+// (apps/web/.env.local → ../../budget.db). Every run — local and CI
+// alike — starts from a fresh demo seed: `tests/e2e/global-setup.ts`
+// POSTs /api/reset before the suite (it wipes + re-seeds the shared
+// DB, which the suite would otherwise pollute with `PW *` rows).
+//
+// Concurrency: the suite mutates a single shared DB, so tests MUST
+// not run in parallel — a second mutating test (or import.spec's
+// mid-suite /api/reset) would race any in-flight writes and corrupt
+// absolute-value assertions. We pin `workers: 1` everywhere so local
+// runs are as deterministic as CI.
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3000;
@@ -33,10 +38,10 @@ const BASE_URL = `http://localhost:${PORT}`;
 export default defineConfig({
   testDir: "./tests/e2e",
   globalSetup: "./tests/e2e/global-setup.ts",
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: BASE_URL,

@@ -2,31 +2,26 @@
 //
 // Reset the DB to the seed state once before the suite runs.
 //
-// Why this is gated on CI:
+// Why unconditionally:
 //
 //   apps/web/.env.local points the dev server at the repo-root budget.db.
-//   `playwright.config.ts` reuses whatever dev server is already running
-//   locally (see `reuseExistingServer`), so a developer who kicks off
-//   `yarn e2e` from the VSCode extension or a terminal already has the
-//   dev server up. Resetting the DB in that case would silently nuke
-//   their working data.
+//   The suite mutates that shared DB (accounts, categories, transactions,
+//   recurrings, assignments) and import.spec.ts replaces it wholesale, so
+//   leftover state between runs is the norm rather than the exception.
+//   Starting from the demo seed makes every run — local or CI —
+//   deterministic and keeps seed-assumption tests (e.g. reconcile.spec)
+//   green on repeat runs. The dev DB is the demo dataset anyway; the
+//   trade-off of re-seeding it is negligible next to the suite's own
+//   writes.
 //
-//   In CI, Playwright always starts a fresh server (`reuseExistingServer`
-//   flips off), so the only thing attached to that DB is the test run
-//   itself. Resetting is safe and gives the suite a deterministic
-//   baseline.
-//
-//   The matching CI toggle on the server side lives at
-//   `playwright.config.ts:49`.
+//   (Historically this was gated on CI so a developer's locally-running
+//   dev server was never reset out from under them — but that left local
+//   runs starting from whatever the previous run left behind.)
 import { request } from "@playwright/test";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 
 export default async function globalSetup() {
-  if (!process.env.CI) {
-    return;
-  }
-
   const ctx = await request.newContext({ baseURL: BASE_URL });
   try {
     const res = await ctx.post("/api/reset");

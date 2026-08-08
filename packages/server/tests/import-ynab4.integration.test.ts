@@ -1,0 +1,292 @@
+/**
+ * import-ynab4.integration.test.ts
+ *
+ * Full-path integration test for `importYnab4` against a real migrated
+ * in-memory SQLite DB. The existing `import-ynab4.test.ts` only covers
+ * `recomputeAccountBalances` and the BEGIN/COMMIT/ROLLBACK contract via
+ * a mock DB; this exercises the actual mapping logic:
+ *
+ *   - tombstone skipping for accounts/payees/groups/subcategories
+ *   - account kind/groupLabel derivation from YNAB4 account types
+ *   - "Hidden Categories" and non-OUTFLOW master category skipping
+ *   - credit-card payment group + per-credit-account categories
+ *   - budgeted assignments (zero-budgeted rows skipped)
+ *   - transfer detection via `targetAccountId` and the
+ *     "Payee/Transfer:acc" payee convention
+ *   - __ImmediateIncome__/__Split__ category → null mapping
+ *   - split parents + children with parentId linkage
+ *   - cleared-status mapping (Cleared → c, Uncleared → u, Reconciled → r)
+ *   - scheduled frequency fallback and split/transfer scheduled rows
+ *   - account balance recomputation including incoming transfers
+ */
+import { describe, expect, it, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "path";
+import { fileURLToPath } from "url";
+import { importYnab4 } from "../src/import-ynab4.js";
+import { getBudgetData } from "../src/queries/budget.js";
+import * as schema from "../src/schema.js";
+import type { Db } from "../src/client.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+function openMigratedDb(): Db {
+  const raw = new Database(":memory:");
+  raw.pragma("foreign_keys = ON");
+  const db = drizzle(raw, { schema });
+  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  return db;
+}
+
+const ynabData = {
+  accounts: [
+    { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+    { entityId: "acc2", accountName: "Visa", accountType: "CreditCard", onBudget: true },
+    { entityId: "acc3", accountName: "RRSP", accountType: "InvestmentAccount", onBudget: false },
+    { entityId: "accX", accountName: "Deleted", accountType: "Checking", onBudget: true, isTombstone: true },
+  ],
+  payees: [
+    { entityId: "p1", name: "Grocery Store" },
+    { entityId: "p2", name: "Employer" },
+    { entityId: "pX", name: "Old Payee", isTombstone: true },
+  ],
+  masterCategories: [
+    {
+      entityId: "mc1",
+      name: "Everyday",
+      type: "OUTFLOW",
+      subCategories: [
+        { entityId: "sc1", name: "Groceries" },
+        { entityId: "sc2", name: "Deleted Cat", isTombstone: true },
+      ],
+    },
+    { entityId: "mc2", name: "Hidden Categories", type: "OUTFLOW", subCategories: [] },
+    { entityId: "mc3", name: "Income", type: "INFLOW", subCategories: [] },
+  ],
+  transactions: [
+    {
+      entityId: "t1",
+      accountId: "acc1",
+      date: "2026-06-01",
+      amount: -100,
+      cleared: "Cleared",
+      payeeId: "p1",
+      categoryId: "sc1",
+    },
+    {
+      entityId: "t2",
+      accountId: "acc1",
+      date: "2026-06-02",
+      amount: -500,
+      cleared: "Uncleared",
+      payeeId: null,
+      categoryId: null,
+      targetAccountId: "acc2",
+    },
+    {
+      entityId: "t3",
+      accountId: "acc2",
+      date: "2026-06-02",
+      amount: 500,
+      cleared: "Uncleared",
+      payeeId: "Payee/Transfer:acc1",
+      categoryId: null,
+    },
+    {
+      entityId: "t4",
+      accountId: "acc1",
+      date: "2026-06-03",
+      amount: 3000,
+      cleared: "Reconciled",
+      payeeId: "p2",
+      categoryId: "Category/__ImmediateIncome__",
+    },
+    {
+      entityId: "t5",
+      accountId: "acc1",
+      date: "2026-06-04",
+      amount: -150,
+      cleared: "Cleared",
+      payeeId: "p1",
+      categoryId: "Category/__Split__",
+      subTransactions: [
+        { categoryId: "sc1", amount: -100 },
+        { categoryId: "sc3-missing", amount: -50 },
+      ],
+    },
+    { entityId: "tX", accountId: "acc1", date: "2026-06-05", amount: -1, cleared: "Cleared", payeeId: "pX", categoryId: "sc1", isTombstone: true },
+    { entityId: "tY", accountId: "missing-acc", date: "2026-06-06", amount: -1, cleared: "Cleared", payeeId: null, categoryId: null },
+  ],
+  monthlyBudgets: [
+    {
+      month: "2026-06-01",
+      monthlySubCategoryBudgets: [
+        { categoryId: "sc1", budgeted: 500 },
+        { categoryId: "sc2", budgeted: 0 },
+      ],
+    },
+  ],
+  scheduledTransactions: [
+    {
+      entityId: "s1",
+      accountId: "acc1",
+      date: "2026-07-01",
+      amount: -75,
+      frequency: "monthly",
+      payeeId: "p1",
+      categoryId: "sc1",
+    },
+    {
+      entityId: "s2",
+      accountId: "acc1",
+      date: "2026-07-02",
+      amount: -100,
+      frequency: "EVERYWEEK",
+      payeeId: "p1",
+      categoryId: "sc1",
+    },
+    {
+      entityId: "s3",
+      accountId: "acc1",
+      date: "2026-07-03",
+      amount: -200,
+      frequency: "biweekly",
+      payeeId: "Payee/Transfer:acc2",
+      categoryId: null,
+    },
+    {
+      entityId: "s4",
+      accountId: "acc1",
+      date: "2026-07-04",
+      amount: -300,
+      frequency: "monthly",
+      payeeId: "p1",
+      categoryId: "Category/__Split__",
+      subTransactions: [{ categoryId: "sc1", amount: -300 }],
+    },
+    { entityId: "sX", accountId: "acc1", date: "2026-07-05", amount: -1, frequency: "monthly", payeeId: null, categoryId: null, isTombstone: true },
+  ],
+};
+
+describe("importYnab4 full import", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openMigratedDb();
+  });
+
+  it("returns the expected row counts", async () => {
+    const result = await importYnab4(db, ynabData);
+    expect(result).toEqual({
+      accounts: 3,
+      categoryGroups: 2, // Everyday + "Credit Card Payments"
+      categories: 1, // only mapped subcategories (sc1); CC-payment cats aren't in the map
+      transactions: 7, // raw yTransactions.length, tombstones included
+    });
+  });
+
+  it("maps account kinds and group labels", async () => {
+    await importYnab4(db, ynabData);
+    const { accounts } = await getBudgetData(db);
+    expect(accounts).toHaveLength(3);
+    const byName = new Map(accounts.map((a) => [a.name, a]));
+    expect(byName.get("Chequing")).toMatchObject({ kind: "liquid", groupLabel: "Budget Accounts", onBudget: true });
+    expect(byName.get("Visa")).toMatchObject({ kind: "credit", groupLabel: "Credit Cards", onBudget: true });
+    expect(byName.get("RRSP")).toMatchObject({ kind: "offbudget", groupLabel: "Off Budget", onBudget: false });
+    expect(byName.get("Deleted")).toBeUndefined();
+  });
+
+  it("skips hidden/non-outflow groups and tombstones, and creates the CC payment group", async () => {
+    await importYnab4(db, ynabData);
+    const { groups, categories } = await getBudgetData(db);
+    const groupNames = groups.map((g) => g.name);
+    expect(groupNames).toContain("Everyday");
+    expect(groupNames).toContain("Credit Card Payments");
+    expect(groupNames).not.toContain("Hidden Categories");
+    expect(groupNames).not.toContain("Income");
+
+    const catNames = categories.map((c) => c.name);
+    expect(catNames).toContain("Groceries");
+    expect(catNames).not.toContain("Deleted Cat");
+    // The Visa credit account gets a payment category linked to it.
+    const visaCat = categories.find((c) => c.name === "Visa");
+    expect(visaCat).toBeTruthy();
+    const ccGroup = groups.find((g) => g.isCreditCardPayments)!;
+    expect(visaCat!.groupId).toBe(ccGroup.id);
+  });
+
+  it("imports transactions with payee, status, and transfer mapping", async () => {
+    await importYnab4(db, ynabData);
+    const { transactions } = await getBudgetData(db);
+    const byPayee = new Map(transactions.map((t) => [t.payee, t]));
+
+    // Tombstone and unknown-account rows are dropped.
+    expect(transactions).toHaveLength(7);
+
+    const regular = byPayee.get("Grocery Store");
+    expect(regular).toMatchObject({ amount: "-100", status: "c", date: "2026-06-01" });
+
+    const transfer = transactions.find((t) => t.payee.startsWith("Transfer :"));
+    expect(transfer).toBeTruthy();
+    expect(Number(transfer!.amount)).toBe(500);
+
+    const income = byPayee.get("Employer");
+    expect(income).toMatchObject({ amount: "3000", status: "r", categoryId: null });
+
+    // Split parent + children are linked via parentId.
+    const splitChildren = transactions.filter((t) => t.parentId != null);
+    expect(splitChildren).toHaveLength(2);
+    const splitParent = transactions.find((t) => t.amount === "-150");
+    expect(splitParent).toBeTruthy();
+    for (const child of splitChildren) {
+      expect(child.parentId).toBe(splitParent!.id);
+    }
+    // The child with an unmapped category is still imported (null cat).
+    expect(splitChildren.some((c) => c.categoryId === null)).toBe(true);
+  });
+
+  it("imports assignments only for non-zero budgeted amounts", async () => {
+    await importYnab4(db, ynabData);
+    const { assignments } = await getBudgetData(db);
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]).toMatchObject({ amount: "500", month: "2026-06" });
+  });
+
+  it("normalizes scheduled frequencies, transfers, and split children", async () => {
+    await importYnab4(db, ynabData);
+    const { recurring } = await getBudgetData(db);
+    expect(recurring).toHaveLength(4);
+
+    const byPayee = new Map(recurring.map((r) => [r.payee, r]));
+    expect(byPayee.get("Grocery Store")).toBeTruthy();
+    // EVERYWEEK is not a supported frequency → falls back to monthly.
+    expect(byPayee.get("Grocery Store")!.frequency).toBe("monthly");
+
+    // The transfer scheduled row resolves the "Payee/Transfer:" convention.
+    const transferR = recurring.find((r) => r.transferAccountId != null)!;
+    expect(transferR.payee).toBe("Transfer : Visa");
+    expect(transferR.frequency).toBe("biweekly");
+    expect(transferR.categoryId).toBeNull();
+
+    // Split scheduled: children imported, parent category forced null.
+    const splitR = recurring.find((r) => r.subTransactions.length > 0)!;
+    expect(splitR.categoryId).toBeNull();
+    expect(splitR.subTransactions).toHaveLength(1);
+    expect(Number(splitR.subTransactions[0]!.amount)).toBe(-300);
+  });
+
+  it("recomputes balances including incoming transfers", async () => {
+    await importYnab4(db, ynabData);
+    const { accounts } = await getBudgetData(db);
+    const byName = new Map(accounts.map((a) => [a.name, a]));
+
+    // Chequing: -100 (t1) - 500 (t2 source) + 3000 (t4) - 150 (split
+    // parent) - 100 - 50 (split children) − (500 transfer in from Visa)
+    // = 2100 − 500 = 1600. RRSP has no transactions.
+    expect(Number(byName.get("Chequing")!.balance)).toBeCloseTo(1600);
+    expect(Number(byName.get("RRSP")!.balance)).toBeCloseTo(0);
+  });
+});
