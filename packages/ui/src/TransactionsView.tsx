@@ -160,9 +160,8 @@ export function TransactionsView({
         <table className="y-table">
           <thead className="y-thead">
             <tr>
-              <th style={{ width: 22 }} />
               <th style={{ width: 92 }}>Date</th>
-              <th style={{ width: 130 }}>Account</th>
+              {!accountFilter && <th style={{ width: 130 }}>Account</th>}
               <th>Payee</th>
               <th style={{ width: 210 }}>Category</th>
               <th>Memo</th>
@@ -204,11 +203,12 @@ export function TransactionsView({
                     onClick={() => !isChild && onEdit(t.id)}
                     style={{ cursor: isChild ? "default" : "pointer" }}
                   >
-                    <td className="text-center" />
                     <td className="y-num">{t.date}</td>
-                    <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
-                      {accountById.get(t.accountId)?.name ?? ""}
-                    </td>
+                    {!accountFilter && (
+                      <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
+                        {accountById.get(t.accountId)?.name ?? ""}
+                      </td>
+                    )}
                     <td className="truncate" style={{ color: "var(--y-ink)" }}>
                       {isChild && (
                         <span
@@ -218,7 +218,6 @@ export function TransactionsView({
                           ↳
                         </span>
                       )}
-                      {!isChild && t.parentId == null && t.transferAccountId == null && null}
                       {t.payee}
                     </td>
                     <td
@@ -258,11 +257,15 @@ export function TransactionsView({
                     <td
                       className="num y-num"
                       style={{
-                        color: t.runningBalance < 0 ? "var(--y-red)" : "var(--y-ink)",
-                        fontWeight: t.runningBalance < 0 ? 700 : 400,
+                        color: isChild
+                          ? "var(--y-ink-faint)"
+                          : t.runningBalance < 0
+                            ? "var(--y-red)"
+                            : "var(--y-ink)",
+                        fontWeight: !isChild && t.runningBalance < 0 ? 700 : 400,
                       }}
                     >
-                      {money(t.runningBalance)}
+                      {isChild ? "—" : money(t.runningBalance)}
                     </td>
                   </tr>
                 );

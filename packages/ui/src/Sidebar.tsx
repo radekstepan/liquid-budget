@@ -197,6 +197,7 @@ export function Sidebar({
         </button>
       </div>
 
+      <div className="y-divider opacity-[.12]" />
       <div className="p-2">
         <div
           className="rounded-[4px] p-2.5"
@@ -211,7 +212,7 @@ export function Sidebar({
             className="flex w-full items-center gap-1.5"
             style={{ color: "var(--y-side-ink)" }}
           >
-            <span className={cx("y-tri", !nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-ink-dim)" }} />
+            <span className={cx("y-tri", nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-ink-dim)" }} />
             <span className="text-[11px] font-bold">Net Worth</span>
             <span className="y-side-amt text-white" style={{ fontWeight: 700 }}>
               {fmt(netWorth)}

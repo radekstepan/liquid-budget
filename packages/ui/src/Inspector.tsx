@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { GroupRow } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
 import { Icon, Button, Panel, cx, money } from "@ynab/theme";
@@ -34,6 +34,19 @@ export function Inspector({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when user clicks outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   const { year, month0 } = parseMonthKey(month);
   const monthName = MONTHS[month0] ?? "";
@@ -53,7 +66,7 @@ export function Inspector({
             {monthName} {year}
           </div>
         </div>
-        <div className="ml-auto relative">
+        <div className="ml-auto relative" ref={menuRef}>
           <Button
             onClick={() => setMenuOpen((o) => !o)}
             size="sm"
@@ -64,8 +77,15 @@ export function Inspector({
           </Button>
           {menuOpen && (
             <div
-              className="y-modal absolute right-0 top-[28px] z-20"
-              style={{ width: 220, padding: 4 }}
+              className="absolute right-0 top-[28px] z-20"
+              style={{
+                width: 220,
+                padding: 4,
+                background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+                border: "1px solid var(--y-chrome-line)",
+                borderRadius: 4,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+              }}
             >
               <button
                 onClick={() => {

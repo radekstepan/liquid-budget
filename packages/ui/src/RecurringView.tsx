@@ -121,34 +121,21 @@ export function RecurringView({
                     {r.active ? "Active" : "Paused"}
                   </Pill>
                   {flavour !== "single" && (
-                    <span
-                      className="y-caps"
-                      style={{
-                        background: "var(--y-panel-alt)",
-                        color: "var(--y-ink-soft)",
-                        padding: "1px 7px",
-                        borderRadius: 8,
-                        border: "1px solid var(--y-line)",
-                        fontSize: 10.5,
-                      }}
+                    <Pill
+                      tone="grey"
+                      style={{ minWidth: 0, padding: "1px 8px", fontSize: 9.5, letterSpacing: "0.07em", textTransform: "uppercase" }}
                     >
                       {flavour}
-                    </span>
+                    </Pill>
                   )}
                 </div>
                 <div className="mt-3 flex items-center justify-between">
-                  <span
-                    className="y-caps"
-                    style={{
-                      background: "var(--y-panel-alt)",
-                      color: "var(--y-ink-soft)",
-                      padding: "2px 7px",
-                      borderRadius: 8,
-                      border: "1px solid var(--y-line)",
-                    }}
+                  <Pill
+                    tone="grey"
+                    style={{ minWidth: 0, padding: "2px 8px", fontSize: 9.5, letterSpacing: "0.07em", textTransform: "uppercase" }}
                   >
                     {r.frequency}
-                  </span>
+                  </Pill>
                   <span className="y-hint">
                     Next: <span className="y-num" style={{ color: "var(--y-ink-soft)" }}>{r.nextDate}</span>
                   </span>

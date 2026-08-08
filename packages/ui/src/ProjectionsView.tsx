@@ -124,7 +124,7 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
           </div>
         </Panel>
 
-        <div className="mt-3 y-panel overflow-hidden">
+        <Panel title="Monthly Breakdown" className="mt-3" bodyClass="!p-0 overflow-hidden">
           <table className="y-table">
             <thead className="y-thead">
               <tr>
@@ -153,7 +153,7 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
               ))}
             </tbody>
           </table>
-        </div>
+        </Panel>
       </div>
     </div>
   );
