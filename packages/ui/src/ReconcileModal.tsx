@@ -304,23 +304,14 @@ function SummaryStat({
   tone?: "default" | "soft";
 }) {
   return (
-    <div
-      className="rounded-[4px] px-2.5 py-2"
-      style={{
-        background: "var(--y-panel-alt, rgba(0,0,0,0.03))",
-        border: "1px solid var(--y-line)",
-      }}
-    >
+    <div className="y-mathbox">
       <div
-        className="y-caps text-[10px] font-bold tracking-[.08em]"
-        style={{ color: tone === "soft" ? "var(--y-ink-soft)" : "var(--y-ink)" }}
+        className="y-math-label"
+        style={{ color: tone === "soft" ? "var(--y-ink-faint)" : undefined }}
       >
         {label}
       </div>
-      <div
-        className="text-[15px] font-bold y-num mt-[1px]"
-        style={{ color: "var(--y-ink)" }}
-      >
+      <div className="y-math-val y-num">
         {value == null ? "—" : money(value)}
       </div>
       <div className="y-hint text-[10.5px] mt-[1px]">{hint}</div>

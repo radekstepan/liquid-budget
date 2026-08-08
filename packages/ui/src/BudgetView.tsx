@@ -8,6 +8,7 @@ import {
   MonthNav,
   BudgetHeader,
   Button,
+  Toolbar,
   ToolbarSep,
   Pill,
   balanceTone,
@@ -91,6 +92,19 @@ export function BudgetView({
   const creditGroup = structureGroups.find((g) => g.group.isCreditCardPayments);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when user clicks outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   const dragGroupId = useRef<number | null>(null);
   const [groupOverId, setGroupOverId] = useState<number | null>(null);
@@ -134,7 +148,7 @@ export function BudgetView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="y-toolbar">
+      <Toolbar>
         <MonthNav
           month={currentMonth}
           onPrev={() => onShiftMonth(-1)}
@@ -148,7 +162,7 @@ export function BudgetView({
           <Icon name="plus" size={11} /> Master Category
         </Button>
         <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
+          <div className="relative" ref={menuRef}>
             <Button
               onClick={() => setMenuOpen((o) => !o)}
               size="sm"
@@ -157,7 +171,16 @@ export function BudgetView({
               <Icon name="dots" size={14} />
             </Button>
             {menuOpen && (
-              <div className="y-modal absolute right-0 top-[28px] z-20 min-w-[180px]" style={{ width: 200, padding: 4 }}>
+              <div
+                className="absolute right-0 top-[28px] z-20 min-w-[180px] overflow-hidden"
+                style={{
+                  background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+                  border: "1px solid var(--y-chrome-line)",
+                  borderRadius: 4,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                  padding: 4,
+                }}
+              >
                 <button
                   onClick={() => {
                     onCollapseAll();
@@ -180,7 +203,7 @@ export function BudgetView({
             )}
           </div>
         </div>
-      </div>
+      </Toolbar>
 
       <BudgetHeader
         parts={headerParts}
@@ -268,10 +291,7 @@ export function BudgetView({
 
         <button
           onClick={onAddGroup}
-          className="flex w-full items-center gap-2 px-3 py-2 text-[11.5px] font-medium"
-          style={{ color: "var(--y-ink-soft)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+          className="y-menu-item gap-2 px-3 py-2 text-[11.5px]"
         >
           <Icon name="plus" size={11} /> Add Category Group
         </button>

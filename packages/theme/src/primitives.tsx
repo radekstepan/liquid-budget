@@ -289,9 +289,11 @@ export const Notice: React.FC<{
   style?: React.CSSProperties;
 }> = ({ tone = "info", title, children, className, style }) => (
   <div className={cx("y-notice", `y-notice--${tone}`, className)} style={style}>
-    <span className="mt-[1px]">
-      {tone === "ok" ? "✓" : tone === "danger" ? "✕" : tone === "warn" ? "!" : "i"}
-    </span>
+    <Icon
+      name={tone === "ok" ? "check" : tone === "danger" ? "x" : tone === "warn" ? "minus" : "note"}
+      size={13}
+      color="currentColor"
+    />
     <div>
       {title && <div className="font-bold mb-[2px]">{title}</div>}
       <div>{children}</div>
