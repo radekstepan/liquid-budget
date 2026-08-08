@@ -44,9 +44,13 @@ test("POST + DELETE /api/transactions round-trips a row", async () => {
   const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
 
   // Discover a real account + category from the live budget so the
-  // created transaction doesn't trip FK constraints.
+  // created transaction doesn't trip FK constraints. EQ Bank is used
+  // here (not the first liquid account, which is TD — the split test
+  // below asserts TD's exact balance and would race with this row).
   const budget = await (await ctx.get("/api/budget")).json();
-  const account = budget.accounts.find((a: { kind: string }) => a.kind === "liquid");
+  const account = budget.accounts.find(
+    (a: { name: string }) => a.name === "EQ Bank"
+  ) ?? budget.accounts.find((a: { kind: string }) => a.kind === "liquid");
   const category = budget.categories[0];
   expect(account?.id).toBeTruthy();
   expect(category?.id).toBeTruthy();
@@ -210,7 +214,14 @@ test("POST /api/transactions with subTransactions creates a balanced split", asy
   expect(Number(accountAfter.balance)).toBeCloseTo(accountBalBefore + parentAmount, 2);
 
   // Clean up — delete the parent, cascade should drop the children.
-  await ctx.delete(`/api/transactions?id=${result.parent.id}`);
+  const cleanup = await ctx.delete(`/api/transactions?id=${result.parent.id}`);
+  expect(cleanup.status()).toBe(200);
+  const afterDelete = await (await ctx.get("/api/budget")).json();
+  expect(
+    afterDelete.transactions.some(
+      (t: { id: number }) => t.id === result.parent.id
+    )
+  ).toBe(false);
   await ctx.dispose();
 });
 
@@ -366,5 +377,158 @@ test("POST /api/recurring creates a recurring split with subTransactions", async
   expect(bad.status()).toBe(400);
 
   await ctx.delete(`/api/recurring?id=${row.id}`);
+  await ctx.dispose();
+});
+
+test("GET /api/accounts returns the accounts ordered by sort", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const res = await ctx.get("/api/accounts");
+  expect(res.status()).toBe(200);
+  const rows = await res.json();
+  expect(Array.isArray(rows)).toBe(true);
+  expect(rows.length).toBeGreaterThan(0);
+  for (const a of rows) {
+    expect(a.id).toBeGreaterThan(0);
+    expect(typeof a.name).toBe("string");
+  }
+  // Sorted by the sort column, ascending.
+  const sorts = rows.map((a: { sort: number }) => a.sort);
+  expect(sorts).toEqual([...sorts].sort((a, b) => a - b));
+  await ctx.dispose();
+});
+
+test("PATCH /api/transactions updates amount, payee, and status", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const account = budget.accounts.find((a: { name: string }) => a.name === "Cash");
+  expect(account?.id).toBeTruthy();
+
+  const created = await ctx.post("/api/transactions", {
+    data: {
+      accountId: account.id,
+      categoryId: null,
+      date: "2099-06-20",
+      payee: "PATCH me",
+      memo: "",
+      amount: -10,
+      cleared: true,
+    },
+  });
+  expect(created.status()).toBe(200);
+  const row = await created.json();
+
+  const patched = await ctx.patch("/api/transactions", {
+    data: {
+      id: row.id,
+      payee: "Patched payee",
+      amount: -20,
+      status: "u",
+    },
+  });
+  expect(patched.status()).toBe(200);
+  const patchedRow = await patched.json();
+  expect(patchedRow.payee).toBe("Patched payee");
+  expect(Number(patchedRow.amount)).toBeCloseTo(-20, 2);
+  expect(patchedRow.status).toBe("u");
+
+  const after = await (await ctx.get("/api/budget")).json();
+  const stored = after.transactions.find((t: { id: number }) => t.id === row.id);
+  expect(stored?.payee).toBe("Patched payee");
+  expect(stored?.status).toBe("u");
+
+  // PATCH with an unknown id → 404.
+  const missing = await ctx.patch("/api/transactions", {
+    data: { id: 999999, payee: "ghost" },
+  });
+  expect(missing.status()).toBe(404);
+
+  await ctx.delete(`/api/transactions?id=${row.id}`);
+  await ctx.dispose();
+});
+
+test("PATCH /api/recurring updates amount, frequency, and active state", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const account = budget.accounts.find((a: { name: string }) => a.name === "Cash");
+  expect(account?.id).toBeTruthy();
+
+  const created = await ctx.post("/api/recurring", {
+    data: {
+      accountId: account.id,
+      categoryId: null,
+      payee: "PATCH recurring",
+      amount: -50,
+      frequency: "monthly",
+      nextDate: "2099-07-20",
+    },
+  });
+  expect(created.status()).toBe(200);
+  const row = await created.json();
+
+  const patched = await ctx.patch("/api/recurring", {
+    data: {
+      id: row.id,
+      amount: -60,
+      frequency: "biweekly",
+      active: false,
+    },
+  });
+  expect(patched.status()).toBe(200);
+  const patchedRow = await patched.json();
+  expect(Number(patchedRow.amount)).toBeCloseTo(-60, 2);
+  expect(patchedRow.frequency).toBe("biweekly");
+  expect(patchedRow.active).toBe(false);
+
+  const after = await (await ctx.get("/api/budget")).json();
+  const stored = after.recurring.find((r: { id: number }) => r.id === row.id);
+  expect(stored?.frequency).toBe("biweekly");
+  expect(stored?.active).toBe(false);
+
+  // PATCH with an unknown id → 404.
+  const missing = await ctx.patch("/api/recurring", {
+    data: { id: 999999, payee: "ghost" },
+  });
+  expect(missing.status()).toBe(404);
+
+  await ctx.delete(`/api/recurring?id=${row.id}`);
+  await ctx.dispose();
+});
+
+test("DELETE /api/categories removes a created category and group", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const group = budget.groups.find(
+    (g: { name: string; isCreditCardPayments?: boolean }) => !g.isCreditCardPayments
+  );
+  expect(group?.id).toBeTruthy();
+
+  const stamp = Date.now();
+  const createdCat = await ctx.post("/api/categories", {
+    data: { groupId: group.id, name: `PW Del Cat ${stamp}` },
+  });
+  expect(createdCat.status()).toBe(200);
+  const cat = await createdCat.json();
+  expect(cat.id).toBeGreaterThan(0);
+
+  const createdGroup = await ctx.post("/api/categories", {
+    data: { type: "group", name: `PW Del Group ${stamp}` },
+  });
+  expect(createdGroup.status()).toBe(200);
+  const g = await createdGroup.json();
+
+  const delCat = await ctx.delete(`/api/categories?id=${cat.id}`);
+  expect(delCat.status()).toBe(200);
+  const delGroup = await ctx.delete(`/api/categories?id=${g.id}&type=group`);
+  expect(delGroup.status()).toBe(200);
+
+  const after = await (await ctx.get("/api/budget")).json();
+  expect(
+    after.categories.some((c: { id: number }) => c.id === cat.id)
+  ).toBe(false);
+  expect(after.groups.some((x: { id: number }) => x.id === g.id)).toBe(false);
+
+  // Deleting an unknown id still resolves ok.
+  const missing = await ctx.delete("/api/categories?id=999999");
+  expect(missing.status()).toBe(200);
   await ctx.dispose();
 });

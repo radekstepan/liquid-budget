@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   createAccount,
   deleteAccount,
+  getAccount,
   listAccounts,
   updateAccount,
 } from "../src/queries/accounts.js";
@@ -66,6 +67,22 @@ describe("accounts queries", () => {
       await deleteAccount(mock.db, 5);
       const deleteCall = mock.calls.find((c) => c.op === "delete");
       expect(deleteCall?.table).toBe("accounts");
+    });
+  });
+
+  describe("getAccount", () => {
+    it("returns the account row for a known id", async () => {
+      mock.respondWith("select:accounts", [{ id: 3, name: "Savings" }]);
+      const row = await getAccount(mock.db, 3);
+      expect(row).toMatchObject({ id: 3, name: "Savings" });
+      const selectCall = mock.calls.find((c) => c.op === "select");
+      expect(selectCall?.table).toBe("accounts");
+    });
+
+    it("returns undefined when the id does not exist", async () => {
+      mock.respondWith("select:accounts", []);
+      const row = await getAccount(mock.db, 999);
+      expect(row).toBeUndefined();
     });
   });
 

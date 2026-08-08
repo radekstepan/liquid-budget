@@ -79,8 +79,10 @@ test("creates a 2-way split and renders the indented children", async ({ page })
   await subCategorySelects.nth(0).selectOption({ index: 1 });
   await subCategorySelects.nth(1).selectOption({ index: 2 });
 
-  await allDecimals.nth(1).fill("60");
-  await allDecimals.nth(2).fill("40");
+  // Children carry their typed sign and must sum to the signed parent
+  // total (mixed-sign validation): -60 + -40 = -100.
+  await allDecimals.nth(1).fill("-60");
+  await allDecimals.nth(2).fill("-40");
 
   // Save.
   await modal.getByRole("button", { name: "Save Transaction" }).click();

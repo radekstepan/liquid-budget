@@ -69,3 +69,67 @@ test("a day with multiple transactions shows the payee pills", async ({ page }) 
   await expect(cell).toContainText("Fortis BC");
   await expect(cell).toContainText("Costco");
 });
+
+test("a day with more than three transactions truncates and expands", async ({ page }) => {
+  // 2026-06-01 has 6 transactions in the seed. Only three pills render
+  // (CalendarView.tsx:108); a "+N more" button expands the cell to
+  // reveal the rest (CalendarView.tsx:161-172). Which three are shown
+  // first depends on the query order, so assert counts, not payees.
+  const cell = page.locator(
+    'div[role="button"][aria-label="Add transaction on 2026-06-01"]'
+  );
+  const pills = () =>
+    cell.locator(
+      "div.flex.items-center.gap-1.rounded.px-1.py-\\[1px\\].text-\\[10px\\]"
+    );
+
+  const moreButton = cell.getByRole("button", { name: /^\+\d+ more$/ });
+  await expect(moreButton).toBeVisible();
+  const moreText = (await moreButton.textContent()) ?? "";
+  const moreCount = Number(moreText.match(/\+(\d+) more/)?.[1]);
+  expect(moreCount).toBeGreaterThan(0);
+
+  await expect(pills()).toHaveCount(3);
+  await moreButton.click();
+  // All items now visible: the 3 truncated + the overflow count.
+  await expect(pills()).toHaveCount(3 + moreCount);
+  await expect(cell.getByRole("button", { name: /more/ })).toHaveCount(0);
+});
+
+test("days with transactions show a day net equal to the sum of their pills", async ({ page }) => {
+  // 2026-06-10 has two seed transactions (Telus -110.00, Fido -90.00).
+  // The day-net label must equal the sum of the visible pill amounts —
+  // robust even if a parallel spec adds another row to the day.
+  const cell = page.locator(
+    'div[role="button"][aria-label="Add transaction on 2026-06-10"]'
+  );
+  const amounts = await cell
+    .locator("span.y-num.shrink-0")
+    .allTextContents();
+  expect(amounts.length).toBeGreaterThan(0);
+  const sum = amounts.reduce((s, a) => s + Number(a.replace(/[$,]/g, "")), 0);
+  const dayNet = await cell
+    .locator("span.y-num.text-\\[10\\.5px\\].font-bold")
+    .textContent();
+  expect(Number((dayNet ?? "").replace(/[$,]/g, ""))).toBeCloseTo(sum, 2);
+});
+
+test("toolbar shows a Net this month equal to the sum of the day nets", async ({ page }) => {
+  // The exact June total shifts when parallel mutating specs add
+  // June-dated rows to the shared dev DB, so assert self-consistency:
+  // Net this month must equal the sum of every visible day net.
+  const net = page.locator(".y-toolbar").getByText("Net this month:");
+  await expect(net).toBeVisible();
+  const total = Number(
+    ((await net.locator("span.y-num").textContent()) ?? "").replace(/[$,]/g, "")
+  );
+
+  const dayNets = page.locator(
+    'div[role="button"][aria-label^="Add transaction on 2026-06-"] span.y-num.text-\\[10\\.5px\\].font-bold'
+  );
+  const sum = (await dayNets.allTextContents()).reduce(
+    (s, a) => s + Number(a.replace(/[$,]/g, "")),
+    0
+  );
+  expect(total).toBeCloseTo(sum, 2);
+});

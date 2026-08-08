@@ -4,6 +4,8 @@ import {
   CategoryModal,
   TransactionModal,
   RecurringModal,
+  GroupModal,
+  AccountModal,
 } from "../src/Modals.js";
 import type {
   Account,
@@ -736,5 +738,136 @@ describe("RecurringModal", () => {
     expect(payload.amount).toBe(4000);
     expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 5000 });
     expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -1000 });
+  });
+});
+
+describe("GroupModal", () => {
+  it("calls onSave with the trimmed name when creating", () => {
+    const onSave = vi.fn();
+    render(<GroupModal onClose={() => {}} onSave={onSave} />);
+    expect(screen.getByText("New Category Group")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "  Bills  " } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith("Bills");
+  });
+
+  it("does not call onSave for an empty name", () => {
+    const onSave = vi.fn();
+    render(<GroupModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("pre-fills the name and uses the rename title when editing", () => {
+    const onSave = vi.fn();
+    render(<GroupModal initialName="Everyday" onClose={() => {}} onSave={onSave} />);
+    expect(screen.getByText("Rename Group")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Everyday")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Daily" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith("Daily");
+  });
+
+  it("calls onClose from Cancel", () => {
+    const onClose = vi.fn();
+    render(<GroupModal onClose={onClose} onSave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("AccountModal", () => {
+  it("saves a liquid account with a positive balance", () => {
+    const onSave = vi.fn();
+    render(<AccountModal onClose={() => {}} onSave={onSave} />);
+    // The modal title and the primary button both read "Add Account".
+    expect(screen.getAllByText("Add Account").length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+      target: { value: "Savings" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "250.75" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Savings",
+      kind: "liquid",
+      groupLabel: "Liquid",
+      balance: 250.75,
+      onBudget: true,
+    });
+  });
+
+  it("saves a credit card account on-budget", () => {
+    const onSave = vi.fn();
+    render(<AccountModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+      target: { value: "Visa" },
+    });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "credit" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "-300" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Visa",
+      kind: "credit",
+      groupLabel: "Credit Cards",
+      balance: -300,
+      onBudget: true,
+    });
+  });
+
+  it("saves an off-budget account", () => {
+    const onSave = vi.fn();
+    render(<AccountModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+      target: { value: "RRSP" },
+    });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "offbudget" } });
+    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "RRSP",
+      kind: "offbudget",
+      groupLabel: "Retirement",
+      balance: 0,
+      onBudget: false,
+    });
+  });
+
+  it("does not call onSave when the name is empty", () => {
+    const onSave = vi.fn();
+    render(<AccountModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("pre-fills and saves the edit payload", () => {
+    const onSave = vi.fn();
+    render(
+      <AccountModal
+        initial={{ name: "Chequing", kind: "liquid", balance: "-125.00" }}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    expect(screen.getByText("Edit Account")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Chequing")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("125")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Chequing",
+      kind: "liquid",
+      groupLabel: "Liquid",
+      balance: 125,
+      onBudget: true,
+    });
+  });
+
+  it("calls onClose from Cancel", () => {
+    const onClose = vi.fn();
+    render(<AccountModal onClose={onClose} onSave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(onClose).toHaveBeenCalled();
   });
 });
