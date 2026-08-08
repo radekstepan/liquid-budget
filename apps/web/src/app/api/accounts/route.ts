@@ -14,14 +14,16 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.name) return Response.json({ error: "invalid" }, { status: 400 });
   const row = await createAccount(getDefaultDb(), body);
   return Response.json(row);
 }
 
 export async function PATCH(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = Number(body.id);
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
   const row = await updateAccount(getDefaultDb(), id, {

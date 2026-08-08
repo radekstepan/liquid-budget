@@ -15,7 +15,8 @@ function errorResponse(e: unknown): Response {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const action = String(body.action ?? "reconcile");
   const db = getDefaultDb();
 

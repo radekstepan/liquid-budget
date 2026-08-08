@@ -3,7 +3,8 @@ import { getDefaultDb, upsertAssignment } from "@ynab/server";
 export const dynamic = "force-dynamic";
 
 export async function PUT(req: Request) {
-  const body = await req.json();
+  let body: any;
+  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const categoryId = Number(body.categoryId);
   const month = String(body.month);
   const amount = Number(body.amount);
