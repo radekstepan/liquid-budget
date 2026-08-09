@@ -861,18 +861,55 @@ button.y-pill:hover {
   background: #d3d3ce;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
-.y-scroll::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+/* (docs-only classes removed when the demo was retired) */
+
+/* ---------- scrollbars (global, YNAB 4 chrome look) ---------- */
+*::-webkit-scrollbar {
+  width: 13px;
+  height: 13px;
 }
-.y-scroll::-webkit-scrollbar-track {
-  background: #eeeeeb;
-  border-left: 1px solid #d5d5d0;
+*::-webkit-scrollbar-track {
+  background: #e9e9e6;
+  border-left: 1px solid #d8d8d3;
+  border-top: 1px solid #d8d8d3;
 }
-.y-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(90deg, #c3c6c8, #a9adb0);
-  border: 2px solid #eeeeeb;
-  border-radius: 6px;
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #c8cbcd, #aeb2b5);
+  border: 2px solid #e9e9e6;
+  border-radius: 7px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, #bcc5cc, #9db0be);
+}
+*::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(90deg, #94a7b4, #7c93a3);
+}
+*::-webkit-scrollbar-corner {
+  background: #e9e9e6;
+}
+* {
+  scrollbar-color: #b3b7ba #e9e9e6;
 }
 
-/* (docs-only classes removed when the demo was retired) */
+/* dark scrollbars (dark sidebars / rails) */
+.y-scroll--dark::-webkit-scrollbar-track {
+  background: #2c373e;
+  border-left: 1px solid #1c252b;
+  border-top: 1px solid #1c252b;
+}
+.y-scroll--dark::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #79868e, #5f6d76);
+  border: 2px solid #2c373e;
+}
+.y-scroll--dark::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, #8d99a0, #6f7e87);
+}
+.y-scroll--dark::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(90deg, #5f8fb0, #4a789c);
+}
+.y-scroll--dark::-webkit-scrollbar-corner {
+  background: #2c373e;
+}
+.y-scroll--dark {
+  scrollbar-color: #6f7d86 #2c373e;
+}

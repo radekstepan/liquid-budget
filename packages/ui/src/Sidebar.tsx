@@ -95,7 +95,7 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="flex-1 overflow-y-auto y-scroll">
+      <div className="flex-1 overflow-y-auto y-scroll y-scroll--dark">
         {groups.map((label) => {
           const list = accountsFor(label);
           if (list.length === 0) return null;
