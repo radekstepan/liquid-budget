@@ -81,5 +81,13 @@ describe("Inspector", () => {
       fireEvent.click(feb);
       expect(onSelectMonth).not.toHaveBeenCalled();
     });
+
+    it("renders non-real months as visible (>=10px) bars so empty slots are obvious", () => {
+      render(<Inspector {...baseProps} history={history} onSelectMonth={() => {}} />);
+      const feb = screen.getByRole("button", { name: /jump to feb 2026/i });
+      // jsdom returns px values verbatim from the inline style.
+      const heightPx = parseFloat(feb.style.height);
+      expect(heightPx).toBeGreaterThanOrEqual(10);
+    });
   });
 });

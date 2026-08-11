@@ -3,7 +3,19 @@
 import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { fmt, num, monthLabel } from "@ynab/logic";
-import { Icon, Toolbar, Select, Panel, MathCell } from "@ynab/theme";
+import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
+import { NetWorthReport, type NetWorthPoint } from "./NetWorthReport.js";
+import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
+import { ExpenseBreakdownReport } from "./ExpenseBreakdownReport.js";
+
+type SubTab = "overview" | "networth" | "spending" | "breakdown";
+
+const SUB_TABS: { key: SubTab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "networth", label: "Net Worth" },
+  { key: "spending", label: "Spending by Category" },
+  { key: "breakdown", label: "Expense Breakdown" },
+];
 
 function getMonthsBetween(start: string, end: string) {
   const partsS = start.split("-");
@@ -45,47 +57,64 @@ export function ReportsView({
 
   const [startMonth, setStartMonth] = useState<string>(defaultStart);
   const [endMonth, setEndMonth] = useState<string>(defaultEnd);
+  const [sub, setSub] = useState<SubTab>("overview");
 
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
 
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
+  const catMap = useMemo(
+    () => new Map(data.categories.map((c) => [c.id, c.name])),
+    [data.categories]
+  );
 
-  const rangeTxns = data.transactions.filter((t) => {
-    const mk = t.date.slice(0, 7);
-    return mk >= actualStart && mk <= actualEnd;
-  });
+  const rangeTxns = useMemo(
+    () =>
+      data.transactions.filter((t) => {
+        const mk = t.date.slice(0, 7);
+        return mk >= actualStart && mk <= actualEnd;
+      }),
+    [data.transactions, actualStart, actualEnd]
+  );
 
-  const income = rangeTxns
-    .filter((t) => t.categoryId == null && num(t.amount) > 0)
-    .reduce((s, t) => s + num(t.amount), 0);
-  const expense = rangeTxns
-    .filter((t) => num(t.amount) < 0)
-    .reduce((s, t) => s + num(t.amount), 0);
+  const income = useMemo(
+    () =>
+      rangeTxns
+        .filter((t) => t.categoryId == null && num(t.amount) > 0)
+        .reduce((s, t) => s + num(t.amount), 0),
+    [rangeTxns]
+  );
+  const expense = useMemo(
+    () => rangeTxns.filter((t) => num(t.amount) < 0).reduce((s, t) => s + num(t.amount), 0),
+    [rangeTxns]
+  );
 
-  const byCat = new Map<number, number>();
-  for (const t of rangeTxns) {
-    if (t.categoryId == null) continue;
-    const a = num(t.amount);
-    if (a < 0) byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) + -a);
-  }
-  const spending = [...byCat.entries()]
-    .map(([id, v]) => ({ name: catMap.get(id) ?? "—", value: v }))
-    .sort((a, b) => b.value - a.value);
-  const maxSpend = Math.max(1, ...spending.map((s) => s.value));
-  const totalSpend = spending.reduce((s, x) => s + x.value, 0);
+  const spending: SpendingItem[] = useMemo(() => {
+    const byCat = new Map<number, number>();
+    for (const t of rangeTxns) {
+      if (t.categoryId == null) continue;
+      const a = num(t.amount);
+      if (a < 0) byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) + -a);
+    }
+    return [...byCat.entries()]
+      .map(([id, v]) => ({ name: catMap.get(id) ?? "—", value: v }))
+      .sort((a, b) => b.value - a.value);
+  }, [rangeTxns, catMap]);
 
-  const byPayee = new Map<string, number>();
-  for (const t of rangeTxns) {
-    const a = num(t.amount);
-    if (a < 0) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
-  }
-  const payees = [...byPayee.entries()]
-    .map(([n, v]) => ({ n, v }))
-    .sort((a, b) => b.v - a.v)
-    .slice(0, 6);
+  const totalSpend = useMemo(() => spending.reduce((s, x) => s + x.value, 0), [spending]);
 
-  const netWorthData = useMemo(() => {
+  const payees = useMemo(() => {
+    const byPayee = new Map<string, number>();
+    for (const t of rangeTxns) {
+      const a = num(t.amount);
+      if (a < 0) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
+    }
+    return [...byPayee.entries()]
+      .map(([n, v]) => ({ n, v }))
+      .sort((a, b) => b.v - a.v)
+      .slice(0, 6);
+  }, [rangeTxns]);
+
+  const netWorthData: NetWorthPoint[] = useMemo(() => {
     const months = getMonthsBetween(actualStart, actualEnd);
     const accBalances = new Map<number, number>();
 
@@ -102,7 +131,7 @@ export function ReportsView({
       txnsByMonth.get(mk)!.push(t);
     }
 
-    const points: { month: string; assets: number; debts: number; net: number }[] = [];
+    const points: NetWorthPoint[] = [];
     for (const m of months) {
       const txns = txnsByMonth.get(m) || [];
       for (const t of txns) {
@@ -120,18 +149,6 @@ export function ReportsView({
     return points;
   }, [data.transactions, actualStart, actualEnd]);
 
-  const palette = [
-    "var(--y-blue)",
-    "var(--y-blue-dark)",
-    "#5aa5d0",
-    "var(--y-orange)",
-    "var(--y-green-dk)",
-    "var(--y-red-dk)",
-    "var(--y-grey-pill)",
-    "#a482d4",
-  ];
-  const colorAt = (i: number) => palette[i % palette.length]!;
-
   return (
     <div className="flex h-full flex-col">
       <Toolbar>
@@ -143,7 +160,8 @@ export function ReportsView({
           <span className="y-caps">From</span>
           <Select
             value={startMonth}
-            onChange={(e) => setStartMonth(e.target.value)}
+            onChange={(v) => setStartMonth(v)}
+            ariaLabel="From month"
           >
             {allMonths.map((m) => (
               <option key={m} value={m}>
@@ -154,7 +172,8 @@ export function ReportsView({
           <span className="y-caps">To</span>
           <Select
             value={endMonth}
-            onChange={(e) => setEndMonth(e.target.value)}
+            onChange={(v) => setEndMonth(v)}
+            ariaLabel="To month"
           >
             {allMonths.map((m) => (
               <option key={m} value={m}>
@@ -165,270 +184,82 @@ export function ReportsView({
         </div>
       </Toolbar>
 
-      <div className="flex-1 overflow-y-auto p-4 y-scroll">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <MathCell label="Income" value={fmt(income)} tone="green" className="flex-1" style={{ minWidth: 140 }} />
-          <MathCell label="Expenses" value={fmt(expense)} tone="red" className="flex-1" style={{ minWidth: 140 }} />
-          <MathCell
-            label="Net"
-            value={fmt(income + expense)}
-            tone={income + expense >= 0 ? "green" : "red"}
-            className="flex-1"
-            style={{ minWidth: 140 }}
-          />
-        </div>
+      <Tabs
+        tabs={SUB_TABS.map((t) => t.label)}
+        value={SUB_TABS.find((t) => t.key === sub)?.label ?? SUB_TABS[0]!.label}
+        onChange={(label) => {
+          const match = SUB_TABS.find((t) => t.label === label);
+          if (match) setSub(match.key);
+        }}
+      />
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <Panel title="Net Worth">
-            <NetWorthGraph points={netWorthData} />
-          </Panel>
+      <div className="min-h-0 flex-1">
+        {sub === "overview" && (
+          <div className="h-full overflow-y-auto p-4 y-scroll">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <MathCell
+                label="Income"
+                value={fmt(income)}
+                tone="green"
+                className="flex-1"
+                style={{ minWidth: 140 }}
+              />
+              <MathCell
+                label="Expenses"
+                value={fmt(expense)}
+                tone="red"
+                className="flex-1"
+                style={{ minWidth: 140 }}
+              />
+              <MathCell
+                label="Net"
+                value={fmt(income + expense)}
+                tone={income + expense >= 0 ? "green" : "red"}
+                className="flex-1"
+                style={{ minWidth: 140 }}
+              />
+            </div>
 
-          <Panel title="Spending by Category">
-            {spending.length === 0 ? (
-              <Empty />
-            ) : (
-              <div className="space-y-[8px] max-h-[300px] overflow-y-auto pr-1 y-scroll">
-                {spending.map((s, i) => (
-                  <div key={s.name}>
-                    <div className="mb-[2px] flex justify-between text-[11.5px]">
-                      <span style={{ color: "var(--y-ink-soft)" }}>{s.name}</span>
+            <Panel title="Top Payees" bodyClass="p-3">
+              {payees.length === 0 ? (
+                <div className="py-4 text-center y-hint">No data for this timeframe.</div>
+              ) : (
+                <div className="space-y-[6px]">
+                  {payees.map((p) => (
+                    <div
+                      key={p.n}
+                      className="flex items-center justify-between text-[12px]"
+                    >
+                      <span style={{ color: "var(--y-ink-soft)" }}>{p.n}</span>
                       <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-                        {fmt(s.value)}{" "}
-                        <span style={{ color: "var(--y-ink-faint)" }}>
-                          ({totalSpend ? Math.round((s.value / totalSpend) * 100) : 0}%)
-                        </span>
-                      </span>
-                    </div>
-                    <div className="y-bar-track h-[10px] overflow-hidden rounded-[3px]">
-                      <div
-                        className="h-full rounded-[3px]"
-                        style={{
-                          width: `${(s.value / maxSpend) * 100}%`,
-                          background: colorAt(i),
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
-
-          <Panel title="Expense Breakdown">
-            {spending.length === 0 ? (
-              <Empty />
-            ) : (
-              <div className="flex items-center gap-4">
-                <Donut
-                  segments={spending.map((s, i) => ({ value: s.value, color: colorAt(i) }))}
-                  total={totalSpend}
-                />
-                <div className="flex-1 space-y-[4px]">
-                  {spending.slice(0, 6).map((s, i) => (
-                    <div key={s.name} className="flex items-center gap-2 text-[11.5px]">
-                      <span
-                        className="h-2 w-2 rounded-full shrink-0"
-                        style={{ background: colorAt(i) }}
-                      />
-                      <span className="flex-1 truncate" style={{ color: "var(--y-ink-soft)" }}>
-                        {s.name}
-                      </span>
-                      <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-                        {fmt(s.value)}
+                        {fmt(p.v)}
                       </span>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-          </Panel>
+              )}
+            </Panel>
+          </div>
+        )}
 
-          <Panel title="Top Payees">
-            {payees.length === 0 ? (
-              <Empty />
-            ) : (
-              <div className="space-y-[6px]">
-                {payees.map((p) => (
-                  <div
-                    key={p.n}
-                    className="flex items-center justify-between text-[12px]"
-                  >
-                    <span style={{ color: "var(--y-ink-soft)" }}>{p.n}</span>
-                    <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-                      {fmt(p.v)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
-        </div>
+        {sub === "networth" && (
+          <div className="h-full p-4">
+            <NetWorthReport points={netWorthData} />
+          </div>
+        )}
+
+        {sub === "spending" && (
+          <div className="h-full p-4">
+            <SpendingReport spending={spending} total={totalSpend} />
+          </div>
+        )}
+
+        {sub === "breakdown" && (
+          <div className="h-full p-4">
+            <ExpenseBreakdownReport spending={spending} total={totalSpend} />
+          </div>
+        )}
       </div>
     </div>
   );
-}
-
-function NetWorthGraph({
-  points,
-}: {
-  points: { month: string; assets: number; debts: number; net: number }[];
-}) {
-  if (points.length === 0) return <Empty />;
-
-  const maxVal = Math.max(1, ...points.map((p) => p.assets));
-  const minVal = Math.min(0, ...points.map((p) => p.debts));
-  const range = maxVal - minVal;
-
-  const W = 500;
-  const H = 200;
-  const padY = 20;
-  const innerH = H - 2 * padY;
-
-  const zeroY = range === 0 ? H / 2 : padY + innerH * (maxVal / range);
-  const barW = Math.max(5, Math.min(30, (W - 20) / points.length - 4));
-
-  return (
-    <div className="w-full overflow-x-auto">
-      <svg
-        width="100%"
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        className="min-w-[400px]"
-      >
-        <line
-          x1="0"
-          y1={zeroY}
-          x2={W}
-          y2={zeroY}
-          stroke="var(--y-line)"
-          strokeWidth="1"
-        />
-
-        {points.map((p, i) => {
-          const x = 10 + (i * (W - 20)) / points.length;
-
-          const assetH = range === 0 ? 0 : innerH * (p.assets / range);
-          const assetY = zeroY - assetH;
-
-          const debtH = range === 0 ? 0 : innerH * (-p.debts / range);
-          const debtY = zeroY;
-
-          const netY = range === 0 ? H / 2 : zeroY - innerH * (p.net / range);
-
-          return (
-            <g key={i}>
-              {p.assets > 0 && (
-                <rect
-                  x={x}
-                  y={assetY}
-                  width={barW}
-                  height={Math.max(1, assetH)}
-                  fill="var(--y-blue)"
-                  opacity={0.5}
-                />
-              )}
-              {p.debts < 0 && (
-                <rect
-                  x={x}
-                  y={debtY}
-                  width={barW}
-                  height={Math.max(1, debtH)}
-                  fill="var(--y-red)"
-                  opacity={0.5}
-                />
-              )}
-
-              <circle cx={x + barW / 2} cy={netY} r={3} fill="var(--y-ink)" />
-            </g>
-          );
-        })}
-
-        <path
-          d={`M ${points
-            .map(
-              (p, i) =>
-                `${10 + (i * (W - 20)) / points.length + barW / 2},${
-                  range === 0 ? H / 2 : zeroY - innerH * (p.net / range)
-                }`
-            )
-            .join(" L ")}`}
-          fill="none"
-          stroke="var(--y-ink)"
-          strokeWidth="2"
-        />
-      </svg>
-      <div className="flex justify-between y-hint px-[10px] mt-1">
-        <span>{points[0]!.month}</span>
-        <span>{points[points.length - 1]!.month}</span>
-      </div>
-    </div>
-  );
-}
-
-function Donut({
-  segments,
-  total,
-}: {
-  segments: { value: number; color: string }[];
-  total: number;
-}) {
-  const r = 42;
-  const c = 2 * Math.PI * r;
-  let offset = 0;
-  return (
-    <svg
-      width={120}
-      height={120}
-      viewBox="0 0 120 120"
-      className="shrink-0"
-    >
-      <circle cx={60} cy={60} r={r} fill="none" stroke="var(--y-line)" strokeWidth={16} />
-      {segments.map((s, i) => {
-        const frac = total ? s.value / total : 0;
-        const len = frac * c;
-        const el = (
-          <circle
-            key={i}
-            cx={60}
-            cy={60}
-            r={r}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={16}
-            strokeDasharray={`${len} ${c - len}`}
-            strokeDashoffset={-offset}
-            transform="rotate(-90 60 60)"
-          />
-        );
-        offset += len;
-        return el;
-      })}
-      <text
-        x={60}
-        y={57}
-        textAnchor="middle"
-        className="tnum"
-        fontSize={12}
-        fill="var(--y-ink-soft)"
-      >
-        Total
-      </text>
-      <text
-        x={60}
-        y={72}
-        textAnchor="middle"
-        className="tnum"
-        fontSize={13}
-        fontWeight={700}
-        fill="var(--y-ink)"
-      >
-        {fmt(total)}
-      </text>
-    </svg>
-  );
-}
-
-function Empty() {
-  return <div className="py-4 text-center y-hint">No data for this timeframe.</div>;
 }

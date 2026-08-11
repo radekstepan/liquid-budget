@@ -233,9 +233,9 @@ export function ReconcileModal({
             <Field label="Category">
               <Select
                 value={adjustmentCategoryId}
-                onChange={(e) =>
+                onChange={(v) =>
                   setAdjustmentCategoryId(
-                    e.target.value === "" ? "" : Number(e.target.value)
+                    v === "" ? "" : Number(v)
                   )
                 }
                 className="w-full"

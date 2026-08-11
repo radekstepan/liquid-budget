@@ -61,7 +61,7 @@ export const MonthNav: React.FC<{
         >
           <Select
             value={String(month0)}
-            onChange={(e) => onSetMonth(keyOf(safeYear, Number(e.target.value)))}
+            onChange={(v) => onSetMonth(keyOf(safeYear, Number(v)))}
             aria-label="Month"
             className="y-select--lg"
           >
@@ -73,7 +73,7 @@ export const MonthNav: React.FC<{
           </Select>
           <Select
             value={String(safeYear)}
-            onChange={(e) => onSetMonth(keyOf(Number(e.target.value), month0))}
+            onChange={(v) => onSetMonth(keyOf(Number(v), month0))}
             aria-label="Year"
             className="y-select--lg"
           >

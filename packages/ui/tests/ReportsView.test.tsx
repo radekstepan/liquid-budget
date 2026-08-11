@@ -1,7 +1,58 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
+import { pickFromOpenDropdownByValue } from "./dropdown.js";
+
+class MockResizeObserver {
+  cb: () => void;
+  constructor(cb: () => void) {
+    this.cb = cb;
+  }
+  observe(el: HTMLElement) {
+    if (el.clientWidth === 0) {
+      Object.defineProperty(el, "clientWidth", { value: 800, configurable: true });
+    }
+    if (el.clientHeight === 0) {
+      Object.defineProperty(el, "clientHeight", { value: 400, configurable: true });
+    }
+    this.cb();
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeAll(() => {
+  (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
+    MockResizeObserver;
+});
+
+function findPanel(title: string) {
+  const matches = screen.getAllByText(title);
+  const head = matches.find((el) => el.closest(".y-panel")) ?? matches[0];
+  return head?.closest(".y-panel");
+}
+
+function clickTab(label: string) {
+  const tab = screen.getByRole("button", { name: label });
+  fireEvent.click(tab);
+}
+
+// Regression guard: the chart panels' body div (sibling of .y-panel-head)
+// must be a flex column so the `flex-1` chart area actually stretches. If
+// the body is a plain block, `flex-1` on the child is a no-op and the
+// measured chart div collapses to content height (which depends on the
+// chart rendering) — a deadlock that leaves the tabs blank in a real
+// browser even though a unit-test ResizeObserver mock fakes dimensions.
+function expectPanelBodyIsFlexColumn(panel: Element) {
+  const head = panel.querySelector(".y-panel-head");
+  expect(head).toBeTruthy();
+  const body = head?.nextElementSibling ?? null;
+  expect(body).toBeTruthy();
+  const cls = (body as Element).className ?? "";
+  expect(cls).toContain("flex");
+  expect(cls).toContain("flex-col");
+}
 
 function txn(
   month: string,
@@ -59,13 +110,21 @@ function renderView(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ReportsView", () => {
-  it("renders the toolbar and all four report panels", () => {
+  it("renders the toolbar, tabs, math strip, and Top Payees on Overview", () => {
     renderView();
     expect(screen.getByText("Reports")).toBeInTheDocument();
-    expect(screen.getByText("Net Worth")).toBeInTheDocument();
-    expect(screen.getByText("Spending by Category")).toBeInTheDocument();
-    expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Top Payees")).toBeInTheDocument();
+    // Tabs include the three chart pages.
+    for (const tab of ["Overview", "Net Worth", "Spending by Category", "Expense Breakdown"]) {
+      expect(screen.getByRole("button", { name: tab })).toBeInTheDocument();
+    }
+    // Math strip cells.
+    expect(screen.getByText("Income")).toBeInTheDocument();
+    expect(screen.getByText("Expenses")).toBeInTheDocument();
+    expect(screen.getByText("Net")).toBeInTheDocument();
+    // Overview panel — Top Payees only.
+    const topPanel = findPanel("Top Payees")!;
+    expect(topPanel).toBeTruthy();
+    expect(screen.queryByText("Net Worth", { selector: ".y-panel-head" })).not.toBeInTheDocument();
   });
 
   it("totals income and expenses across the default range", () => {
@@ -77,8 +136,7 @@ describe("ReportsView", () => {
 
   it("re-totals when the From month is narrowed", () => {
     renderView();
-    const [from] = screen.getAllByRole("combobox");
-    fireEvent.change(from!, { target: { value: "2026-06" } });
+    pickFromOpenDropdownByValue(/from month/i, "2026-06");
     expect(screen.getByText("$3,000.00")).toBeInTheDocument();
     expect(screen.getByText("-$50.00")).toBeInTheDocument();
     expect(screen.getByText("$2,950.00")).toBeInTheDocument();
@@ -86,30 +144,15 @@ describe("ReportsView", () => {
 
   it("swaps From/To when From is after To", () => {
     renderView();
-    const [from] = screen.getAllByRole("combobox");
-    fireEvent.change(from!, { target: { value: "2026-06" } });
-    const [, to] = screen.getAllByRole("combobox");
-    fireEvent.change(to!, { target: { value: "2026-04" } });
+    pickFromOpenDropdownByValue(/from month/i, "2026-06");
+    pickFromOpenDropdownByValue(/to month/i, "2026-04");
     // The swap keeps the full range, so totals are unchanged.
     expect(screen.getByText("$9,000.00")).toBeInTheDocument();
   });
 
-  it("shows spending by category with percents, sorted descending", () => {
+  it("shows top payees sorted by spend on Overview", () => {
     renderView();
-    const panel = screen.getByText("Spending by Category").closest("div")!.parentElement!;
-    const scope = within(panel);
-    // Groceries 350 (54%) before Rent 300 (46%).
-    const names = scope.getAllByText(/Groceries|Rent/).map((el) => el.textContent);
-    expect(names[0]).toBe("Groceries");
-    expect(names[1]).toBe("Rent");
-    expect(scope.getByText(/\(54%\)/)).toBeInTheDocument();
-    expect(scope.getByText(/\(46%\)/)).toBeInTheDocument();
-  });
-
-  it("shows top payees sorted by spend", () => {
-    renderView();
-    const panel = screen.getByText("Top Payees").closest("div")!.parentElement!;
-    const scope = within(panel);
+    const scope = within(findPanel("Top Payees")!);
     expect(scope.getByText("Groceries")).toBeInTheDocument();
     expect(scope.getByText("$350.00")).toBeInTheDocument();
     expect(scope.getByText("Shop A")).toBeInTheDocument();
@@ -117,10 +160,38 @@ describe("ReportsView", () => {
     expect(scope.getByText("$150.00")).toBeInTheDocument();
   });
 
-  it("renders the net worth SVG graph", () => {
+  it("Spending tab shows sorted bars with percents", () => {
     renderView();
-    const panel = screen.getByText("Net Worth").closest("div")!.parentElement!;
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    expectPanelBodyIsFlexColumn(panel);
+    const scope = within(panel);
+    // Groceries ($350, 54%) is top, Rent ($300, 46%) second.
+    const names = scope.getAllByText(/Groceries|Rent/).map((el) => el.textContent);
+    expect(names[0]).toBe("Groceries");
+    expect(names[1]).toBe("Rent");
+    expect(scope.getByText("54%")).toBeInTheDocument();
+    expect(scope.getByText("46%")).toBeInTheDocument();
+  });
+
+  it("Net Worth tab renders the SVG line/area graph", () => {
+    renderView();
+    clickTab("Net Worth");
+    const panel = findPanel("Net Worth")!;
+    expect(panel).toBeTruthy();
+    expectPanelBodyIsFlexColumn(panel);
     expect(panel.querySelector("svg")).not.toBeNull();
+  });
+
+  it("Expense Breakdown tab renders the donut SVG and legend", () => {
+    renderView();
+    clickTab("Expense Breakdown");
+    const panel = findPanel("Expense Breakdown")!;
+    expect(panel).toBeTruthy();
+    expectPanelBodyIsFlexColumn(panel);
+    expect(panel.querySelector("svg")).not.toBeNull();
+    expect(within(panel).getByText("Groceries")).toBeInTheDocument();
+    expect(within(panel).getByText("Rent")).toBeInTheDocument();
   });
 
   it("shows the empty state when there are no transactions", () => {
