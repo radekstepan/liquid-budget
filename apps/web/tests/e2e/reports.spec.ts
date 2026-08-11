@@ -41,9 +41,14 @@ test("changing the To selector narrows the range and re-totals Income", async ({
   const fullIncome = (await incomeCell.locator(".y-math-val").textContent())?.trim();
   expect(fullIncome).toBeTruthy();
 
-  const selects = page.locator(".y-toolbar select");
-  await selects.nth(0).selectOption("2026-06");
-  await selects.nth(1).selectOption("2026-06");
+  // Select is a custom button-based dropdown (not a native <select>); drive it
+  // by opening the trigger and clicking the option with the matching data-value.
+  const pickMonth = async (label: RegExp, value: string) => {
+    await page.getByRole("button", { name: label }).click();
+    await page.locator(`.y-dropdown [data-value="${value}"]`).click();
+  };
+  await pickMonth(/from month/i, "2026-06");
+  await pickMonth(/to month/i, "2026-06");
 
   const narrowIncome = (await incomeCell.locator(".y-math-val").textContent())?.trim();
   expect(narrowIncome).toBeTruthy();

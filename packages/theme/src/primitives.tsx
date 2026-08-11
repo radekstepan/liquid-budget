@@ -289,6 +289,13 @@ export const Select: React.FC<SelectProps> = ({
     { left: 0, top: 0, width: 0, placeAbove: false }
   );
   const [mounted, setMounted] = useState(false);
+  // Snapshot the items the dropdown was opened with so the portaled buttons
+  // always commit against the same array the click handler captured. Without
+  // this, `children` re-renders between opening and clicking can produce an
+  // index `i` whose `items[i]` is now undefined → "Cannot read properties of
+  // undefined (reading 'value')" inside `commit`. The snapshot is replaced
+  // each time the dropdown (re)opens.
+  const [openItems, setOpenItems] = useState<DropdownItem[]>(items);
 
   useEffect(() => {
     setMounted(true);
@@ -332,9 +339,13 @@ export const Select: React.FC<SelectProps> = ({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-    setActiveIdx(selectedIdx);
-  }, [open, selectedIdx]);
+    if (open) {
+      // Capture the items at the moment of opening so subsequent re-renders
+      // (e.g. parent state changes) can't mutate what `commit(i)` reads.
+      setOpenItems(items);
+      setActiveIdx(selectedIdx);
+    }
+  }, [open, items, selectedIdx]);
 
   useEffect(() => {
     if (!open) return;
@@ -368,11 +379,17 @@ export const Select: React.FC<SelectProps> = ({
   }, [open, activeIdx]);
 
   const commit = (idx: number) => {
-    const it = items[idx];
-    if (!it || it.disabled) return;
+    // Always commit against the snapshot captured when the dropdown opened,
+    // not against the live `items` — those can diverge if the parent re-renders
+    // between open and click, leaving a captured `i` out of range.
+    if (!Number.isInteger(idx) || idx < 0 || idx >= openItems.length) return;
+    const it = openItems[idx];
+    if (!it || it.disabled || typeof it.value === "undefined") return;
     onChange(it.value);
     setOpen(false);
-    triggerRef.current?.focus();
+    // Defer focus until after React commits the close, otherwise the trigger
+    // can be unmounted (parent re-rendered the whole toolbar) before we focus.
+    requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   const onKeyDownTrigger = (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -384,31 +401,32 @@ export const Select: React.FC<SelectProps> = ({
   };
 
   const onKeyDownList = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const list = openItems;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIdx((i) => {
-        for (let step = 0; step < items.length; step++) {
-          const next = (i + 1 + step) % items.length;
-          if (!items[next]?.disabled) return next;
+        for (let step = 0; step < list.length; step++) {
+          const next = (i + 1 + step) % list.length;
+          if (!list[next]?.disabled) return next;
         }
         return i;
       });
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIdx((i) => {
-        for (let step = 0; step < items.length; step++) {
-          const next = (i - 1 - step + items.length) % items.length;
-          if (!items[next]?.disabled) return next;
+        for (let step = 0; step < list.length; step++) {
+          const next = (i - 1 - step + list.length) % list.length;
+          if (!list[next]?.disabled) return next;
         }
         return i;
       });
     } else if (e.key === "Home") {
       e.preventDefault();
-      setActiveIdx(items.findIndex((it) => !it.disabled));
+      setActiveIdx(list.findIndex((it) => !it.disabled));
     } else if (e.key === "End") {
       e.preventDefault();
-      for (let i = items.length - 1; i >= 0; i--) {
-        if (!items[i]?.disabled) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (!list[i]?.disabled) {
           setActiveIdx(i);
           break;
         }
@@ -420,11 +438,11 @@ export const Select: React.FC<SelectProps> = ({
       setOpen(false);
     } else if (e.key.length === 1 && /\S/.test(e.key)) {
       const ch = e.key.toLowerCase();
-      const start = (activeIdx + 1) % items.length;
-      for (let step = 0; step < items.length; step++) {
-        const i = (start + step) % items.length;
-        const label = items[i]?.label.toLowerCase() ?? "";
-        if (!items[i]?.disabled && label.startsWith(ch)) {
+      const start = (activeIdx + 1) % list.length;
+      for (let step = 0; step < list.length; step++) {
+        const i = (start + step) % list.length;
+        const label = list[i]?.label.toLowerCase() ?? "";
+        if (!list[i]?.disabled && label.startsWith(ch)) {
           setActiveIdx(i);
           break;
         }
@@ -476,7 +494,7 @@ export const Select: React.FC<SelectProps> = ({
               zIndex: 60,
             }}
           >
-            {items.map((it, i) => {
+            {openItems.map((it, i) => {
               const isSel = i === selectedIdx;
               const isActive = i === activeIdx;
               return (
