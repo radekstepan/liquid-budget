@@ -318,7 +318,7 @@ export const Select: React.FC<SelectProps> = ({
     const placeAbove = spaceBelow < estimatedH && rect.top > spaceBelow;
     setPos({
       left: rect.left,
-      top: placeAbove ? rect.top - 4 : rect.bottom + 4,
+      top: placeAbove ? rect.top - 1 : rect.bottom - 1,
       width: rect.width,
       placeAbove,
     });
