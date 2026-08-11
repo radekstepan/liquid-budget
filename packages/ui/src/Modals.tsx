@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
 import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
@@ -948,10 +948,14 @@ export function RecurringModal({
 
 export function AccountModal({
   initial,
+  transactionCount,
   onClose,
   onSave,
+  onDelete,
 }: {
-  initial?: { name: string; kind: "liquid" | "credit" | "offbudget"; balance: number | string };
+  initial?: Account;
+  /** Number of transactions tied to this account. Used only in edit mode to size the delete confirm copy. */
+  transactionCount?: number;
   onClose: () => void;
   onSave: (v: {
     name: string;
@@ -960,12 +964,21 @@ export function AccountModal({
     balance: number;
     onBudget: boolean;
   }) => void;
+  /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
+  onDelete?: () => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">(initial?.kind ?? "liquid");
   const [balance, setBalance] = useState(
     initial != null ? String(Math.abs(Number(initial.balance))) : ""
   );
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setConfirmingDelete(false);
+    setDeleting(false);
+  }, [initial?.id]);
 
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
   const save = () => {
@@ -974,43 +987,101 @@ export function AccountModal({
     onSave({ name: name.trim(), kind, groupLabel, balance: b, onBudget: kind !== "offbudget" });
   };
   const isEdit = !!initial;
+  const txCount = transactionCount ?? 0;
+
+  const confirmDelete = async () => {
+    if (!onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <Modal
-      title={isEdit ? "Edit Account" : "Add Account"}
+      title={
+        confirmingDelete
+          ? `Delete "${initial?.name ?? "Account"}"?`
+          : isEdit
+            ? "Edit Account"
+            : "Add Account"
+      }
       onClose={onClose}
       footer={
-        <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save}>
-            {isEdit ? "Save Changes" : "Add Account"}
-          </Btn>
-        </>
+        confirmingDelete ? (
+          <>
+            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              Cancel
+            </Btn>
+            <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Yes, delete it"}
+            </Btn>
+          </>
+        ) : (
+          <>
+            <div style={{ marginRight: "auto" }}>
+              {isEdit && onDelete && (
+                <Btn
+                  variant="danger"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  Delete account
+                </Btn>
+              )}
+            </div>
+            <Btn onClick={onClose}>Cancel</Btn>
+            <Btn variant="primary" onClick={save}>
+              {isEdit ? "Save Changes" : "Add Account"}
+            </Btn>
+          </>
+        )
       }
     >
-      <Field label="Account Name">
-        <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
-      </Field>
-      <Field label="Type">
-        <Select
-          value={kind}
-          onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
-          className="w-full"
-        >
-          <option value="liquid">Liquid (Cash / Checking / Savings)</option>
-          <option value="credit">Credit Card</option>
-          <option value="offbudget">Off-Budget (Retirement / Asset)</option>
-        </Select>
-      </Field>
-      <Field label="Current Balance">
-        <TextField
-          value={balance}
-          onChange={(e) => setBalance(e.target.value)}
-          placeholder="0.00"
-          inputMode="decimal"
-          className={inputClass}
-        />
-        <AmountPreview value={balance} />
-      </Field>
+      {confirmingDelete ? (
+        <>
+          <Notice tone="danger" title="This cannot be undone">
+            Deleting this account will permanently remove:
+            <ul className="list-disc pl-5 mt-1 space-y-[2px]">
+              {txCount > 0 ? (
+                <li>
+                  <strong className="y-num">{txCount}</strong>{" "}
+                  {txCount === 1 ? "transaction" : "transactions"}
+                </li>
+              ) : null}
+              <li>the account and its history</li>
+            </ul>
+          </Notice>
+        </>
+      ) : (
+        <>
+          <Field label="Account Name">
+            <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
+          </Field>
+          <Field label="Type">
+            <Select
+              value={kind}
+              onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
+              className="w-full"
+            >
+              <option value="liquid">Liquid (Cash / Checking / Savings)</option>
+              <option value="credit">Credit Card</option>
+              <option value="offbudget">Off-Budget (Retirement / Asset)</option>
+            </Select>
+          </Field>
+          <Field label="Current Balance">
+            <TextField
+              value={balance}
+              onChange={(e) => setBalance(e.target.value)}
+              placeholder="0.00"
+              inputMode="decimal"
+              className={inputClass}
+            />
+            <AmountPreview value={balance} />
+          </Field>
+        </>
+      )}
     </Modal>
   );
 }
