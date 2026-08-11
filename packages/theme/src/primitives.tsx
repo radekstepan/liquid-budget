@@ -226,11 +226,11 @@ function childrenToItems(children: React.ReactNode): DropdownItem[] {
       const raw = el.props.value;
       const value = String(raw);
       const label =
-        typeof el.props.children === "string"
-          ? el.props.children
+        typeof el.props.children === "string" || typeof el.props.children === "number"
+          ? String(el.props.children)
           : Array.isArray(el.props.children)
             ? el.props.children
-                .map((c) => (typeof c === "string" ? c : ""))
+                .map((c) => (typeof c === "string" || typeof c === "number" ? String(c) : ""))
                 .join("")
             : "";
       out.push({ value, label, disabled: !!el.props.disabled });

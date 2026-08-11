@@ -63,7 +63,6 @@ export const MonthNav: React.FC<{
             value={String(month0)}
             onChange={(v) => onSetMonth(keyOf(safeYear, Number(v)))}
             aria-label="Month"
-            className="y-select--lg"
           >
             {MONTHS_LONG.map((m, i) => (
               <option key={m} value={String(i)}>
@@ -75,7 +74,6 @@ export const MonthNav: React.FC<{
             value={String(safeYear)}
             onChange={(v) => onSetMonth(keyOf(Number(v), month0))}
             aria-label="Year"
-            className="y-select--lg"
           >
             {years.map((y) => (
               <option key={y} value={String(y)}>
