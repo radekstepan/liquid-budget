@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReconcileModal, type ReconcileModalState } from "../src/ReconcileModal.js";
 import type { Category, CategoryGroup } from "@ynab/logic";
+import { openDropdown } from "./dropdown.js";
 
 const state: ReconcileModalState = {
   accountId: 7,
@@ -135,9 +136,13 @@ describe("ReconcileModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.textContent);
-    expect(options).toEqual(["Groceries", "Rent"]);
+    openDropdown(/category/i);
+    const list = screen.getByRole("listbox");
+    const optionEls = within(list).getAllByRole("option") as HTMLButtonElement[];
+    const labels = optionEls.map(
+      (o) => o.querySelector(".y-dropdown-item-label")?.textContent ?? ""
+    );
+    expect(labels).toEqual(["Groceries", "Rent"]);
   });
 
   it("shows 'No categories available' and disables arming when no eligible category exists", () => {

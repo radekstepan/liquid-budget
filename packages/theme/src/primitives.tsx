@@ -1,4 +1,13 @@
-import React, { useState } from "react";
+import React, {
+  Children,
+  isValidElement,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
 export const cx = (...c: (string | false | undefined | null)[]) =>
   c.filter(Boolean).join(" ");
@@ -196,27 +205,315 @@ export const TextField: React.FC<
 
 export type SelectOption = string | { value: string | number; label: string };
 
-export const Select: React.FC<
-  React.SelectHTMLAttributes<HTMLSelectElement> & {
-    options?: SelectOption[];
-    children?: React.ReactNode;
-  }
-> = ({ options, className, children, ...rest }) => (
-  <span className="y-select-wrap">
-    <select {...rest} className={cx("y-select", className)}>
-      {children ??
-        options?.map((o) => {
-          const v = typeof o === "string" ? o : o.value;
-          const l = typeof o === "string" ? o : o.label;
-          return (
-            <option key={String(v)} value={v}>
-              {l}
-            </option>
-          );
-        })}
-    </select>
-  </span>
-);
+type DropdownItem = { value: string; label: string; disabled?: boolean };
+
+function childrenToItems(children: React.ReactNode): DropdownItem[] {
+  const out: DropdownItem[] = [];
+  const walk = (nodes: React.ReactNode) => {
+    Children.forEach(nodes, (child) => {
+      if (!isValidElement(child)) return;
+      const el = child as React.ReactElement<{
+        value?: string | number;
+        disabled?: boolean;
+        children?: React.ReactNode;
+      }>;
+      // Fragments (and arrays of children passed as a single Fragment)
+      // don't carry a `value` — recurse into their children.
+      if (el.props.value === undefined) {
+        if (el.props.children != null) walk(el.props.children as React.ReactNode);
+        return;
+      }
+      const raw = el.props.value;
+      const value = String(raw);
+      const label =
+        typeof el.props.children === "string"
+          ? el.props.children
+          : Array.isArray(el.props.children)
+            ? el.props.children
+                .map((c) => (typeof c === "string" ? c : ""))
+                .join("")
+            : "";
+      out.push({ value, label, disabled: !!el.props.disabled });
+    });
+  };
+  walk(children);
+  return out;
+}
+
+function optionsToItems(options?: SelectOption[]): DropdownItem[] {
+  if (!options) return [];
+  return options.map((o) => {
+    if (typeof o === "string") return { value: o, label: o };
+    return { value: String(o.value), label: o.label };
+  });
+}
+
+export type SelectProps = Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  "onChange" | "defaultValue"
+> & {
+  value: string | number;
+  onChange: (next: string) => void;
+  options?: SelectOption[];
+  children?: React.ReactNode;
+  ariaLabel?: string;
+  disabled?: boolean;
+  size?: "sm" | "md" | "lg";
+};
+
+export const Select: React.FC<SelectProps> = ({
+  value,
+  onChange,
+  options,
+  children,
+  className,
+  ariaLabel,
+  disabled,
+  size = "md",
+  ...rest
+}) => {
+  const items = useMemo<DropdownItem[]>(
+    () => {
+      const fromChildren = childrenToItems(children);
+      return fromChildren.length > 0 ? fromChildren : optionsToItems(options);
+    },
+    [children, options]
+  );
+
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; placeAbove: boolean }>(
+    { left: 0, top: 0, width: 0, placeAbove: false }
+  );
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const selectedIdx = useMemo(() => {
+    const v = String(value);
+    const i = items.findIndex((it) => it.value === v);
+    return i >= 0 ? i : 0;
+  }, [items, value]);
+
+  const selectedLabel = items[selectedIdx]?.label ?? "";
+
+  const computePos = () => {
+    const btn = triggerRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const estimatedH = Math.min(280, items.length * 24 + 8);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const placeAbove = spaceBelow < estimatedH && rect.top > spaceBelow;
+    setPos({
+      left: rect.left,
+      top: placeAbove ? rect.top - 4 : rect.bottom + 4,
+      width: rect.width,
+      placeAbove,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    computePos();
+    const onScroll = () => computePos();
+    const onResize = () => computePos();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIdx(selectedIdx);
+  }, [open, selectedIdx]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (listRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      itemRefs.current[activeIdx]?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, activeIdx]);
+
+  const commit = (idx: number) => {
+    const it = items[idx];
+    if (!it || it.disabled) return;
+    onChange(it.value);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const onKeyDownTrigger = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setOpen(true);
+    }
+  };
+
+  const onKeyDownList = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => {
+        for (let step = 0; step < items.length; step++) {
+          const next = (i + 1 + step) % items.length;
+          if (!items[next]?.disabled) return next;
+        }
+        return i;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => {
+        for (let step = 0; step < items.length; step++) {
+          const next = (i - 1 - step + items.length) % items.length;
+          if (!items[next]?.disabled) return next;
+        }
+        return i;
+      });
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(items.findIndex((it) => !it.disabled));
+    } else if (e.key === "End") {
+      e.preventDefault();
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (!items[i]?.disabled) {
+          setActiveIdx(i);
+          break;
+        }
+      }
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      commit(activeIdx);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    } else if (e.key.length === 1 && /\S/.test(e.key)) {
+      const ch = e.key.toLowerCase();
+      const start = (activeIdx + 1) % items.length;
+      for (let step = 0; step < items.length; step++) {
+        const i = (start + step) % items.length;
+        const label = items[i]?.label.toLowerCase() ?? "";
+        if (!items[i]?.disabled && label.startsWith(ch)) {
+          setActiveIdx(i);
+          break;
+        }
+      }
+    }
+  };
+
+  const sizeClass = size === "lg" ? "y-select--lg" : "";
+
+  return (
+    <div
+      className={cx("y-select-wrap", className)}
+      data-open={open ? "true" : undefined}
+      {...rest}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((o) => !o)}
+        onKeyDown={onKeyDownTrigger}
+        className={cx("y-select", "y-select-trigger", sizeClass)}
+        style={{
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? "default" : "pointer",
+        }}
+      >
+        <span className="y-select-trigger-label">{selectedLabel}</span>
+      </button>
+      {open && mounted &&
+        createPortal(
+          <div
+            ref={listRef}
+            role="listbox"
+            tabIndex={-1}
+            onKeyDown={onKeyDownList}
+            className="y-dropdown"
+            style={{
+              position: "fixed",
+              left: pos.left,
+              top: pos.placeAbove ? undefined : pos.top,
+              bottom: pos.placeAbove
+                ? window.innerHeight - pos.top
+                : undefined,
+              width: pos.width,
+              zIndex: 60,
+            }}
+          >
+            {items.map((it, i) => {
+              const isSel = i === selectedIdx;
+              const isActive = i === activeIdx;
+              return (
+                <button
+                  key={it.value}
+                  ref={(el) => {
+                    itemRefs.current[i] = el;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={isSel}
+                  data-value={it.value}
+                  disabled={it.disabled}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onClick={() => commit(i)}
+                  className={cx(
+                    "y-dropdown-item",
+                    isSel && "is-sel",
+                    isActive && "is-active",
+                    it.disabled && "is-disabled"
+                  )}
+                >
+                  <span className="y-dropdown-item-label">{it.label}</span>
+                  {isSel && (
+                    <span className="y-dropdown-item-check" aria-hidden>
+                      &#x2713;
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+};
 
 export const Checkbox: React.FC<{
   checked?: boolean;

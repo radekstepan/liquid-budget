@@ -171,11 +171,13 @@ export function Inspector({
         <div className="flex items-end gap-[3px]" style={{ height: 92 }}>
           {(() => {
             const max = Math.max(1, ...history.map((h) => h.assigned));
+            const trackH = 80;
             return history.map((h) => {
               const pct = (h.assigned / max) * 100;
               const isCurrent = h.key === month;
               const { month0: m0, year: y } = parseMonthKey(h.key);
               const label = `${MONTHS[m0]?.slice(0, 3) ?? ""} ${y}`;
+              const heightPx = Math.max(10, (pct / 100) * trackH);
               return (
                 <button
                   key={h.key}
@@ -183,17 +185,18 @@ export function Inspector({
                   disabled={!h.real}
                   aria-label={`Jump to ${MONTHS[m0]} ${y}`}
                   title={`${MONTHS[m0]} ${y}: ${money(h.assigned)}`}
-                  className="flex-1 min-w-0 rounded-[2px] transition-all y-bar-track"
+                  className="flex-1 min-w-0 rounded-[2px] transition-all"
                   style={{
-                    height: `${Math.max(2, pct)}%`,
+                    height: `${heightPx}px`,
                     background: !h.real
-                      ? undefined
+                      ? "var(--y-line-soft)"
                       : isCurrent
                         ? "var(--y-blue)"
                         : "var(--y-blue-pale)",
                     border: isCurrent ? "1px solid var(--y-blue-dark)" : "1px solid transparent",
-                    opacity: !h.real ? 0.5 : isCurrent ? 1 : 0.85,
+                    opacity: !h.real ? 0.55 : isCurrent ? 1 : 0.85,
                     cursor: h.real ? "pointer" : "default",
+                    boxShadow: h.real ? "inset 0 1px 0 rgba(255,255,255,0.5)" : "none",
                   }}
                 />
               );

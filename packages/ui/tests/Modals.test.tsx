@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import {
   CategoryModal,
   TransactionModal,
@@ -14,6 +14,7 @@ import type {
   Recurring,
   RecurringSubTransaction,
 } from "@ynab/logic";
+import { pickFromOpenDropdownByValue, pickPlaceholderDropdownByIndexByValue } from "./dropdown.js";
 
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100.00", onBudget: true, sort: 0 },
@@ -193,8 +194,8 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
-      expect(screen.queryByRole("combobox", { name: /category/i })).not.toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: /transfer to/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /category/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /transfer to/i })).toBeInTheDocument();
     });
 
     it("calls onSave with transferAccountId and the destination name as payee", () => {
@@ -210,9 +211,7 @@ describe("TransactionModal", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
       fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
-      fireEvent.change(screen.getByRole("combobox", { name: /transfer to/i }), {
-        target: { value: "2" },
-      });
+      pickFromOpenDropdownByValue(/transfer to/i, "2");
       fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
       expect(onSave).toHaveBeenCalledTimes(1);
       expect(onSave.mock.calls[0]![0]).toMatchObject({
@@ -308,13 +307,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "-100" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      const subCatSelects = screen
-        .getAllByRole("combobox")
-        .filter(
-          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
-        ) as HTMLSelectElement[];
-      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
-      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
       // Children retain the sign the user types. Parent is -100, so we
       // type -60 and -40; the sum matches the parent.
       fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
@@ -360,13 +354,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "4000" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      const subCatSelects = screen
-        .getAllByRole("combobox")
-        .filter(
-          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
-        ) as HTMLSelectElement[];
-      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
-      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 
@@ -403,13 +392,8 @@ describe("TransactionModal", () => {
       const parent = allZeros[0]!;
       fireEvent.change(parent, { target: { value: "4000" } });
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      const subCatSelects = screen
-        .getAllByRole("combobox")
-        .filter(
-          (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
-        ) as HTMLSelectElement[];
-      fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
-      fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
+      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-2000" } });
 
@@ -491,12 +475,15 @@ describe("RecurringModal", () => {
         onSave={() => {}}
       />
     );
-    const select = screen.getByRole("combobox", { name: /frequency/i }) as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toContain("biweekly");
-    expect(options).toContain("weekly");
-    expect(options).toContain("monthly");
-    expect(options).toContain("yearly");
+    const trigger = screen.getByRole("button", { name: /frequency/i });
+    fireEvent.click(trigger);
+    const list = screen.getByRole("listbox");
+    const optionEls = within(list).getAllByRole("option") as HTMLButtonElement[];
+    const values = optionEls.map((o) => o.getAttribute("data-value"));
+    expect(values).toContain("biweekly");
+    expect(values).toContain("weekly");
+    expect(values).toContain("monthly");
+    expect(values).toContain("yearly");
   });
 
   it("calls onSave with a signed amount (no Outflow/Inflow toggle)", () => {
@@ -513,9 +500,7 @@ describe("RecurringModal", () => {
       target: { value: "Hydro" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-80" } });
-    fireEvent.change(screen.getByRole("combobox", { name: /frequency/i }), {
-      target: { value: "biweekly" },
-    });
+    pickFromOpenDropdownByValue(/frequency/i, "biweekly");
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({
@@ -563,9 +548,7 @@ describe("RecurringModal", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
     // Source account stays the first one (Chequing); pick the destination.
-    fireEvent.change(screen.getByLabelText(/transfer to/i), {
-      target: { value: "2" },
-    });
+    pickFromOpenDropdownByValue(/transfer to/i, "2");
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-500" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -599,13 +582,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "-200" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    const subCatSelects = screen
-      .getAllByRole("combobox")
-      .filter(
-        (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
-      ) as HTMLSelectElement[];
-    fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
-    fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
+    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
     // Children retain the typed sign (no coercion by the modal).
     fireEvent.change(subAmounts[0]!, { target: { value: "-120" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-80" } });
@@ -717,13 +695,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "4000" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    const subCatSelects = screen
-      .getAllByRole("combobox")
-      .filter(
-        (s) => (s as HTMLSelectElement).options[0]?.text === "Category…"
-      ) as HTMLSelectElement[];
-    fireEvent.change(subCatSelects[0]!, { target: { value: "10" } });
-    fireEvent.change(subCatSelects[1]!, { target: { value: "11" } });
+    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
+    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
     fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 
@@ -804,7 +777,7 @@ describe("AccountModal", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
       target: { value: "Visa" },
     });
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "credit" } });
+    pickFromOpenDropdownByValue(/type/i, "credit");
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-300" },
     });
@@ -824,7 +797,7 @@ describe("AccountModal", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
       target: { value: "RRSP" },
     });
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "offbudget" } });
+    pickFromOpenDropdownByValue(/type/i, "offbudget");
     fireEvent.click(screen.getByRole("button", { name: /add account/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "RRSP",

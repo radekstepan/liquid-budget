@@ -289,7 +289,7 @@ export function TransactionModal({
         <Field label="Account">
           <Select
             value={accountId}
-            onChange={(e) => setAccountId(Number(e.target.value))}
+            onChange={(v) => setAccountId(Number(v))}
             className="w-full"
             disabled={mode === "transfer"}
           >
@@ -302,7 +302,7 @@ export function TransactionModal({
           <Field label="Transfer to">
             <Select
               value={transferAccountId}
-              onChange={(e) => setTransferAccountId(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
               className="w-full"
             >
               <option value="">Select account…</option>
@@ -315,7 +315,7 @@ export function TransactionModal({
           <Field label="Category">
             <Select
               value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
               className="w-full"
             >
               <option value="">Uncategorized</option>
@@ -350,10 +350,10 @@ export function TransactionModal({
               <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
                 <Select
                   value={row.categoryId || ""}
-                  onChange={(e) => {
-                    const v = e.target.value === "" ? 0 : Number(e.target.value);
+                  onChange={(v) => {
+                    const next = v === "" ? 0 : Number(v);
                     setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, categoryId: v } : r))
+                      rs.map((r, j) => (i === j ? { ...r, categoryId: next } : r))
                     );
                   }}
                   className="w-full"
@@ -766,7 +766,7 @@ export function RecurringModal({
         <Field label="Frequency">
           <Select
             value={frequency}
-            onChange={(e) => setFrequency(e.target.value)}
+            onChange={(v) => setFrequency(v)}
             className="w-full"
           >
             <option value="weekly">Weekly</option>
@@ -792,7 +792,7 @@ export function RecurringModal({
         <Field label="Account">
           <Select
             value={accountId}
-            onChange={(e) => setAccountId(Number(e.target.value))}
+            onChange={(v) => setAccountId(Number(v))}
             className="w-full"
             disabled={mode === "transfer"}
           >
@@ -805,7 +805,7 @@ export function RecurringModal({
           <Field label="Transfer to">
             <Select
               value={transferAccountId}
-              onChange={(e) => setTransferAccountId(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
               className="w-full"
             >
               <option value="">Select account…</option>
@@ -818,7 +818,7 @@ export function RecurringModal({
           <Field label="Category">
             <Select
               value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
               className="w-full"
             >
               <option value="">Uncategorized</option>
@@ -853,10 +853,10 @@ export function RecurringModal({
               <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
                 <Select
                   value={row.categoryId || ""}
-                  onChange={(e) => {
-                    const v = e.target.value === "" ? 0 : Number(e.target.value);
+                  onChange={(v) => {
+                    const next = v === "" ? 0 : Number(v);
                     setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, categoryId: v } : r))
+                      rs.map((r, j) => (i === j ? { ...r, categoryId: next } : r))
                     );
                   }}
                   className="w-full"
@@ -993,7 +993,7 @@ export function AccountModal({
       <Field label="Type">
         <Select
           value={kind}
-          onChange={(e) => setKind(e.target.value as "liquid" | "credit" | "offbudget")}
+          onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
           className="w-full"
         >
           <option value="liquid">Liquid (Cash / Checking / Savings)</option>
