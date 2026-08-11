@@ -399,13 +399,12 @@ body {
 .y-select-trigger-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .y-select-wrap {
   position: relative;
   display: inline-block;
+  min-width: 130px;
 }
 .y-select-wrap::after {
   content: "";
@@ -467,7 +466,7 @@ body {
   border: 1px solid #b3b3ae;
   border-radius: 4px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 6px 18px rgba(0, 0, 0, 0.22);
-  padding: 3px;
+  padding: 1px 3px;
   max-height: 280px;
   overflow-y: auto;
   font-family: var(--y-font);
@@ -483,7 +482,7 @@ body {
   background: transparent;
   border: 0;
   border-radius: 3px;
-  padding: 5px 10px 5px 8px;
+  padding: 4px 10px;
   cursor: pointer;
   white-space: nowrap;
   outline: none;
@@ -508,8 +507,6 @@ body {
 .y-dropdown-item-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .y-dropdown-item-check {
   margin-left: 8px;
@@ -920,7 +917,7 @@ button.y-pill:hover {
   display: flex;
   gap: 0;
   border-bottom: 1px solid #b6b6b1;
-  padding: 0 8px;
+  padding: 6px 8px 0;
   background: linear-gradient(#f2f2f0, #e4e4e0);
 }
 .y-tab {
