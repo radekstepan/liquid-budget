@@ -302,6 +302,14 @@ body {
   border-color: var(--y-red-dk);
   background: linear-gradient(var(--y-red-lt), var(--y-red));
 }
+.y-btn--danger:hover {
+  background: linear-gradient(#e06d5b, var(--y-red-lt));
+}
+.y-btn--danger:active,
+.y-btn--danger.is-on {
+  background: linear-gradient(var(--y-red-dk), var(--y-red));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.28) inset;
+}
 .y-btn--flat {
   border-color: transparent;
   background: transparent;
