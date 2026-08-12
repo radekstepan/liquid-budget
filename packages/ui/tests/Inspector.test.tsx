@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { Inspector } from "../src/Inspector.js";
 
 const baseProps = {
@@ -28,27 +28,30 @@ describe("Inspector", () => {
     expect(screen.getByText("Import YNAB4 Backup")).toBeInTheDocument();
   });
 
-  it("calls onResetDemo (after confirm) when Reset demo data is clicked", () => {
-    const onResetDemo = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("calls onResetDemo when the modal is confirmed", async () => {
+    const onResetDemo = vi.fn().mockResolvedValue(undefined);
     render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
 
     fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
-    expect(confirmSpy).toHaveBeenCalled();
+
+    expect(screen.getByText("Reset demo data?")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, reset it/i }));
+    });
     expect(onResetDemo).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
   });
 
-  it("does not call onResetDemo if the confirm is cancelled", () => {
+  it("does not call onResetDemo when the modal is cancelled", () => {
     const onResetDemo = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
 
     fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
+
+    expect(screen.getByText("Reset demo data?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(onResetDemo).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
   });
 
   it("hides the Reset menu item when onResetDemo is not provided", () => {

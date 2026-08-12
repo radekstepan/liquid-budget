@@ -110,3 +110,31 @@ test("Post Now creates a transaction and advances the next date", async ({ page 
   expect(afterBody.transactions.length).toBe(txCountBefore + 1);
   expect(updated.nextDate).not.toBe(dateBefore);
 });
+
+test("Post Now button stays readable while held down (blue :active)", async ({ page }) => {
+  // Regression guard: the `.y-btn--blue` variant used to inherit the
+  // light-gray `:active` gradient from the default button rule, leaving
+  // white text unreadable while the mouse was held down. The fix adds
+  // a dedicated dark-blue gradient + explicit `color: #fff` to
+  // `.y-btn--blue:active` (and `.is-on`). Simulate the held-down state
+  // by issuing `mouse.down()` without `mouse.up()`.
+  const card = page
+    .locator(".y-panel")
+    .filter({ hasText: "TD Bank" })
+    .filter({ hasText: "$2,352.97" })
+    .first();
+  const postNow = card.getByRole("button", { name: "Post Now" });
+  const box = await postNow.boundingBox();
+  if (!box) throw new Error("Post Now button not found");
+
+  // Hover and press the mouse without releasing, so CSS `:active` applies.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  try {
+    const color = await postNow.evaluate((el) => getComputedStyle(el).color);
+    // White text on the dark-blue gradient stays readable while held down.
+    expect(color).toBe("rgb(255, 255, 255)");
+  } finally {
+    await page.mouse.up();
+  }
+});

@@ -259,6 +259,12 @@ export type SelectProps = Omit<
   ariaLabel?: string;
   disabled?: boolean;
   size?: "sm" | "md" | "lg";
+  /**
+   * When true, the dropdown opens with a search input at the top that
+   * filters options by case-insensitive substring match. Intended for
+   * lists that can grow long (e.g. the "Transfer to" account picker).
+   */
+  searchable?: boolean;
 };
 
 export const Select: React.FC<SelectProps> = ({
@@ -270,6 +276,7 @@ export const Select: React.FC<SelectProps> = ({
   ariaLabel,
   disabled,
   size = "md",
+  searchable = false,
   ...rest
 }) => {
   const items = useMemo<DropdownItem[]>(
@@ -282,9 +289,11 @@ export const Select: React.FC<SelectProps> = ({
 
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [query, setQuery] = useState("");
   const [pos, setPos] = useState<{ left: number; top: number; width: number; placeAbove: boolean }>(
     { left: 0, top: 0, width: 0, placeAbove: false }
   );
@@ -308,6 +317,25 @@ export const Select: React.FC<SelectProps> = ({
   }, [items, value]);
 
   const selectedLabel = items[selectedIdx]?.label ?? "";
+
+  // Filter against the open-time snapshot so the visible list stays stable
+  // for the lifetime of the open dropdown, even if the parent re-renders
+  // (e.g. an account name is edited elsewhere).
+  const filteredItems = useMemo(() => {
+    if (!searchable) return openItems;
+    const q = query.trim().toLowerCase();
+    if (!q) return openItems;
+    return openItems.filter((it) => it.label.toLowerCase().includes(q));
+  }, [searchable, openItems, query]);
+
+  // Whenever the filter shrinks or shifts the list, keep `activeIdx` valid.
+  useEffect(() => {
+    if (filteredItems.length === 0) {
+      setActiveIdx(0);
+      return;
+    }
+    setActiveIdx((i) => (i >= filteredItems.length ? 0 : i));
+  }, [filteredItems]);
 
   const computePos = () => {
     const btn = triggerRef.current;
@@ -344,6 +372,7 @@ export const Select: React.FC<SelectProps> = ({
       // (e.g. parent state changes) can't mutate what `commit(i)` reads.
       setOpenItems(items);
       setActiveIdx(selectedIdx);
+      setQuery("");
     }
   }, [open, items, selectedIdx]);
 
@@ -373,17 +402,26 @@ export const Select: React.FC<SelectProps> = ({
   useEffect(() => {
     if (!open) return;
     const id = requestAnimationFrame(() => {
-      itemRefs.current[activeIdx]?.focus();
+      // When searchable, the user types into the search box first; focus it
+      // so they can immediately start filtering. Otherwise focus the first
+      // option as before so keyboard navigation is ready.
+      if (searchable) {
+        searchRef.current?.focus();
+      } else {
+        itemRefs.current[activeIdx]?.focus();
+      }
     });
     return () => cancelAnimationFrame(id);
-  }, [open, activeIdx]);
+  }, [open, activeIdx, searchable]);
 
   const commit = (idx: number) => {
-    // Always commit against the snapshot captured when the dropdown opened,
-    // not against the live `items` — those can diverge if the parent re-renders
-    // between open and click, leaving a captured `i` out of range.
-    if (!Number.isInteger(idx) || idx < 0 || idx >= openItems.length) return;
-    const it = openItems[idx];
+    // `idx` is a position in the *rendered* list. When searchable that's
+    // `filteredItems` (a subset of the open-time snapshot); otherwise it's
+    // the snapshot itself. Commit against the right source so we can still
+    // hand `onChange` the value the user actually clicked.
+    const source = searchable ? filteredItems : openItems;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= source.length) return;
+    const it = source[idx];
     if (!it || it.disabled || typeof it.value === "undefined") return;
     onChange(it.value);
     setOpen(false);
@@ -401,7 +439,12 @@ export const Select: React.FC<SelectProps> = ({
   };
 
   const onKeyDownList = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const list = openItems;
+    // When focus is in the search input, only ArrowDown/Up should leave the
+    // input and move into the option list. All other printable keystrokes
+    // belong to the search field, not the listbox's letter-jump handler.
+    const inSearch = searchable && e.target === searchRef.current;
+    if (inSearch && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const list = filteredItems;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIdx((i) => {
@@ -494,38 +537,59 @@ export const Select: React.FC<SelectProps> = ({
               zIndex: 60,
             }}
           >
-            {openItems.map((it, i) => {
-              const isSel = i === selectedIdx;
-              const isActive = i === activeIdx;
-              return (
-                <button
-                  key={it.value}
-                  ref={(el) => {
-                    itemRefs.current[i] = el;
-                  }}
-                  type="button"
-                  role="option"
-                  aria-selected={isSel}
-                  data-value={it.value}
-                  disabled={it.disabled}
-                  onMouseEnter={() => setActiveIdx(i)}
-                  onClick={() => commit(i)}
-                  className={cx(
-                    "y-dropdown-item",
-                    isSel && "is-sel",
-                    isActive && "is-active",
-                    it.disabled && "is-disabled"
-                  )}
-                >
-                  <span className="y-dropdown-item-label">{it.label}</span>
-                  {isSel && (
-                    <span className="y-dropdown-item-check" aria-hidden>
-                      &#x2713;
-                    </span>
-                  )}
-                </button>
+            {searchable && (
+              <input
+                ref={searchRef}
+                type="text"
+                className="y-input y-search y-dropdown-search"
+                placeholder="Search…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Filter options"
+              />
+            )}
+            {filteredItems.length === 0 && searchable ? (
+              <span className="y-dropdown-empty" role="presentation">
+                No matches
+              </span>
+            ) : (
+              filteredItems.map((it, i) => {
+                const originalIdx = openItems.indexOf(it);
+                const isSel = originalIdx === selectedIdx;
+                const isActive = i === activeIdx;
+                return (
+                  <button
+                    key={it.value}
+                    ref={(el) => {
+                      itemRefs.current[i] = el;
+                    }}
+                    type="button"
+                    role="option"
+                    aria-selected={isSel}
+                    data-value={it.value}
+                    disabled={it.disabled}
+                    onMouseEnter={() => setActiveIdx(i)}
+                    onClick={() => commit(i)}
+                    className={cx(
+                      "y-dropdown-item",
+                      isSel && "is-sel",
+                      isActive && "is-active",
+                      it.disabled && "is-disabled"
+                    )}
+                  >
+                    <span className="y-dropdown-item-label">{it.label}</span>
+                    {isSel && (
+                      <span className="y-dropdown-item-check" aria-hidden>
+                        &#x2713;
+                      </span>
+                    )}
+                  </button>
               );
-            })}
+            })
+            )}
           </div>,
           document.body
         )}

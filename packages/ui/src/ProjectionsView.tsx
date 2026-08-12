@@ -1,8 +1,10 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, netMonthlyAmount, MONTHS_LONG, parseMonthKey } from "@ynab/logic";
 import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
+import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
 export function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
   const { year, month0 } = parseMonthKey(month);
@@ -37,18 +39,52 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
     bal += perMonth;
   }
 
+  const { ref, size } = useElementSize<HTMLDivElement>();
+  const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
+
+  const W = size.width;
+  const H = 240;
+  const pad = 10;
+
   const min = Math.min(...points.map((p) => p.value));
   const max = Math.max(...points.map((p) => p.value));
   const range = max - min || 1;
-  const W = 720;
-  const H = 240;
-  const pad = 10;
   const x = (i: number) => pad + (i / (points.length - 1)) * (W - pad * 2);
   const y = (v: number) => pad + (1 - (v - min) / range) * (H - pad * 2);
   const line = points
     .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`)
     .join(" ");
   const area = `${line} L${x(points.length - 1).toFixed(1)},${H - pad} L${x(0).toFixed(1)},${H - pad} Z`;
+
+  const handleMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (W === 0 || points.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    if (points.length === 1) {
+      setHover({ idx: 0, x: e.clientX, y: e.clientY });
+      return;
+    }
+    const stride = (W - pad * 2) / (points.length - 1);
+    const idx = Math.max(
+      0,
+      Math.min(points.length - 1, Math.round((relX - pad) / stride))
+    );
+    setHover({ idx, x: e.clientX, y: e.clientY });
+  };
+
+  const tipContent: ReactNode | null = (() => {
+    if (hover == null) return null;
+    const p = points[hover.idx];
+    if (!p) return null;
+    return (
+      <div className="space-y-[3px]">
+        <div className="text-[11px] font-bold mb-1" style={{ color: "#f2f5f7" }}>
+          {p.label}
+        </div>
+        <TipLabel color="var(--y-blue)" label="Projected" value={fmt(p.value)} />
+      </div>
+    );
+  })();
 
   return (
     <div className="flex h-full flex-col">
@@ -82,37 +118,69 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
         </div>
 
         <Panel title="12-Month Liquid Balance Forecast">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 240 }}>
-            <defs>
-              <linearGradient id="projFillGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--y-blue)" stopOpacity={0.28} />
-                <stop offset="100%" stopColor="var(--y-blue)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            {y(0) > pad && y(0) < H - pad && (
-              <line
-                x1={pad}
-                y1={y(0)}
-                x2={W - pad}
-                y2={y(0)}
-                stroke="var(--y-red)"
-                strokeDasharray="4 4"
-                strokeWidth={1}
-                opacity={0.5}
-              />
+          <div
+            ref={ref}
+            className="relative w-full"
+            onMouseMove={handleMove}
+            onMouseLeave={() => setHover(null)}
+          >
+            {W > 0 && (
+              <svg width={W} height={H}>
+                <defs>
+                  <linearGradient id="projFillGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--y-blue)" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="var(--y-blue)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                {y(0) > pad && y(0) < H - pad && (
+                  <line
+                    x1={pad}
+                    y1={y(0)}
+                    x2={W - pad}
+                    y2={y(0)}
+                    stroke="var(--y-red)"
+                    strokeDasharray="4 4"
+                    strokeWidth={1}
+                    opacity={0.5}
+                  />
+                )}
+                <path d={area} fill="url(#projFillGrad)" />
+                <path
+                  d={line}
+                  fill="none"
+                  stroke="var(--y-blue)"
+                  strokeWidth={2.5}
+                  strokeLinejoin="round"
+                />
+                {hover && (
+                  <line
+                    x1={x(hover.idx)}
+                    x2={x(hover.idx)}
+                    y1={pad}
+                    y2={H - pad}
+                    stroke="var(--y-blue)"
+                    strokeOpacity={0.4}
+                    strokeWidth={1.5}
+                    strokeDasharray="3 3"
+                  />
+                )}
+                {points.map((p, i) => {
+                  const isHover = hover?.idx === i;
+                  return (
+                    <circle
+                      key={i}
+                      cx={x(i)}
+                      cy={y(p.value)}
+                      r={isHover ? 5.5 : 3}
+                      fill={isHover ? "var(--y-blue)" : "#fff"}
+                      stroke="var(--y-blue)"
+                      strokeWidth={isHover ? 2 : 1.5}
+                    />
+                  );
+                })}
+              </svg>
             )}
-            <path d={area} fill="url(#projFillGrad)" />
-            <path
-              d={line}
-              fill="none"
-              stroke="var(--y-blue)"
-              strokeWidth={2.5}
-              strokeLinejoin="round"
-            />
-            {points.map((p, i) => (
-              <circle key={i} cx={x(i)} cy={y(p.value)} r={3} fill="var(--y-blue)" />
-            ))}
-          </svg>
+          </div>
           <div className="mt-1 flex justify-between y-hint">
             {points
               .filter((_, i) => i % 2 === 0)
@@ -122,6 +190,7 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
                 </span>
               ))}
           </div>
+          <ChartTip x={hover?.x ?? null} y={hover?.y ?? null} content={tipContent} />
         </Panel>
 
         <Panel title="Monthly Breakdown" className="mt-3" bodyClass="!p-0 overflow-hidden">

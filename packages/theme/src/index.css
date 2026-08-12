@@ -92,6 +92,7 @@ body {
   font-family: var(--y-num);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 /* ---------- window chrome ---------- */
@@ -225,6 +226,7 @@ body {
   margin-left: auto;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------- buttons (Adobe AIR bevel) ---------- */
@@ -251,8 +253,8 @@ body {
 .y-btn:hover {
   background: linear-gradient(#ffffff, #eceded);
 }
-.y-btn:active,
-.y-btn.is-on {
+.y-btn:active:not(.y-btn--primary):not(.y-btn--danger),
+.y-btn.is-on:not(.y-btn--primary):not(.y-btn--danger) {
   background: linear-gradient(#cfd2d3, #e5e6e5);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.22) inset;
   border-color: #8e9396;
@@ -295,6 +297,12 @@ body {
 }
 .y-btn--blue:hover {
   background: linear-gradient(#54a2cf, #3688b8);
+}
+.y-btn--blue:active,
+.y-btn--blue.is-on {
+  background: linear-gradient(var(--y-blue-dark), #17527a);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.28) inset;
+  color: #fff;
 }
 .y-btn--danger {
   color: #fff;
@@ -514,6 +522,21 @@ body {
   font-size: 11px;
   line-height: 1;
 }
+.y-dropdown-search {
+  display: block;
+  width: calc(100% - 6px);
+  margin: 2px 0 4px;
+  font-size: 11.5px;
+  border-bottom: 1px solid #e0e0dc;
+  border-radius: 3px 3px 0 0;
+}
+.y-dropdown-empty {
+  display: block;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--y-ink-faint);
+  font-style: italic;
+}
 .y-search {
   background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 13 13'><circle cx='5.2' cy='5.2' r='3.9' fill='none' stroke='%23868c90' stroke-width='1.6'/><path d='M8.3 8.3 L11.6 11.6' stroke='%23868c90' stroke-width='1.8' stroke-linecap='round'/></svg>")
     no-repeat 6px 50%;
@@ -691,6 +714,7 @@ button.y-pill:hover {
   border-radius: 2px;
   padding: 1px 3px;
   outline: none;
+  white-space: nowrap;
 }
 .y-inline-amt:hover {
   border-color: #c3cad0;
@@ -776,6 +800,7 @@ button.y-pill:hover {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: #3b4245;
+  white-space: nowrap;
 }
 .y-math-op {
   font-size: 18px;

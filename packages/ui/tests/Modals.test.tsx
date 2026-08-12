@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import {
   CategoryModal,
   TransactionModal,
@@ -196,6 +196,30 @@ describe("TransactionModal", () => {
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
       expect(screen.queryByRole("button", { name: /category/i })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /transfer to/i })).toBeInTheDocument();
+    });
+
+    it("provides a search input inside the Transfer-to dropdown", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+
+      const list = screen.getByRole("listbox");
+      const search = within(list).getByRole("textbox", { name: /filter options/i });
+      expect(search).toBeInTheDocument();
+
+      act(() => {
+        fireEvent.change(search, { target: { value: "cre" } });
+      });
+      const visible = within(list).getAllByRole("option");
+      expect(visible.map((o) => o.textContent)).toEqual(["Credit"]);
     });
 
     it("calls onSave with transferAccountId and the destination name as payee", () => {

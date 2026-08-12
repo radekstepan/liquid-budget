@@ -130,4 +130,114 @@ describe("Dropdown (Select)", () => {
     fireEvent.click(screen.getByRole("option", { name: "z" }));
     expect(onChange).toHaveBeenCalledWith("z");
   });
+
+  describe("searchable", () => {
+    const accounts = [
+      { value: "1", label: "Checking" },
+      { value: "2", label: "Savings" },
+      { value: "3", label: "Credit Card" },
+      { value: "4", label: "Cash" },
+    ];
+
+    function renderSearchable(value = "1") {
+      return renderSelect({
+        value,
+        onChange: () => {},
+        searchable: true,
+        options: accounts,
+      });
+    }
+
+    it("renders a search input inside the listbox and focuses it on open", () => {
+      renderSearchable();
+      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
+      const list = screen.getByRole("listbox");
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      expect(list).toContainElement(search);
+      act(() => {
+        search.focus();
+      });
+      expect(search).toHaveFocus();
+    });
+
+    it("filters options by case-insensitive substring", () => {
+      renderSearchable();
+      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+
+      act(() => {
+        fireEvent.change(search, { target: { value: "cre" } });
+      });
+
+      const visible = screen.getAllByRole("option");
+      expect(visible.map((o) => o.textContent)).toEqual(["Credit Card"]);
+
+      act(() => {
+        fireEvent.change(search, { target: { value: "CASH" } });
+      });
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Cash"]);
+    });
+
+    it("shows a 'No matches' placeholder when nothing matches", () => {
+      renderSearchable();
+      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      act(() => {
+        fireEvent.change(search, { target: { value: "zzz" } });
+      });
+      expect(screen.queryAllByRole("option")).toHaveLength(0);
+      expect(screen.getByText(/no matches/i)).toBeInTheDocument();
+    });
+
+    it("restores the full list when the query is cleared", () => {
+      renderSearchable();
+      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      act(() => {
+        fireEvent.change(search, { target: { value: "cre" } });
+      });
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+
+      act(() => {
+        fireEvent.change(search, { target: { value: "" } });
+      });
+      expect(screen.getAllByRole("option")).toHaveLength(4);
+    });
+
+    it("resets the query when the dropdown is reopened", () => {
+      renderSearchable();
+      const trigger = screen.getByRole("button", { name: "Checking" });
+
+      fireEvent.click(trigger);
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      act(() => {
+        fireEvent.change(search, { target: { value: "cre" } });
+      });
+      fireEvent.mouseDown(document.body);
+
+      fireEvent.click(trigger);
+      expect(
+        screen.getByRole("textbox", { name: /filter options/i })
+      ).toHaveValue("");
+    });
+
+    it("commits against the filtered list, not the snapshot", () => {
+      const onChange = vi.fn();
+      render(
+        <Select
+          value="1"
+          onChange={onChange}
+          searchable
+          options={accounts}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      act(() => {
+        fireEvent.change(search, { target: { value: "sav" } });
+      });
+      fireEvent.click(screen.getByRole("option", { name: "Savings" }));
+      expect(onChange).toHaveBeenCalledWith("2");
+    });
+  });
 });
