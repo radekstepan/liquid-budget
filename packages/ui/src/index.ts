@@ -1,6 +1,6 @@
 export { Sidebar, type View } from "./Sidebar.js";
 export { Inspector } from "./Inspector.js";
-export { BudgetView, type MonthBudget } from "./BudgetView.js";
+export { BudgetView } from "./BudgetView.js";
 export { TransactionsView } from "./TransactionsView.js";
 export { RecurringView } from "./RecurringView.js";
 export { ReportsView } from "./ReportsView.js";
