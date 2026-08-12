@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { BudgetView } from "../src/BudgetView.js";
+import { BudgetView, type MonthBudget } from "../src/BudgetView.js";
 import type { BudgetResult } from "@ynab/logic";
+
+// Force the multi-month tests to render >1 month column: jsdom has no
+// ResizeObserver and reports clientWidth=0, which would clamp the
+// visible count to 1. We stub useElementSize to report a wide pane.
+vi.mock("../src/chartUtils.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/chartUtils.js")>(
+    "../src/chartUtils.js"
+  );
+  return {
+    ...actual,
+    useElementSize: () => ({
+      ref: { current: null },
+      size: { width: 1400, height: 240 },
+    }),
+  };
+});
 
 function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
   return {
@@ -94,8 +110,14 @@ const baseProps = {
 };
 
 function renderView(overrides: Record<string, unknown> = {}) {
+  const budget = (overrides.budget as BudgetResult | undefined) ?? baseProps.budget;
+  const visibleBudgets =
+    (overrides.visibleBudgets as MonthBudget[] | undefined) ??
+    [{ month: baseProps.currentMonth, result: budget }];
   const props = {
     ...baseProps,
+    budget,
+    visibleBudgets,
     ...overrides,
   } as Parameters<typeof BudgetView>[0];
   return render(<BudgetView {...props} />);
@@ -297,6 +319,84 @@ describe("BudgetView", () => {
       fireEvent.dragStart(grip, { dataTransfer: dt });
       fireEvent.drop(rent, { dataTransfer: dt });
       expect(onReorderCategory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("multi-month rendering", () => {
+    function buildMonthBudget(monthKey: string, overrides: Partial<BudgetResult> = {}): MonthBudget {
+      return { month: monthKey, result: makeBudget(overrides) };
+    }
+
+    it("renders one column block per visible month with month labels", () => {
+      renderView({
+        currentMonth: "2026-06",
+        visibleBudgets: [
+          buildMonthBudget("2026-04"),
+          buildMonthBudget("2026-05"),
+          buildMonthBudget("2026-06"),
+        ],
+      });
+      // Header labels for each visible month.
+      expect(screen.getByText(/^Apr '26$/i)).toBeInTheDocument();
+      expect(screen.getByText(/^May '26$/i)).toBeInTheDocument();
+      expect(screen.getByText(/^Jun '26$/i)).toBeInTheDocument();
+      // Sub-headers: Budgeted / Outflows / Balance appear 3× (once per month).
+      expect(screen.getAllByText("Budgeted")).toHaveLength(3);
+      expect(screen.getAllByText("Outflows")).toHaveLength(3);
+      expect(screen.getAllByText("Balance")).toHaveLength(3);
+    });
+
+    it("uses the per-month CatRow values for the editable Budgeted cell", () => {
+      const mayBudget = makeBudget({
+        groups: [
+          {
+            group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            assigned: 0,
+            outflow: 0,
+            available: 0,
+            rows: [
+              {
+                category: { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+                carryoverIn: 0,
+                assigned: 75,
+                outflow: 0,
+                ccBuffer: 0,
+                available: 0,
+                fundedPct: 0,
+              },
+            ],
+          },
+        ],
+      });
+      const onAssign = vi.fn();
+      renderView({
+        currentMonth: "2026-06",
+        visibleBudgets: [
+          buildMonthBudget("2026-05", {
+            groups: [
+              {
+                group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+                assigned: 0,
+                outflow: 0,
+                available: 0,
+                rows: [mayBudget.groups![0]!.rows[0]!],
+              },
+            ],
+          }),
+          buildMonthBudget("2026-06"),
+        ],
+        onAssign,
+      });
+
+      // The May Budgeted cell should commit against month "2026-05".
+      const mayButton = screen.getByRole("button", { name: "$75.00" });
+      fireEvent.click(mayButton);
+      const input = document.querySelectorAll("input.y-inline-amt");
+      // Find the input that opened from the May cell by value.
+      const mayInput = Array.from(input).find((i) => (i as HTMLInputElement).value === "75.00")!;
+      fireEvent.change(mayInput, { target: { value: "123" } });
+      fireEvent.keyDown(mayInput, { key: "Enter" });
+      expect(onAssign).toHaveBeenCalledWith(10, 123, "2026-05");
     });
   });
 });

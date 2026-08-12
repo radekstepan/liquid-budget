@@ -165,7 +165,7 @@ export function CalendarView({
                             e.stopPropagation();
                             setExpandedDay(d);
                           }}
-                          className="text-left text-[10px] underline-offset-2 hover:underline"
+                          className="block w-full p-0 text-left text-[10px] leading-none underline-offset-2 hover:underline"
                           style={{ color: "var(--y-ink-soft)" }}
                         >
                           +{overflow} more
@@ -178,7 +178,7 @@ export function CalendarView({
                             e.stopPropagation();
                             setExpandedDay(null);
                           }}
-                          className="text-[10px] underline-offset-2 hover:underline"
+                          className="block w-full p-0 text-left text-[10px] leading-none underline-offset-2 hover:underline"
                           style={{ color: "var(--y-ink-soft)" }}
                         >
                           Show less

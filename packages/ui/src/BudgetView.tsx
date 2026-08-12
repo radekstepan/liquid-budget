@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import type { GroupRow, Account, CatRow, BudgetResult } from "@ynab/logic";
-import { evalAmount, fmt } from "@ynab/logic";
+import { evalAmount, fmt, MONTHS, parseMonthKey } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -16,25 +16,28 @@ import {
   money,
 } from "@ynab/theme";
 import type { BudgetHeaderPart } from "@ynab/theme";
+import { useElementSize } from "./chartUtils.js";
 
 const COL_A = "w-[110px]";
 const COL_O = "w-[110px]";
 const COL_V = "w-[120px]";
+const MONTH_BLOCK_PX = 340;
 
+/** Pre-rendered budget for one month; rendered side-by-side in BudgetView. */
 export type MonthBudget = {
   month: string;
-  year: number;
-  monthName: string;
   result: BudgetResult;
 };
 
 function formatMonthLong(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number);
-  const MONTHS = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
   return `${MONTHS[(m ?? 1) - 1] ?? ""} ${y ?? ""}`;
+}
+
+/** Compact "Jun '26" label for the table header month strip. */
+function formatMonthShort(monthKey: string): string {
+  const { month0, year } = parseMonthKey(monthKey);
+  return `${MONTHS[month0]?.slice(0, 3) ?? ""} '${String(year).slice(2)}`;
 }
 
 function previousMonthKey(monthKey: string): string {
@@ -48,6 +51,7 @@ function previousMonthKey(monthKey: string): string {
 export function BudgetView({
   budget,
   currentMonth,
+  visibleBudgets,
   collapsed,
   onToggleGroup,
   onAssign,
@@ -69,6 +73,8 @@ export function BudgetView({
 }: {
   budget: BudgetResult;
   currentMonth: string;
+  /** Pre-computed budgets for up to 4 months ending at `currentMonth`. */
+  visibleBudgets: MonthBudget[];
   collapsed: Record<number, boolean>;
   onToggleGroup: (id: number) => void;
   onAssign: (catId: number, amount: number, month: string) => void;
@@ -88,8 +94,50 @@ export function BudgetView({
   onReorderGroup?: (id: number, sort: number) => void;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
-  const structureGroups = budget.groups;
+  const { ref, size } = useElementSize<HTMLDivElement>();
+  const visibleCount = Math.max(1, Math.floor(size.width / MONTH_BLOCK_PX));
+  const visible = visibleBudgets.slice(-visibleCount);
+
+  // Use the latest visible month's structure for category ordering (categories
+  // are static across months). Fall back to the anchor month's structure.
+  const anchorResult = visible.length > 0 ? visible[visible.length - 1]!.result : budget;
+  const structureGroups = anchorResult.groups;
   const creditGroup = structureGroups.find((g) => g.group.isCreditCardPayments);
+
+  // Lookup: catId -> month -> CatRow. Built once per render so each row can
+  // pull its per-month values in O(1) instead of scanning all groups.
+  const catByMonth = useMemo(() => {
+    const m = new Map<number, Map<string, CatRow>>();
+    for (const { month, result } of visibleBudgets) {
+      for (const g of result.groups) {
+        for (const r of g.rows) {
+          let inner = m.get(r.category.id);
+          if (!inner) {
+            inner = new Map();
+            m.set(r.category.id, inner);
+          }
+          inner.set(month, r);
+        }
+      }
+    }
+    return m;
+  }, [visibleBudgets]);
+
+  // Same lookup but for group totals (assigned/outflow/available per month).
+  const groupByMonth = useMemo(() => {
+    const m = new Map<number, Map<string, GroupRow>>();
+    for (const { month, result } of visibleBudgets) {
+      for (const g of result.groups) {
+        let inner = m.get(g.group.id);
+        if (!inner) {
+          inner = new Map();
+          m.set(g.group.id, inner);
+        }
+        inner.set(month, g);
+      }
+    }
+    return m;
+  }, [visibleBudgets]);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -234,15 +282,32 @@ export function BudgetView({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden y-scroll">
+      <div ref={ref} className="flex-1 overflow-y-auto overflow-x-hidden y-scroll">
         <table className="y-table">
           <thead className="y-thead">
             <tr>
-              <th style={{ width: 26 }} />
-              <th>Category</th>
-              <th className={`num ${COL_A}`}>Budgeted</th>
-              <th className={`num ${COL_O}`}>Outflows</th>
-              <th className={`num ${COL_V}`}>Balance</th>
+              <th rowSpan={2} style={{ width: 26 }} />
+              <th rowSpan={2}>Category</th>
+              {visible.map(({ month }) => (
+                <th
+                  key={month}
+                  colSpan={3}
+                  className="text-center"
+                  style={{ borderLeft: "1px solid #cbcbc6" }}
+                >
+                  {formatMonthShort(month)}
+                  {month === currentMonth && (
+                    <span style={{ color: "var(--y-blue-dark)", marginLeft: 4 }}>•</span>
+                  )}
+                </th>
+              ))}
+            </tr>
+            <tr>
+              {visible.flatMap(({ month }) => [
+                <th key={`${month}-a`} className={`num ${COL_A}`}>Budgeted</th>,
+                <th key={`${month}-o`} className={`num ${COL_O}`}>Outflows</th>,
+                <th key={`${month}-v`} className={`num ${COL_V}`}>Balance</th>,
+              ])}
             </tr>
           </thead>
           <tbody>
@@ -252,7 +317,9 @@ export function BudgetView({
                 <GroupBlock
                   key={g.group.id}
                   group={g}
-                  month={currentMonth}
+                  visible={visible}
+                  groupByMonth={groupByMonth}
+                  catByMonth={catByMonth}
                   collapsed={!!collapsed[g.group.id]}
                   onToggle={() => onToggleGroup(g.group.id)}
                   onAssign={onAssign}
@@ -274,7 +341,9 @@ export function BudgetView({
             {creditGroup && (
               <GroupBlock
                 group={creditGroup}
-                month={currentMonth}
+                visible={visible}
+                groupByMonth={groupByMonth}
+                catByMonth={catByMonth}
                 collapsed={!!collapsed[creditGroup.group.id]}
                 onToggle={() => onToggleGroup(creditGroup.group.id)}
                 onAssign={onAssign}
@@ -302,7 +371,9 @@ export function BudgetView({
 
 function GroupBlock({
   group,
-  month,
+  visible,
+  groupByMonth,
+  catByMonth,
   collapsed,
   onToggle,
   onAssign,
@@ -319,7 +390,9 @@ function GroupBlock({
   onDrop,
 }: {
   group: GroupRow;
-  month: string;
+  visible: MonthBudget[];
+  groupByMonth: Map<number, Map<string, GroupRow>>;
+  catByMonth: Map<number, Map<string, CatRow>>;
   collapsed: boolean;
   onToggle: () => void;
   onAssign: (catId: number, amount: number, month: string) => void;
@@ -338,9 +411,8 @@ function GroupBlock({
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
 
-  const sumBudgeted = group.rows.reduce((t, r) => t + r.assigned, 0);
-  const sumOutflow = group.rows.reduce((t, r) => t + r.outflow, 0);
-  const sumBalance = group.rows.reduce((t, r) => t + r.available, 0);
+  // For each visible month, look up the group's totals row.
+  const monthGroupRows = visible.map(({ month }) => groupByMonth.get(group.group.id)?.get(month));
 
   return (
     <>
@@ -408,101 +480,144 @@ function GroupBlock({
             </button>
           </div>
         </td>
-        <td className="num y-num text-right">{fmt(sumBudgeted)}</td>
-        <td className="num y-num text-right" style={{ color: sumOutflow < 0 ? "var(--y-ink)" : "var(--y-ink-soft)" }}>
-          {fmt(sumOutflow)}
-        </td>
-        <td className="num y-num text-right" style={{ color: sumBalance < 0 ? "var(--y-red)" : "var(--y-ink)" }}>
-          {fmt(sumBalance)}
-        </td>
+        {monthGroupRows.map((gRow, idx) => {
+          const a = gRow?.assigned ?? 0;
+          const o = gRow?.outflow ?? 0;
+          const v = gRow?.available ?? 0;
+          const month = visible[idx]!.month;
+          return [
+            <td key={`${month}-a`} className="num y-num text-right">{fmt(a)}</td>,
+            <td key={`${month}-o`} className="num y-num text-right" style={{ color: o < 0 ? "var(--y-ink)" : "var(--y-ink-soft)" }}>
+              {fmt(o)}
+            </td>,
+            <td key={`${month}-v`} className="num y-num text-right" style={{ color: v < 0 ? "var(--y-red)" : "var(--y-ink)" }}>
+              {fmt(v)}
+            </td>,
+          ];
+        })}
       </tr>
 
       {!collapsed &&
-        group.rows.map((r: CatRow, i: number) => (
-          <tr
-            key={r.category.id}
-            data-cat-row
-            className={cx("y-row", i % 2 === 1 && "alt")}
-            style={{
-              borderTop: catOverId === r.category.id ? "2px solid var(--y-blue)" : undefined,
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              e.dataTransfer.dropEffect = "move";
-              setCatOverId(r.category.id);
-            }}
-            onDragLeave={(e) => {
-              e.stopPropagation();
-              setCatOverId(null);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const srcId = dragCatId.current;
-              if (srcId == null || srcId === r.category.id || !onReorderCategory) return;
-              const srcIdx = group.rows.findIndex((x) => x.category.id === srcId);
-              const tgtIdx = group.rows.findIndex((x) => x.category.id === r.category.id);
-              if (srcIdx === -1 || tgtIdx === -1) return;
-              const reordered = [...group.rows];
-              const [moved] = reordered.splice(srcIdx, 1);
-              reordered.splice(tgtIdx, 0, moved!);
-              reordered.forEach((row, i) => {
-                if (row.category.sort !== i) onReorderCategory(row.category.id, i);
-              });
-              dragCatId.current = null;
-              setCatOverId(null);
-            }}
-          >
-            <td className="text-center" style={{ width: 26 }}>
-              <span
-                className="inline-block cursor-grab"
-                style={{ color: "var(--y-ink-faint)" }}
-                draggable
-                onDragStart={(e) => {
-                  e.stopPropagation();
-                  e.dataTransfer.effectAllowed = "move";
-                  dragCatId.current = r.category.id;
-                }}
-                title="Drag to reorder"
-              >
-                <Icon name="grip" size={13} />
-              </span>
-            </td>
-            <td className="pl-[26px]">
-              <div className="group/row flex items-center">
-                <span className="truncate">{r.category.name}</span>
-                <span className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
-                  <button
-                    onClick={onEditCategory}
-                    className="grid h-[18px] w-[18px] place-items-center rounded"
-                    style={{ color: "var(--y-ink-soft)" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    aria-label={`Edit ${r.category.name}`}
-                    title="Edit category"
-                  >
-                    <Icon name="edit" size={11} />
-                  </button>
+        group.rows.map((r: CatRow, i: number) => {
+          const monthCells = visible.map(({ month }) => {
+            const monthRow = catByMonth.get(r.category.id)?.get(month);
+            const a = monthRow?.assigned ?? 0;
+            const o = monthRow?.outflow ?? 0;
+            const v = monthRow?.available ?? 0;
+            return { month, a, o, v };
+          });
+          return (
+            <tr
+              key={r.category.id}
+              data-cat-row
+              className={cx("y-row", i % 2 === 1 && "alt")}
+              style={{
+                borderTop: catOverId === r.category.id ? "2px solid var(--y-blue)" : undefined,
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "move";
+                setCatOverId(r.category.id);
+              }}
+              onDragLeave={(e) => {
+                e.stopPropagation();
+                setCatOverId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const srcId = dragCatId.current;
+                if (srcId == null || srcId === r.category.id || !onReorderCategory) return;
+                const srcIdx = group.rows.findIndex((x) => x.category.id === srcId);
+                const tgtIdx = group.rows.findIndex((x) => x.category.id === r.category.id);
+                if (srcIdx === -1 || tgtIdx === -1) return;
+                const reordered = [...group.rows];
+                const [moved] = reordered.splice(srcIdx, 1);
+                reordered.splice(tgtIdx, 0, moved!);
+                reordered.forEach((row, i) => {
+                  if (row.category.sort !== i) onReorderCategory(row.category.id, i);
+                });
+                dragCatId.current = null;
+                setCatOverId(null);
+              }}
+            >
+              <td className="text-center" style={{ width: 26 }}>
+                <span
+                  className="inline-block cursor-grab"
+                  style={{ color: "var(--y-ink-faint)" }}
+                  draggable
+                  onDragStart={(e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.effectAllowed = "move";
+                    dragCatId.current = r.category.id;
+                  }}
+                  title="Drag to reorder"
+                >
+                  <Icon name="grip" size={13} />
                 </span>
-              </div>
-            </td>
-            <td className="num">
-              <CategoryMonthCell
-                value={r.assigned}
-                onAssign={(v) => onAssign(r.category.id, v, month)}
-              />
-            </td>
-            <td className="num y-num" style={{ color: r.outflow < 0 ? "var(--y-ink-soft)" : "var(--y-ink-faint)" }}>
-              {fmt(r.outflow)}
-            </td>
-            <td className="num">
-              <Pill tone={balanceTone(r.available)} style={{ minWidth: 72 }}>
-                {fmt(r.available)}
-              </Pill>
-            </td>
-          </tr>
-        ))}
+              </td>
+              <td className="pl-[26px]">
+                <div className="group/row flex items-center">
+                  <span className="truncate">{r.category.name}</span>
+                  <span className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
+                    <button
+                      onClick={onEditCategory}
+                      className="grid h-[18px] w-[18px] place-items-center rounded"
+                      style={{ color: "var(--y-ink-soft)" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      aria-label={`Edit ${r.category.name}`}
+                      title="Edit category"
+                    >
+                      <Icon name="edit" size={11} />
+                    </button>
+                  </span>
+                </div>
+              </td>
+              {monthCells.map(({ month, a, o, v }) => (
+                <FragmentRow
+                  key={month}
+                  month={month}
+                  assigned={a}
+                  outflow={o}
+                  available={v}
+                  onAssign={(val) => onAssign(r.category.id, val, month)}
+                />
+              ))}
+            </tr>
+          );
+        })}
+    </>
+  );
+}
+
+function FragmentRow({
+  month,
+  assigned,
+  outflow,
+  available,
+  onAssign,
+}: {
+  month: string;
+  assigned: number;
+  outflow: number;
+  available: number;
+  onAssign: (v: number) => void;
+}) {
+  return (
+    <>
+      <td className="num">
+        <CategoryMonthCell value={assigned} onAssign={onAssign} />
+      </td>
+      <td className="num y-num" style={{ color: outflow < 0 ? "var(--y-ink-soft)" : "var(--y-ink-faint)" }}>
+        {fmt(outflow)}
+      </td>
+      <td className="num">
+        <Pill tone={balanceTone(available)} style={{ minWidth: 72 }}>
+          {fmt(available)}
+        </Pill>
+      </td>
     </>
   );
 }

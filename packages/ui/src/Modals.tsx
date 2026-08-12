@@ -304,6 +304,7 @@ export function TransactionModal({
               value={transferAccountId}
               onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
               className="w-full"
+              searchable
             >
               <option value="">Select account…</option>
               {otherAccounts.map((a) => (
@@ -425,7 +426,7 @@ export function TransactionModal({
       <Field label="Memo (optional)">
         <TextField value={memo} onChange={(e) => setMemo(e.target.value)} className={inputClass} />
       </Field>
-      <div className="mt-2 mb-0">
+      <div className="mt-2 mb-0 flex items-end pb-1">
         <Checkbox
           checked={cleared}
           onChange={setCleared}
@@ -807,6 +808,7 @@ export function RecurringModal({
               value={transferAccountId}
               onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
               className="w-full"
+              searchable
             >
               <option value="">Select account…</option>
               {otherAccounts.map((a) => (

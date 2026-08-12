@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import type { BudgetData } from "@ynab/logic";
+import type { BudgetData, BudgetResult } from "@ynab/logic";
 import { computeBudget, num, parseMonthKey, monthKey, todayISO, DEMO_MONTH, MONTHS } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
@@ -150,6 +150,21 @@ export function BudgetApp({
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
 
+  // Compute up to 4 months of budgets ending at the current anchor.
+  // BudgetView decides how many to render based on the pane's measured width.
+  const visibleBudgets = useMemo(() => {
+    const out: { month: string; result: BudgetResult }[] = [];
+    const { year: y, month0 } = parseMonthKey(month);
+    for (let i = MAX_VISIBLE_MONTHS - 1; i >= 0; i--) {
+      const total = y * 12 + month0 - i;
+      const yy = Math.floor(total / 12);
+      const mm = ((total % 12) + 12) % 12;
+      const m = monthKey(yy, mm);
+      out.push({ month: m, result: computeBudget(data, m) });
+    }
+    return out;
+  }, [data, month]);
+
   const groups = budget.groups;
   const budgetGroups = groups.filter((g) => !g.group.isCreditCardPayments);
   const summary = {
@@ -184,8 +199,8 @@ export function BudgetApp({
   }, [data, month, summary.assigned]);
 
   const assign = useCallback(
-    async (categoryId: number, amount: number) => {
-      await api.assign(categoryId, amount, month);
+    async (categoryId: number, amount: number, m?: string) => {
+      await api.assign(categoryId, amount, m ?? month);
     },
     [api, month]
   );
@@ -320,6 +335,7 @@ export function BudgetApp({
           <BudgetView
             budget={budget}
             currentMonth={month}
+            visibleBudgets={visibleBudgets}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
             onAssign={assign}
@@ -539,5 +555,11 @@ export function BudgetApp({
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * Maximum number of months BudgetView is willing to render side-by-side.
+ * The actual visible count is `min(MAX_VISIBLE_MONTHS, floor(paneWidth / MONTH_BLOCK_PX))`.
+ */
+const MAX_VISIBLE_MONTHS = 4;
 
 export const __demoConstants = { DEMO_MONTH, todayISO };

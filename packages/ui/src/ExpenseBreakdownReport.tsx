@@ -111,7 +111,7 @@ export function ExpenseBreakdownReport({
         {!empty && size.width > 0 && side > 0 && (
           <>
             <div
-              className="flex shrink-0 items-center justify-center pr-3"
+              className="flex shrink-0 items-center justify-center"
               style={{ width: side, height: side }}
             >
               <svg width={side} height={side}>

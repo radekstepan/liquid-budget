@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { GroupRow } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
-import { Icon, Button, Panel, cx, money } from "@ynab/theme";
+import { Icon, Button, Panel, Notice, cx, money } from "@ynab/theme";
+import { Modal, Btn } from "./ui.js";
 
 export function Inspector({
   groups,
@@ -33,6 +34,8 @@ export function Inspector({
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -54,6 +57,18 @@ export function Inspector({
     .flatMap((g) => g.rows)
     .filter((r) => r.available < 0)
     .map((r) => r.category.id);
+
+  const confirmReset = async () => {
+    if (!onResetDemo) return;
+    setResetting(true);
+    try {
+      await onResetDemo();
+    } finally {
+      setResetting(false);
+      setConfirmingReset(false);
+      setMenuOpen(false);
+    }
+  };
 
   return (
     <aside
@@ -98,11 +113,9 @@ export function Inspector({
               </button>
               {onResetDemo && (
                 <button
-                  onClick={async () => {
-                    if (confirm("Reset to demo data? This wipes all your changes.")) {
-                      await onResetDemo();
-                    }
+                  onClick={() => {
                     setMenuOpen(false);
+                    setConfirmingReset(true);
                   }}
                   className="y-menu-item"
                 >
@@ -208,6 +221,28 @@ export function Inspector({
           <span>{history[history.length - 1] ? formatShortMonth(history[history.length - 1]!.key) : ""}</span>
         </div>
       </Panel>
+
+      {confirmingReset && (
+        <Modal
+          title="Reset demo data?"
+          onClose={() => !resetting && setConfirmingReset(false)}
+          footer={
+            <>
+              <Btn onClick={() => setConfirmingReset(false)} disabled={resetting}>
+                Cancel
+              </Btn>
+              <Btn variant="danger" onClick={confirmReset} disabled={resetting}>
+                {resetting ? "Resetting…" : "Yes, reset it"}
+              </Btn>
+            </>
+          }
+        >
+          <Notice tone="danger" title="This cannot be undone">
+            Resetting will permanently wipe all your changes (budgets,
+            transactions, accounts) and restore the demo dataset.
+          </Notice>
+        </Modal>
+      )}
     </aside>
   );
 }

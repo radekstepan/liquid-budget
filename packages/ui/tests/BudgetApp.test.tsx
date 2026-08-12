@@ -192,12 +192,13 @@ describe("BudgetApp", () => {
 
   it("calls api.resetDemo when the menu item is clicked", async () => {
     const { api, calls } = makeApi();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
 
     fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     fireEvent.click(screen.getByText("Reset demo data"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, reset it/i }));
+    });
     expect(calls.some((c) => c.method === "resetDemo")).toBe(true);
-    confirmSpy.mockRestore();
   });
 });

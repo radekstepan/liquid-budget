@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
-import { computeRunningBalances, fmt, num } from "@ynab/logic";
-import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, Pill, money } from "@ynab/theme";
+import { computeRunningBalances, num } from "@ynab/logic";
+import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money } from "@ynab/theme";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
@@ -86,17 +86,6 @@ export function TransactionsView({
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>
             {filterAccount ? filterAccount.name : "All Transactions"}
           </span>
-          {filterAccount?.lastReconciledAt && (
-            <Pill
-              tone="green"
-              title={`Last reconciled: ${filterAccount.lastReconciledAt} (${fmt(
-                num(filterAccount.lastReconciledBalance ?? 0)
-              )})`}
-            >
-              <Icon name="reconcile" size={10} color="#fff" />
-              <span className="ml-1">{filterAccount.lastReconciledAt}</span>
-            </Pill>
-          )}
         </div>
         {filterAccount && (
           <Button

@@ -5,17 +5,19 @@
 // Tests cover:
 //   1. Balanced reconciliation: open the modal, accept the working
 //      balance as the statement balance, confirm — verify the modal
-//      closes, the previously-cleared rows render the R glyph, and
-//      the "Last reconciled" pill appears in the toolbar.
+//      closes and the previously-cleared rows render the R glyph.
 //   2. Reconciliation with adjustment: enter a statement balance off
 //      by a small amount, pick a category, confirm — verify the
-//      synthetic "Reconciliation balance" row appears and the
-//      "Last reconciled" pill is now showing today's date.
+//      synthetic "Reconciliation balance" row appears.
 //   3. Un-reconcile: re-open the modal on the same account, click
-//      the "undo" link, verify the R glyphs revert to C and the
-//      pill disappears.
+//      the "undo" link, verify the R glyphs revert to C.
 //   4. API contract: POST /api/reconcile with a non-zero diff and no
 //      categoryId returns 422; with both fields succeeds.
+//
+// The toolbar "Last reconciled" pill was removed from the UI; the
+// underlying lastReconciledAt data and the modal's "undo" flow are
+// still covered. We assert the pill is absent (count 0) so any
+// regression re-introducing it would fail this suite.
 import { test, expect, type Page, request as apiRequest } from "@playwright/test";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
@@ -45,12 +47,12 @@ async function gotoAccountTransactions(page: Page, accountName: string) {
 }
 
 test.describe("reconcile flow", () => {
-  test("balanced reconciliation locks cleared rows and shows the Last reconciled pill", async ({ page }) => {
+  test("balanced reconciliation locks cleared rows", async ({ page }) => {
     // Use "Cash" — it has no transactions in the seed, so the entire
     // current balance ($116.05) equals the working balance. After
-    // reconcile, a "Last reconciled" pill should appear and there
-    // are no R rows to assert on — but the pill alone proves the
-    // server round-tripped.
+    // reconcile, the toolbar should show no "Last reconciled" pill
+    // (the pill was removed from the UI; the data is still tracked
+    // and used by the Reconcile modal).
     await gotoAccountTransactions(page, "Cash");
 
     await page.getByRole("button", { name: "Reconcile", exact: true }).click();
@@ -62,9 +64,8 @@ test.describe("reconcile flow", () => {
     await modal.getByRole("button", { name: "Reconcile", exact: true }).click();
     await expect(modal).toBeHidden();
 
-    // The "Last reconciled" pill should now be visible in the toolbar
-    // (it shows today's date).
-    await expect(page.locator(".y-pill--green").first()).toBeVisible();
+    // The pill should remain absent.
+    await expect(page.locator(".y-pill--green")).toHaveCount(0);
   });
 
   test("reconcile with a non-zero diff creates a synthetic adjustment row", async ({ page }) => {
@@ -113,19 +114,19 @@ test.describe("reconcile flow", () => {
       page.getByRole("row").filter({ hasText: "Reconciliation balance" })
     ).toBeVisible();
 
-    // The toolbar should now show the "Last reconciled" pill.
-    await expect(page.locator(".y-pill--green").first()).toBeVisible();
+    // The pill should remain absent.
+    await expect(page.locator(".y-pill--green")).toHaveCount(0);
   });
 
-  test("un-reconcile restores the rows to Cleared and removes the pill", async ({ page }) => {
+  test("un-reconcile restores the rows to Cleared", async ({ page }) => {
     // Scotia e-Chequing is now reconciled from the previous test (in
     // CI after the global reset). Use the TD account which the seed
     // marks as pre-reconciled with a known lastReconciledAt.
     await gotoAccountTransactions(page, "TD Unlimited Chequing");
 
-    // The seed sets lastReconciledAt to "2026-04-10" with a "Last
-    // reconciled" pill visible right away.
-    await expect(page.locator(".y-pill--green").first()).toBeVisible();
+    // The seed sets lastReconciledAt, but the toolbar pill is no
+    // longer rendered in the UI.
+    await expect(page.locator(".y-pill--green")).toHaveCount(0);
 
     await page.getByRole("button", { name: "Reconcile", exact: true }).click();
     const modal = page.locator(".y-modal").last();
@@ -135,7 +136,7 @@ test.describe("reconcile flow", () => {
     await modal.getByRole("button", { name: /undo the last reconciliation/i }).click();
     await expect(modal).toBeHidden();
 
-    // The pill should be gone (no more lastReconciledAt).
+    // Pill still absent after un-reconcile.
     await expect(page.locator(".y-pill--green")).toHaveCount(0);
   });
 });
