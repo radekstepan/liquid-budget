@@ -93,7 +93,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /checking/i })).toHaveClass(/is-sel/);
   });
 
-  it("does not render per-account delete buttons when onDeleteAccount is not provided", () => {
+  it("does not render per-account delete or reconcile buttons", () => {
     render(
       <Sidebar
         view="budget"
@@ -105,44 +105,37 @@ describe("Sidebar", () => {
       />
     );
     expect(screen.queryByRole("button", { name: /delete account cash/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reconcile account cash/i })).not.toBeInTheDocument();
   });
 
-  it("calls onDeleteAccount with the account id when the trash button is clicked (after confirm)", () => {
-    const onDeleteAccount = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("does not highlight the 'All Transactions' nav when an account is selected", () => {
     render(
       <Sidebar
-        view="budget"
+        view="transactions"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={1}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    expect(navAll.className).not.toMatch(/\bis-sel\b/);
+    expect(screen.getByRole("button", { name: /cash/i })).toHaveClass(/is-sel/);
+  });
+
+  it("highlights the 'All Transactions' nav when view=transactions and no account is selected", () => {
+    render(
+      <Sidebar
+        view="transactions"
         setView={() => {}}
         accounts={accounts}
         selectedAccountId={null}
         onSelectAccount={() => {}}
         onAddAccount={() => {}}
-        onDeleteAccount={onDeleteAccount}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /delete account cash/i }));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(onDeleteAccount).toHaveBeenCalledWith(1);
-    confirmSpy.mockRestore();
-  });
-
-  it("does not call onDeleteAccount if confirm is cancelled", () => {
-    const onDeleteAccount = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(
-      <Sidebar
-        view="budget"
-        setView={() => {}}
-        accounts={accounts}
-        selectedAccountId={null}
-        onSelectAccount={() => {}}
-        onAddAccount={() => {}}
-        onDeleteAccount={onDeleteAccount}
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: /delete account cash/i }));
-    expect(onDeleteAccount).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
+    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    expect(navAll.className).toMatch(/\bis-sel\b/);
   });
 });

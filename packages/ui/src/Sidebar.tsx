@@ -31,8 +31,6 @@ export function Sidebar({
   onSelectAccount,
   onAddAccount,
   onEditAccount,
-  onDeleteAccount,
-  onReconcileAccount,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -41,8 +39,6 @@ export function Sidebar({
   onSelectAccount: (id: number) => void;
   onAddAccount: () => void;
   onEditAccount?: (id: number) => void;
-  onDeleteAccount?: (id: number) => void;
-  onReconcileAccount?: (id: number) => void;
 }) {
   const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
   const seen = new Set(accounts.map((a) => a.groupLabel));
@@ -83,7 +79,8 @@ export function Sidebar({
 
       <nav className="px-0 pt-1">
         {NAV.map(({ key, label, icon }) => {
-          const active = view === key;
+          const active =
+            view === key && !(view === "transactions" && selectedAccountId != null);
           return (
             <button
               key={key}
@@ -121,9 +118,7 @@ export function Sidebar({
               {!isCollapsed &&
                 list.map((a) => {
                   const isSelected = selectedAccountId === a.id;
-                  const hasActions = Boolean(
-                    onEditAccount || onReconcileAccount || onDeleteAccount
-                  );
+                  const hasActions = Boolean(onEditAccount);
                   return (
                     <div
                       key={a.id}
@@ -148,54 +143,22 @@ export function Sidebar({
                           {fmt(num(a.balance))}
                         </span>
                       </button>
-                      {hasActions && (
+                      {hasActions && onEditAccount && (
                         <div
                           className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
                         >
-                          {onEditAccount && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onEditAccount(a.id);
-                              }}
-                              className="grid h-[18px] w-[18px] place-items-center rounded"
-                              style={{ color: "var(--y-side-ink-dim)" }}
-                              title="Edit account"
-                              aria-label={`Edit account ${a.name}`}
-                            >
-                              <Icon name="edit" size={11} />
-                            </button>
-                          )}
-                          {onReconcileAccount && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onReconcileAccount(a.id);
-                              }}
-                              className="grid h-[18px] w-[18px] place-items-center rounded"
-                              style={{ color: "var(--y-side-ink-dim)" }}
-                              title="Reconcile account"
-                              aria-label={`Reconcile account ${a.name}`}
-                            >
-                              <Icon name="reconcile" size={11} />
-                            </button>
-                          )}
-                          {onDeleteAccount && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm(`Delete account "${a.name}"? This removes all its transactions.`)) {
-                                  onDeleteAccount(a.id);
-                                }
-                              }}
-                              className="grid h-[18px] w-[18px] place-items-center rounded"
-                              style={{ color: "var(--y-side-ink-dim)" }}
-                              title="Delete account"
-                              aria-label={`Delete account ${a.name}`}
-                            >
-                              <Icon name="trash" size={11} />
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditAccount(a.id);
+                            }}
+                            className="grid h-[18px] w-[18px] place-items-center rounded"
+                            style={{ color: "var(--y-side-ink-dim)" }}
+                            title="Edit account"
+                            aria-label={`Edit account ${a.name}`}
+                          >
+                            <Icon name="edit" size={11} />
+                          </button>
                         </div>
                       )}
                     </div>

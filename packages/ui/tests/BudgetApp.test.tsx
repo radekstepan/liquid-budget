@@ -129,23 +129,65 @@ describe("BudgetApp", () => {
     expect(screen.getAllByText("Add Account").length).toBeGreaterThan(0);
   });
 
-  it("calls api.deleteAccount with the account id when the trash button is clicked", async () => {
+  it("calls api.deleteAccount from the edit modal after the two-step confirm", async () => {
     const { api, calls } = makeApi();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    const seed = makeSeedBudgetData();
+    const account = seed.accounts.find((a) => a.id === 1);
+    const txCount = account
+      ? seed.transactions.filter((t) => t.accountId === account.id).length
+      : 0;
+    render(<BudgetApp data={seed} api={api} />);
 
+    // Open the edit modal via the row's edit button (no longer a trash button).
+    const editBtn = screen.getByRole("button", {
+      name: `Edit account ${account?.name ?? ""}`,
+    });
+    fireEvent.click(editBtn);
+
+    expect(screen.getByText("Edit Account")).toBeInTheDocument();
+
+    // Step 1: enter the confirm panel.
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    const heading = screen.getByText(`Delete "${account?.name ?? ""}"?`);
+    expect(heading).toBeInTheDocument();
+    if (txCount > 0) {
+      expect(screen.getByText(txCount.toString())).toBeInTheDocument();
+    }
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+
+    // Step 2: cancel must NOT delete.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(calls.some((c) => c.method === "deleteAccount")).toBe(false);
+
+    // Re-open confirm and accept.
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    expect(calls.some((c) => c.method === "deleteAccount" && c.args[0] === 1)).toBe(true);
+  });
+
+  it("does not highlight 'All Transactions' when an account is selected", () => {
+    const { api } = makeApi();
+    const seed = makeSeedBudgetData();
+    render(<BudgetApp data={seed} api={api} />);
+
+    // Select the first account row, which navigates the app to the
+    // transactions view with an accountFilter set.
     const accountBtns = screen.getAllByRole("button", { name: /td unlimited chequing/i });
     const accountRow = accountBtns.find(
-      (b) => !b.getAttribute("aria-label")?.startsWith("Delete account")
+      (b) => b.getAttribute("aria-label") == null
     )!;
-    const wrapper = accountRow.parentElement!;
-    const trash = wrapper.querySelector('button[aria-label^="Delete account"]') as HTMLButtonElement;
-    expect(trash).toBeTruthy();
-    fireEvent.click(trash);
+    fireEvent.click(accountRow);
 
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(calls.some((c) => c.method === "deleteAccount" && c.args[0] === 1)).toBe(true);
-    confirmSpy.mockRestore();
+    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    expect(navAll.className).not.toMatch(/\bis-sel\b/);
+
+    // Toggling the same account again (now in the filtered view) clears
+    // the filter and re-highlights "All Transactions".
+    fireEvent.click(accountRow);
+    expect(navAll.className).toMatch(/\bis-sel\b/);
   });
 
   it("calls api.resetDemo when the menu item is clicked", async () => {

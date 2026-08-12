@@ -313,8 +313,6 @@ export function BudgetApp({
         }}
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
-        onDeleteAccount={api.deleteAccount}
-        onReconcileAccount={openReconcile}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
@@ -460,6 +458,9 @@ export function BudgetApp({
       {modal.kind === "editAccount" && editingAccount && (
         <AccountModal
           initial={editingAccount}
+          transactionCount={
+            data.transactions.filter((t) => t.accountId === editingAccount.id).length
+          }
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.updateAccount(editingAccount.id, {
@@ -467,6 +468,12 @@ export function BudgetApp({
               kind: v.kind,
               balance: v.balance,
             });
+            setModal({ kind: "none" });
+          }}
+          onDelete={async () => {
+            await api.deleteAccount(editingAccount.id);
+            setAccountFilter((cur) => (cur === editingAccount.id ? null : cur));
+            setView("budget");
             setModal({ kind: "none" });
           }}
         />
