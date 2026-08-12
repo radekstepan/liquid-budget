@@ -139,6 +139,7 @@ export function BudgetApp({
 }) {
   const [view, setView] = useState<View>("budget");
   const [month, setMonth] = useState(DEMO_MONTH);
+  const [monthCount, setMonthCount] = useState<number>(3);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
     const cc = data.groups.find((g) => g.isCreditCardPayments);
     return cc ? { [cc.id]: true } : {};
@@ -149,6 +150,26 @@ export function BudgetApp({
   const { year } = parseMonthKey(month);
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
+
+  const visibleMonths = useMemo(() => {
+    const { year: y, month0 } = parseMonthKey(month);
+    const anchorTotal = y * 12 + month0;
+    const offset = Math.floor((monthCount - 1) / 2);
+    const start = anchorTotal - offset;
+    const keys: string[] = [];
+    for (let i = 0; i < monthCount; i++) {
+      const t = start + i;
+      const yy = Math.floor(t / 12);
+      const mm = ((t % 12) + 12) % 12;
+      keys.push(monthKey(yy, mm));
+    }
+    return keys;
+  }, [month, monthCount]);
+
+  const budgets = useMemo(
+    () => visibleMonths.map((m) => computeBudget(data, m)),
+    [data, visibleMonths]
+  );
 
   const groups = budget.groups;
   const budgetGroups = groups.filter((g) => !g.group.isCreditCardPayments);
@@ -319,6 +340,10 @@ export function BudgetApp({
         {view === "budget" && (
           <BudgetView
             budget={budget}
+            budgets={budgets}
+            visibleMonths={visibleMonths}
+            monthCount={monthCount}
+            onSetMonthCount={setMonthCount}
             currentMonth={month}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
