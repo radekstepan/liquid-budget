@@ -195,6 +195,11 @@ export function BudgetApp({
     []
   );
 
+  const navigateView = useCallback((v: View) => {
+    if (v === "transactions") setAccountFilter(null);
+    setView(v);
+  }, []);
+
   const cycleStatus = useCallback(
     async (id: number) => {
       const t = data.transactions.find((x) => x.id === id);
@@ -299,10 +304,11 @@ export function BudgetApp({
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--y-app-bg)" }}>
       <Sidebar
         view={view}
-        setView={setView}
+        setView={navigateView}
         accounts={data.accounts}
+        selectedAccountId={accountFilter}
         onSelectAccount={(id) => {
-          setAccountFilter(id);
+          setAccountFilter((cur) => (cur === id ? null : id));
           setView("transactions");
         }}
         onAddAccount={() => setModal({ kind: "account" })}
@@ -340,7 +346,6 @@ export function BudgetApp({
           <TransactionsView
             data={data}
             accountFilter={accountFilter}
-            setAccountFilter={setAccountFilter}
             onAdd={() => setModal({ kind: "addTransaction" })}
             onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
             onDelete={api.deleteTransaction}

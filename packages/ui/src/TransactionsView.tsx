@@ -10,7 +10,6 @@ type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: numbe
 export function TransactionsView({
   data,
   accountFilter,
-  setAccountFilter,
   onAdd,
   onEdit,
   onDelete,
@@ -19,7 +18,6 @@ export function TransactionsView({
 }: {
   data: BudgetData;
   accountFilter: number | null;
-  setAccountFilter: (id: number | null) => void;
   onAdd: () => void;
   onEdit: (id: number) => void;
   onDelete: (id: number) => void;
@@ -88,22 +86,6 @@ export function TransactionsView({
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>
             {filterAccount ? filterAccount.name : "All Transactions"}
           </span>
-          {filterAccount && (
-            <Pill
-              tone="blue"
-              style={{ minWidth: 0, padding: "1px 7px 2px" }}
-            >
-              {fmt(num(filterAccount.balance))}
-              <button
-                type="button"
-                onClick={() => setAccountFilter(null)}
-                className="ml-1"
-                aria-label="Clear account filter"
-              >
-                <Icon name="x" size={9} color="#fff" />
-              </button>
-            </Pill>
-          )}
           {filterAccount?.lastReconciledAt && (
             <Pill
               tone="green"

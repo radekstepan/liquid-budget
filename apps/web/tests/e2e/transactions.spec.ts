@@ -74,23 +74,34 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(allRows).toHaveCount(totalBefore);
 });
 
-test("account filter pill clears and restores the unfiltered title", async ({ page }) => {
+test("selecting a sidebar account marks the row and scopes the register; All Transactions nav clears it", async ({ page }) => {
   // The toolbar title (a <span>) shows "All Transactions" by default
-  // and the account name when filtered (TransactionsView.tsx:78-82).
-  // The sidebar nav button keeps the same label, so we target the
-  // toolbar only.
+  // and the account name when an account row is selected
+  // (TransactionsView.tsx).
   const toolbarTitle = page.locator(".y-toolbar span.text-\\[13px\\]").first();
   await expect(toolbarTitle).toHaveText("All Transactions");
 
-  // Sidebar account click triggers the deep-link filter
-  // (Sidebar.tsx:118-127 → BudgetApp.tsx:215-218).
-  await page.getByRole("button", { name: /TD Unlimited Chequing/ }).first().click();
-  await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
+  const accountRow = page.getByRole("button", { name: /TD Unlimited Chequing/ }).first();
+  await expect(accountRow).not.toHaveClass(/is-sel/);
 
-  // The pill exposes an × button with aria-label "Clear account filter"
-  // (TransactionsView.tsx:91-94).
-  await page.getByRole("button", { name: "Clear account filter" }).click();
+  // Sidebar account click selects the row (Sidebar.tsx: <is-sel> is
+  // applied) and switches to the transactions view filtered to that
+  // account (BudgetApp.tsx onSelectAccount handler).
+  await accountRow.click();
+  await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
+  await expect(accountRow).toHaveClass(/is-sel/);
+
+  // Clicking the same account again toggles the selection off.
+  await accountRow.click();
   await expect(toolbarTitle).toHaveText("All Transactions");
+  await expect(accountRow).not.toHaveClass(/is-sel/);
+
+  // Re-select, then click the top-level "All Transactions" nav to clear.
+  await accountRow.click();
+  await expect(accountRow).toHaveClass(/is-sel/);
+  await page.getByRole("button", { name: "All Transactions", exact: true }).click();
+  await expect(toolbarTitle).toHaveText("All Transactions");
+  await expect(accountRow).not.toHaveClass(/is-sel/);
 });
 
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {

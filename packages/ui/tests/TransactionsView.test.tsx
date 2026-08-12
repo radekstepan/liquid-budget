@@ -10,7 +10,6 @@ describe("TransactionsView", () => {
       <TransactionsView
         data={data}
         accountFilter={null}
-        setAccountFilter={() => {}}
         onAdd={() => {}}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -32,7 +31,6 @@ describe("TransactionsView", () => {
       <TransactionsView
         data={makeSeedBudgetData()}
         accountFilter={null}
-        setAccountFilter={() => {}}
         onAdd={onAdd}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -50,7 +48,6 @@ describe("TransactionsView", () => {
       <TransactionsView
         data={data}
         accountFilter={1}
-        setAccountFilter={() => {}}
         onAdd={() => {}}
         onEdit={() => {}}
         onDelete={() => {}}

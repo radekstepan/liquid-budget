@@ -13,7 +13,14 @@ const accounts: Account[] = [
 describe("Sidebar", () => {
   it("renders all 6 nav buttons", () => {
     render(
-      <Sidebar view="budget" setView={() => {}} accounts={accounts} onSelectAccount={() => {}} onAddAccount={() => {}} />
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
     );
     expect(screen.getByRole("button", { name: /budget/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
@@ -26,7 +33,14 @@ describe("Sidebar", () => {
   it("calls setView when a nav button is clicked", () => {
     const setView = vi.fn();
     render(
-      <Sidebar view="budget" setView={setView} accounts={accounts} onSelectAccount={() => {}} onAddAccount={() => {}} />
+      <Sidebar
+        view="budget"
+        setView={setView}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
     );
     fireEvent.click(screen.getByRole("button", { name: /reports/i }));
     expect(setView).toHaveBeenCalledWith("reports");
@@ -35,7 +49,14 @@ describe("Sidebar", () => {
   it("calls onAddAccount when the Add Account button is clicked", () => {
     const onAddAccount = vi.fn();
     render(
-      <Sidebar view="budget" setView={() => {}} accounts={accounts} onSelectAccount={() => {}} onAddAccount={onAddAccount} />
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={onAddAccount}
+      />
     );
     fireEvent.click(screen.getByRole("button", { name: /add account/i }));
     expect(onAddAccount).toHaveBeenCalledTimes(1);
@@ -44,15 +65,44 @@ describe("Sidebar", () => {
   it("calls onSelectAccount with the account id", () => {
     const onSelectAccount = vi.fn();
     render(
-      <Sidebar view="budget" setView={() => {}} accounts={accounts} onSelectAccount={onSelectAccount} onAddAccount={() => {}} />
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={onSelectAccount}
+        onAddAccount={() => {}}
+      />
     );
     fireEvent.click(screen.getByRole("button", { name: /cash/i }));
     expect(onSelectAccount).toHaveBeenCalledWith(1);
   });
 
+  it("marks the matching account row with is-sel when selectedAccountId matches", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={2}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: /cash/i })).not.toHaveClass(/is-sel/);
+    expect(screen.getByRole("button", { name: /checking/i })).toHaveClass(/is-sel/);
+  });
+
   it("does not render per-account delete buttons when onDeleteAccount is not provided", () => {
     render(
-      <Sidebar view="budget" setView={() => {}} accounts={accounts} onSelectAccount={() => {}} onAddAccount={() => {}} />
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
     );
     expect(screen.queryByRole("button", { name: /delete account cash/i })).not.toBeInTheDocument();
   });
@@ -65,6 +115,7 @@ describe("Sidebar", () => {
         view="budget"
         setView={() => {}}
         accounts={accounts}
+        selectedAccountId={null}
         onSelectAccount={() => {}}
         onAddAccount={() => {}}
         onDeleteAccount={onDeleteAccount}
@@ -84,6 +135,7 @@ describe("Sidebar", () => {
         view="budget"
         setView={() => {}}
         accounts={accounts}
+        selectedAccountId={null}
         onSelectAccount={() => {}}
         onAddAccount={() => {}}
         onDeleteAccount={onDeleteAccount}
