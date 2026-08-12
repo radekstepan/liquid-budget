@@ -650,6 +650,11 @@ button.y-pill:hover {
 .y-thead th.num {
   text-align: right;
 }
+.y-thead--sticky th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
 .y-row td {
   padding: 4px 8px;
   border-bottom: 1px solid var(--y-line-soft);
@@ -661,6 +666,15 @@ button.y-pill:hover {
 }
 .y-row:hover td {
   background: #eef6fb;
+}
+.y-row:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--y-blue);
+}
+.y-row.is-empty {
+  opacity: 0.55;
+}
+.y-row.is-empty:hover {
+  opacity: 0.85;
 }
 .y-row.is-sel td,
 .y-row.is-sel:hover td {
@@ -675,19 +689,19 @@ button.y-pill:hover {
   border-left: 1px solid var(--y-line-soft);
 }
 .y-master td {
-  background: linear-gradient(#dde5ea, var(--y-master));
+  background: var(--y-master);
   border-bottom: 1px solid var(--y-master-line);
   border-top: 1px solid #eaf0f3;
   font-weight: 700;
-  color: #3c474e;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-  padding: 5px 8px;
+  font-size: 12.5px;
+  color: #2f3539;
+  padding: 6px 8px;
 }
 .y-master td + td {
   border-left: 1px solid rgba(255, 255, 255, 0.25);
 }
 .y-master:hover td {
-  background: linear-gradient(#e3ebef, #d8e1e6);
+  background: #ced9e0;
 }
 
 .y-tri {

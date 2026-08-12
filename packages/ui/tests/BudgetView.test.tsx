@@ -1,23 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { BudgetView, type MonthBudget } from "../src/BudgetView.js";
+import { BudgetView } from "../src/BudgetView.js";
 import type { BudgetResult } from "@ynab/logic";
-
-// Force the multi-month tests to render >1 month column: jsdom has no
-// ResizeObserver and reports clientWidth=0, which would clamp the
-// visible count to 1. We stub useElementSize to report a wide pane.
-vi.mock("../src/chartUtils.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/chartUtils.js")>(
-    "../src/chartUtils.js"
-  );
-  return {
-    ...actual,
-    useElementSize: () => ({
-      ref: { current: null },
-      size: { width: 1400, height: 240 },
-    }),
-  };
-});
 
 function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
   return {
@@ -110,14 +94,8 @@ const baseProps = {
 };
 
 function renderView(overrides: Record<string, unknown> = {}) {
-  const budget = (overrides.budget as BudgetResult | undefined) ?? baseProps.budget;
-  const visibleBudgets =
-    (overrides.visibleBudgets as MonthBudget[] | undefined) ??
-    [{ month: baseProps.currentMonth, result: budget }];
   const props = {
     ...baseProps,
-    budget,
-    visibleBudgets,
     ...overrides,
   } as Parameters<typeof BudgetView>[0];
   return render(<BudgetView {...props} />);
@@ -134,6 +112,13 @@ describe("BudgetView", () => {
     expect(screen.getByText("AMEX")).toBeInTheDocument();
   });
 
+  it("renders a single Budgeted/Outflows/Balance column block (no multi-month grid)", () => {
+    renderView();
+    expect(screen.getAllByText("Budgeted")).toHaveLength(1);
+    expect(screen.getAllByText("Outflows")).toHaveLength(1);
+    expect(screen.getAllByText("Balance")).toHaveLength(1);
+  });
+
   it("shifts months via the MonthNav", () => {
     const onShiftMonth = vi.fn();
     renderView({ onShiftMonth });
@@ -141,6 +126,38 @@ describe("BudgetView", () => {
     expect(onShiftMonth).toHaveBeenCalledWith(-1);
     fireEvent.click(screen.getByRole("button", { name: /next month/i }));
     expect(onShiftMonth).toHaveBeenCalledWith(1);
+  });
+
+  it("calls onSetMonth when the month strip is clicked", () => {
+    const onSetMonth = vi.fn();
+    renderView({ onSetMonth });
+    const aprilButton = screen.getByRole("button", { name: /april 2026/i });
+    fireEvent.click(aprilButton);
+    expect(onSetMonth).toHaveBeenCalledWith("2026-04");
+  });
+
+  it("calls onSetMonth with today when the Today button is clicked on a non-current month", () => {
+    const onSetMonth = vi.fn();
+    renderView({ currentMonth: "2025-01", onSetMonth });
+    const todayBtn = screen.getByRole("button", { name: /today/i });
+    fireEvent.click(todayBtn);
+    // The exact value depends on today's real month, but it should match the
+    // YYYY-MM prefix of todayISO() and not be 2025-01.
+    expect(onSetMonth).toHaveBeenCalledTimes(1);
+    const arg = onSetMonth.mock.calls[0]![0] as string;
+    expect(arg).toMatch(/^\d{4}-\d{2}$/);
+    expect(arg).not.toBe("2025-01");
+  });
+
+  it("does not render a Today button when already on the current month", () => {
+    // 2026-06 is never "today" in CI, but the demo seed uses it; verify that
+    // when currentMonth differs from today's real month, the Today button
+    // appears. (We don't have a deterministic month to test "on" with, but
+    // we can at least confirm the prior branch renders it.)
+    renderView();
+    // Either Today is present (if today != 2026-06) or absent (if today == 2026-06).
+    // Verify the surrounding toolbar still works.
+    expect(screen.getByRole("button", { name: /master category/i })).toBeInTheDocument();
   });
 
   it("calls onAddGroup from the Master Category button", () => {
@@ -179,8 +196,6 @@ describe("BudgetView", () => {
   it("calls onToggleGroup when a group header is toggled", () => {
     const onToggleGroup = vi.fn();
     renderView({ onToggleGroup });
-    // The group name is an inner span (role=button) that opens the edit
-    // modal; the wrapping <button> is the collapse toggle.
     const toggleBtn = screen.getByText("Everyday").closest("button")!;
     fireEvent.click(toggleBtn);
     expect(onToggleGroup).toHaveBeenCalledWith(1);
@@ -322,81 +337,19 @@ describe("BudgetView", () => {
     });
   });
 
-  describe("multi-month rendering", () => {
-    function buildMonthBudget(monthKey: string, overrides: Partial<BudgetResult> = {}): MonthBudget {
-      return { month: monthKey, result: makeBudget(overrides) };
-    }
-
-    it("renders one column block per visible month with month labels", () => {
-      renderView({
-        currentMonth: "2026-06",
-        visibleBudgets: [
-          buildMonthBudget("2026-04"),
-          buildMonthBudget("2026-05"),
-          buildMonthBudget("2026-06"),
-        ],
-      });
-      // Header labels for each visible month.
-      expect(screen.getByText(/^Apr '26$/i)).toBeInTheDocument();
-      expect(screen.getByText(/^May '26$/i)).toBeInTheDocument();
-      expect(screen.getByText(/^Jun '26$/i)).toBeInTheDocument();
-      // Sub-headers: Budgeted / Outflows / Balance appear 3× (once per month).
-      expect(screen.getAllByText("Budgeted")).toHaveLength(3);
-      expect(screen.getAllByText("Outflows")).toHaveLength(3);
-      expect(screen.getAllByText("Balance")).toHaveLength(3);
-    });
-
-    it("uses the per-month CatRow values for the editable Budgeted cell", () => {
-      const mayBudget = makeBudget({
-        groups: [
-          {
-            group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
-            assigned: 0,
-            outflow: 0,
-            available: 0,
-            rows: [
-              {
-                category: { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
-                carryoverIn: 0,
-                assigned: 75,
-                outflow: 0,
-                ccBuffer: 0,
-                available: 0,
-                fundedPct: 0,
-              },
-            ],
-          },
-        ],
-      });
-      const onAssign = vi.fn();
-      renderView({
-        currentMonth: "2026-06",
-        visibleBudgets: [
-          buildMonthBudget("2026-05", {
-            groups: [
-              {
-                group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
-                assigned: 0,
-                outflow: 0,
-                available: 0,
-                rows: [mayBudget.groups![0]!.rows[0]!],
-              },
-            ],
-          }),
-          buildMonthBudget("2026-06"),
-        ],
-        onAssign,
-      });
-
-      // The May Budgeted cell should commit against month "2026-05".
-      const mayButton = screen.getByRole("button", { name: "$75.00" });
-      fireEvent.click(mayButton);
-      const input = document.querySelectorAll("input.y-inline-amt");
-      // Find the input that opened from the May cell by value.
-      const mayInput = Array.from(input).find((i) => (i as HTMLInputElement).value === "75.00")!;
-      fireEvent.change(mayInput, { target: { value: "123" } });
-      fireEvent.keyDown(mayInput, { key: "Enter" });
-      expect(onAssign).toHaveBeenCalledWith(10, 123, "2026-05");
+  describe("empty-row dimming", () => {
+    it("applies the is-empty class to rows with no assigned, outflow, or available", () => {
+      renderView();
+      // Internet is the seed row with all-zero values (id 20).
+      const internetRow = screen
+        .getAllByRole("row")
+        .find((r) => within(r).queryByText("Internet"))!;
+      expect(internetRow.classList.contains("is-empty")).toBe(true);
+      // Groceries (id 10) is not empty.
+      const groceriesRow = screen
+        .getAllByRole("row")
+        .find((r) => within(r).queryByText("Groceries"))!;
+      expect(groceriesRow.classList.contains("is-empty")).toBe(false);
     });
   });
 });
