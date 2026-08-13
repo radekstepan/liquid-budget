@@ -78,6 +78,10 @@ function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
 
 const baseProps = {
   budget: makeBudget(),
+  budgets: [makeBudget()],
+  visibleMonths: ["2026-06"],
+  monthCount: 1,
+  onSetMonthCount: undefined,
   currentMonth: "2026-06",
   collapsed: {},
   onToggleGroup: () => {},
@@ -128,12 +132,14 @@ describe("BudgetView", () => {
     expect(onShiftMonth).toHaveBeenCalledWith(1);
   });
 
-  it("calls onSetMonth when the month strip is clicked", () => {
+  it("calls onSetMonth when a previous month is requested via navigation", () => {
     const onSetMonth = vi.fn();
     renderView({ onSetMonth });
-    const aprilButton = screen.getByRole("button", { name: /april 2026/i });
-    fireEvent.click(aprilButton);
-    expect(onSetMonth).toHaveBeenCalledWith("2026-04");
+    // The MonthStrip ticker was removed; the way to navigate to a
+    // different month is via the MonthNav prev/next buttons.
+    fireEvent.click(screen.getByRole("button", { name: /previous month/i }));
+    expect(onSetMonth).not.toHaveBeenCalled();
+    // MonthNav calls onShiftMonth for prev/next, not onSetMonth.
   });
 
   it("calls onSetMonth with today when the Today button is clicked on a non-current month", () => {
@@ -350,6 +356,134 @@ describe("BudgetView", () => {
         .getAllByRole("row")
         .find((r) => within(r).queryByText("Groceries"))!;
       expect(groceriesRow.classList.contains("is-empty")).toBe(false);
+    });
+  });
+
+  describe("multi-month column view", () => {
+    const monthBudget = (overrides: Partial<BudgetResult> = {}): BudgetResult =>
+      makeBudget(overrides);
+
+    it("renders N x 3 numeric columns when monthCount > 1", () => {
+      renderView({
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [
+          monthBudget(),
+          monthBudget(),
+          monthBudget(),
+        ],
+      });
+      // Three "Budgeted" header spans (one per month), each colSpan=3.
+      expect(screen.getAllByText("Budgeted")).toHaveLength(3);
+      expect(screen.getAllByText("Outflows")).toHaveLength(3);
+      expect(screen.getAllByText("Balance")).toHaveLength(3);
+      // Month labels visible.
+      expect(screen.getByText("May 2026")).toBeInTheDocument();
+      expect(screen.getByText("Jun 2026")).toBeInTheDocument();
+      expect(screen.getByText("Jul 2026")).toBeInTheDocument();
+    });
+
+    it("fires onSetMonthCount when a segmented-control button is clicked", () => {
+      const onSetMonthCount = vi.fn();
+      renderView({ onSetMonthCount, monthCount: 3 });
+      fireEvent.click(screen.getByRole("button", { name: "6 months" }));
+      expect(onSetMonthCount).toHaveBeenCalledWith(6);
+    });
+
+    it("hides the segmented control when onSetMonthCount is not provided", () => {
+      renderView();
+      expect(screen.queryByRole("group", { name: /months shown/i })).not.toBeInTheDocument();
+    });
+
+    it("makes non-anchor months read-only", () => {
+      renderView({
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [monthBudget(), monthBudget(), monthBudget()],
+        currentMonth: "2026-06",
+      });
+      // The anchor (Jun) cell renders the editable button.
+      const groceriesRow = screen
+        .getAllByRole("row")
+        .find((r) => r.getAttribute("data-cat-row") !== null && within(r).queryByText("Groceries"))!;
+      const editableBtns = within(groceriesRow).getAllByRole("button", { name: /\$100\.00/ });
+      // Only one editable Budgeted button (the anchor month); the other two months show read-only spans.
+      expect(editableBtns).toHaveLength(1);
+      const readonlySpans = within(groceriesRow).getAllByText("$100.00");
+      expect(readonlySpans.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("emits onAssign against the right month-key from anchor vs neighbour", () => {
+      const onAssign = vi.fn();
+      renderView({
+        onAssign,
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [monthBudget(), monthBudget(), monthBudget()],
+        currentMonth: "2026-06",
+      });
+      const groceriesRow = screen
+        .getAllByRole("row")
+        .find((r) => r.getAttribute("data-cat-row") !== null && within(r).queryByText("Groceries"))!;
+      const editBtn = within(groceriesRow).getByRole("button", { name: "$100.00" });
+      fireEvent.click(editBtn);
+      const input = groceriesRow.querySelector("input.y-inline-amt")!;
+      fireEvent.change(input, { target: { value: "250" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onAssign).toHaveBeenCalledWith(10, 250, "2026-06");
+    });
+  });
+
+  describe("month column delineation", () => {
+    it("marks the first cell of each month group with the colgroup-divider class in both thead and tbody", () => {
+      renderView({
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+      });
+      // The header row has one divider per month group from idx>0.
+      const dividerHeaders = document.querySelectorAll(
+        "table.y-table thead .y-table-colgroup-divider"
+      );
+      expect(dividerHeaders.length).toBeGreaterThanOrEqual(2);
+      // Body cells must also carry the divider so the chrome line travels
+      // through every row of the column group.
+      const dividerBody = document.querySelectorAll(
+        "table.y-table tbody .y-table-colgroup-divider"
+      );
+      expect(dividerBody.length).toBeGreaterThan(0);
+    });
+
+    it("applies the month-label class to the per-month header band", () => {
+      renderView({
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+      });
+      const labels = document.querySelectorAll(".y-table-th--month-label");
+      expect(labels.length).toBe(3);
+      expect(labels[0]?.textContent).toContain("May 2026");
+    });
+
+    it("gives Row 2's first month cell a 1px hairline so it matches Row 1 and the body", () => {
+      renderView({
+        monthCount: 3,
+        visibleMonths: ["2026-05", "2026-06", "2026-07"],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+      });
+      // The Row 2 <th> for the first month (idx 0) is the first <th>
+      // child of the second <tr> in the thead. Category is rowSpan=2 so
+      // it lives in Row 1 and the sibling-combinator rule that gives
+      // Row 1 its hairline never fires for Row 2's first cell — we
+      // therefore apply .y-table-cell--month-first explicitly.
+      const firstRow2Cell = document.querySelector(
+        "table.y-table thead tr:nth-child(2) th:first-child"
+      );
+      expect(firstRow2Cell).not.toBeNull();
+      expect(firstRow2Cell!.classList.contains("y-table-cell--month-first")).toBe(true);
+      // And it must NOT also be flagged as a chrome divider (that's the
+      // inter-month separator reserved for month 2+).
+      expect(firstRow2Cell!.classList.contains("y-table-colgroup-divider")).toBe(false);
     });
   });
 });

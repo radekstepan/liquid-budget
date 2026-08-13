@@ -151,3 +151,75 @@ test("clicking a real history bar in the Inspector jumps to that month", async (
   await page.getByRole("button", { name: "Jump to Jun 2026" }).click();
   await expect(monthBadge).toHaveText("Jun 2026");
 });
+
+test("month column group divider has a visible 2px left border in both header and body", async ({ page }) => {
+  // Each month group is separated by a 2px border-strong delimiter
+  // (.y-table-colgroup-divider). The first month group is not a divider
+  // (it's the leftmost), so we look at the second group — both in the
+  // header and in a body row.
+  await expect(page.getByRole("columnheader", { name: "Jun 2026", exact: true })).toBeVisible();
+
+  const headerDivider = page
+    .locator("th.y-table-th--month-label.y-table-colgroup-divider")
+    .first();
+  await expect(headerDivider).toBeVisible();
+  const headerBorder = await headerDivider.evaluate(
+    (el) => getComputedStyle(el).borderLeftWidth
+  );
+  expect(headerBorder).toBe("2px");
+
+  // Body cell of the second month group — the Budgeted cell of any
+  // category row in the second month group should also be 2px.
+  const bodyDivider = page
+    .locator("table.y-table tbody td.y-table-colgroup-divider")
+    .first();
+  await expect(bodyDivider).toBeVisible();
+  const bodyBorder = await bodyDivider.evaluate(
+    (el) => getComputedStyle(el).borderLeftWidth
+  );
+  expect(bodyBorder).toBe("2px");
+});
+
+test("Row 2's first Budgeted cell has a 1px hairline matching Row 1 and the body", async ({ page }) => {
+  // The Category→month1 boundary must look the same in Row 2 as it
+  // already does in Row 1 and the body: a 1px hairline, NOT the 2px
+  // chrome divider reserved for month 2+.
+  const firstRow2Header = page
+    .locator("table.y-table thead tr")
+    .nth(1)
+    .locator("th")
+    .first();
+  await expect(firstRow2Header).toBeVisible();
+  const w = await firstRow2Header.evaluate(
+    (el) => getComputedStyle(el).borderLeftWidth
+  );
+  expect(w).toBe("1px");
+});
+
+test("month-count control switches the budget to N side-by-side month columns", async ({ page }) => {
+  // Default is 3 months. The header shows three "Budgeted" sub-headers,
+  // one per visible month, plus per-month labels (May/Jun/Jul 2026).
+  const thead = page.locator("table.y-table thead");
+  const monthHeader = (label: string) =>
+    thead.getByRole("columnheader", { name: label, exact: true });
+  const budgetedCount = () => thead.getByText("Budgeted", { exact: true }).count();
+
+  expect(await budgetedCount()).toBe(3);
+  await expect(monthHeader("May 2026")).toBeVisible();
+  await expect(monthHeader("Jun 2026")).toBeVisible();
+  await expect(monthHeader("Jul 2026")).toBeVisible();
+
+  // Switch to 6 months — the window spans 4 months before to 1 month after
+  // the anchor (Jun 2026).
+  await page.getByRole("button", { name: "6 months" }).click();
+  await expect(monthHeader("Apr 2026")).toBeVisible();
+  await expect(monthHeader("Aug 2026")).toBeVisible();
+  expect(await budgetedCount()).toBe(6);
+
+  // Switch back to 1 month — per-month labels collapse, only the classic
+  // Category / Budgeted / Outflows / Balance header is shown.
+  await page.getByRole("button", { name: "1 month" }).click();
+  await expect(monthHeader("May 2026")).toBeHidden();
+  expect(await budgetedCount()).toBe(1);
+});
+
