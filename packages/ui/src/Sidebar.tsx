@@ -107,7 +107,7 @@ export function Sidebar({
                 className="y-side-head flex items-center w-full"
               >
                 <span className={cx("y-tri mr-1", !isCollapsed && "is-open")} />
-                <span>{label}</span>
+                <span className="truncate min-w-0 flex-1">{label}</span>
                 <span
                   className="y-side-amt"
                   style={{ color: total < 0 ? "var(--y-side-neg)" : undefined }}
