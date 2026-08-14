@@ -11,7 +11,8 @@
 body {
   background: var(--y-app-bg);
   color: var(--y-ink);
-  font-feature-settings: "tnum" 1, "ss01" 1;
+  font-family: var(--y-font);
+  font-size: 1rem;
 }
 
 .tnum {

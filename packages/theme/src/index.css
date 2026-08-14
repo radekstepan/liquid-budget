@@ -5,30 +5,30 @@
 
 :root {
   /* --- chrome / neutrals --- */
-  --y-app-bg: #e9e9e7;
+  --y-app-bg: #e8e8e5;
   --y-panel: #f4f4f2;
   --y-panel-alt: #fbfbfa;
   --y-line: #c9c9c5;
-  --y-line-soft: #e2e2de;
-  --y-border-strong: #bdbdb8;
+  --y-line-soft: #e0e0dc;
+  --y-border-strong: #b8b8b3;
   --y-ink: #33383b;
   --y-ink-soft: #6d7478;
   --y-ink-faint: #9aa0a4;
 
   /* --- hovers (light surfaces) --- */
-  --y-hover: #e8e8e5;
-  --y-row-hover: #eef0ee;
-  --y-master-hover: #cbd5dd;
+  --y-hover: #e4e4e1;
+  --y-row-hover: #eef6fb;
+  --y-master-hover: #c8d3da;
 
-  /* --- sidebar --- */
-  --y-side-top: #4a5a64;
-  --y-side-bot: #313d45;
-  --y-side-edge: #212a30;
-  --y-side-ink: #cdd6db;
-  --y-side-ink-dim: #8ea0ab;
+  /* --- sidebar: YNAB4 distinctive steel blue (#4a6b8a range) with texture --- */
+  --y-side-top: #4a6b82;
+  --y-side-bot: #2e4d61;
+  --y-side-edge: #1a3040;
+  --y-side-ink: #c5d5de;
+  --y-side-ink-dim: #7a9aac;
   --y-side-sel-top: #2f7fb0;
   --y-side-sel-bot: #1f5c85;
-  --y-side-neg: #ea8b7d;
+  --y-side-neg: #f08070;
 
   /* --- chart bars --- */
   --y-bar-track: #dcdcd8;
@@ -36,8 +36,8 @@
 
   /* --- chrome gradient (inspector head, budget header bg) --- */
   --y-chrome-top: #f2f2f0;
-  --y-chrome-bot: #e8e8e5;
-  --y-chrome-line: #c4c4bf;
+  --y-chrome-bot: #e6e6e3;
+  --y-chrome-line: #c2c2bd;
 
   /* --- brand --- */
   --y-blue: #2f7fb0;
@@ -59,12 +59,12 @@
   --y-grey-pill: #b3bbc0;
   --y-grey-pill-dk: #98a1a7;
 
-  /* --- table --- */
+  /* --- table: neutral greys matching YNAB4 (row-alt was too blue) --- */
   --y-row: #ffffff;
-  --y-row-alt: #f3f6f8;
+  --y-row-alt: #f4f4f2;
   --y-row-sel: #cfe3f2;
-  --y-master: #d4dde3;
-  --y-master-line: #b6c2ca;
+  --y-master: #d2d9de;
+  --y-master-line: #b4bfc8;
 
   --y-font: "Lucida Grande", "Lucida Sans Unicode", "Segoe UI", Tahoma, Helvetica,
     Arial, sans-serif;
@@ -77,12 +77,20 @@ body,
   height: 100%;
 }
 
+html {
+  /* YNAB4 ran at 12px base — restoring this density is the single
+     biggest fidelity improvement vs the browser's 16px default. */
+  font-size: 12px;
+}
+
 body {
   margin: 0;
   font-family: var(--y-font);
+  font-size: 1rem; /* = 12px */
   color: var(--y-ink);
   background: var(--y-app-bg);
-  -webkit-font-smoothing: antialiased;
+  /* Lucida Grande renders best with subpixel AA, matching YNAB4 */
+  -webkit-font-smoothing: subpixel-antialiased;
 }
 
 .y-font {
@@ -236,10 +244,21 @@ body {
 
 /* ---------- sidebar ---------- */
 .y-sidebar {
-  background: linear-gradient(var(--y-side-top), var(--y-side-bot));
+  /* YNAB4-authentic: saturated steel blue gradient + subtle diagonal
+     line texture (characteristic of Adobe AIR / skeuomorphic era) */
+  background-color: var(--y-side-bot);
+  background-image:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 3px,
+      rgba(0, 0, 0, 0.06) 3px,
+      rgba(0, 0, 0, 0.06) 4px
+    ),
+    linear-gradient(180deg, var(--y-side-top) 0%, var(--y-side-bot) 100%);
   border-right: 1px solid var(--y-side-edge);
   color: var(--y-side-ink);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.07);
 }
 .y-side-head {
   font-size: 10px;
@@ -249,6 +268,7 @@ body {
   color: var(--y-side-ink-dim);
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
   padding: 12px 12px 5px;
+  overflow: hidden;
 }
 .y-side-item {
   display: flex;
