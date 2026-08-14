@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Account } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { Icon, cx } from "@ynab/theme";
+import { Button, Icon, cx } from "@ynab/theme";
 
 export type View =
   | "budget"
@@ -168,16 +168,13 @@ export function Sidebar({
           );
         })}
 
-        <button
+        <Button
           onClick={onAddAccount}
-          className="mx-2 mt-2 inline-flex h-[24px] w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[3px] border border-[var(--y-green-dk)] text-[11px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_1px_1px_rgba(0,0,0,0.18)]"
-          style={{
-            background: "linear-gradient(var(--y-green-lt), var(--y-green))",
-            textShadow: "0 -1px 0 rgba(0,0,0,0.35)",
-          }}
+          variant="primary"
+          className="mx-2 mt-2 mb-3 h-[24px] w-[calc(100%-1rem)]"
         >
-          <Icon name="plus" size={11} /> Add Account
-        </button>
+          <Icon name="plus" size={11} color="#fff" /> Add Account
+        </Button>
       </div>
 
       <div className="y-divider opacity-[.12]" />
