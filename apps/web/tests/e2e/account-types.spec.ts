@@ -41,9 +41,8 @@ test("adds a Credit Card account under the Credit Cards group", async ({ page })
   await expect(modal.locator(".y-modal-head")).toHaveText("Add Account");
 
   await modal.locator("input").first().fill(name);
-  // The Type <select> is the first (and only) one in the modal
-  // (AccountModal.tsx:993-1003).
-  await modal.locator("select").first().selectOption("credit");
+  await modal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="credit"]').click();
   await modal.locator('input[inputmode="decimal"]').first().fill("-100.00");
   await modal
     .locator(".y-modal-foot")
@@ -83,7 +82,8 @@ test("adds an Off-Budget account under the Retirement group", async ({ page }) =
   await expect(modal.locator(".y-modal-head")).toHaveText("Add Account");
 
   await modal.locator("input").first().fill(name);
-  await modal.locator("select").first().selectOption("offbudget");
+  await modal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="offbudget"]').click();
   await modal.locator('input[inputmode="decimal"]').first().fill("1234.56");
   await modal
     .locator(".y-modal-foot")
@@ -129,7 +129,8 @@ test("Net Worth panel reflects a newly created Liquid account", async ({ page })
   await page.getByRole("button", { name: "Add Account" }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator("input").first().fill(name);
-  await modal.locator("select").first().selectOption("liquid");
+  await modal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="liquid"]').click();
   await modal.locator('input[inputmode="decimal"]').first().fill(String(startBalance));
   await modal
     .locator(".y-modal-foot")
@@ -175,7 +176,8 @@ test("renames an account via the edit pencil", async ({ page }) => {
   await page.getByRole("button", { name: "Add Account" }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator("input").first().fill(original);
-  await addModal.locator("select").first().selectOption("liquid");
+  await addModal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="liquid"]').click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("10.00");
   await addModal
     .locator(".y-modal-foot")

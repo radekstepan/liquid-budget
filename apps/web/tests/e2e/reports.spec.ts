@@ -85,7 +85,7 @@ test("Spending by Category tab renders the top spender with a percent bar", asyn
   // The seed's top spender is the AMEX Cobalt category.
   await expect(panel.getByText("AMEX Cobalt")).toBeVisible();
   // Percent labels now render without parenthesised percent (e.g. "54%").
-  await expect(panel.getByText(/\b\d+%/)).toBeVisible();
+  await expect(panel.getByText(/\b\d+%/).first()).toBeVisible();
   await expect(panel.locator(".y-bar-track").first()).toBeVisible();
 });
 

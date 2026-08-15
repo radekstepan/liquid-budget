@@ -34,17 +34,18 @@ test("year dropdown jumps to the same month in the chosen year", async ({ page }
   // Same MonthNav as the Budget view, so the picker is wired through
   // CalendarView.tsx:60-72 and shares the year+month selects.
   const picker = page.getByTestId("month-nav-picker");
-  const yearSelect = picker.getByLabel("Year", { exact: true });
-  await expect(yearSelect).toHaveValue("2026");
+  const yearSelect = picker.getByRole("button", { name: "Year" });
+  await expect(yearSelect).toHaveText("2026");
 
-  await yearSelect.selectOption("2028");
+  await yearSelect.click();
+  await page.locator('.y-dropdown [data-value="2028"]').click();
 
   const monthBadge = page
     .locator(".y-inspector")
     .locator("div.text-\\[12\\.5px\\].font-bold")
     .first();
   await expect(monthBadge).toHaveText("Jun 2028");
-  await expect(picker.getByLabel("Month", { exact: true })).toHaveValue("5");
+  await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
 });
 
 test("clicking an empty day opens the Add Transaction modal pre-dated to that day", async ({ page }) => {

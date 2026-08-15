@@ -175,11 +175,13 @@ test("split children render no ClearedFlag (status column is empty)", async ({ p
   // — so for a -$20 parent the children are also negative.
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-20");
-  const subCategorySelects = modal.locator("select").filter({
-    has: page.locator("option", { hasText: "Category…" }),
+  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
+    hasText: "Category…",
   });
-  await subCategorySelects.nth(0).selectOption({ index: 1 });
-  await subCategorySelects.nth(1).selectOption({ index: 2 });
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
   await allDecimals.nth(1).fill("-12");
   await allDecimals.nth(2).fill("-8");
   await modal.getByRole("button", { name: "Save Transaction" }).click();

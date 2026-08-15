@@ -265,6 +265,7 @@ export type SelectProps = Omit<
   options?: SelectOption[];
   children?: React.ReactNode;
   ariaLabel?: string;
+  "aria-label"?: string;
   disabled?: boolean;
   size?: "sm" | "md" | "lg";
   /**
@@ -282,11 +283,13 @@ export const Select: React.FC<SelectProps> = ({
   children,
   className,
   ariaLabel,
+  "aria-label": ariaLabelAttr,
   disabled,
   size = "md",
   searchable = false,
   ...rest
 }) => {
+  const labelForAria = ariaLabel ?? ariaLabelAttr;
   const items = useMemo<DropdownItem[]>(
     () => {
       const fromChildren = childrenToItems(children);
@@ -514,7 +517,7 @@ export const Select: React.FC<SelectProps> = ({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={ariaLabel}
+        aria-label={labelForAria}
         disabled={disabled}
         onClick={() => !disabled && setOpen((o) => !o)}
         onKeyDown={onKeyDownTrigger}

@@ -27,8 +27,8 @@ test("adds a new liquid account and renders it under Budget Accounts", async ({ 
 
   // Account Name (autofocuses — Modals.tsx:466).
   await modal.locator("input").first().fill(name);
-  // Type is the second <select> in the modal.
-  await modal.locator("select").first().selectOption("liquid");
+  await modal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="liquid"]').click();
   await modal.locator('input[inputmode="decimal"]').first().fill("250.00");
   await modal.locator(".y-modal-foot").getByRole("button", { name: "Add Account" }).click();
 
@@ -67,7 +67,8 @@ test("deletes an account after accepting the confirm dialog", async ({ page }) =
   await page.getByRole("button", { name: "Add Account" }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator("input").first().fill(name);
-  await addModal.locator("select").first().selectOption("liquid");
+  await addModal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="liquid"]').click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("1.00");
   await addModal
     .locator(".y-modal-foot")
@@ -75,16 +76,35 @@ test("deletes an account after accepting the confirm dialog", async ({ page }) =
     .click();
   await expect(addModal).toBeHidden();
 
-  // Set up the dialog handler before clicking delete
-  // (Sidebar.tsx:158 calls window.confirm).
-  page.on("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: `Delete account ${name}` }).click({ force: true });
+  // The trash button was removed from the sidebar. Deletion now goes
+  // through the Edit Account modal: hover-reveal the edit pencil
+  // (Sidebar.tsx), open the modal, click "Delete account" to enter the
+  // confirm panel, then "Yes, delete it" to finalise.
+  await page
+    .getByRole("button", { name: `Edit account ${name}` })
+    .click({ force: true });
+
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.locator(".y-modal-head")).toHaveText("Edit Account");
+
+  // Step 1: enter the confirm panel.
+  await editModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Delete account" })
+    .click();
+  await expect(editModal.locator(".y-modal-head")).toContainText("Delete");
+
+  // Step 2: confirm the deletion.
+  await editModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Yes, delete it" })
+    .click();
+  await expect(editModal).toBeHidden();
 
   // The account row is a button whose accessible name is
-  // "<name> <balance>"; the Edit/Delete buttons have aria-labels
-  // starting with "Edit account <name>" / "Delete account <name>",
+  // "<name> <balance>"; the Edit button has aria-label "Edit account <name>",
   // so anchor the regex with `^` to match only the row.
   await expect(
     page.getByRole("button", { name: new RegExp(`^${name} `) })
-  ).toBeHidden();
+  ).toHaveCount(0);
 });

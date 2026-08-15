@@ -38,11 +38,13 @@ test("creates a transfer between two accounts", async ({ page }) => {
   // Negative amount = outflow from source.
   await modal.locator('input[inputmode="decimal"]').first().fill("-75.00");
   // Pick a destination account.
-  const destSelect = modal.getByRole("combobox", { name: /transfer to/i });
-  const options = await destSelect.locator("option").allTextContents();
-  expect(options.length).toBeGreaterThan(1);
-  const destName = options[1]!;
-  await destSelect.selectOption({ label: destName });
+  const destTrigger = modal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
+  await destTrigger.click();
+  const options = page.locator('.y-dropdown button[role="option"]');
+  await expect(options.first()).toBeVisible();
+  const destOption = options.nth(1);
+  const destName = (await destOption.textContent())?.trim()!;
+  await destOption.click();
 
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -72,12 +74,13 @@ test("creates a 2-way split and renders the indented children", async ({ page })
   await allDecimals.nth(0).fill("-100");
 
   // Pick categories and amounts for the two sub-rows.
-  // Sub-row category selects are the only comboboxes with "Category…" as the first option.
-  const subCategorySelects = modal.locator("select").filter({
-    has: page.locator("option", { hasText: "Category…" }),
+  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
+    hasText: "Category…",
   });
-  await subCategorySelects.nth(0).selectOption({ index: 1 });
-  await subCategorySelects.nth(1).selectOption({ index: 2 });
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Children carry their typed sign and must sum to the signed parent
   // total (mixed-sign validation): -60 + -40 = -100.
@@ -109,11 +112,13 @@ test("split editor disables save when children don't sum to the parent total", a
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-100");
 
-  const subCategorySelects = modal.locator("select").filter({
-    has: page.locator("option", { hasText: "Category…" }),
+  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
+    hasText: "Category…",
   });
-  await subCategorySelects.nth(0).selectOption({ index: 1 });
-  await subCategorySelects.nth(1).selectOption({ index: 2 });
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Off by a cent.
   await allDecimals.nth(1).fill("60");

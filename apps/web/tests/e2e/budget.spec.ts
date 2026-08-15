@@ -62,12 +62,13 @@ test("year dropdown jumps to the same month in the chosen year", async ({ page }
   // (data-testid="month-nav-picker") so the surrounding prev/next
   // buttons don't match.
   const picker = page.getByTestId("month-nav-picker");
-  const yearSelect = picker.getByLabel("Year", { exact: true });
-  await expect(yearSelect).toHaveValue("2026");
+  const yearSelect = picker.getByRole("button", { name: "Year" });
+  await expect(yearSelect).toHaveText("2026");
 
   // One click jumps to a different year — replaces the multi-click
   // prev-arrow flow for any in-range year.
-  await yearSelect.selectOption("2028");
+  await yearSelect.click();
+  await page.locator('.y-dropdown [data-value="2028"]').click();
 
   // Inspector reflects the new month; the Month and Year selects stay
   // in sync (month preserved, year updated).
@@ -76,27 +77,28 @@ test("year dropdown jumps to the same month in the chosen year", async ({ page }
     .locator("div.text-\\[12\\.5px\\].font-bold")
     .first();
   await expect(monthBadge).toHaveText("Jun 2028");
-  await expect(yearSelect).toHaveValue("2028");
-  await expect(picker.getByLabel("Month", { exact: true })).toHaveValue("5");
+  await expect(yearSelect).toHaveText("2028");
+  await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
 });
 
 test("month dropdown jumps to the chosen month in the current year", async ({ page }) => {
   const picker = page.getByTestId("month-nav-picker");
-  const monthSelect = picker.getByLabel("Month", { exact: true });
-  const yearSelect = picker.getByLabel("Year", { exact: true });
+  const monthSelect = picker.getByRole("button", { name: "Month" });
+  const yearSelect = picker.getByRole("button", { name: "Year" });
 
-  await expect(monthSelect).toHaveValue("5"); // June is index 5
-  await expect(yearSelect).toHaveValue("2026");
+  await expect(monthSelect).toHaveText("June"); // June is index 5
+  await expect(yearSelect).toHaveText("2026");
 
-  await monthSelect.selectOption("2"); // March is index 2
+  await monthSelect.click();
+  await page.locator('.y-dropdown [data-value="2"]').click(); // March is index 2
 
   const monthBadge = page
     .locator(".y-inspector")
     .locator("div.text-\\[12\\.5px\\].font-bold")
     .first();
   await expect(monthBadge).toHaveText("Mar 2026");
-  await expect(monthSelect).toHaveValue("2");
-  await expect(yearSelect).toHaveValue("2026");
+  await expect(monthSelect).toHaveText("March");
+  await expect(yearSelect).toHaveText("2026");
 });
 
 test("year dropdown range is derived from data and includes a future cap", async ({ page }) => {
@@ -104,14 +106,16 @@ test("year dropdown range is derived from data and includes a future cap", async
   // extend at least 5 years into the future so users can budget ahead
   // (BudgetApp.tsx derives {minYear, maxYear} from data + thisYear + 5).
   const picker = page.getByTestId("month-nav-picker");
-  const yearSelect = picker.getByLabel("Year", { exact: true });
-  const optionsText = await yearSelect.locator("option").allTextContents();
+  const yearSelect = picker.getByRole("button", { name: "Year" });
+  await yearSelect.click();
+  const optionsText = await page.locator('.y-dropdown .y-dropdown-item-label').allTextContents();
   expect(optionsText).toContain("2026");
   const years = optionsText.map((t) => Number(t)).filter((n) => Number.isFinite(n));
   const maxOption = Math.max(...years);
   // The current year is 2026 (per today's date and the seed); the
   // future cap adds 5 more years for a max of 2031.
   expect(maxOption).toBeGreaterThanOrEqual(2031);
+  await page.keyboard.press("Escape");
 });
 
 test("Group options menu collapses and expands all groups", async ({ page }) => {
