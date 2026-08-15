@@ -300,10 +300,10 @@ export function BudgetAppShell() {
             className="h-8 w-8 animate-spin rounded-full"
             style={{
               border: "2px solid var(--y-line)",
-              borderTopColor: "var(--y-blue)",
+              borderTopColor: "var(--y-side-ink)",
             }}
           />
-          <span className="y-hint">Loading budget…</span>
+          <span style={{ color: "var(--y-side-ink)" }}>Loading budget…</span>
         </div>
       </div>
     );
