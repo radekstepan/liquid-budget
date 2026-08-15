@@ -14,11 +14,13 @@ export type View =
   | "recurring";
 
 type NavItem = { key: View; label: string; icon: string };
-const NAV: NavItem[] = [
+const NAV_TOP: NavItem[] = [
   { key: "budget", label: "Budget", icon: "budget" },
   { key: "reports", label: "Reports", icon: "chart" },
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "projections", label: "Projections", icon: "projections" },
+];
+const NAV_BOTTOM: NavItem[] = [
   { key: "transactions", label: "All Transactions", icon: "swap" },
   { key: "recurring", label: "Recurring Transactions", icon: "clock" },
 ];
@@ -75,12 +77,11 @@ export function Sidebar({
           </div>
         </div>
       </div>
-      <div className="y-divider opacity-[.12]" />
+      <div className="y-side-section-divider" style={{ marginTop: "1px" }} />
 
       <nav className="px-0 pt-1">
-        {NAV.map(({ key, label, icon }) => {
-          const active =
-            view === key && !(view === "transactions" && selectedAccountId != null);
+        {NAV_TOP.map(({ key, label, icon }) => {
+          const active = view === key;
           return (
             <button
               key={key}
@@ -95,18 +96,42 @@ export function Sidebar({
       </nav>
 
       <div className="flex-1 overflow-y-auto y-scroll y-scroll--dark">
+        {/* All Accounts row — highlighted when transactions view with no account filter */}
+        <button
+          onClick={() => setView("transactions")}
+          className={cx(
+            "y-side-item y-side-nav",
+            view === "transactions" && selectedAccountId == null && "is-sel"
+          )}
+        >
+          <Icon name="bank" size={14} />
+          <span className="truncate flex-1">All Accounts</span>
+          <span
+            className="y-side-amt"
+            style={{
+              color:
+                liquidTotal + creditTotal < 0 ? "var(--y-side-neg)" : undefined,
+              fontWeight: 500,
+            }}
+          >
+            {fmt(liquidTotal + creditTotal)}
+          </span>
+        </button>
         {groups.map((label) => {
           const list = accountsFor(label);
           if (list.length === 0) return null;
           const isCollapsed = collapsed[label];
           const total = totalFor(label);
           return (
-            <div key={label} className="mb-1">
+            <div key={label} className="y-side-group">
               <button
                 onClick={() => setCollapsed((c) => ({ ...c, [label]: !c[label] }))}
-                className="y-side-head flex items-center w-full"
+                className="y-side-head flex items-center gap-2 w-full"
               >
-                <span className={cx("y-tri mr-1", !isCollapsed && "is-open")} />
+                <span
+                  className={cx("y-tri mr-2", !isCollapsed && "is-open")}
+                  style={{ borderLeftColor: "var(--y-side-sel-top)", flexShrink: 0 }}
+                />
                 <span className="truncate min-w-0 flex-1">{label}</span>
                 <span
                   className="y-side-amt"
@@ -168,6 +193,24 @@ export function Sidebar({
           );
         })}
 
+        {/* Bottom nav items (Transactions, Recurring) */}
+        <div className="pt-2 pb-3">
+        {NAV_BOTTOM.map(({ key, label, icon }) => {
+          const active =
+            view === key && !(key === "transactions" && selectedAccountId != null);
+          return (
+            <button
+              key={key}
+              onClick={() => setView(key)}
+              className={cx("y-side-item y-side-nav", active && "is-sel")}
+            >
+              <Icon name={icon} size={14} />
+              {label}
+            </button>
+          );
+        })}
+        </div>
+        
         <Button
           onClick={onAddAccount}
           variant="primary"
@@ -177,23 +220,14 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="y-divider opacity-[.12]" />
-      <div className="p-2">
-        <div
-          className="rounded-[4px] p-2.5"
-          style={{
-            background: "rgba(8,18,28,0.62)",
-            border: "1px solid rgba(255,255,255,0.14)",
-            boxShadow:
-              "0 1px 0 rgba(255,255,255,0.08) inset, 0 6px 14px rgba(0,0,0,0.32)",
-          }}
-        >
+      <div className="y-side-section-divider" />
+      <div className="y-side-nw">
           <button
             onClick={() => setNwOpen((o) => !o)}
             className="flex w-full items-center gap-1.5"
             style={{ color: "var(--y-side-ink)" }}
           >
-            <span className={cx("y-tri", nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-ink-dim)" }} />
+            <span className={cx("y-tri mr-1.5", nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-sel-top)" }} />
             <span className="text-[11px] font-bold">Net Worth</span>
             <span className="y-side-amt text-white" style={{ fontWeight: 700 }}>
               {fmt(netWorth)}
@@ -220,7 +254,6 @@ export function Sidebar({
             </div>
           )}
         </div>
-      </div>
     </aside>
   );
 }

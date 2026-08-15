@@ -296,9 +296,26 @@ body::after {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--y-side-ink-dim);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 0, 0, 0.18);
-  padding: 12px 12px 5px;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
+  padding: 6px 10px 5px;
   overflow: hidden;
+  text-align: left;
+  /* No background — the parent y-side-group card provides it */
+}
+.y-side-group {
+  /* Each account section is a dark-glass card over the linen pattern */
+  margin: 6px 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 1px 3px rgba(0, 0, 0, 0.18);
+}
+/* Triangle inside sidebar groups uses light ink so it's visible on dark cards */
+.y-side-group .y-tri {
+  border-left-color: var(--y-side-sel-top);
 }
 .y-side-item {
   display: flex;
@@ -308,23 +325,19 @@ body::after {
   padding: 5px 12px;
   font-size: 12px;
   color: var(--y-side-ink);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.12);
-  border-top: 1px solid transparent;
-  border-bottom: 1px solid transparent;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
   cursor: pointer;
   text-align: left;
+  /* No border-top/bottom — avoids visual artifacts on selected state */
 }
 .y-side-item:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.15);
 }
 .y-side-item.is-sel {
-  background: linear-gradient(var(--y-side-sel-top), var(--y-side-sel-bot));
-  border-top-color: rgba(255, 255, 255, 0.22);
-  border-bottom-color: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.30);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.15), inset 0 -1px 0 rgba(0, 0, 0, 0.15);
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset,
-    0 1px 3px rgba(0, 0, 0, 0.35) inset;
 }
 .y-side-nav {
   font-size: 13px;
@@ -336,6 +349,23 @@ body::after {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.y-side-section-divider {
+  height: 1px;
+  margin: 3px 0;
+  background: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.y-side-nw {
+  /* Net Worth card — same dark glass language as account groups */
+  margin: 6px;
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(0, 0, 0, 0.32);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 2px 6px rgba(0, 0, 0, 0.22);
 }
 
 /* ---------- buttons (Adobe AIR bevel) ---------- */
