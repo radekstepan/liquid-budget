@@ -48,7 +48,7 @@ export const MonthNav: React.FC<{
     <div className="flex items-center gap-2">
       <button
         type="button"
-        className="y-btn y-btn--sm"
+        className="y-btn y-btn--sm y-monthnav-btn"
         aria-label="Previous month"
         onClick={onPrev}
       >
@@ -92,7 +92,7 @@ export const MonthNav: React.FC<{
       )}
       <button
         type="button"
-        className="y-btn y-btn--sm"
+        className="y-btn y-btn--sm y-monthnav-btn"
         aria-label="Next month"
         onClick={onNext}
       >

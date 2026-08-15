@@ -27,7 +27,7 @@ async function waitForReady(page: Page) {
 
 async function gotoRecurring(page: Page) {
   await page
-    .getByRole("button", { name: "Recurring Transactions", exact: true })
+    .getByRole("button", { name: "Recurring", exact: true })
     .click();
   await expect(
     page.getByText("Recurring Transactions", { exact: true }).first()

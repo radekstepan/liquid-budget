@@ -11,7 +11,7 @@ const accounts: Account[] = [
 ];
 
 describe("Sidebar", () => {
-  it("renders all 6 nav buttons", () => {
+  it("renders all 5 nav buttons", () => {
     render(
       <Sidebar
         view="budget"
@@ -26,8 +26,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /calendar/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /all transactions/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /recurring transactions/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /recurring/i })).toBeInTheDocument();
   });
 
   it("calls setView when a nav button is clicked", () => {
@@ -108,7 +107,7 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /reconcile account cash/i })).not.toBeInTheDocument();
   });
 
-  it("does not highlight the 'All Transactions' nav when an account is selected", () => {
+  it("does not highlight the 'Accounts' nav when an account is selected", () => {
     render(
       <Sidebar
         view="transactions"
@@ -119,12 +118,12 @@ describe("Sidebar", () => {
         onAddAccount={() => {}}
       />
     );
-    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    const navAll = screen.getByRole("button", { name: /accounts/i });
     expect(navAll.className).not.toMatch(/\bis-sel\b/);
     expect(screen.getByRole("button", { name: /cash/i })).toHaveClass(/is-sel/);
   });
 
-  it("highlights the 'All Transactions' nav when view=transactions and no account is selected", () => {
+  it("highlights the 'Accounts' nav when view=transactions and no account is selected", () => {
     render(
       <Sidebar
         view="transactions"
@@ -135,7 +134,7 @@ describe("Sidebar", () => {
         onAddAccount={() => {}}
       />
     );
-    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    const navAll = screen.getByRole("button", { name: /accounts/i });
     expect(navAll.className).toMatch(/\bis-sel\b/);
   });
 });

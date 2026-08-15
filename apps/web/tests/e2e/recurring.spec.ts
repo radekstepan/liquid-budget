@@ -14,7 +14,7 @@ async function waitForReady(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await waitForReady(page);
-  await page.getByRole("button", { name: "Recurring Transactions", exact: true }).click();
+  await page.getByRole("button", { name: "Recurring", exact: true }).click();
   await expect(page.getByText("Recurring Transactions", { exact: true }).first()).toBeVisible();
 });
 

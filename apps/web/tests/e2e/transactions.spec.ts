@@ -15,7 +15,7 @@ async function waitForReady(page: Page) {
 }
 
 async function gotoAllTransactions(page: Page) {
-  await page.getByRole("button", { name: "All Transactions", exact: true }).click();
+  await page.getByRole("button", { name: /^Accounts/ }).click();
   await expect(
     page.getByText("All Transactions", { exact: true }).first()
   ).toBeVisible();
@@ -74,7 +74,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(allRows).toHaveCount(totalBefore);
 });
 
-test("selecting a sidebar account marks the row and scopes the register; All Transactions nav clears it", async ({ page }) => {
+test("selecting a sidebar account marks the row and scopes the register; Accounts nav clears it", async ({ page }) => {
   // The toolbar title (a <span>) shows "All Transactions" by default
   // and the account name when an account row is selected
   // (TransactionsView.tsx).
@@ -96,10 +96,10 @@ test("selecting a sidebar account marks the row and scopes the register; All Tra
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
-  // Re-select, then click the top-level "All Transactions" nav to clear.
+  // Re-select, then click the top-level "Accounts" nav to clear.
   await accountRow.click();
   await expect(accountRow).toHaveClass(/is-sel/);
-  await page.getByRole("button", { name: "All Transactions", exact: true }).click();
+  await page.getByRole("button", { name: /^Accounts/ }).click();
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 });

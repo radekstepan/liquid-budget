@@ -19,7 +19,7 @@ async function waitForReady(page: Page) {
 }
 
 async function gotoAllTransactions(page: Page) {
-  await page.getByRole("button", { name: "All Transactions", exact: true }).click();
+  await page.getByRole("button", { name: /^Accounts/ }).click();
   await expect(
     page.getByText("All Transactions", { exact: true }).first()
   ).toBeVisible();
