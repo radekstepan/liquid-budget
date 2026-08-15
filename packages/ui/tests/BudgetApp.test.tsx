@@ -74,7 +74,7 @@ describe("BudgetApp", () => {
   it("renders Sidebar, Inspector, and the default Budget view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    expect(screen.getByText("All Transactions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^accounts/i })).toBeInTheDocument();
     expect(screen.getAllByText("To Be Budgeted").length).toBeGreaterThan(0);
     // The single-month budget view has a MonthNav with prev/next buttons
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
@@ -84,7 +84,7 @@ describe("BudgetApp", () => {
   it("switches view when a sidebar nav item is clicked", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /recurring transactions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /recurring/i }));
     expect(
       screen.getByRole("button", { name: /add recurring/i })
     ).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("BudgetApp", () => {
   it("opens the Add Transaction modal when triggered from the Transactions view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /all transactions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
     fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
     expect(screen.getAllByText("Add Transaction").length).toBeGreaterThan(0);
   });
@@ -101,7 +101,7 @@ describe("BudgetApp", () => {
   it("calls api.addTransaction with the form values when the modal is saved", async () => {
     const { api, calls } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /all transactions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
     fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
@@ -168,7 +168,7 @@ describe("BudgetApp", () => {
     expect(calls.some((c) => c.method === "deleteAccount" && c.args[0] === 1)).toBe(true);
   });
 
-  it("does not highlight 'All Transactions' when an account is selected", () => {
+  it("does not highlight 'Accounts' when an account is selected", () => {
     const { api } = makeApi();
     const seed = makeSeedBudgetData();
     render(<BudgetApp data={seed} api={api} />);
@@ -181,11 +181,11 @@ describe("BudgetApp", () => {
     )!;
     fireEvent.click(accountRow);
 
-    const navAll = screen.getByRole("button", { name: /all transactions/i });
+    const navAll = screen.getByRole("button", { name: /^accounts/i });
     expect(navAll.className).not.toMatch(/\bis-sel\b/);
 
     // Toggling the same account again (now in the filtered view) clears
-    // the filter and re-highlights "All Transactions".
+    // the filter and re-highlights "Accounts".
     fireEvent.click(accountRow);
     expect(navAll.className).toMatch(/\bis-sel\b/);
   });

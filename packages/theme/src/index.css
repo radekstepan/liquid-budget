@@ -408,6 +408,9 @@ body::after {
   min-height: 19px;
   padding: 2px 7px;
 }
+.y-monthnav-btn {
+  min-height: 23px;
+}
 .y-btn--lg {
   font-size: 13px;
   min-height: 29px;

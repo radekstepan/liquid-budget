@@ -16,18 +16,22 @@ test.beforeEach(async ({ page }) => {
   await waitForReady(page);
 });
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { label: string; viewToolbar: string | RegExp; match?: string | RegExp }[] = [
   { label: "Budget", viewToolbar: /Master Category/ },
   { label: "Reports", viewToolbar: "Reports" },
   { label: "Calendar", viewToolbar: "Calendar" },
   { label: "Projections", viewToolbar: "Projections" },
-  { label: "All Transactions", viewToolbar: "All Transactions" },
-  { label: "Recurring Transactions", viewToolbar: "Recurring Transactions" },
+  // The Accounts button's accessible name includes its running balance
+  // (Sidebar.tsx y-side-amt), so it needs a regex match.
+  { label: "Accounts", match: /^Accounts/, viewToolbar: "All Transactions" },
+  { label: "Recurring", viewToolbar: "Recurring Transactions" },
 ];
 
-for (const { label, viewToolbar } of NAV_ITEMS) {
+for (const { label, match, viewToolbar } of NAV_ITEMS) {
   test(`navigates to ${label} view via sidebar`, async ({ page }) => {
-    await page.getByRole("button", { name: label, exact: true }).click();
+    await page
+      .getByRole("button", { name: match ?? label, exact: match ? false : true })
+      .click();
     // BudgetView shows the "Master Category" button in its toolbar
     // (BudgetView.tsx:138-140). Every other view puts a plain text
     // title in the toolbar (e.g. ReportsView.tsx:140).
@@ -47,9 +51,8 @@ test("clicking a sidebar account deep-links to its transaction filter", async ({
 
   // The TransactionsView toolbar swaps its title from "All Transactions"
   // to the account name when filtered (TransactionsView.tsx:78-82). The
-  // sidebar nav button keeps saying "All Transactions" because the view
-  // is still the transactions view — so we target the toolbar title
-  // (a <span> with the bold class).
+  // sidebar "Accounts" nav keeps the view on transactions — so we
+  // target the toolbar title (a <span> with the bold class).
   const toolbarTitle = page.locator(".y-toolbar span.text-\\[13px\\]").first();
   await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
 });
