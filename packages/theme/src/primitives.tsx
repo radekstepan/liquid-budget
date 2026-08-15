@@ -174,6 +174,14 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
         <path d="M5.2 7.4h5.6M5.2 10h4" strokeWidth="1.2" strokeLinecap="round" />
       </>
     ),
+    bank: (
+      <>
+        <path d="M2 6.4h12M8 2.4l6 4H2l6-4z" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M4 6.4v5.2M7 6.4v5.2M10 6.4v5.2M13 6.4v5.2" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M2 11.6h12" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M1.5 13.6h13" strokeWidth="1.5" strokeLinecap="round" />
+      </>
+    ),
   };
   return (
     <svg
