@@ -140,11 +140,13 @@ test("adding a recurring Transfer renders the source → dest hint", async ({ pa
   // The Transfer-mode payee input is the auto-generated one
   // (Modals.tsx:834) — leave it blank so the server fills in
   // "Transfer : <dest>".
-  const destSelect = modal.getByRole("combobox", { name: /transfer to/i });
-  const destOptions = await destSelect.locator("option").allTextContents();
-  expect(destOptions.length).toBeGreaterThan(1);
-  const destName = destOptions[1]!;
-  await destSelect.selectOption({ label: destName });
+  const destTrigger = modal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
+  await destTrigger.click();
+  const options = page.locator('.y-dropdown button[role="option"]');
+  await expect(options.first()).toBeVisible();
+  const destOption = options.nth(1);
+  const destName = (await destOption.textContent())?.trim()!;
+  await destOption.click();
   await modal.getByRole("button", { name: "Save" }).click();
   await expect(modal).toBeHidden();
 
@@ -190,11 +192,13 @@ test("adding a recurring Split enables Save when children balance", async ({ pag
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-30");
 
-  const subCategorySelects = modal.locator("select").filter({
-    has: page.locator("option", { hasText: "Category…" }),
+  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
+    hasText: "Category…",
   });
-  await subCategorySelects.nth(0).selectOption({ index: 1 });
-  await subCategorySelects.nth(1).selectOption({ index: 2 });
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
+  await subCategoryTriggers.nth(0).click();
+  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Off by a cent — Save should be disabled (Modals.tsx:720).
   await allDecimals.nth(1).fill("-20");

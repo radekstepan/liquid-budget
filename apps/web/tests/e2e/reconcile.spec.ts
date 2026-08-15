@@ -87,14 +87,9 @@ test.describe("reconcile flow", () => {
     // a category dropdown and a "Mark for adjustment" button.
     await expect(modal.getByText("Absorb the difference")).toBeVisible();
 
-    // Pick a non-CC-payment category. The select element is the
-    // only one inside the modal.
-    const categorySelect = modal.locator("select").last();
-    // First eligible option (skip the placeholder).
-    const options = await categorySelect.locator("option").allTextContents();
-    expect(options.length).toBeGreaterThan(0);
-    // The dropdown has a default; just confirm it has a value.
-    expect(await categorySelect.inputValue()).toBeTruthy();
+    // Pick a non-CC-payment category. The select trigger is inside the modal.
+    const categorySelect = modal.locator(".y-select-trigger").last();
+    await expect(categorySelect).toBeVisible();
 
     // Acknowledge the diff by clicking "Mark for adjustment" — the
     // modal's primary button only enables once the user signals
