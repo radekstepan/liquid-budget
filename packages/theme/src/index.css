@@ -20,15 +20,15 @@
   --y-row-hover: #eef6fb;
   --y-master-hover: #c8d3da;
 
-  /* --- sidebar: YNAB4 distinctive steel blue (#4a6b8a range) with texture --- */
-  --y-side-top: #4a6b82;
-  --y-side-bot: #2e4d61;
+  /* --- sidebar: YNAB4 cyan-blue field (#2b95c4 family) + faint linen weave --- */
+  --y-side-top: #2e99c7;
+  --y-side-bot: #2b95c4;
   --y-side-edge: #1a3040;
-  --y-side-ink: #c5d5de;
-  --y-side-ink-dim: #7a9aac;
-  --y-side-sel-top: #2f7fb0;
-  --y-side-sel-bot: #1f5c85;
-  --y-side-neg: #f08070;
+  --y-side-ink: #e3edf3;
+  --y-side-ink-dim: #c6dae3;
+  --y-side-sel-top: #4eaad5;
+  --y-side-sel-bot: #2372a4;
+  --y-side-neg: #ff9d8b;
 
   /* --- chart bars --- */
   --y-bar-track: #dcdcd8;
@@ -88,9 +88,40 @@ body {
   font-family: var(--y-font);
   font-size: 1rem; /* = 12px */
   color: var(--y-ink);
-  background: var(--y-app-bg);
+  /* Page-wide YNAB4 cyan-blue field; the linen weave lives on
+     ::before / ::after so it stays put when content scrolls. */
+  background-color: #2b95c4;
+  background-image: linear-gradient(180deg, #2e99c7 0%, #2b95c4 100%);
   /* Lucida Grande renders best with subpixel AA, matching YNAB4 */
   -webkit-font-smoothing: subpixel-antialiased;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+body::before {
+  /* Main linen pass — long, broken horizontal & vertical fibres blended
+     and contrast-compressed. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-main' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.007 0.48' numOctaves='2' seed='17' stitchTiles='stitch' result='horizontal'/><feTurbulence type='fractalNoise' baseFrequency='0.44 0.009' numOctaves='2' seed='41' stitchTiles='stitch' result='vertical'/><feBlend in='horizontal' in2='vertical' mode='multiply' result='woven'/><feComponentTransfer in='woven'><feFuncR type='linear' slope='.52' intercept='.24'/><feFuncG type='linear' slope='.52' intercept='.24'/><feFuncB type='linear' slope='.52' intercept='.24'/></feComponentTransfer></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-main)'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100vw 100vh;
+  opacity: 0.22;
+  mix-blend-mode: soft-light;
+}
+
+body::after {
+  /* Finer pass — breaks up any detectable repeat. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-fine-filter' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.018 0.72' numOctaves='1' seed='8' result='a'/><feTurbulence type='fractalNoise' baseFrequency='0.68 0.020' numOctaves='1' seed='29' result='b'/><feBlend in='a' in2='b' mode='multiply'/></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-fine-filter)'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100vw 100vh;
+  opacity: 0.085;
+  mix-blend-mode: overlay;
 }
 
 .y-font {
@@ -244,21 +275,20 @@ body {
 
 /* ---------- sidebar ---------- */
 .y-sidebar {
-  /* YNAB4-authentic: saturated steel blue gradient + subtle diagonal
-     line texture (characteristic of Adobe AIR / skeuomorphic era) */
-  background-color: var(--y-side-bot);
-  background-image:
-    repeating-linear-gradient(
-      -45deg,
-      transparent,
-      transparent 3px,
-      rgba(0, 0, 0, 0.06) 3px,
-      rgba(0, 0, 0, 0.06) 4px
-    ),
-    linear-gradient(180deg, var(--y-side-top) 0%, var(--y-side-bot) 100%);
+  /* The body's cyan-blue + linen weave shows through entirely; the
+     sidebar itself is just a faint vertical dark vignette (~6% top
+     → ~18% bottom) to give text enough contrast, plus a thin right
+     edge. No pattern is rendered on the sidebar itself — there is
+     only one linen layer on the page (the body's), so the eye reads
+     the weave as a continuous background. */
+  background: linear-gradient(
+    180deg,
+    rgba(8, 22, 32, 0.06) 0%,
+    rgba(8, 22, 32, 0.18) 100%
+  );
   border-right: 1px solid var(--y-side-edge);
   color: var(--y-side-ink);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.07);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
 }
 .y-side-head {
   font-size: 10px;
@@ -266,7 +296,7 @@ body {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--y-side-ink-dim);
-  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 0, 0, 0.18);
   padding: 12px 12px 5px;
   overflow: hidden;
 }
@@ -278,7 +308,7 @@ body {
   padding: 5px 12px;
   font-size: 12px;
   color: var(--y-side-ink);
-  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.45);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.12);
   border-top: 1px solid transparent;
   border-bottom: 1px solid transparent;
   cursor: pointer;
@@ -293,7 +323,8 @@ body {
   border-bottom-color: rgba(0, 0, 0, 0.4);
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35) inset;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset,
+    0 1px 3px rgba(0, 0, 0, 0.35) inset;
 }
 .y-side-nav {
   font-size: 13px;
