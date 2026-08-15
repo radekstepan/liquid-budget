@@ -182,9 +182,10 @@ export function Sidebar({
         <div
           className="rounded-[4px] p-2.5"
           style={{
-            background: "rgba(0,0,0,0.25)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "0 1px 0 rgba(255,255,255,0.04) inset",
+            background: "rgba(8,18,28,0.62)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            boxShadow:
+              "0 1px 0 rgba(255,255,255,0.08) inset, 0 6px 14px rgba(0,0,0,0.32)",
           }}
         >
           <button

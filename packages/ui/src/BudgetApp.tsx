@@ -322,7 +322,7 @@ export function BudgetApp({
   }, [modal, data.accounts, data.transactions]);
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: "var(--y-app-bg)" }}>
+    <div className="flex h-screen overflow-hidden" style={{ background: "transparent" }}>
       <Sidebar
         view={view}
         setView={navigateView}

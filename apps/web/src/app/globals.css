@@ -8,12 +8,8 @@
   box-sizing: border-box;
 }
 
-body {
-  background: var(--y-app-bg);
-  color: var(--y-ink);
-  font-family: var(--y-font);
-  font-size: 1rem;
-}
+/* body background is owned by packages/theme (cyan-blue + linen) — keep
+   this layer free of a `background` rule so the theme body shows through. */
 
 .tnum {
   font-variant-numeric: tabular-nums;
