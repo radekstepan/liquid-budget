@@ -331,8 +331,8 @@ body {
 .y-btn:hover {
   background: linear-gradient(#ffffff, #eceded);
 }
-.y-btn:active:not(.y-btn--primary):not(.y-btn--danger),
-.y-btn.is-on:not(.y-btn--primary):not(.y-btn--danger) {
+.y-btn:active:not(.y-btn--primary):not(.y-btn--danger):not(.y-btn--blue),
+.y-btn.is-on:not(.y-btn--primary):not(.y-btn--danger):not(.y-btn--blue) {
   background: linear-gradient(#cfd2d3, #e5e6e5);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.22) inset;
   border-color: #8e9396;
