@@ -148,19 +148,27 @@ describe("transactions queries", () => {
       expect(ops).toEqual(["select", "insert", "update", "update"]);
     });
 
-    it("rejects a row that is both a transfer and a split child", async () => {
-      await expect(
-        createTransaction(mock.db, {
-          accountId: 1,
-          categoryId: 10,
-          date: "2026-07-01",
-          payee: "X",
-          memo: "",
-          amount: -10,
-          transferAccountId: 2,
-          parentId: 5,
-        })
-      ).rejects.toBeInstanceOf(TransactionError);
+    it("allows a row that is both a transfer and a split child", async () => {
+      mock.respondWith("insert:transactions", [
+        { id: 88, accountId: 1, transferAccountId: 2, parentId: 5, amount: -10 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      const row = await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Transfer : Savings",
+        memo: "",
+        amount: -10,
+        transferAccountId: 2,
+        parentId: 5,
+      });
+      expect(row).toMatchObject({
+        accountId: 1,
+        transferAccountId: 2,
+        parentId: 5,
+        amount: -10,
+      });
     });
 
     it("rejects direct creation of a reconciled transaction", async () => {
@@ -185,11 +193,20 @@ describe("transactions queries", () => {
   });
 
   describe("assertSplitsBalanced", () => {
-    it("accepts a balanced split", () => {
+    it("accepts a balanced split with categories", () => {
       expect(() =>
         assertSplitsBalanced(-100, [
           { categoryId: 1, amount: -60 },
           { categoryId: 2, amount: -40 },
+        ])
+      ).not.toThrow();
+    });
+
+    it("accepts a balanced split with transfer subtransactions", () => {
+      expect(() =>
+        assertSplitsBalanced(-100, [
+          { categoryId: 1, amount: -60 },
+          { transferAccountId: 2, amount: -40 },
         ])
       ).not.toThrow();
     });
@@ -200,13 +217,22 @@ describe("transactions queries", () => {
       ).toThrow(TransactionError);
     });
 
-    it("rejects a missing category", () => {
+    it("rejects a missing category or transfer account", () => {
       expect(() =>
         assertSplitsBalanced(-50, [
           { categoryId: 1, amount: -30 },
           { categoryId: 0, amount: -20 },
         ])
-      ).toThrow(/must have a category/);
+      ).toThrow(/must have a category or transfer account/);
+    });
+
+    it("rejects a sub-transaction with both category and transfer account", () => {
+      expect(() =>
+        assertSplitsBalanced(-50, [
+          { categoryId: 1, amount: -30 },
+          { categoryId: 2, transferAccountId: 3, amount: -20 },
+        ])
+      ).toThrow(/cannot have both a category and transfer account/);
     });
 
     it("rejects an off-by-cent mismatch", () => {

@@ -163,7 +163,16 @@ describe("validateSubTransactions", () => {
     ).toMatch(/at least two/i);
   });
 
-  it("rejects a missing-category child", () => {
+  it("accepts a split with transfer subtransactions", () => {
+    expect(
+      validateSubTransactions(-100, [
+        { categoryId: 1, amount: -60 },
+        { categoryId: null, transferAccountId: 2, amount: -40 },
+      ])
+    ).toBeNull();
+  });
+
+  it("rejects a missing-category child that is also not a transfer", () => {
     expect(
       validateSubTransactions(-50, [
         { categoryId: 1, amount: -30 },

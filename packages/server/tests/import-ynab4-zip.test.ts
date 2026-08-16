@@ -340,10 +340,11 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
     expect(Number(ccTransfers[0]!.amount)).toBe(-300);
 
     const savingsTransfer = data.transactions.filter(
-      (t) => t.payee === "Transfer : Main Chequing"
+      (t) => t.payee === "Transfer : High Interest Savings"
     );
     expect(savingsTransfer).toHaveLength(1);
-    expect(Number(savingsTransfer[0]!.amount)).toBe(800);
+    expect(Number(savingsTransfer[0]!.amount)).toBe(-800);
+    expect(savingsTransfer[0]!.transferAccountId).toBe(byName.get("High Interest Savings")!.id);
 
     // 7. Verify Hidden Categories Mapping
     const hiddenCarCat = data.categories.find((c) => c.name === "Old Car Maintenance");

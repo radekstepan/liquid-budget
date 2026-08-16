@@ -91,8 +91,17 @@ export function TransactionsView({
 
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
-    const parentRows = rows.filter((r) => r.parentId == null);
-    if (!q) return parentRows;
+    const isRowVisible = (r: Txn) => {
+      // Top-level transactions are always shown.
+      if (r.parentId == null) return true;
+      // If we are viewing an account that is the DESTINATION of a transfer sub-transaction,
+      // show it in this account register as an incoming transfer!
+      if (accountFilter != null && r.transferAccountId === accountFilter) return true;
+      // Otherwise, child rows on their parent's account are hidden in the register.
+      return false;
+    };
+    const visibleRows = rows.filter(isRowVisible);
+    if (!q) return visibleRows;
 
     const childrenByParent = new Map<number, Transaction[]>();
     for (const t of data.transactions) {
@@ -106,10 +115,14 @@ export function TransactionsView({
       }
     }
 
-    return parentRows.filter((r) => {
+    return visibleRows.filter((r) => {
+      const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
+      const payeeText = isIncoming
+        ? `Transfer : ${accountById.get(r.accountId)?.name ?? "Unknown"}`
+        : r.payee;
       const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
       if (
-        r.payee.toLowerCase().includes(q) ||
+        payeeText.toLowerCase().includes(q) ||
         catName.toLowerCase().includes(q) ||
         (r.memo ?? "").toLowerCase().includes(q)
       ) {
@@ -118,9 +131,11 @@ export function TransactionsView({
       const children = childrenByParent.get(r.id);
       if (children) {
         return children.some((c) => {
+          const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
+          const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
           const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
           return (
-            c.payee.toLowerCase().includes(q) ||
+            childPayee.toLowerCase().includes(q) ||
             childCat.toLowerCase().includes(q) ||
             (c.memo ?? "").toLowerCase().includes(q)
           );
@@ -128,7 +143,7 @@ export function TransactionsView({
       }
       return false;
     });
-  }, [rows, deferredSearch, data.transactions, categoryById]);
+  }, [rows, deferredSearch, data.transactions, categoryById, accountFilter, accountById]);
 
   const totals = useMemo(() => {
     let inflow = 0;
@@ -136,11 +151,13 @@ export function TransactionsView({
     let count = 0;
     for (const r of filtered) {
       count++;
-      if (r.amount > 0) inflow += r.amount;
-      else outflow += -r.amount;
+      const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
+      const effAmt = isIncoming ? -r.amount : r.amount;
+      if (effAmt > 0) inflow += effAmt;
+      else outflow += -effAmt;
     }
     return { inflow, outflow, net: inflow - outflow, count };
-  }, [filtered]);
+  }, [filtered, accountFilter]);
 
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
   const colCount = accountFilter ? 8 : 9;
@@ -252,19 +269,24 @@ export function TransactionsView({
                 )}
                 {visibleRows.map((t, idx) => {
                   const globalIndex = startIndex + idx;
-                  const outflow = t.amount < 0 ? -t.amount : 0;
-                  const inflow = t.amount > 0 ? t.amount : 0;
+                  const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+                  const effAmt = isIncoming ? -t.amount : t.amount;
+                  const outflow = effAmt < 0 ? -effAmt : 0;
+                  const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
                   const catName =
                     t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
                   const displayCat = isSplit
                     ? "Split (Multiple Categories)"
                     : catName || (t.transferAccountId ? "Transfer" : "");
+                  const displayPayee = isIncoming
+                    ? `Transfer : ${accountById.get(t.accountId)?.name ?? "Unknown"}`
+                    : t.payee;
                   return (
                     <tr
                       key={t.id}
                       className={`group y-row ${globalIndex % 2 === 1 ? "alt" : ""}`}
-                      onClick={() => onEdit(t.id)}
+                      onClick={() => onEdit(t.parentId ?? t.id)}
                       style={{ cursor: "pointer" }}
                     >
                       <td className="y-num">{t.date}</td>
@@ -274,7 +296,7 @@ export function TransactionsView({
                         </td>
                       )}
                       <td className="truncate" style={{ color: "var(--y-ink)" }}>
-                        {t.payee}
+                        {displayPayee}
                       </td>
                       <td
                         className="truncate"

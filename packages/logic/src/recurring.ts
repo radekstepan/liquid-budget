@@ -73,14 +73,15 @@ export function netMonthlyAmount(
  */
 export function validateRecurringSubTransactions(
   parentAmount: number,
-  children: { categoryId: number | null; amount: number }[]
+  children: { categoryId: number | null; amount: number; transferAccountId?: number | null }[]
 ): string | null {
   if (children.length < 2) {
     return "Add at least two sub-transactions.";
   }
   for (let i = 0; i < children.length; i++) {
-    if (!children[i]!.categoryId) {
-      return `Sub-transaction ${i + 1} is missing a category.`;
+    const c = children[i]!;
+    if (!c.categoryId && !c.transferAccountId) {
+      return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
     }
   }
   const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
