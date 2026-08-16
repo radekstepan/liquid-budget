@@ -276,10 +276,7 @@ export function Sidebar({
                       >
                         <span className="truncate">{a.name}</span>
                         <span
-                          className={cx(
-                            "y-side-amt transition-opacity",
-                            hasActions && "group-hover:opacity-0"
-                          )}
+                          className="y-side-amt"
                           style={{
                             color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
                             fontWeight: 500,
@@ -289,13 +286,13 @@ export function Sidebar({
                         </span>
                       </button>
                       {hasActions && onEditAccount && (
-                        <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               onEditAccount(a.id);
                             }}
-                            className="grid h-[18px] w-[18px] place-items-center rounded"
+                            className="grid h-[18px] w-[18px] place-items-center rounded opacity-60 hover:opacity-100"
                             style={{ color: "var(--y-side-ink-dim)" }}
                             title="Edit account"
                             aria-label={`Edit account ${a.name}`}

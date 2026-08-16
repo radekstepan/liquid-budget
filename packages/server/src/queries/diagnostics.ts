@@ -1,6 +1,9 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
+import { getBudgetData } from "./budget.js";
+import { computeBudget } from "@ynab/logic";
+import { todayISO } from "@ynab/logic";
 
 export type BalanceIntegrityReport = {
   accountId: number;
@@ -8,6 +11,15 @@ export type BalanceIntegrityReport = {
   storedBalance: number;
   computedBalance: number;
   difference: number;
+};
+
+export type BudgetIntegrityReport = {
+  totalOnBudgetAccountBalance: number;
+  totalCategoryAvailable: number;
+  tbb: number;
+  /** accountBalances - categoryBalances - tbb; should be 0 */
+  difference: number;
+  month: string;
 };
 
 /**
@@ -103,4 +115,40 @@ export async function recomputeAccountBalances(
   }
 
   return { updatedCount };
+}
+
+/**
+ * Verify the YNAB4 fundamental invariant:
+ *   sum(on-budget account balances) - sum(category available balances) - TBB === 0
+ *
+ * This is the core identity that must hold for the budget to be internally
+ * consistent. If this invariant is violated, TBB will be silently wrong.
+ */
+export async function verifyBudgetIntegrity(db: Database): Promise<BudgetIntegrityReport> {
+  const data = await getBudgetData(db);
+  const month = todayISO().slice(0, 7);
+  const result = computeBudget(data, month);
+
+  const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
+  const totalAccountBalance = onBudgetAccounts.reduce(
+    (s, a) => s + Number(a.balance ?? 0),
+    0
+  );
+
+  const totalCategoryAvailable = result.groups.reduce(
+    (s, g) => s + g.available,
+    0
+  );
+
+  const difference = Math.round(
+    totalAccountBalance - totalCategoryAvailable - result.tbb
+  );
+
+  return {
+    totalOnBudgetAccountBalance: totalAccountBalance,
+    totalCategoryAvailable,
+    tbb: result.tbb,
+    difference,
+    month,
+  };
 }

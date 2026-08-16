@@ -1145,7 +1145,37 @@ button.y-pill:hover {
 }
 /* (docs-only classes removed when the demo was retired) */
 
-/* ---------- scrollbars (thin, elegant pill style) ---------- */
+/* Focus visible — restore focus rings for keyboard navigation.
+   Tailwind preflight removes the default outline, so we add it back
+   with a visible ring that matches the design system. */
+:focus-visible {
+  outline: 2px solid var(--y-blue);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* Suppress focus-visible ring on mouse interactions for buttons/inputs
+   that already have their own focus styles. */
+.y-btn:focus-visible,
+.y-inline-amt:focus-visible,
+.y-input:focus-visible,
+.y-select:focus-visible,
+.y-select-trigger:focus-visible {
+  outline: none;
+}
+.y-btn:focus-visible {
+  box-shadow: 0 0 0 2px rgba(47, 127, 176, 0.45), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+.y-side-item:focus-visible,
+.y-side-nav:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: -2px;
+  border-radius: 0;
+}
+.y-dropdown-item:focus-visible {
+  outline: 2px solid var(--y-blue);
+  outline-offset: -2px;
+  border-radius: 3px;
+}
 /*
  * Technique: transparent track + thick transparent border on the thumb.
  * The border acts as inset padding so the visible thumb never touches the
@@ -1201,4 +1231,69 @@ button.y-pill:hover {
 }
 .y-scroll--dark {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+/* ---------- toast notifications ---------- */
+.y-toast-stack {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  max-width: 360px;
+}
+.y-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 5px;
+  color: #fff;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3);
+  font-size: 12px;
+  font-family: var(--y-font);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 4px 16px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  animation: toast-in 0.2s ease-out;
+  user-select: none;
+}
+.y-toast:hover {
+  filter: brightness(1.08);
+}
+.y-toast-msg {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+.y-toast-close {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.15);
+  border: 0;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.y-toast-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

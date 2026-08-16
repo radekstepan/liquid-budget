@@ -196,6 +196,60 @@ export function BudgetApp({
     totalAvailable: groups.reduce((s, g) => s + g.available, 0),
   };
 
+  // Quick-fill: last month's budgeted per category
+  const lastMonthAssignments = useMemo(() => {
+    const prevMonth = previousMonthKey(month);
+    const map = new Map<number, number>();
+    for (const a of data.assignments) {
+      if (a.month === prevMonth) {
+        map.set(a.categoryId, num(a.amount));
+      }
+    }
+    return map;
+  }, [data, month]);
+
+  // Quick-fill: average spent (outflow) over last 3 months per category
+  const avgSpentByCategory = useMemo(() => {
+    const { year: y, month0 } = parseMonthKey(month);
+    const map = new Map<number, { sum: number; count: number }>();
+    for (let i = 1; i <= 3; i++) {
+      const mm = ((month0 - i) % 12 + 12) % 12;
+      const yy = y + Math.floor((month0 - i) / 12);
+      const key = monthKey(yy, mm);
+      for (const t of data.transactions) {
+        if (t.date.slice(0, 7) !== key) continue;
+        if (t.categoryId == null) continue;
+        if (t.parentId != null) continue;
+        const amt = num(t.amount);
+        if (amt >= 0) continue; // only outflows
+        const entry = map.get(t.categoryId) ?? { sum: 0, count: 0 };
+        entry.sum += -amt; // make positive
+        entry.count++;
+        map.set(t.categoryId, entry);
+      }
+    }
+    const result = new Map<number, number>();
+    for (const [catId, { sum, count }] of map) {
+      result.set(catId, Math.round(sum / count));
+    }
+    return result;
+  }, [data, month]);
+
+  // Quick-fill: underfunded = max(0, goalTarget - available)
+  const underfundedByCategory = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const g of budget.groups) {
+      for (const r of g.rows) {
+        if (r.category.goalTarget) {
+          const goal = num(r.category.goalTarget);
+          const underfunded = Math.max(0, goal - r.available);
+          if (underfunded > 0) map.set(r.category.id, underfunded);
+        }
+      }
+    }
+    return map;
+  }, [budget]);
+
   const { history, avg } = useMemo(() => {
     const realMonths = new Set(data.assignments.map((a) => a.month));
     const assignedFor = (key: string) =>
@@ -398,6 +452,9 @@ export function BudgetApp({
             onReorderCategory={api.reorderCategory}
             onReorderGroup={api.reorderGroup}
             onClearOverdraft={clearOverdraft}
+            lastMonthAssignments={lastMonthAssignments}
+            avgSpentByCategory={avgSpentByCategory}
+            underfundedByCategory={underfundedByCategory}
           />
         )}
         {view === "transactions" && (
@@ -608,6 +665,14 @@ export function BudgetApp({
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function previousMonthKey(monthKeyStr: string): string {
+  const { year, month0 } = parseMonthKey(monthKeyStr);
+  const idx = year * 12 + month0 - 1;
+  const yy = Math.floor(idx / 12);
+  const mm = idx - yy * 12;
+  return monthKey(yy, mm);
 }
 
 export const __demoConstants = { DEMO_MONTH, todayISO };

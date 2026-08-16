@@ -145,6 +145,15 @@ export function Inspector({
               >
                 <Icon name="import" size={12} /> Import YNAB4 Backup
               </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.open("/api/export", "_blank");
+                }}
+                className="y-menu-item"
+              >
+                <Icon name="export" size={12} /> Export as CSV
+              </button>
               {onResetDemo && (
                 <button
                   onClick={() => {

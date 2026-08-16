@@ -154,6 +154,7 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
       </>
     ),
     import: <path d="M8 2v8m0 0 3-3m-3 3L5 7M2.5 12.5h11" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    export: <path d="M8 14V6m0 0L5 9m3-3 3 3M2.5 3.5h11" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
     search: (
       <>
         <circle cx="7" cy="7" r="4.4" strokeWidth="1.6" />
@@ -783,4 +784,58 @@ export const ClearedFlag: React.FC<{
     </span>
   );
   return inner;
+};
+
+/* -------------------------------------------------- Toast */
+export type ToastTone = "info" | "ok" | "warn" | "danger";
+
+export type ToastItem = {
+  id: number;
+  message: string;
+  tone: ToastTone;
+};
+
+let _nextToastId = 0;
+
+export function createToast(message: string, tone: ToastTone = "info"): ToastItem {
+  return { id: ++_nextToastId, message, tone };
+}
+
+const TOAST_BG: Record<ToastTone, string> = {
+  info: "linear-gradient(#4f5c64, #333e45)",
+  ok: "linear-gradient(var(--y-green-lt), var(--y-green-dk))",
+  warn: "linear-gradient(#f0b559, var(--y-orange-dk))",
+  danger: "linear-gradient(var(--y-red-lt), var(--y-red-dk))",
+};
+
+export const Toast: React.FC<{ items: ToastItem[]; onDismiss: (id: number) => void }> = ({
+  items,
+  onDismiss,
+}) => {
+  if (items.length === 0) return null;
+  return createPortal(
+    <div className="y-toast-stack" role="status" aria-live="polite">
+      {items.map((t) => (
+        <div
+          key={t.id}
+          className="y-toast"
+          style={{ background: TOAST_BG[t.tone] }}
+          onClick={() => onDismiss(t.id)}
+        >
+          <span className="y-toast-msg">{t.message}</span>
+          <button
+            className="y-toast-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss(t.id);
+            }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
 };
