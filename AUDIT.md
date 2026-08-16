@@ -482,6 +482,264 @@ Update or remove tests that reference them.
    `computeCarryover`, `isSplitBalanced`) have tests. Update tests to test the
    live path instead, or just delete the tests?
 
+### Plan Review Addendum (second-pass findings)
+
+After deeper review of each fix against the live code, the following gaps,
+refinements, and cross-cutting concerns were identified.
+
+#### #6 — Missing pieces in integer cents migration
+
+**`numSafe()` in `register.ts:156-160`** uses `parseFloat` and must be updated
+identically to `num()`:
+```ts
+export function numSafe(s: string | number | null | undefined): number {
+  if (s == null) return 0;
+  const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
+  return Number.isNaN(n) ? 0 : n;
+}
+```
+
+**`round2()` in `reconcile.ts:279`** becomes a no-op after integer cents (all
+values are already integers). Remove it and its call sites in
+`getReconcileState`, `reconcileAccount`, `postAdjustment`.
+
+**`evalAmount()` in `format.ts:55-246`** is an expression parser for budget
+input fields. It currently evaluates to dollars. After migration, it must
+evaluate to cents. The result must be multiplied by 100 and rounded, or the
+interpretation of the input must change from "dollars" to "cents".
+
+**UI input fields:** All number inputs across `packages/ui/` and `apps/web/`
+that feed into server queries must send cents. This is a cross-cutting concern
+touching every form and modal that creates or edits money values.
+
+**`getBudgetData()` type conversion:** The function converts `number` → `string`
+for `BudgetData`. After migration the DB values are integer cents. The conversion
+stays the same syntactically but the semantic meaning changes. Downstream
+consumers (budget engine, reports, register) all use `num()` to parse these
+strings back to numbers — and `num()` will now return cents. This is correct as
+long as `num()` is updated first.
+
+#### #13 — Split parents could incorrectly get `isIncome = true`
+
+A split parent row has `categoryId: null`, `parentId: null`,
+`transferAccountId: null`. If the parent's amount is positive and the account is
+on-budget, the `isIncome` determination logic would incorrectly flag it as
+income.
+
+**Fix:** In `createSplitWithChildren`, explicitly set `isIncome: false` on the
+parent row. Split parents are created only via `createSplitWithChildren`, not
+`createTransaction`, so this single-site fix is sufficient.
+
+#### #4 — `computeCashFlow` does NOT need updating
+
+The audit notes an inconsistency between `computeMonthIncome` and
+`computeCashFlow`. These serve different purposes:
+- `computeMonthIncome` = "money available to budget" (uncategorised inflows on
+  on-budget accounts)
+- `computeCashFlow` = "all money in vs all money out" (all non-transfer
+  transactions on all accounts)
+
+`computeCashFlow` already correctly excludes transfers. It should NOT exclude
+off-budget accounts (cash flow tracks all money movement). Once transfers are
+excluded from `computeMonthIncome` via the `isIncome` flag, the inconsistency is
+resolved. No change needed to `computeCashFlow`.
+
+#### #1 — Refined CC buffer fix
+
+**Refund handling:** The current code has `if (amt >= 0) continue` which skips
+positive categorised rows. Removing this guard alone is sufficient — for a refund
+(`amt > 0`), `(-amt)` is negative, which correctly reduces the buffer. The
+`(-amt)` expression already handles both signs correctly.
+
+**Payment detection (second pass):** After the existing loop that sums
+categorised spend, add a second pass that identifies transfers TO the linked
+credit account:
+```ts
+for (const t of data.transactions) {
+  if (!t.date.startsWith(month)) continue;
+  if (t.transferAccountId == null) continue;
+  if (splitParentIds.has(t.id)) continue;
+  for (const [catId, linkedAccId] of ccPayCatToAccount) {
+    if (t.transferAccountId === linkedAccId) {
+      spendByAccount.set(linkedAccId, (spendByAccount.get(linkedAccId) ?? 0) - Math.abs(num(t.amount)));
+    }
+  }
+}
+```
+
+Both `buildCCBufferMap` and `buildSpendByAccountMonth` need both fixes.
+
+#### #8 — Error type differences between call sites
+
+The four sites have different error mechanisms:
+- `split.ts` (logic): `validateSubTransactions` returns `string | null` — the NaN
+  check must return an error string, not throw.
+- `recurring.ts` (logic): `validateRecurringSubTransactions` also returns
+  `string | null`.
+- `transactions.ts` (server): `assertSplitsBalanced` throws `TransactionError`.
+- `recurring.ts` (server): `assertSplitsBalanced` throws `RecurringError`.
+
+The finite check must use the appropriate error mechanism at each site.
+
+#### #10 — Adjustment row needs explicit `reconciledAt` stamp
+
+The `postAdjustment` function inserts the adjustment row with `status: "c"` and
+does NOT flip it to `"r"` (it stays cleared for the next reconciliation). So it
+won't get `reconciledAt` stamped by the flip step. Without `reconciledAt`, the
+`unreconcileAccount` query can't identify which adjustment row belongs to the
+current batch.
+
+**Fix:** In `postAdjustment`, explicitly set `reconciledAt: todayISO()` on the
+adjustment row. Then in `unreconcileAccount`, filter adjustment rows by
+`reconciledAt === acct.lastReconciledAt` (not by date + memo alone). This also
+makes the ORDER BY from #9 unnecessary (the `reconciledAt` filter uniquely
+identifies the batch), but ORDER BY is still defensive.
+
+**Combined #10 + #11 query in `reconcileAccount`:**
+```ts
+const today = todayISO();
+const flip = await db
+  .update(transactions)
+  .set({ status: "r", reconciledAt: today })
+  .where(and(
+    eq(transactions.accountId, input.accountId),
+    eq(transactions.status, "c"),
+    sql`${transactions.date} <= ${today}`
+  ))
+  .returning({ id: transactions.id });
+```
+
+**Combined #9 + #10 query in `unreconcileAccount`:**
+```ts
+const flipped = await db
+  .update(transactions)
+  .set({ status: "c", reconciledAt: null })
+  .where(and(
+    eq(transactions.accountId, accountId),
+    eq(transactions.status, "r"),
+    eq(transactions.reconciledAt, lastDate)
+  ))
+  .returning({ id: transactions.id });
+
+const adjustmentRows = await db
+  .select({ id: transactions.id, amount: transactions.amount })
+  .from(transactions)
+  .where(and(
+    eq(transactions.accountId, accountId),
+    eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
+    eq(transactions.reconciledAt, lastDate)
+  ))
+  .orderBy(sql`${transactions.date} DESC, ${transactions.id} DESC`)
+  .limit(1);
+```
+
+#### #12 — Child delete: avoiding double-reversal
+
+When deleting a child that leaves the parent with 0 or 1 remaining children, the
+parent must be deleted too. But the parent's delete handler in `deleteTransaction`
+queries ALL children and reverses their balances — including the already-deleted
+child's balance, which was already reversed in the child branch. This would
+double-reverse.
+
+**Fix:** Handle the cleanup inline in the child branch of `deleteTransaction`,
+after deleting the child but before returning:
+```ts
+if (existing.parentId != null) {
+  // Reverse deleted child's balance
+  await applyBalance(db, existing.accountId, -Number(existing.amount));
+  if (existing.transferAccountId != null) {
+    await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+  }
+  // Delete the child
+  await db.delete(transactions).where(eq(transactions.id, id));
+  // Check if parent is now orphaned
+  const remaining = await getChildren(db, existing.parentId);
+  if (remaining.length === 0) {
+    await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+  } else if (remaining.length === 1) {
+    const lastChild = remaining[0]!;
+    await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
+    if (lastChild.transferAccountId != null) {
+      await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
+    }
+    await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+  }
+  return existing;
+}
+```
+The parent delete cascades the remaining child, whose balance was already
+reversed above. No double-reversal.
+
+#### #14 — Register walker needs role tagging
+
+The no-anchor branch must distinguish source vs destination role for each row.
+The walker at `register.ts:119-123` does `bal -= r.amount`, which is correct for
+the source account. For the destination account, the delta is `-r.amount`.
+Tagging entries with their role ensures the correct sign is applied:
+
+```ts
+for (const r of parsed) {
+  if (parentIds.has(r.id)) continue;
+  // Source account
+  let srcList = byAccount.get(r.accountId);
+  if (!srcList) { srcList = []; byAccount.set(r.accountId, srcList); }
+  srcList.push(r);
+  // Destination account (transfers only)
+  if (r.transferAccountId != null) {
+    let destList = byAccount.get(r.transferAccountId);
+    if (!destList) { destList = []; byAccount.set(r.transferAccountId, destList); }
+    destList.push(r); // same row, but walker must apply -r.amount
+  }
+}
+```
+
+Then in the walker, determine the delta per row based on whether
+`r.accountId === acctId` (source) or `r.transferAccountId === acctId`
+(destination), mirroring the anchored branch logic at `:100-104`.
+
+### Cross-cutting concerns
+
+**Migration ordering:** The integer cents migration (#6) must run before the
+`isIncome` backfill (#13) because the backfill checks `amount > 0` which will be
+in cents after migration.
+
+**Type changes:** Adding `isIncome?: boolean` and `reconciledAt?: string | null`
+to the `Transaction` type in `types.ts`. Both are optional for backward
+compatibility during migration. `isIncome` is read-only after creation;
+`reconciledAt` is managed by the system.
+
+**API boundary:** Neither `isIncome` nor `reconciledAt` should be exposed in
+update endpoints. They are determined by the system at insert time and during
+reconciliation.
+
+**Test strategy:** Each fix phase should add at least one test that would have
+failed before the fix. The existing 304 tests should continue to pass (or be
+updated if they encode buggy behaviour). The dead functions in #19 have tests in
+`packages/logic/tests/budget-engine.test.ts`, `split.test.ts`, and possibly
+`compute.test.ts` — these must be handled when deleting.
+
+**Risk assessment:** Phase 1 (#6 + #7) is the highest-risk phase due to the
+integer cents migration touching every money path. Recommended: do it on a
+feature branch with full test coverage verification after each sub-step.
+
+### Summary of new concerns
+
+| Concern | Severity | Phase |
+|---------|----------|-------|
+| `evalAmount()` needs cents conversion | High | #6 |
+| `round2()` becomes no-op, remove or update | Medium | #6 |
+| `numSafe()` needs same update as `num()` | Medium | #6 |
+| UI input fields need cents conversion | High | #6 |
+| Split parents could get `isIncome = true` | Medium | #13 |
+| Adjustment row needs explicit `reconciledAt` stamp | Medium | #10 |
+| Child delete needs remaining-count check to avoid double-reversal | Medium | #12 |
+| `computeCashFlow` does NOT need updating (resolved by design) | None | #4 |
+| Logic-layer validators return strings, server-layer throws | Low | #8 |
+| Register walker needs role tagging for correct sign | Low | #14 |
+| Dead code tests need handling before deletion | Low | #19 |
+| Migration ordering: #6 must precede #13 | — | Cross |
+| Projections timing rewrite deferred | Low | #16 |
+
 ---
 
 ## Index
