@@ -1,8 +1,6 @@
-import AdmZip from "adm-zip";
-import { getDefaultDb, importYnab4 } from "@ynab/server";
+import { getDefaultDb, importYnab4, extractYnab4DataFromZip } from "@ynab/server";
 import path from "path";
 import fs from "fs";
-
 import { fileURLToPath } from "url";
 
 async function main() {

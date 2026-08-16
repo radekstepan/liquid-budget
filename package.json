@@ -20,6 +20,7 @@
     "e2e:install": "yarn workspace @ynab/web e2e:install",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:reset": "yarn workspace @ynab/server db:reset",
+    "db:import": "npx tsx apps/web/scripts/do-import.ts",
     "db:generate": "yarn workspace @ynab/web db:generate",
     "db:migrate": "yarn workspace @ynab/server db:migrate",
     "coverage": "turbo run coverage"
