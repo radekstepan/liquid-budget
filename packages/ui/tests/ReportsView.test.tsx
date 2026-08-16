@@ -194,6 +194,43 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
   });
 
+  it("Expense Breakdown draws slices as explicit arc paths so tiny slices cannot render a dash 'bow'", () => {
+    // "Fees" is a tiny share — the slice whose sub-pixel stroke-dasharray used
+    // to rasterize as a ragged multi-colour sliver at the ring seam.
+    const data = makeData();
+    data.categories.push({
+      id: 12,
+      groupId: 1,
+      name: "Fees",
+      sort: 2,
+      carryover: "0",
+      goalTarget: null,
+      linkedAccountId: null,
+    });
+    data.transactions.push(txn("2026-06", 20, "Stamps", -1, 12));
+    renderView({ data });
+    clickTab("Expense Breakdown");
+    const panel = findPanel("Expense Breakdown")!;
+    const svg = panel.querySelector("svg")!;
+    const circles = svg.querySelectorAll("circle");
+    const paths = svg.querySelectorAll("path");
+    // Wedges are explicit <path> arcs; the only <circle> left is the background fill.
+    expect(circles.length).toBe(1);
+    expect(paths.length).toBe(3);
+    // No slice may use stroke-dasharray/dashoffset — the source of the "bow".
+    for (const c of Array.from(circles)) {
+      expect(c.getAttribute("stroke-dasharray")).toBeNull();
+      expect(c.getAttribute("stroke-dashoffset")).toBeNull();
+    }
+    // Each wedge closes along the ring's inner edge: its path data must contain
+    // an arc drawn in the reverse (sweep 0) direction. A missing/incorrectly
+    // swept inner arc renders slices as an "outer arc with no inner band".
+    for (const p of Array.from(paths)) {
+      const d = p.getAttribute("d");
+      expect(d).toMatch(/A [\d.]+ [\d.]+ 0 [01] 0 /);
+    }
+  });
+
   it("shows the empty state when there are no transactions", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
     expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);

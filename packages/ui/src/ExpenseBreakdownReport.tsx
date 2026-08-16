@@ -51,24 +51,89 @@ export function ExpenseBreakdownReport({
     );
   })();
 
-  let offset = 0;
-  const rendered = segments.map((s) => {
-    const len = s.share * circumference;
-    const node = (
-      <circle
+  const rOut = r + strokeWidth / 2 + 1;
+  const rIn = r - strokeWidth / 2 - 1;
+
+  // Tiny categories (e.g. <0.1% of the total) would previously produce
+  // sub-pixel `stroke-dasharray` dashes on <circle> elements, which browsers
+  // rasterize as a ragged multi-colour sliver at the seam — the "bow". Render
+  // explicit annular arc paths instead, and clamp the drawn wedge of tiny
+  // slices to a small fixed arc so they stay visible. The legend, tooltip and
+  // percentages keep the true (unclamped) values.
+  const minShare = circumference > 0 ? Math.min(0.012, Math.max(0.003, 4 / circumference)) : 0;
+  const renderShares = segments.map((s) => s.share);
+  if (minShare > 0) {
+    const belowMin = renderShares.filter((v) => v > 0 && v < minShare).length;
+    if (belowMin > 0) {
+      const short = renderShares.reduce((acc, v) => acc + (v > 0 && v < minShare ? minShare - v : 0), 0);
+      const largest = renderShares
+        .map((v, idx) => ({ v, idx }))
+        .filter((o) => o.v > minShare)
+        .sort((a, b) => b.v - a.v);
+      let left = short;
+      for (const o of largest) {
+        if (left <= 0) break;
+        const give = Math.min(o.v - minShare, left);
+        renderShares[o.idx] = (renderShares[o.idx] ?? o.v) - give;
+        left -= give;
+      }
+      for (let idx = 0; idx < renderShares.length; idx++) {
+        const v = renderShares[idx];
+        if (v != null && v > 0 && v < minShare) {
+          renderShares[idx] = minShare;
+        }
+      }
+    }
+    const totalShare = renderShares.reduce((a, v) => a + v, 0);
+    if (totalShare > 1) {
+      let over = totalShare - 1;
+      const largest = renderShares
+        .map((v, idx) => ({ v, idx }))
+        .sort((a, b) => b.v - a.v);
+      for (const o of largest) {
+        if (over <= 0) break;
+        const give = Math.min(o.v - minShare, over);
+        renderShares[o.idx] = (renderShares[o.idx] ?? o.v) - give;
+        over -= give;
+      }
+    }
+  }
+
+  const polar = (frac: number, rr: number) => {
+    const a = (frac - 0.25) * 2 * Math.PI;
+    return `${(cx + rr * Math.cos(a)).toFixed(3)} ${(cy + rr * Math.sin(a)).toFixed(3)}`;
+  };
+
+  let cum = 0;
+  const rendered = segments.map((s, idx) => {
+    const share = renderShares[idx] ?? s.share;
+    const start = cum;
+    const end = Math.min(1, cum + share);
+    cum += share;
+    const full = end - start >= 1 - 1e-9;
+    const large = share > 0.5 ? 1 : 0;
+    const hovered = hover?.idx === s.i;
+    const grow = 2;
+    const or = rOut + (hovered ? grow : 0);
+    const ir = rIn - (hovered ? grow : 0);
+    const arc = (to: number, rr: number, sweep: number, la: number) =>
+      `A ${rr} ${rr} 0 ${la} ${sweep} ${polar(to, rr)}`;
+    // A path arc whose start equals its end is not rendered, so a full circle
+    // is drawn as two half-circle arcs instead. The outer arcs sweep forward
+    // (1), the closing inner arcs sweep back (0) along the ring's inner edge.
+    const d = full
+      ? `M ${polar(start, or)} ${arc(start + 0.5, or, 1, 0)} ${arc(end, or, 1, 0)} L ${polar(end, ir)} ${arc(end - 0.5, ir, 0, 0)} ${arc(start, ir, 0, 0)} Z`
+      : `M ${polar(start, or)} ${arc(end, or, 1, large)} L ${polar(end, ir)} ${arc(start, ir, 0, large)} Z`;
+    return (
+      <path
         key={s.i}
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="none"
+        d={d}
+        fill={s.color}
+        fillOpacity={hover == null || hovered ? 1 : 0.32}
         stroke={s.color}
-        strokeOpacity={hover == null || hover.idx === s.i ? 1 : 0.32}
-        strokeWidth={hover?.idx === s.i ? strokeWidth + 4 : strokeWidth}
-        strokeDasharray={`${len} ${circumference - len}`}
-        strokeDashoffset={-offset}
-        transform={`rotate(-90 ${cx} ${cy})`}
+        strokeWidth={hovered ? 2 : 1}
         style={{
-          transition: "stroke-opacity 120ms, stroke-width 120ms",
+          transition: "fill-opacity 120ms, stroke-width 120ms",
           cursor: "pointer",
         }}
         onMouseMove={(e) => {
@@ -77,8 +142,6 @@ export function ExpenseBreakdownReport({
         onMouseLeave={() => setHover(null)}
       />
     );
-    offset += len;
-    return node;
   });
 
   const innerLabelSize = Math.max(20, side * 0.12);
