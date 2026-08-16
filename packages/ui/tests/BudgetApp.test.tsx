@@ -65,6 +65,9 @@ function makeApi(overrides: Partial<BudgetAppApi> = {}): {
     reorderGroup: vi.fn(async (...args) => {
       calls.push({ method: "reorderGroup", args });
     }),
+    reorderAccount: vi.fn(async (...args) => {
+      calls.push({ method: "reorderAccount", args });
+    }),
     ...overrides,
   };
   return { api, calls };

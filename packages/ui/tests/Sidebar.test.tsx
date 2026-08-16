@@ -77,10 +77,10 @@ describe("Sidebar", () => {
     expect(onSelectAccount).toHaveBeenCalledWith(1);
   });
 
-  it("marks the matching account row with is-sel when selectedAccountId matches", () => {
+  it("marks the matching account row with is-sel when selectedAccountId matches and view is transactions", () => {
     render(
       <Sidebar
-        view="budget"
+        view="transactions"
         setView={() => {}}
         accounts={accounts}
         selectedAccountId={2}
@@ -90,6 +90,21 @@ describe("Sidebar", () => {
     );
     expect(screen.getByRole("button", { name: /cash/i })).not.toHaveClass(/is-sel/);
     expect(screen.getByRole("button", { name: /checking/i })).toHaveClass(/is-sel/);
+  });
+
+  it("does not mark any account row as selected when view is not transactions", () => {
+    render(
+      <Sidebar
+        view="projections"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={2}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: /checking/i })).not.toHaveClass(/is-sel/);
+    expect(screen.getByRole("button", { name: /projections/i })).toHaveClass(/is-sel/);
   });
 
   it("does not render per-account delete or reconcile buttons", () => {
@@ -136,5 +151,49 @@ describe("Sidebar", () => {
     );
     const navAll = screen.getByRole("button", { name: /accounts/i });
     expect(navAll.className).toMatch(/\bis-sel\b/);
+  });
+
+  it("calls onReorderAccount on account drag and drop", () => {
+    const onReorderAccount = vi.fn();
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        onReorderAccount={onReorderAccount}
+      />
+    );
+
+    const cashRow = screen.getByText("Cash").closest("[draggable='true']");
+    const checkingRow = screen.getByText("Checking").closest("[draggable='true']");
+    expect(cashRow).not.toBeNull();
+    expect(checkingRow).not.toBeNull();
+
+    const dataTransfer = { effectAllowed: "", dropEffect: "" };
+
+    fireEvent.dragStart(cashRow!, { dataTransfer });
+    fireEvent.dragOver(checkingRow!, { dataTransfer });
+    fireEvent.drop(checkingRow!, { dataTransfer });
+
+    expect(onReorderAccount).toHaveBeenCalled();
+  });
+
+  it("resets sidebar width on double clicking the resize handle", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    const handle = screen.getByLabelText("Resize sidebar");
+    expect(handle).toBeInTheDocument();
+    fireEvent.doubleClick(handle);
   });
 });
