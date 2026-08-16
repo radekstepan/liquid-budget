@@ -154,3 +154,184 @@ export function computeNetWorthReport(
 
   return points;
 }
+
+export type CashFlowSummary = {
+  month: string;
+  income: number;
+  outflow: number;
+  net: number;
+  savingsRate: number;
+};
+
+/**
+ * Compute monthly cash flow (Income vs Outflow, Net, and Savings Rate %).
+ */
+export function computeCashFlow(data: BudgetData, month: string): CashFlowSummary {
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  let income = 0;
+  let outflow = 0;
+
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    if (t.date.slice(0, 7) !== month) continue;
+
+    const amt = num(t.amount);
+    if (t.transferAccountId == null && amt > 0) {
+      income += amt;
+    } else if (t.transferAccountId == null && amt < 0) {
+      outflow += Math.abs(amt);
+    }
+  }
+
+  income = Math.round(income * 100) / 100;
+  outflow = Math.round(outflow * 100) / 100;
+  const net = Math.round((income - outflow) * 100) / 100;
+  const savingsRate =
+    income > 0
+      ? Math.round(((income - outflow) / income) * 1000) / 10
+      : net > 0
+        ? 100
+        : 0;
+
+  return { month, income, outflow, net, savingsRate };
+}
+
+export type TrailingNetWorthSummary = {
+  points: NetWorthPoint[];
+  currentNet: number;
+  startNet: number;
+  delta: number;
+  pctDelta: number;
+};
+
+export function getOffsetMonth(month: string, offset: number): string {
+  const parts = month.split("-");
+  const y = Number(parts[0]);
+  const m = Number(parts[1]) - 1;
+  const total = y * 12 + m + offset;
+  const ny = Math.floor(total / 12);
+  const nm = ((total % 12) + 12) % 12;
+  return `${ny}-${String(nm + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Compute trailing N months of Net Worth ending at endMonth.
+ */
+export function computeTrailingNetWorth(
+  data: BudgetData,
+  endMonth: string,
+  count = 12
+): TrailingNetWorthSummary {
+  const startMonth = getOffsetMonth(endMonth, -(count - 1));
+  const points = computeNetWorthReport(data, startMonth, endMonth);
+  const currentNet = points[points.length - 1]?.net ?? 0;
+  const startNet = points[0]?.net ?? 0;
+  const delta = Math.round((currentNet - startNet) * 100) / 100;
+  const pctDelta =
+    startNet !== 0 ? Math.round((delta / Math.abs(startNet)) * 1000) / 10 : 0;
+
+  return {
+    points,
+    currentNet,
+    startNet,
+    delta,
+    pctDelta,
+  };
+}
+
+export type SpendingInsight = {
+  id: string;
+  type: "trend" | "spike" | "top_spend" | "clean";
+  categoryId?: number;
+  categoryName?: string;
+  amount?: number;
+  avgAmount?: number;
+  pctChange?: number;
+  message: string;
+};
+
+/**
+ * Compute monthly trends and 3-month average comparisons sorted by % change.
+ */
+export function computeMonthlyInsights(
+  data: BudgetData,
+  month: string,
+  _budgetResult?: unknown
+): SpendingInsight[] {
+  const insights: SpendingInsight[] = [];
+  const catMap = new Map(data.categories.map((c) => [c.id, c.name]));
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  // Spending per category this month vs previous 3 months
+  const m1 = getOffsetMonth(month, -1);
+  const m2 = getOffsetMonth(month, -2);
+  const m3 = getOffsetMonth(month, -3);
+  const priorMonths = new Set([m1, m2, m3]);
+
+  const currentSpendByCat = new Map<number, number>();
+  const priorSpendByCat = new Map<number, number[]>();
+
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    if (t.categoryId == null || t.transferAccountId != null) continue;
+    const amt = num(t.amount);
+    if (amt >= 0) continue;
+
+    const absAmt = Math.abs(amt);
+    const mk = t.date.slice(0, 7);
+
+    if (mk === month) {
+      currentSpendByCat.set(
+        t.categoryId,
+        (currentSpendByCat.get(t.categoryId) ?? 0) + absAmt
+      );
+    } else if (priorMonths.has(mk)) {
+      const arr = priorSpendByCat.get(t.categoryId) ?? [];
+      arr.push(absAmt);
+      priorSpendByCat.set(t.categoryId, arr);
+    }
+  }
+
+  // Calculate 3-month average and % difference for categories
+  for (const [catId, currentSpend] of currentSpendByCat.entries()) {
+    const prior = priorSpendByCat.get(catId) ?? [];
+    if (prior.length > 0) {
+      const avg3mo = prior.reduce((a, b) => a + b, 0) / 3;
+      if (avg3mo > 0) {
+        const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
+        const name = catMap.get(catId) ?? "Unknown";
+        insights.push({
+          id: `trend-${catId}`,
+          type: "trend",
+          categoryId: catId,
+          categoryName: name,
+          amount: Math.round(currentSpend * 100) / 100,
+          avgAmount: Math.round(avg3mo * 100) / 100,
+          pctChange: pct,
+          message: `${name}: $${Math.round(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
+        });
+      }
+    }
+  }
+
+  // Sort by % change descending
+  insights.sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0));
+
+  if (insights.length === 0) {
+    insights.push({
+      id: "clean-spending",
+      type: "clean",
+      message: "Spending is steady within 3-month baseline",
+    });
+  }
+
+  return insights;
+}
+

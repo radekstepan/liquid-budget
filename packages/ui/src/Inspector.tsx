@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { GroupRow } from "@ynab/logic";
+import type {
+  GroupRow,
+  CashFlowSummary,
+  TrailingNetWorthSummary,
+  SpendingInsight,
+} from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
 import { Icon, Button, Panel, Notice, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
@@ -15,19 +20,25 @@ export function Inspector({
   tbb,
   overBudgeted,
   priorSurplus,
+  cashFlow,
+  trailingNetWorth,
+  insights,
   onSelectMonth,
   onResetDemo,
   onImportYnab4,
   onClearOverdraft,
 }: {
   groups: GroupRow[];
-  summary: { assigned: number; outflow: number; available: number; totalAvailable: number };
+  summary?: { assigned: number; outflow: number; available: number; totalAvailable: number };
   month: string;
-  history: { key: string; assigned: number; real: boolean }[];
-  avg: number;
+  history?: { key: string; assigned: number; real: boolean }[];
+  avg?: number;
   tbb: number;
   overBudgeted: boolean;
-  priorSurplus: number;
+  priorSurplus?: number;
+  cashFlow?: CashFlowSummary;
+  trailingNetWorth?: TrailingNetWorthSummary;
+  insights?: SpendingInsight[];
   onSelectMonth: (key: string) => void;
   onResetDemo?: () => Promise<void> | void;
   onImportYnab4?: (file: File) => Promise<void>;
@@ -36,6 +47,7 @@ export function Inspector({
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [hoveredPoint, setHoveredPoint] = useState<{ month: string; net: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -70,10 +82,32 @@ export function Inspector({
     }
   };
 
+  // Fallback defaults if not provided
+  const effectiveCashFlow: CashFlowSummary = cashFlow ?? {
+    month,
+    income: summary?.assigned ?? 0,
+    outflow: summary ? Math.abs(summary.outflow) : 0,
+    net: (summary?.assigned ?? 0) - (summary ? Math.abs(summary.outflow) : 0),
+    savingsRate: 0,
+  };
+
+  const effectiveNetWorth: TrailingNetWorthSummary = trailingNetWorth ?? {
+    points: history
+      ? history.map((h) => ({ month: h.key, assets: h.assigned, debts: 0, net: h.assigned }))
+      : [],
+    currentNet: 0,
+    startNet: 0,
+    delta: 0,
+    pctDelta: 0,
+  };
+
+  const effectiveInsights: SpendingInsight[] = insights ?? [
+    { id: "clean", type: "clean", message: "Spending is steady within 3-month baseline" },
+  ];
+
   return (
-    <aside
-      className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto"
-    >
+    <aside className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto">
+      {/* Header with Month & Settings Cog */}
       <div className="flex items-center px-1">
         <div>
           <div className="y-caps">Demo Budget</div>
@@ -140,8 +174,12 @@ export function Inspector({
         </div>
       </div>
 
+      {/* Primary To Be Budgeted / Overbudgeted Banner */}
       <div
-        className={cx("y-atb", overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange")}
+        className={cx(
+          "y-atb",
+          overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange"
+        )}
       >
         <div className="text-[20px] font-bold leading-[1.1] y-num">{money(tbb)}</div>
         <div className="text-[9px] font-bold tracking-[.09em] uppercase opacity-90">
@@ -159,67 +197,255 @@ export function Inspector({
         )}
       </div>
 
-      <Panel title="Summary" bodyClass="!p-[10px] space-y-[5px] text-[11.5px]">
-        {[
-          ["Assigned", money(summary.assigned)],
-          ["Outflow", money(-summary.outflow)],
-          ["Available", money(summary.available)],
-          ["Carried Forward", money(priorSurplus)],
-          ["Total Available", money(summary.totalAvailable)],
-          ["To Be Budgeted", money(tbb)],
-        ].map(([k, v]) => (
-          <div key={k} className="flex justify-between">
-            <span style={{ color: "var(--y-ink-soft)" }}>{k}</span>
-            <span className="y-num" style={{ color: "var(--y-ink)" }}>{v}</span>
+      {/* Card 1: Net Monthly (Cash Flow & Savings Rate) */}
+      <Panel title="Net Monthly" bodyClass="!p-[10px] space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <div
+              className={cx(
+                "text-[18px] font-bold y-num leading-none",
+                effectiveCashFlow.net >= 0 ? "text-[#2e7d32]" : "text-[#c0483a]"
+              )}
+            >
+              {effectiveCashFlow.net >= 0 ? "+" : ""}
+              {money(effectiveCashFlow.net)}
+            </div>
+            <div className="y-hint text-[10px] mt-0.5">Net Cash Flow</div>
           </div>
-        ))}
+          <span
+            className={cx(
+              "px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide",
+              effectiveCashFlow.net >= 0
+                ? "bg-[#e4f1d4] text-[#427a1b]"
+                : "bg-[#f7dedb] text-[#97341f]"
+            )}
+          >
+            {effectiveCashFlow.net >= 0
+              ? `${effectiveCashFlow.savingsRate}% saved`
+              : "Deficit"}
+          </span>
+        </div>
+
+        <div className="space-y-[4px] text-[11px] pt-1 border-t border-[var(--y-line-soft)]">
+          <div className="flex justify-between">
+            <span style={{ color: "var(--y-ink-soft)" }}>Income (Inflow)</span>
+            <span className="y-num font-medium text-[#2e7d32]">
+              +{money(effectiveCashFlow.income)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span style={{ color: "var(--y-ink-soft)" }}>Expenses (Outflow)</span>
+            <span className="y-num font-medium" style={{ color: "var(--y-ink)" }}>
+              -{money(effectiveCashFlow.outflow)}
+            </span>
+          </div>
+        </div>
       </Panel>
 
-      <Panel title="Average Assigned" bodyClass="!p-[10px]">
-        <div className="text-[18px] font-bold y-num" style={{ color: "var(--y-ink)" }}>{money(avg)}</div>
-        <div className="y-hint mt-[2px]">across {history.filter((h) => h.real).length} real months</div>
-      </Panel>
+      {/* Card 2: 12-Month Net Worth Trajectory & Interactive Sparkline */}
+      <Panel title="Net Worth (12 mo)" bodyClass="!p-[10px] space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <div className="text-[17px] font-bold y-num leading-none" style={{ color: "var(--y-ink)" }}>
+              {hoveredPoint ? money(hoveredPoint.net) : money(effectiveNetWorth.currentNet)}
+            </div>
+            <div className="y-hint text-[10px] mt-0.5">
+              {hoveredPoint ? formatFullMonth(hoveredPoint.month) : "Current Net Worth"}
+            </div>
+          </div>
+          <span
+            className={cx(
+              "px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-0.5",
+              effectiveNetWorth.delta >= 0
+                ? "bg-[#e4f1d4] text-[#427a1b]"
+                : "bg-[#f7dedb] text-[#97341f]"
+            )}
+            title="12-Month Change"
+          >
+            {effectiveNetWorth.delta >= 0 ? "▲" : "▼"}{" "}
+            {money(Math.abs(effectiveNetWorth.delta))}{" "}
+            ({effectiveNetWorth.pctDelta >= 0 ? "+" : ""}{effectiveNetWorth.pctDelta}%)
+          </span>
+        </div>
 
-      <Panel title="History (12 mo)" bodyClass="!p-[10px]">
-        <div className="flex items-end gap-[3px]" style={{ height: 92 }}>
+        {/* SVG Sparkline */}
+        <div className="relative pt-1">
           {(() => {
-            const max = Math.max(1, ...history.map((h) => h.assigned));
-            const trackH = 80;
-            return history.map((h) => {
-              const pct = (h.assigned / max) * 100;
-              const isCurrent = h.key === month;
-              const { month0: m0, year: y } = parseMonthKey(h.key);
-              const label = `${MONTHS[m0]?.slice(0, 3) ?? ""} ${y}`;
-              const heightPx = Math.max(10, (pct / 100) * trackH);
-              return (
-                <button
-                  key={h.key}
-                  onClick={() => h.real && onSelectMonth(h.key)}
-                  disabled={!h.real}
-                  aria-label={`Jump to ${MONTHS[m0]} ${y}`}
-                  title={`${MONTHS[m0]} ${y}: ${money(h.assigned)}`}
-                  className="flex-1 min-w-0 rounded-[2px] transition-all"
-                  style={{
-                    height: `${heightPx}px`,
-                    background: !h.real
-                      ? "var(--y-line-soft)"
-                      : isCurrent
-                        ? "var(--y-blue)"
-                        : "var(--y-blue-pale)",
-                    border: isCurrent ? "1px solid var(--y-blue-dark)" : "1px solid transparent",
-                    opacity: !h.real ? 0.55 : isCurrent ? 1 : 0.85,
-                    cursor: h.real ? "pointer" : "default",
-                    boxShadow: h.real ? "inset 0 1px 0 rgba(255,255,255,0.5)" : "none",
-                  }}
-                />
-              );
-            });
+            const pts = effectiveNetWorth.points;
+            if (pts.length === 0) return null;
+
+            const W = 224;
+            const H = 64;
+            const padX = 8;
+            const padY = 8;
+
+            let minVal = Math.min(...pts.map((p) => p.net));
+            let maxVal = Math.max(...pts.map((p) => p.net));
+            if (minVal === maxVal) {
+              minVal -= 100;
+              maxVal += 100;
+            }
+            const range = maxVal - minVal;
+            const yMin = minVal - range * 0.1;
+            const yMax = maxVal + range * 0.1;
+
+            const getX = (i: number) =>
+              pts.length === 1
+                ? W / 2
+                : padX + (i / (pts.length - 1)) * (W - 2 * padX);
+            const getY = (v: number) =>
+              H - padY - ((v - yMin) / (yMax - yMin)) * (H - 2 * padY);
+
+            const pathD = pts
+              .map((p, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(p.net).toFixed(1)}`)
+              .join(" ");
+
+            const areaD = `${pathD} L ${getX(pts.length - 1).toFixed(1)} ${H} L ${getX(0).toFixed(1)} ${H} Z`;
+
+            return (
+              <div className="space-y-1">
+                <svg
+                  viewBox={`0 0 ${W} ${H}`}
+                  className="w-full overflow-visible"
+                  style={{ height: 64 }}
+                >
+                  <defs>
+                    <linearGradient id="y-nw-grad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#2f7fb0" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#2f7fb0" stopOpacity="0.02" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Shaded Area */}
+                  <path d={areaD} fill="url(#y-nw-grad)" />
+
+                  {/* Trend Line */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="#2f7fb0"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+
+                  {/* Data Nodes */}
+                  {pts.map((p, i) => {
+                    const cxCoord = getX(i);
+                    const cyCoord = getY(p.net);
+                    const isCurrent = p.month === month;
+                    const { month0: m0, year: y } = parseMonthKey(p.month);
+                    const label = `Jump to ${MONTHS[m0]} ${y}`;
+
+                    return (
+                      <g key={p.month}>
+                        {/* Outer focus/active ring */}
+                        {isCurrent && (
+                          <circle
+                            cx={cxCoord}
+                            cy={cyCoord}
+                            r="5.5"
+                            fill="none"
+                            stroke="#1f5c85"
+                            strokeWidth="1.5"
+                            opacity="0.8"
+                          />
+                        )}
+                        <circle
+                          cx={cxCoord}
+                          cy={cyCoord}
+                          r={isCurrent ? "3.5" : "2.5"}
+                          fill={isCurrent ? "#1f5c85" : "#2f7fb0"}
+                          className="transition-all hover:r-[4.5px] cursor-pointer"
+                          onMouseEnter={() => setHoveredPoint({ month: p.month, net: p.net })}
+                          onMouseLeave={() => setHoveredPoint(null)}
+                          onClick={() => onSelectMonth(p.month)}
+                        >
+                          <title>{`${MONTHS[m0]} ${y}: ${money(p.net)}`}</title>
+                        </circle>
+                      </g>
+                    );
+                  })}
+                </svg>
+
+                {/* HTML Interactive Jump Row for Full Accessibility and Click Targets */}
+                <div className="flex items-center gap-[2px] pt-0.5">
+                  {pts.map((p) => {
+                    const { month0: m0, year: y } = parseMonthKey(p.month);
+                    const isCurrent = p.month === month;
+                    const shortLabel = `${MONTHS[m0]?.slice(0, 1)}`;
+                    return (
+                      <button
+                        key={p.month}
+                        onClick={() => onSelectMonth(p.month)}
+                        onMouseEnter={() => setHoveredPoint({ month: p.month, net: p.net })}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                        aria-label={`Jump to ${MONTHS[m0]} ${y}`}
+                        title={`${MONTHS[m0]} ${y}: ${money(p.net)}`}
+                        className={cx(
+                          "flex-1 text-[9px] py-0.5 rounded text-center transition-all",
+                          isCurrent
+                            ? "bg-[#2f7fb0] text-white font-bold"
+                            : "hover:bg-[var(--y-hover)] text-[var(--y-ink-soft)]"
+                        )}
+                      >
+                        {shortLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
           })()}
         </div>
-        <div className="flex justify-between mt-1 y-hint">
-          <span>{history[0] ? formatShortMonth(history[0].key) : ""}</span>
-          <span>{history[history.length - 1] ? formatShortMonth(history[history.length - 1]!.key) : ""}</span>
+
+        <div className="flex justify-between text-[10px] y-hint pt-0.5">
+          <span>{effectiveNetWorth.points[0] ? formatShortMonth(effectiveNetWorth.points[0].month) : ""}</span>
+          <span>
+            {effectiveNetWorth.points.length > 0
+              ? formatShortMonth(effectiveNetWorth.points[effectiveNetWorth.points.length - 1]!.month)
+              : ""}
+          </span>
         </div>
+      </Panel>
+
+      {/* Card 3: Trends & Insights (3-Month Average) */}
+      <Panel title="Trends & Insights" bodyClass="!p-[10px] space-y-1.5">
+        {[...effectiveInsights]
+          .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+          .map((insight) => (
+            <div
+              key={insight.id}
+              className="p-2 rounded border border-[var(--y-line-soft)] bg-[var(--y-panel-alt)] text-[11px] leading-tight flex items-center justify-between"
+            >
+              <div className="min-w-0 pr-2">
+                <div className="font-semibold text-[var(--y-ink)] truncate">
+                  {insight.categoryName ?? insight.message}
+                </div>
+                {insight.amount != null && (
+                  <div className="y-hint text-[10px] mt-0.5">
+                    {money(insight.amount)} this mo
+                  </div>
+                )}
+              </div>
+              {insight.pctChange != null ? (
+                <div className="shrink-0 text-right">
+                  <div
+                    className={cx(
+                      "text-[11px] font-bold y-num",
+                      insight.pctChange > 0 ? "text-[#c0483a]" : "text-[#2e7d32]"
+                    )}
+                  >
+                    {insight.pctChange >= 0 ? "+" : ""}
+                    {insight.pctChange}%
+                  </div>
+                  <div className="y-hint text-[9px]">vs 3-mo avg</div>
+                </div>
+              ) : (
+                <div className="y-hint text-[10px]">{insight.message}</div>
+              )}
+            </div>
+          ))}
       </Panel>
 
       {confirmingReset && (
@@ -249,5 +475,10 @@ export function Inspector({
 
 function formatShortMonth(key: string): string {
   const { year: y, month0 } = parseMonthKey(key);
-  return `${MONTHS[month0]?.slice(0, 3) ?? ""} ${String(y).slice(2)}`;
+  return `${MONTHS[month0]?.slice(0, 3) ?? ""} '${String(y).slice(2)}`;
+}
+
+function formatFullMonth(key: string): string {
+  const { year: y, month0 } = parseMonthKey(key);
+  return `${MONTHS[month0] ?? ""} ${y}`;
 }
