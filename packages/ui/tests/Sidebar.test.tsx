@@ -196,4 +196,38 @@ describe("Sidebar", () => {
     expect(handle).toBeInTheDocument();
     fireEvent.doubleClick(handle);
   });
+
+  it("renders Archived Accounts section when archived accounts exist", () => {
+    const mixedAccounts: Account[] = [
+      ...accounts,
+      { id: 99, name: "Old Bank", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 4, archived: true },
+    ];
+    const onSelectAccount = vi.fn();
+    render(
+      <Sidebar
+        view="transactions"
+        setView={() => {}}
+        accounts={mixedAccounts}
+        selectedAccountId={null}
+        onSelectAccount={onSelectAccount}
+        onAddAccount={() => {}}
+      />
+    );
+
+    // Header is rendered
+    const archivedGroupHead = screen.getByRole("button", { name: /archived accounts/i });
+    expect(archivedGroupHead).toBeInTheDocument();
+
+    // By default it is collapsed, so Old Bank is not visible yet
+    expect(screen.queryByRole("button", { name: /^Old Bank / })).not.toBeInTheDocument();
+
+    // Expand the group
+    fireEvent.click(archivedGroupHead);
+    const oldBankRow = screen.getByRole("button", { name: /^Old Bank / });
+    expect(oldBankRow).toBeInTheDocument();
+
+    // Selecting it fires onSelectAccount
+    fireEvent.click(oldBankRow);
+    expect(onSelectAccount).toHaveBeenCalledWith(99);
+  });
 });

@@ -185,6 +185,18 @@ export function TransactionsView({
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>
             {filterAccount ? filterAccount.name : "All Transactions"}
           </span>
+          {filterAccount?.archived && (
+            <span
+              className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border"
+              style={{
+                backgroundColor: "var(--y-gray-100, #f1f5f9)",
+                borderColor: "var(--y-gray-300, #cbd5e1)",
+                color: "var(--y-ink-soft, #64748b)",
+              }}
+            >
+              Archived
+            </span>
+          )}
         </div>
         {filterAccount && (
           <Button

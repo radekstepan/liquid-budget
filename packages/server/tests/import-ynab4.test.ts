@@ -200,6 +200,35 @@ describe("importYnab4 transaction wrapping", () => {
     expect(sqls).not.toContain("ROLLBACK");
   });
 
+  it("marks hidden/closed accounts as archived: true on import", async () => {
+    const ynabData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Old TD", accountType: "Checking", onBudget: true, hidden: true },
+      ],
+      payees: [],
+      masterCategories: [],
+      transactions: [],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    mock.respondWith("select:accounts", []);
+    mock.respondWith("insert:accounts", [{ id: 1, archived: true }]);
+    mock.respondWith("select:accounts#2", [{ id: 1, name: "Old TD" }]);
+    mock.respondWith("select:accounts#3", [{ id: 1, name: "Old TD" }]);
+    mock.respondWith("select:transactions#1", [{ sum: 0 }]);
+    mock.respondWith("select:transactions#2", [{ sum: 0 }]);
+    mock.respondWith("update:accounts#1", [{}]);
+
+    await importYnab4(mock.db, ynabData);
+
+    const accountInsert = mock.calls.find((c) => c.op === "insert");
+    expect(accountInsert?.values).toMatchObject({
+      name: "Old TD",
+      archived: true,
+    });
+  });
+
   it("issues ROLLBACK (not COMMIT) when the body throws", async () => {
     // Same minimal payload, but the first insert (accounts) fails.
     // Without a transaction this would leave the DB wiped; the test

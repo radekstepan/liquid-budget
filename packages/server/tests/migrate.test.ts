@@ -81,6 +81,7 @@ describe("Drizzle migrations", () => {
     const accountsCols = tableInfo(ctx.raw, "accounts").map((c) => c.name);
     expect(accountsCols).toContain("last_reconciled_at");
     expect(accountsCols).toContain("last_reconciled_balance");
+    expect(accountsCols).toContain("archived");
 
     const transactionsCols = tableInfo(ctx.raw, "transactions").map((c) => c.name);
     expect(transactionsCols).toContain("status");

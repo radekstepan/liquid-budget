@@ -18,6 +18,7 @@ export const accounts = sqliteTable("accounts", {
   sort: integer("sort").notNull().default(0),
   lastReconciledAt: text("last_reconciled_at"),
   lastReconciledBalance: real("last_reconciled_balance"),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
 });
 
 export const categoryGroups = sqliteTable("category_groups", {

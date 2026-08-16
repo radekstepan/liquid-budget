@@ -73,17 +73,18 @@ export function bootstrapMigrationJournal(db: Db): BootstrapResult {
       sql`SELECT hash FROM ${sql.raw(MIGRATIONS_TABLE)}`
     ).map((r) => r.hash)
   );
-  for (const m of migrations) {
-    if (!recordedHashes.has(m.hash)) {
-      // The first unrecorded migration's row is missing. This is
-      // the upgrade case: insert a synthetic row for it.
-      db.run(
-        sql`INSERT INTO ${sql.raw(MIGRATIONS_TABLE)} (hash, created_at) VALUES (${
-          m.hash
-        }, ${m.folderMillis})`
-      );
-      return "bootstrapped";
-    }
+  if (recordedHashes.size > 0) {
+    return "noop";
+  }
+
+  const m0 = migrations[0];
+  if (m0) {
+    db.run(
+      sql`INSERT INTO ${sql.raw(MIGRATIONS_TABLE)} (hash, created_at) VALUES (${
+        m0.hash
+      }, ${m0.folderMillis})`
+    );
+    return "bootstrapped";
   }
   return "noop";
 }

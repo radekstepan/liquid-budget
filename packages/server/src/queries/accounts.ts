@@ -8,6 +8,7 @@ export type CreateAccountInput = {
   groupLabel?: string;
   balance?: number;
   onBudget?: boolean;
+  archived?: boolean;
 };
 
 export type UpdateAccountInput = {
@@ -17,6 +18,7 @@ export type UpdateAccountInput = {
   balance?: number;
   onBudget?: boolean;
   sort?: number;
+  archived?: boolean;
 };
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
@@ -32,6 +34,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
       balance: Number(input.balance) || 0,
       onBudget: input.onBudget ?? true,
       sort: Number(maxRow?.max ?? -1) + 1,
+      archived: input.archived ?? false,
     })
     .returning();
   return row;
@@ -50,6 +53,7 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
   if (patch.balance != null) p.balance = Number(patch.balance) || 0;
   if (patch.onBudget != null) p.onBudget = !!patch.onBudget;
   if (patch.sort != null) p.sort = Number(patch.sort);
+  if (patch.archived != null) p.archived = !!patch.archived;
   const [row] = await db.update(accounts).set(p).where(eq(accounts.id, id)).returning();
   return row;
 }

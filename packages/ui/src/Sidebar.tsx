@@ -46,13 +46,17 @@ export function Sidebar({
   onEditAccount?: (id: number) => void;
   onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
 }) {
+  const activeAccounts = accounts.filter((a) => !a.archived);
+  const archivedAccounts = accounts.filter((a) => !!a.archived);
+
   const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
-  const seen = new Set(accounts.map((a) => a.groupLabel));
+  const seen = new Set(activeAccounts.map((a) => a.groupLabel));
   const groups = [...groupOrder.filter((g) => seen.has(g)), ...seen].filter(
     (g, i, arr) => arr.indexOf(g) === i
   );
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     Retirement: true,
+    "Archived Accounts": true,
   });
   const [nwOpen, setNwOpen] = useState(true);
 
@@ -154,19 +158,20 @@ export function Sidebar({
     setAccOverId(null);
   };
 
-  const liquid = accounts.filter((a) => a.kind === "liquid");
-  const credit = accounts.filter((a) => a.kind === "credit");
-  const off = accounts.filter((a) => a.kind === "offbudget");
+  const liquid = activeAccounts.filter((a) => a.kind === "liquid");
+  const credit = activeAccounts.filter((a) => a.kind === "credit");
+  const off = activeAccounts.filter((a) => a.kind === "offbudget");
 
   const liquidTotal = liquid.reduce((s, a) => s + num(a.balance), 0);
   const creditTotal = credit.reduce((s, a) => s + num(a.balance), 0);
   const offAssets = off.filter((a) => num(a.balance) >= 0).reduce((s, a) => s + num(a.balance), 0);
   const offLiab = off.filter((a) => num(a.balance) < 0).reduce((s, a) => s + num(a.balance), 0);
-  const netWorth = liquidTotal + creditTotal + offAssets + offLiab;
+  const archivedTotal = archivedAccounts.reduce((s, a) => s + num(a.balance), 0);
+  const netWorth = liquidTotal + creditTotal + offAssets + offLiab + archivedTotal;
 
   const totalFor = (label: string) =>
-    accounts.filter((a) => a.groupLabel === label).reduce((s, a) => s + num(a.balance), 0);
-  const accountsFor = (label: string) => accounts.filter((a) => a.groupLabel === label);
+    activeAccounts.filter((a) => a.groupLabel === label).reduce((s, a) => s + num(a.balance), 0);
+  const accountsFor = (label: string) => activeAccounts.filter((a) => a.groupLabel === label);
 
   return (
     <aside
@@ -305,6 +310,91 @@ export function Sidebar({
             </div>
           );
         })}
+
+        {archivedAccounts.length > 0 && (
+          <div className="y-side-group">
+            <button
+              onClick={() =>
+                setCollapsed((c) => ({
+                  ...c,
+                  "Archived Accounts": !c["Archived Accounts"],
+                }))
+              }
+              className="y-side-head flex items-center gap-2 w-full"
+            >
+              <span
+                className={cx(
+                  "y-tri ml-[4px] mr-1.5",
+                  !collapsed["Archived Accounts"] && "is-open"
+                )}
+                style={{ borderLeftColor: "var(--y-side-sel-top)", flexShrink: 0 }}
+              />
+              <span className="truncate min-w-0 flex-1">Archived Accounts</span>
+              <span
+                className="y-side-amt"
+                style={{ color: archivedTotal < 0 ? "var(--y-side-neg)" : undefined }}
+              >
+                {fmt(archivedTotal)}
+              </span>
+            </button>
+            {!collapsed["Archived Accounts"] &&
+              archivedAccounts.map((a) => {
+                const isSelected = view === "transactions" && selectedAccountId === a.id;
+                const isDropTarget = accOverId === a.id;
+                const hasActions = Boolean(onEditAccount);
+                return (
+                  <div
+                    key={a.id}
+                    className={cx("group relative w-full", isDropTarget && "bg-[rgba(78,170,213,0.25)]")}
+                    style={{ paddingLeft: 0 }}
+                    draggable={Boolean(onReorderAccount)}
+                    onDragStart={(e) => handleDragStart(e, a.id)}
+                    onDragOver={(e) => handleDragOver(e, a.id)}
+                    onDragLeave={() => setAccOverId(null)}
+                    onDrop={(e) => handleDrop(e, a, archivedAccounts)}
+                  >
+                    <button
+                      onClick={() => onSelectAccount(a.id)}
+                      className={cx(
+                        "y-side-item group/acc opacity-80 hover:opacity-100",
+                        isSelected && "is-sel !opacity-100"
+                      )}
+                    >
+                      <span className="truncate">{a.name}</span>
+                      <span
+                        className={cx(
+                          "y-side-amt transition-opacity",
+                          hasActions && "group-hover:opacity-0"
+                        )}
+                        style={{
+                          color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
+                          fontWeight: 500,
+                        }}
+                      >
+                        {fmt(num(a.balance))}
+                      </span>
+                    </button>
+                    {hasActions && onEditAccount && (
+                      <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditAccount(a.id);
+                          }}
+                          className="grid h-[18px] w-[18px] place-items-center rounded"
+                          style={{ color: "var(--y-side-ink-dim)" }}
+                          title="Edit account"
+                          aria-label={`Edit account ${a.name}`}
+                        >
+                          <Icon name="edit" size={11} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
 
         <Button
           onClick={onAddAccount}

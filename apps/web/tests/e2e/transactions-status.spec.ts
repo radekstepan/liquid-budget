@@ -176,7 +176,7 @@ test("split transactions render parent ClearedFlag and no subtransaction rows in
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-20");
   const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: "Category…",
+    hasText: /Category/i,
   });
   await subCategoryTriggers.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
