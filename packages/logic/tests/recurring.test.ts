@@ -146,6 +146,22 @@ describe("netMonthlyAmount", () => {
         netMonthlyAmount(base({ accountId: 4, amount: "-10000" }), [], accounts)
       ).toBe(0);
     });
+
+    it("returns 0 for credit card single and split expenses (Issue #16)", () => {
+      // Single expense charged to Visa (credit)
+      expect(
+        netMonthlyAmount(base({ accountId: 3, amount: "-1500" }), [], accounts)
+      ).toBe(0);
+
+      // Split expense charged to Visa (credit)
+      expect(
+        netMonthlyAmount(
+          base({ accountId: 3, amount: "-5000" }),
+          [sub({ amount: "-3000" }), sub({ amount: "-2000" })],
+          accounts
+        )
+      ).toBe(0);
+    });
   });
 });
 

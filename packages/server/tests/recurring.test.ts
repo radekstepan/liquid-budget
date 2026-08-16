@@ -180,6 +180,40 @@ describe("recurring queries", () => {
       expect(subInserts[1]?.values).toMatchObject({ amount: -100000 });
     });
 
+    it("creates a recurring split containing a transfer sub-transaction (Issue #15)", () => {
+      mock.respondWith("insert:recurring", [{ id: 9 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+
+      return createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "Transfer and Spend",
+        amount: -25000,
+        frequency: "monthly",
+        nextDate: "2026-07-15",
+        subTransactions: [
+          { categoryId: 5, amount: -15000, memo: "groceries" },
+          { transferAccountId: 2, amount: -10000, memo: "savings transfer" },
+        ],
+      }).then(() => {
+        const subInserts = mock.calls.filter(
+          (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+        );
+        expect(subInserts).toHaveLength(2);
+        expect(subInserts[0]?.values).toMatchObject({
+          categoryId: 5,
+          transferAccountId: null,
+          amount: -15000,
+        });
+        expect(subInserts[1]?.values).toMatchObject({
+          categoryId: null,
+          transferAccountId: 2,
+          amount: -10000,
+        });
+      });
+    });
+
     it("rejects a split with a missing category on update", async () => {
       const splitRow = { ...existingRow, amount: 20000, categoryId: null };
       mock.respondWith("select:recurring", [splitRow]);

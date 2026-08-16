@@ -146,6 +146,7 @@ describe("reconcile queries", () => {
         payee: RECONCILE_ADJUSTMENT_MEMO,
         amount: -1235,
         status: "c",
+        reconciledAt: expect.any(String),
       });
     });
   });

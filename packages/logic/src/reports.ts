@@ -302,15 +302,11 @@ export function computeMonthlyInsights(
     }
   }
 
-  // Count how many prior months actually exist in data
-  const allDataMonths = new Set(data.transactions.map((t) => t.date.slice(0, 7)));
-  const existingPriorMonthsCount = [m1, m2, m3].filter((m) => allDataMonths.has(m)).length;
-  const divisor = Math.max(1, existingPriorMonthsCount);
-
   // Calculate 3-month average and % difference for categories
   for (const [catId, currentSpend] of currentSpendByCat.entries()) {
     const mMap = priorSpendByCatMonth.get(catId);
     if (mMap && mMap.size > 0) {
+      const divisor = Math.max(1, mMap.size);
       const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
       const avg3mo = Math.round(totalPriorSpend / divisor);
       if (avg3mo > 0) {

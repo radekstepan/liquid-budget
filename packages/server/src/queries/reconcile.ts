@@ -195,6 +195,7 @@ async function postAdjustment(
       transferAccountId: null,
       parentId: null,
       isIncome: false,
+      reconciledAt: today,
     })
     .returning();
 
@@ -248,7 +249,7 @@ export async function unreconcileAccount(
       )
       .returning({ id: transactions.id });
 
-    // Find the most recent synthetic adjustment row to delete.
+    // Find the most recent synthetic adjustment row for this batch to delete.
     const adjustmentRows = await db
       .select({ id: transactions.id, amount: transactions.amount })
       .from(transactions)
@@ -256,7 +257,7 @@ export async function unreconcileAccount(
         and(
           eq(transactions.accountId, accountId),
           eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
-          sql`${transactions.date} <= ${lastDate}`
+          sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
         )
       )
       .orderBy(desc(transactions.date), desc(transactions.id))

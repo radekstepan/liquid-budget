@@ -167,12 +167,15 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
     if (norm.isSplit && parent) {
       let sort = 0;
       for (const c of norm.subTransactions!) {
+        const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+        const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
         await db.insert(recurringSubTransactions).values({
           recurringId: parent.id,
-          categoryId: c.categoryId,
+          categoryId,
           amount: c.amount,
           memo: c.memo ?? "",
           sort: sort++,
+          transferAccountId,
         });
       }
     }
@@ -243,12 +246,15 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       if (norm.isSplit) {
         let sort = 0;
         for (const c of norm.subTransactions!) {
+          const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+          const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
           await db.insert(recurringSubTransactions).values({
             recurringId: id,
-            categoryId: c.categoryId,
+            categoryId,
             amount: c.amount,
             memo: c.memo ?? "",
             sort: sort++,
+            transferAccountId,
           });
         }
       }
