@@ -119,7 +119,7 @@ export function recurringLiquidFlow(
         }
         return s;
       }
-      if (sourceKind === "liquid" || sourceKind === "credit") {
+      if (sourceKind === "liquid") {
         return s + amt;
       }
       return s;
@@ -145,7 +145,7 @@ export function recurringLiquidFlow(
   }
 
   // Single recurring
-  if (sourceKind === "liquid" || sourceKind === "credit") {
+  if (sourceKind === "liquid") {
     return num(r.amount);
   }
   return 0;

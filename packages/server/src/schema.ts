@@ -111,6 +111,7 @@ export const recurringSubTransactions = sqliteTable("recurring_sub_transactions"
   amount: integer("amount").notNull().default(0),
   memo: text("memo").notNull().default(""),
   sort: integer("sort").notNull().default(0),
+  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
 });
 
 export type Account = typeof accounts.$inferSelect;

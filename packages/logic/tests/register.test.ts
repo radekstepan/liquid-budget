@@ -134,6 +134,40 @@ describe("computeRunningBalances", () => {
     expect(byId(out, parent.id).runningBalance).toBe(100000);
   });
 
+  it("applies transfer rows to the destination account in All Transactions (no anchor) mode (Issue #14)", () => {
+    // Transfer $100 from Account 1 to Account 2 on June 30
+    const transfer = t({
+      accountId: 1,
+      transferAccountId: 2,
+      date: "2026-06-30",
+      amount: -10000,
+    });
+    // Older transaction on Account 2 on June 20
+    const olderOnAcc2 = t({
+      accountId: 2,
+      date: "2026-06-20",
+      amount: 5000,
+    });
+    const balances = new Map([
+      [1, 90000],  // After transfer: 90000
+      [2, 60000],  // After transfer: 60000 (was 50000 before transfer)
+    ]);
+    const out = computeRunningBalances([transfer, olderOnAcc2], balances);
+    // Source row shows current balance of Account 1
+    expect(byId(out, transfer.id).runningBalance).toBe(90000);
+    // Older row on Account 2 correctly reflects balance prior to inbound transfer (60000 - 10000 = 50000)
+    expect(byId(out, olderOnAcc2.id).runningBalance).toBe(50000);
+  });
+
+  it("handles string amounts as integer cents", () => {
+    const a = t({ accountId: 1, date: "2026-06-30", amount: "10000" as unknown as number });
+    const b = t({ accountId: 1, date: "2026-06-20", amount: "-5000" as unknown as number });
+    const balances = new Map([[1, 50000]]);
+    const out = computeRunningBalances([a, b], balances);
+    expect(byId(out, a.id).runningBalance).toBe(50000);
+    expect(byId(out, b.id).runningBalance).toBe(40000);
+  });
+
   it("falls back to the row's own account balance when no walk entry exists", () => {
     const a = t({ accountId: 1, date: "2026-06-30", amount: -10000 });
     const balances = new Map([

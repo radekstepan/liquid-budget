@@ -108,18 +108,30 @@ export function computeRunningBalances(
     const byAccount = new Map<number, ParsedTxn[]>();
     for (const r of parsed) {
       if (parentIds.has(r.id)) continue;
-      let list = byAccount.get(r.accountId);
-      if (!list) {
-        list = [];
-        byAccount.set(r.accountId, list);
+      let srcList = byAccount.get(r.accountId);
+      if (!srcList) {
+        srcList = [];
+        byAccount.set(r.accountId, srcList);
       }
-      list.push(r);
+      srcList.push(r);
+      if (r.transferAccountId != null) {
+        let destList = byAccount.get(r.transferAccountId);
+        if (!destList) {
+          destList = [];
+          byAccount.set(r.transferAccountId, destList);
+        }
+        destList.push(r);
+      }
     }
     for (const [acctId, acctRows] of byAccount) {
       let bal = accountBalances.get(acctId) ?? 0;
       for (const r of acctRows) {
-        runningBalanceById.set(r.id, bal);
-        bal -= r.amount;
+        const isSource = r.accountId === acctId;
+        if (isSource) {
+          runningBalanceById.set(r.id, bal);
+        }
+        const delta = isSource ? r.amount : -r.amount;
+        bal -= delta;
       }
     }
   }
@@ -155,6 +167,6 @@ export function computeRunningBalances(
 
 function numSafe(s: string | number | null | undefined): number {
   if (s == null) return 0;
-  const n = typeof s === "number" ? s : parseFloat(s);
+  const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
   return Number.isNaN(n) ? 0 : n;
 }

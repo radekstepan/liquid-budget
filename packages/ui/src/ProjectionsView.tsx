@@ -15,7 +15,8 @@ import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
 export function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
   const { year, month0 } = parseMonthKey(month);
-  const liquidNow = data.accounts
+  const activeAccounts = data.accounts.filter((a) => !a.archived);
+  const liquidNow = activeAccounts
     .filter((a) => a.kind === "liquid")
     .reduce((s, a) => s + num(a.balance), 0);
 
@@ -23,7 +24,7 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
   const perMonth = data.recurring
     .filter((r) => r.active)
     .reduce((s, r) => {
-      const flow = netMonthlyAmount(r, r.subTransactions ?? [], data.accounts);
+      const flow = netMonthlyAmount(r, r.subTransactions ?? [], activeAccounts);
       const mult = frequencyMonthlyMultiplier(r.frequency);
       return s + flow * mult;
     }, 0);

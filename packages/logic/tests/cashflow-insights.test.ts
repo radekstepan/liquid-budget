@@ -112,4 +112,28 @@ describe("computeMonthlyInsights", () => {
     expect(insights[1]?.categoryName).toBe("Groceries");
     expect(insights[1]?.pctChange).toBe(20);
   });
+
+  it("averages over only active prior months for newly created categories (Issue #17)", () => {
+    const data: BudgetData = {
+      accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
+      groups: [{ id: 1, name: "Daily", sort: 1, isCreditCardPayments: false }],
+      categories: [
+        { id: 10, groupId: 1, name: "New Category", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        // Category only has 1 prior month of data ($100 in May)
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-10000", status: "c" },
+        // Current month spend is $100 in June -> 0% change, not +200%
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-10000", status: "c" },
+      ],
+    };
+
+    const insights = computeMonthlyInsights(data, "2026-06");
+    expect(insights).toHaveLength(1);
+    expect(insights[0]?.categoryName).toBe("New Category");
+    expect(insights[0]?.avgAmount).toBe(10000); // Divided by 1, not 3
+    expect(insights[0]?.pctChange).toBe(0);
+  });
 });

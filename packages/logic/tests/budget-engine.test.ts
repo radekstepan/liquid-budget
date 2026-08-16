@@ -396,6 +396,50 @@ describe("computeBudget", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Off-budget and transfer inflows (Issues #3, #4)
+  // -------------------------------------------------------------------------
+
+  it("off-budget account inflows are excluded from TBB (Issue #3)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+        { id: 2, name: "Brokerage", kind: "offbudget", groupLabel: "Investments", balance: "500000", onBudget: false, sort: 1 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1 })],
+      assignments: [],
+      transactions: [
+        // $5,000 dividend in off-budget brokerage
+        { id: 1, accountId: 2, categoryId: null, date: "2025-07-15", payee: "Dividend", memo: "", amount: "500000", status: "c" },
+      ],
+      recurring: [],
+    };
+    const result = computeBudget(data, "2025-07");
+    expect(result.totalIncome).toBe(0);
+    expect(result.tbb).toBe(0);
+  });
+
+  it("transfers between accounts are excluded from income and do not inflate TBB (Issue #4)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "200000", onBudget: true, sort: 0 },
+        { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1 })],
+      assignments: [],
+      transactions: [
+        // Transfer $2,000 from Savings (2) to Checking (1)
+        { id: 1, accountId: 2, categoryId: null, transferAccountId: 1, date: "2025-07-10", payee: "Transfer : Checking", memo: "", amount: "-200000", status: "c" },
+      ],
+      recurring: [],
+    };
+    const result = computeBudget(data, "2025-07");
+    expect(result.totalIncome).toBe(0);
+    expect(result.tbb).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
   // Seed fixture integration
   // -------------------------------------------------------------------------
 
