@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, type BudgetAppApi } from "@ynab/ui";
-import { Notice } from "@ynab/theme";
+import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { BudgetData } from "@ynab/logic";
 import { todayISO, num, nextDateFor } from "@ynab/logic";
 
@@ -21,6 +21,28 @@ async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
 export function BudgetAppShell() {
   const [data, setData] = useState<BudgetData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  const addToast = useCallback((message: string, tone: ToastItem["tone"] = "info") => {
+    const t = createToast(message, tone);
+    setToasts((prev) => [...prev, t]);
+    const timer = setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== t.id));
+      toastTimers.current.delete(t.id);
+    }, 4000);
+    toastTimers.current.set(t.id, timer);
+    return t;
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    const timer = toastTimers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimers.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((x) => x.id !== id));
+  }, []);
 
   const reload = useCallback(async () => {
     const json = await jsonReq<BudgetData>("/api/budget");
@@ -64,11 +86,8 @@ export function BudgetAppShell() {
         });
       } catch (e) {
         if (snapshot) setData(snapshot);
-        // Best-effort resync: pull the server's view so the UI
-        // reflects whatever the DB has now (other in-flight mutations,
-        // a 500 that partially wrote, etc.). Swallow the reload
-        // error — the original error is the one the caller cares about.
         await reload().catch(() => {});
+        addToast("Failed to save assignment. Please try again.", "danger");
         throw e;
       }
     },
@@ -358,5 +377,10 @@ export function BudgetAppShell() {
     );
   }
 
-  return <BudgetApp data={data} api={api} />;
+  return (
+    <>
+      <BudgetApp data={data} api={api} />
+      <Toast items={toasts} onDismiss={dismissToast} />
+    </>
+  );
 }

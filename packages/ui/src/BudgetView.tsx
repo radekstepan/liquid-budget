@@ -66,6 +66,9 @@ export function BudgetView({
   onReorderCategory,
   onReorderGroup,
   onClearOverdraft,
+  lastMonthAssignments,
+  avgSpentByCategory,
+  underfundedByCategory,
 }: {
   budget: BudgetResult;
   budgets: BudgetResult[];
@@ -91,6 +94,9 @@ export function BudgetView({
   onReorderCategory?: (id: number, sort: number) => void;
   onReorderGroup?: (id: number, sort: number) => void;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
+  lastMonthAssignments?: Map<number, number>;
+  avgSpentByCategory?: Map<number, number>;
+  underfundedByCategory?: Map<number, number>;
 }) {
   const showMulti = monthCount > 1;
 
@@ -134,6 +140,10 @@ export function BudgetView({
   const structureGroups = budget.groups.filter((g) => !g.group.isCreditCardPayments);
   const creditGroup = budget.groups.find((g) => g.group.isCreditCardPayments);
 
+  const quickFill = lastMonthAssignments || avgSpentByCategory || underfundedByCategory
+    ? { lastMonthAssignments, avgSpentByCategory, underfundedByCategory }
+    : undefined;
+
   // For each visible month, find the matching GroupRow by id.
   const groupsByMonth = useMemo(() => {
     return resolvedBudgets.map((b) => {
@@ -150,13 +160,7 @@ export function BudgetView({
     },
     {
       label: "Overspent in Previous",
-      value: Math.max(
-        0,
-        budget.groups
-          .filter((g) => !g.group.isCreditCardPayments)
-          .reduce((s, g) => s + (g.available < 0 ? -g.available : 0), 0) -
-          budget.priorSurplus
-      ),
+      value: budget.overspentPrevious,
     },
     { label: `Income for ${formatMonthLong(currentMonth)}`, value: budget.totalIncome },
     { label: `Budgeted in ${formatMonthLong(currentMonth)}`, value: budget.totalAssigned },
@@ -342,6 +346,7 @@ export function BudgetView({
                 onDragOver={() => setGroupOverId(g.group.id)}
                 onDragLeave={() => setGroupOverId(null)}
                 onDrop={() => handleGroupDrop(g.group.id)}
+                quickFill={quickFill}
               />
             ))}
             {creditGroup && (
@@ -486,6 +491,7 @@ function GroupBlock({
   onDragOver,
   onDragLeave,
   onDrop,
+  quickFill,
 }: {
   group: GroupRow;
   collapsed: boolean;
@@ -506,6 +512,7 @@ function GroupBlock({
   onDragOver?: () => void;
   onDragLeave?: () => void;
   onDrop?: () => void;
+  quickFill?: { lastMonthAssignments?: Map<number, number>; avgSpentByCategory?: Map<number, number>; underfundedByCategory?: Map<number, number> };
 }) {
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
@@ -669,7 +676,7 @@ function GroupBlock({
               <td className="y-table-td--sticky-cat pl-[26px]">
                 <div className="group/row flex items-center">
                   <span className="truncate">{r.category.name}</span>
-                  <span className="ml-2 flex items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
+                  <span className="ml-2 flex items-center gap-1 opacity-60 transition-opacity hover:opacity-100">
                     <button
                       onClick={onEditCategory}
                       className="grid h-[18px] w-[18px] place-items-center rounded"
@@ -695,6 +702,8 @@ function GroupBlock({
                         isOtherMonth={m !== currentMonth}
                         isFirstMonth={idx === 0}
                         onAssign={(val) => onAssign(r.category.id, val, m)}
+                        quickFill={quickFill}
+                        categoryId={r.category.id}
                       />
                     );
                   })
@@ -704,6 +713,8 @@ function GroupBlock({
                       <CategoryMonthCell
                         value={r.assigned}
                         onAssign={(val) => onAssign(r.category.id, val, currentMonth)}
+                        quickFill={quickFill}
+                        categoryId={r.category.id}
                       />
                     </td>
                     <td
@@ -735,6 +746,8 @@ function MonthCells({
   isFirstMonth,
   isRowForGroup,
   onAssign,
+  quickFill,
+  categoryId,
 }: {
   group?: GroupRow;
   row?: CatRow;
@@ -742,6 +755,8 @@ function MonthCells({
   isFirstMonth: boolean;
   isRowForGroup?: boolean;
   onAssign?: (val: number) => void;
+  quickFill?: CategoryMonthCellProps["quickFill"];
+  categoryId?: number;
 }) {
   const divCls = isFirstMonth ? "" : "y-table-colgroup-divider";
   const readOnlyCls = isOtherMonth ? "y-table-cell--readonly" : "";
@@ -775,7 +790,7 @@ function MonthCells({
         {isOtherMonth || !onAssign ? (
           <span className="y-num">{fmt(row.assigned)}</span>
         ) : (
-          <CategoryMonthCell value={row.assigned} onAssign={onAssign} />
+          <CategoryMonthCell value={row.assigned} onAssign={onAssign} quickFill={quickFill} categoryId={categoryId} />
         )}
       </td>
       <td
@@ -795,16 +810,28 @@ function MonthCells({
 
 /* ------------------------------------------------------------ inline amount cell */
 
+type CategoryMonthCellProps = {
+  value: number;
+  onAssign: (v: number) => void;
+  quickFill?: {
+    lastMonthAssignments?: Map<number, number>;
+    avgSpentByCategory?: Map<number, number>;
+    underfundedByCategory?: Map<number, number>;
+  };
+  categoryId?: number;
+};
+
 function CategoryMonthCell({
   value,
   onAssign,
-}: {
-  value: number;
-  onAssign: (v: number) => void;
-}) {
+  quickFill,
+  categoryId,
+}: CategoryMonthCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [showQuickFill, setShowQuickFill] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -813,11 +840,29 @@ function CategoryMonthCell({
     }
   }, [editing]);
 
+  useEffect(() => {
+    if (!showQuickFill) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowQuickFill(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showQuickFill]);
+
   const commit = () => {
     const v = evalAmount(draft);
     if (v != null) onAssign(Math.round(v * 100));
     setEditing(false);
   };
+
+  const hasQuickFill =
+    quickFill &&
+    categoryId != null &&
+    ((quickFill.lastMonthAssignments?.has(categoryId)) ||
+      (quickFill.avgSpentByCategory?.has(categoryId)) ||
+      (quickFill.underfundedByCategory?.has(categoryId)));
 
   if (editing) {
     return (
@@ -845,17 +890,91 @@ function CategoryMonthCell({
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        setDraft((value / 100).toFixed(2));
-        setEditing(true);
-      }}
-      className="y-inline-amt cursor-text"
-      style={{ color: "var(--y-ink)" }}
-    >
-      {fmt(value)}
-    </button>
+    <div className="relative inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => {
+          setDraft((value / 100).toFixed(2));
+          setEditing(true);
+        }}
+        className="y-inline-amt cursor-text"
+        style={{ color: "var(--y-ink)" }}
+      >
+        {fmt(value)}
+      </button>
+      {hasQuickFill && (
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowQuickFill((o) => !o);
+            }}
+            className="grid h-[16px] w-[16px] place-items-center rounded opacity-50 hover:!opacity-100"
+            style={{ color: "var(--y-ink-faint)" }}
+            aria-label="Quick budget options"
+            title="Quick budget"
+          >
+            <Icon name="dots" size={10} />
+          </button>
+          {showQuickFill && (
+            <div
+              className="absolute right-0 top-[18px] z-30 min-w-[160px] overflow-hidden"
+              style={{
+                background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+                border: "1px solid var(--y-chrome-line)",
+                borderRadius: 4,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                padding: 4,
+              }}
+            >
+              {quickFill?.lastMonthAssignments?.has(categoryId!) && (
+                <button
+                  onClick={() => {
+                    onAssign(quickFill.lastMonthAssignments!.get(categoryId!)!);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Budgeted Last Month</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(quickFill.lastMonthAssignments!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+              {quickFill?.avgSpentByCategory?.has(categoryId!) && (
+                <button
+                  onClick={() => {
+                    onAssign(quickFill.avgSpentByCategory!.get(categoryId!)!);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Average Spent</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(quickFill.avgSpentByCategory!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+              {quickFill?.underfundedByCategory?.has(categoryId!) && (
+                <button
+                  onClick={() => {
+                    onAssign(quickFill.underfundedByCategory!.get(categoryId!)!);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Underfunded</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(quickFill.underfundedByCategory!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

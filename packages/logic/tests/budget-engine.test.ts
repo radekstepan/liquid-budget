@@ -163,11 +163,16 @@ describe("computeBudget", () => {
     expect(row.available).toBe(30000);
   });
 
-  it("overspend in prior month reduces next month's available", () => {
+  it("overspend in prior month is clamped to zero and deducted from TBB", () => {
     // Month A: assign 100, spend -300 → available -200 (overspent)
-    // Month B: assign 500 → available = -200 + 500 = 300
+    // Month B: assign 500 → available = 0 + 500 = 500 (clamped to zero carryover)
+    // TBB = income - assigned + priorSurplus - overspentPrevious
+    //      = 0 - 500 + 0 - 200 = -700
     const data: BudgetData = {
       ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
       groups: [makeGroup()],
       categories: [makeCategory({ id: 1, carryover: "0" })],
       assignments: [
@@ -180,8 +185,153 @@ describe("computeBudget", () => {
     };
     const result = computeBudget(data, "2025-07");
     const row = result.groups[0]!.rows[0]!;
-    expect(row.carryoverIn).toBe(-20000);
-    expect(row.available).toBe(30000);
+    // Carryover is clamped to 0 (not -20000)
+    expect(row.carryoverIn).toBe(0);
+    // Available = 0 + 50000 = 50000
+    expect(row.available).toBe(50000);
+    // Overspent from previous month is 20000
+    expect(result.overspentPrevious).toBe(20000);
+    // TBB = 0 - 50000 + 0 - 20000 = -70000
+    expect(result.tbb).toBe(-70000);
+  });
+
+  it("cash overspending reduces TBB but not available in next month", () => {
+    // Month 1: income 5000, assign 1000 to groceries, spend 3000 → groceries available -2000
+    // Month 2: income 0, assign 0 → groceries available 0 (clamped), TBB reduced by 2000
+    const data: BudgetData = {
+      ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1, carryover: "0" })],
+      assignments: [
+        { id: 1, categoryId: 1, month: "2025-06", amount: "100000" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Payroll", memo: "", amount: "500000", status: "c", isIncome: true },
+        { id: 2, accountId: 1, categoryId: 1, date: "2025-06-15", payee: "Store", memo: "", amount: "-300000", status: "c" },
+      ],
+    };
+    const june = computeBudget(data, "2025-06");
+    // June: groceries available = 100000 - 300000 = -200000
+    expect(june.groups[0]!.rows[0]!.available).toBe(-200000);
+    expect(june.tbb).toBe(400000); // 500000 - 100000
+
+    const july = computeBudget(data, "2025-07");
+    // July: groceries carryover = 0 (clamped from -200000)
+    expect(july.groups[0]!.rows[0]!.carryoverIn).toBe(0);
+    expect(july.groups[0]!.rows[0]!.available).toBe(0);
+    // July: TBB = 0 - 0 + 400000 (priorSurplus from June) - 200000 = 200000
+    expect(july.overspentPrevious).toBe(200000);
+    expect(july.tbb).toBe(200000);
+  });
+
+  it("multiple categories overspent in prior month are summed", () => {
+    const data: BudgetData = {
+      ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [
+        makeCategory({ id: 1, name: "Cat1", carryover: "0" }),
+        makeCategory({ id: 2, name: "Cat2", sort: 1, carryover: "0" }),
+      ],
+      assignments: [
+        { id: 1, categoryId: 1, month: "2025-06", amount: "0" },
+        { id: 2, categoryId: 2, month: "2025-06", amount: "0" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 1, date: "2025-06-10", payee: "", memo: "", amount: "-15000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 2, date: "2025-06-10", payee: "", memo: "", amount: "-25000", status: "c" },
+      ],
+    };
+    const result = computeBudget(data, "2025-07");
+    // Both categories overspent, total = 15000 + 25000 = 40000
+    expect(result.overspentPrevious).toBe(40000);
+    expect(result.tbb).toBe(-40000);
+  });
+
+  it("overspent that is covered in the next month does not cascade", () => {
+    // Month 1: overspend by 200
+    // Month 2: assign 500 (covers the overspent), TBB reduced by 200
+    // Month 3: TBB should not be reduced by the month 1 overspent again
+    const data: BudgetData = {
+      ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1, carryover: "0" })],
+      assignments: [
+        { id: 1, categoryId: 1, month: "2025-06", amount: "0" },
+        { id: 2, categoryId: 1, month: "2025-07", amount: "50000" },
+        { id: 3, categoryId: 1, month: "2025-08", amount: "0" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 1, date: "2025-06-15", payee: "", memo: "", amount: "-20000", status: "c" },
+      ],
+    };
+
+    const july = computeBudget(data, "2025-07");
+    expect(july.overspentPrevious).toBe(20000);
+    expect(july.tbb).toBe(-70000); // 0 - 50000 - 20000
+
+    const august = computeBudget(data, "2025-08");
+    // Month 3: July had no overspent (available = 0 + 50000 = 50000, positive)
+    expect(august.overspentPrevious).toBe(0);
+    expect(august.tbb).toBe(0);
+  });
+
+  it("credit card overspending does NOT get clamped and does NOT affect TBB", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "300000", onBudget: true, sort: 0 },
+        { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+      ],
+      groups: [
+        { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+      ],
+      categories: [
+        { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+      ],
+      assignments: [
+        { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+        { id: 2, categoryId: 2, month: "2025-06", amount: "0" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Payroll", memo: "", amount: "500000", status: "c", isIncome: true },
+        { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Store", memo: "", amount: "-50000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const june = computeBudget(data, "2025-06");
+    // Groceries: carryover 0 + assigned 10000 + outflow -50000 = -40000 (overspent on CC)
+    const groc = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+    expect(groc.available).toBe(-40000);
+    // CC buffer still accumulates when spending on CC
+    const ccRow = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+    expect(ccRow.ccBuffer).toBe(50000);
+
+    const july = computeBudget(data, "2025-07");
+    // Groceries carryover is clamped to 0 (cash overspending rule)
+    const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+    expect(grocJuly.carryoverIn).toBe(0);
+    // CC payment category: overspending persists as debt (NOT clamped)
+    // carryover = 0 + 0 + 0 + 50000 (buffer from June) = 50000, then in July: 0 + 0 + 0 + 0 = 50000
+    const ccRowJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+    expect(ccRowJuly.carryoverIn).toBe(50000);
+    // Overspent from June: groceries was -40000, clamped to 0, overspent = 40000
+    expect(july.overspentPrevious).toBe(40000);
+    // TBB = 0 - 0 + 400000 - 40000 = 360000 (note: priorSurplus carries forward from June)
+    // June: income 500000 - assigned 10000 = 490000, surplus = 490000
+    // July: 0 - 0 + 490000 - 40000 = 450000
+    expect(july.priorSurplus).toBe(490000);
+    expect(july.tbb).toBe(450000);
   });
 
   it("three-month carryover chain with multiple categories", () => {
@@ -448,7 +598,7 @@ describe("computeBudget", () => {
     const result = computeBudget(data, DEMO_MONTH);
     expect(result.groups).toHaveLength(data.groups.length);
     expect(result.totalIncome).toBeGreaterThan(0);
-    expect(result.tbb).toBe(result.totalIncome + result.priorSurplus - result.totalAssigned);
+    expect(result.tbb).toBe(result.totalIncome + result.priorSurplus - result.totalAssigned - result.overspentPrevious);
   });
 
   it("computes 5 years (60 months) with 1000 transactions in < 100ms", () => {
