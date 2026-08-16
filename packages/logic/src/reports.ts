@@ -139,9 +139,9 @@ export function computeNetWorthReport(
     let debts = 0;
     for (const [, bal] of runningBalances.entries()) {
       if (bal > 0) {
-        assets += bal;
+        assets = Math.round(assets + bal);
       } else if (bal < 0) {
-        debts += bal;
+        debts = Math.round(debts + bal);
       }
     }
 
@@ -149,7 +149,7 @@ export function computeNetWorthReport(
       month: m,
       assets,
       debts,
-      net: assets + debts,
+      net: Math.round(assets + debts),
     });
   }
 
@@ -183,13 +183,13 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
 
     const amt = num(t.amount);
     if (isIncomeTransaction(t, accountMap)) {
-      income += amt;
+      income = Math.round(income + amt);
     } else if (t.transferAccountId == null && amt < 0) {
-      outflow += Math.abs(amt);
+      outflow = Math.round(outflow + Math.abs(amt));
     }
   }
 
-  const net = income - outflow;
+  const net = Math.round(income - outflow);
   const savingsRate =
     income > 0
       ? Math.round(((income - outflow) / income) * 1000) / 10

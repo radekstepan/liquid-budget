@@ -15,6 +15,8 @@ describe("server package public surface", () => {
     expect(typeof server.deleteTransaction).toBe("function");
     expect(typeof server.deleteCategory).toBe("function");
     expect(typeof server.deleteCategoryGroup).toBe("function");
+    expect(typeof server.verifyBalanceIntegrity).toBe("function");
+    expect(typeof server.recomputeAccountBalances).toBe("function");
   });
 
   it("re-exports seedDatabase and DEMO_MONTH", () => {

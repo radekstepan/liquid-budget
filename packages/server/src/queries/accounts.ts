@@ -15,7 +15,6 @@ export type UpdateAccountInput = {
   name?: string;
   kind?: "liquid" | "credit" | "offbudget";
   groupLabel?: string;
-  balance?: number;
   onBudget?: boolean;
   sort?: number;
   archived?: boolean;
@@ -50,7 +49,6 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
   if (patch.name != null) p.name = String(patch.name);
   if (patch.kind != null) p.kind = String(patch.kind);
   if (patch.groupLabel != null) p.groupLabel = String(patch.groupLabel);
-  if (patch.balance != null) p.balance = Number(patch.balance) || 0;
   if (patch.onBudget != null) p.onBudget = !!patch.onBudget;
   if (patch.sort != null) p.sort = Number(patch.sort);
   if (patch.archived != null) p.archived = !!patch.archived;

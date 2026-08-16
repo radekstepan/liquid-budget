@@ -183,6 +183,22 @@ describe("transactions queries", () => {
         message: /reconcile flow/,
       });
     });
+
+    it("rejects amounts exceeding safe integer bounds", async () => {
+      await expect(
+        createTransaction(mock.db, {
+          accountId: 1,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Overflow",
+          memo: "",
+          amount: 1e18,
+        })
+      ).rejects.toMatchObject({
+        status: 400,
+        name: "TransactionError",
+      });
+    });
   });
 
   describe("assertSplitsBalanced", () => {

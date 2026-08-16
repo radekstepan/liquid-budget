@@ -37,7 +37,6 @@ export async function PATCH(req: Request) {
     name: body.name,
     kind: body.kind,
     groupLabel: body.groupLabel,
-    balance: body.balance != null ? Number(body.balance) : undefined,
     onBudget: body.onBudget,
     sort: body.sort != null ? Number(body.sort) : undefined,
     archived: body.archived != null ? Boolean(body.archived) : undefined,

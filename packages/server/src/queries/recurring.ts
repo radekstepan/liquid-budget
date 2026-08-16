@@ -56,6 +56,17 @@ export class RecurringError extends Error {
   }
 }
 
+function assertValidAmount(amount: unknown): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) {
+    throw new RecurringError("Amount must be a valid number", 400);
+  }
+  if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+    throw new RecurringError("Amount exceeds safe integer range", 400);
+  }
+  return Math.round(n);
+}
+
 /**
  * Validate a set of recurring sub-transactions. Mirrors the
  * transaction-side `assertSplitsBalanced`.
@@ -69,14 +80,13 @@ function assertSplitsBalanced(
   children: TxnSubTransactionInput[],
   isExistingChildren = false
 ): void {
+  assertValidAmount(parentAmount);
   if (children.length < 2) {
     throw new RecurringError("split must have at least two sub-transactions");
   }
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
-    if (!Number.isFinite(Number(c.amount))) {
-      throw new RecurringError(`sub-transaction ${i + 1} amount is not a valid number`);
-    }
+    assertValidAmount(c.amount);
     if (c.categoryId && c.transferAccountId) {
       throw new RecurringError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
@@ -144,8 +154,9 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
 
 export async function createRecurring(db: Database, input: CreateRecurringInput) {
   const norm = normaliseInput(input);
+  const validatedAmount = assertValidAmount(input.amount);
   if (norm.isSplit) {
-    assertSplitsBalanced(input.amount, norm.subTransactions!);
+    assertSplitsBalanced(validatedAmount, norm.subTransactions!);
   }
 
   db.run(sql`BEGIN`);
@@ -227,7 +238,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
   if ("categoryId" in patch) p.categoryId = norm.effectiveCategoryId;
   if (patch.payee != null) p.payee = String(patch.payee);
-  if (patch.amount != null) p.amount = Number(patch.amount);
+  if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.frequency != null) p.frequency = String(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
