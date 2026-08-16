@@ -19,7 +19,7 @@
 //   runs starting from whatever the previous run left behind.)
 import { request } from "@playwright/test";
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 export default async function globalSetup() {
   const ctx = await request.newContext({ baseURL: BASE_URL });

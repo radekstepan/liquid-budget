@@ -85,7 +85,7 @@ async function resetToDemo(baseURL: string) {
 }
 
 test("POST /api/import replaces the budget with the backup contents", async ({ request }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
   await resetToDemo(base);
 
   const backup = buildBackup();
@@ -122,7 +122,7 @@ test("POST /api/import replaces the budget with the backup contents", async ({ r
 });
 
 test("POST /api/import rejects a zip without a .ynab4 entry with 400", async ({ request }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
   await resetToDemo(base);
 
   const zip = new AdmZip();
@@ -146,7 +146,7 @@ test("POST /api/import rejects a zip without a .ynab4 entry with 400", async ({ 
 });
 
 test("uploading a backup through the Settings menu reloads the app with imported data", async ({ page, request }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
   await resetToDemo(base);
 
   await page.goto("/");

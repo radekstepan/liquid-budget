@@ -34,6 +34,9 @@ coverage/
 
 budget.db*
 apps/web/budget.db*
+budget.test.db*
+.e2e/
+apps/web/.e2e/
 
 *.y4backup
 backup_extracted

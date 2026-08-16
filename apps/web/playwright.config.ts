@@ -19,21 +19,19 @@
 //     into MSW-style mocking via a DefinePlugin-style env. Today
 //     nothing reads it; it's the same seam therascript uses.
 //
-// DB: the running dev server is responsible for the DB it points at
-// (apps/web/.env.local → ../../budget.db). Every run — local and CI
-// alike — starts from a fresh demo seed: `tests/e2e/global-setup.ts`
-// POSTs /api/reset before the suite (it wipes + re-seeds the shared
-// DB, which the suite would otherwise pollute with `PW *` rows).
+// DB: The E2E test suite runs against an isolated test database
+// (apps/web/.e2e/budget.db) on a dedicated port (3100) to ensure it NEVER
+// touches or mutates the developer's actual budget.db on port 3000.
 //
-// Concurrency: the suite mutates a single shared DB, so tests MUST
+// Concurrency: the suite mutates a single shared test DB, so tests MUST
 // not run in parallel — a second mutating test (or import.spec's
 // mid-suite /api/reset) would race any in-flight writes and corrupt
 // absolute-value assertions. We pin `workers: 1` everywhere so local
 // runs are as deterministic as CI.
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 3000;
-const BASE_URL = `http://localhost:${PORT}`;
+const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) : 3100;
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -48,13 +46,9 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `E2E_TESTING=true yarn dev --port ${PORT}`,
+    command: `DATABASE_URL=../../budget.test.db yarn dev --port ${PORT}`,
     url: `${BASE_URL}/api/health`,
-    // Locally we want the Playwright VSCode extension to reuse the
-    // dev server the developer started in a terminal (via `yarn dev`),
-    // so the extension's auto-spawn race doesn't drop the spec. CI
-    // always wants a fresh server with a clean state.
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",
