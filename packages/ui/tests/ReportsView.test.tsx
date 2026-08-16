@@ -174,13 +174,26 @@ describe("ReportsView", () => {
     expect(scope.getByText("46%")).toBeInTheDocument();
   });
 
-  it("Net Worth tab renders the SVG line/area graph", () => {
-    renderView();
+  it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "8200.00", onBudget: true, sort: 0 },
+        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "500000.00", onBudget: false, sort: 1 },
+        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-300000.00", onBudget: false, sort: 2 },
+      ],
+    };
+    renderView({ data });
     clickTab("Net Worth");
     const panel = findPanel("Net Worth")!;
     expect(panel).toBeTruthy();
     expectPanelBodyIsFlexColumn(panel);
-    expect(panel.querySelector("svg")).not.toBeNull();
+    const svg = panel.querySelector("svg");
+    expect(svg).not.toBeNull();
+    // Chart should contain rectangles for assets/debts bars
+    expect(svg!.querySelectorAll("rect").length).toBeGreaterThan(0);
+    // Chart should contain paths for net line and area
+    expect(svg!.querySelectorAll("path").length).toBe(2);
   });
 
   it("Expense Breakdown tab renders the donut SVG and legend", () => {

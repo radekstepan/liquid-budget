@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { BudgetData, Transaction } from "@ynab/logic";
-import { fmt, num, monthLabel } from "@ynab/logic";
+import type { BudgetData } from "@ynab/logic";
+import { fmt, num, monthLabel, computeNetWorthReport, type NetWorthPoint } from "@ynab/logic";
 import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
-import { NetWorthReport, type NetWorthPoint } from "./NetWorthReport.js";
+import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 import { ExpenseBreakdownReport } from "./ExpenseBreakdownReport.js";
 
@@ -16,25 +16,6 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "spending", label: "Spending by Category" },
   { key: "breakdown", label: "Expense Breakdown" },
 ];
-
-function getMonthsBetween(start: string, end: string) {
-  const partsS = start.split("-");
-  const partsE = end.split("-");
-  let y = Number(partsS[0]);
-  let m = Number(partsS[1]);
-  const ey = Number(partsE[0]);
-  const em = Number(partsE[1]);
-  const out: string[] = [];
-  while (y < ey || (y === ey && m <= em)) {
-    out.push(`${y}-${m.toString().padStart(2, "0")}`);
-    m++;
-    if (m > 12) {
-      m = 1;
-      y++;
-    }
-  }
-  return out;
-}
 
 export function ReportsView({
   data,
@@ -62,6 +43,14 @@ export function ReportsView({
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
 
+  const splitParentIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const t of data.transactions) {
+      if (t.parentId != null) set.add(t.parentId);
+    }
+    return set;
+  }, [data.transactions]);
+
   const catMap = useMemo(
     () => new Map(data.categories.map((c) => [c.id, c.name])),
     [data.categories]
@@ -70,28 +59,32 @@ export function ReportsView({
   const rangeTxns = useMemo(
     () =>
       data.transactions.filter((t) => {
+        if (splitParentIds.has(t.id)) return false;
         const mk = t.date.slice(0, 7);
         return mk >= actualStart && mk <= actualEnd;
       }),
-    [data.transactions, actualStart, actualEnd]
+    [data.transactions, splitParentIds, actualStart, actualEnd]
   );
 
   const income = useMemo(
     () =>
       rangeTxns
-        .filter((t) => t.categoryId == null && num(t.amount) > 0)
+        .filter((t) => t.categoryId == null && t.transferAccountId == null && num(t.amount) > 0)
         .reduce((s, t) => s + num(t.amount), 0),
     [rangeTxns]
   );
   const expense = useMemo(
-    () => rangeTxns.filter((t) => num(t.amount) < 0).reduce((s, t) => s + num(t.amount), 0),
+    () =>
+      rangeTxns
+        .filter((t) => t.transferAccountId == null && num(t.amount) < 0)
+        .reduce((s, t) => s + num(t.amount), 0),
     [rangeTxns]
   );
 
   const spending: SpendingItem[] = useMemo(() => {
     const byCat = new Map<number, number>();
     for (const t of rangeTxns) {
-      if (t.categoryId == null) continue;
+      if (t.categoryId == null || t.transferAccountId != null) continue;
       const a = num(t.amount);
       if (a < 0) byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) + -a);
     }
@@ -105,8 +98,9 @@ export function ReportsView({
   const payees = useMemo(() => {
     const byPayee = new Map<string, number>();
     for (const t of rangeTxns) {
+      if (t.transferAccountId != null) continue;
       const a = num(t.amount);
-      if (a < 0) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
+      if (a < 0 && t.payee) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
     }
     return [...byPayee.entries()]
       .map(([n, v]) => ({ n, v }))
@@ -115,39 +109,8 @@ export function ReportsView({
   }, [rangeTxns]);
 
   const netWorthData: NetWorthPoint[] = useMemo(() => {
-    const months = getMonthsBetween(actualStart, actualEnd);
-    const accBalances = new Map<number, number>();
-
-    for (const t of data.transactions) {
-      if (t.date.slice(0, 7) < actualStart) {
-        accBalances.set(t.accountId, (accBalances.get(t.accountId) ?? 0) + num(t.amount));
-      }
-    }
-
-    const txnsByMonth = new Map<string, Transaction[]>();
-    for (const t of data.transactions) {
-      const mk = t.date.slice(0, 7);
-      if (!txnsByMonth.has(mk)) txnsByMonth.set(mk, []);
-      txnsByMonth.get(mk)!.push(t);
-    }
-
-    const points: NetWorthPoint[] = [];
-    for (const m of months) {
-      const txns = txnsByMonth.get(m) || [];
-      for (const t of txns) {
-        accBalances.set(t.accountId, (accBalances.get(t.accountId) ?? 0) + num(t.amount));
-      }
-
-      let assets = 0;
-      let debts = 0;
-      for (const [, bal] of accBalances.entries()) {
-        if (bal > 0) assets += bal;
-        else debts += bal;
-      }
-      points.push({ month: m, assets, debts, net: assets + debts });
-    }
-    return points;
-  }, [data.transactions, actualStart, actualEnd]);
+    return computeNetWorthReport(data, actualStart, actualEnd);
+  }, [data, actualStart, actualEnd]);
 
   return (
     <div className="flex h-full flex-col">
