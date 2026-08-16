@@ -46,6 +46,44 @@ export function niceTicks(min: number, max: number, count = 5): number[] {
   return out;
 }
 
+/**
+ * Symmetric log transformation for continuous scales crossing zero.
+ * symlog(x) = sign(x) * log10(1 + |x|)
+ */
+export function symlog(x: number): number {
+  if (x === 0) return 0;
+  return Math.sign(x) * Math.log10(1 + Math.abs(x));
+}
+
+/**
+ * Generate sensible decade tick values for symmetric log scale.
+ * e.g., -$1M, -$100K, -$10K, -$1K, $0, $1K, $10K, $100K, $1M.
+ */
+export function symlogTicks(minVal: number, maxVal: number): number[] {
+  const ticks: number[] = [];
+
+  if (minVal < 0) {
+    const minAbs = Math.abs(minVal);
+    const maxPower = Math.ceil(Math.log10(Math.max(10, minAbs)));
+    const minPower = Math.max(2, maxPower >= 5 ? 3 : 2);
+    for (let p = maxPower; p >= minPower; p--) {
+      ticks.push(-Math.pow(10, p));
+    }
+  }
+
+  ticks.push(0);
+
+  if (maxVal > 0) {
+    const maxPower = Math.ceil(Math.log10(Math.max(10, maxVal)));
+    const minPower = Math.max(2, maxPower >= 5 ? 3 : 2);
+    for (let p = minPower; p <= maxPower; p++) {
+      ticks.push(Math.pow(10, p));
+    }
+  }
+
+  return ticks;
+}
+
 export function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });

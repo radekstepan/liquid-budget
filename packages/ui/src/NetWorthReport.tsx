@@ -3,12 +3,14 @@
 import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@ynab/logic";
-import { Panel } from "@ynab/theme";
+import { Button, Panel } from "@ynab/theme";
 import {
   ChartTip,
   colorAt,
   fmtShort,
   niceTicks,
+  symlog,
+  symlogTicks,
   TipLabel,
   useElementSize,
 } from "./chartUtils.js";
@@ -26,6 +28,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
   const gid = useId();
   const { ref, size } = useElementSize<HTMLDivElement>();
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [scaleMode, setScaleMode] = useState<"linear" | "log">("linear");
 
   const chart = useMemo(() => {
     if (size.width === 0 || size.height === 0 || points.length === 0) return null;
@@ -43,12 +46,27 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     for (const p of points) {
       if (p.assets > maxVal) maxVal = p.assets;
       if (p.debts < minVal) minVal = p.debts;
+      if (p.net > maxVal) maxVal = p.net;
+      if (p.net < minVal) minVal = p.net;
     }
-    const ticks = niceTicks(minVal, maxVal);
+
+    const isLog = scaleMode === "log";
+    const ticks = isLog ? symlogTicks(minVal, maxVal) : niceTicks(minVal, maxVal);
     const tMax = ticks[ticks.length - 1] ?? maxVal;
     const tMin = ticks[0] ?? minVal;
-    const range = tMax - tMin || 1;
-    const y = (v: number) => padT + innerH * (1 - (v - tMin) / range);
+
+    const valToNorm = (v: number) => {
+      if (isLog) {
+        const sMin = symlog(tMin);
+        const sMax = symlog(tMax);
+        const sRange = sMax - sMin || 1;
+        return (symlog(v) - sMin) / sRange;
+      }
+      const range = tMax - tMin || 1;
+      return (v - tMin) / range;
+    };
+
+    const y = (v: number) => padT + innerH * (1 - valToNorm(v));
     const zeroY = y(0);
 
     const n = points.length;
@@ -73,7 +91,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     }
 
     return { W, H, padL, padR, padT, padB, innerW, innerH, y, zeroY, ticks, tMin, tMax, linePath, areaPath, barW, n, xAt };
-  }, [size, points]);
+  }, [size, points, scaleMode]);
 
   const empty = points.length === 0;
 
@@ -126,7 +144,32 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
           <span className="inline-block h-[3px] w-5 rounded-full" style={{ background: NET_COLOR }} />
           <span style={{ color: "var(--y-ink-soft)" }}>Net</span>
         </span>
-        <span className="ml-auto y-hint">Hover any month for details</span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>Scale</span>
+            <div className="y-seg">
+              <Button
+                size="sm"
+                variant={scaleMode === "linear" ? "primary" : "default"}
+                active={scaleMode === "linear"}
+                onClick={() => setScaleMode("linear")}
+                title="Linear scale"
+              >
+                Linear
+              </Button>
+              <Button
+                size="sm"
+                variant={scaleMode === "log" ? "primary" : "default"}
+                active={scaleMode === "log"}
+                onClick={() => setScaleMode("log")}
+                title="Logarithmic scale"
+              >
+                Log
+              </Button>
+            </div>
+          </div>
+          <span className="y-hint">Hover any month for details</span>
+        </div>
       </div>
 
       <div
