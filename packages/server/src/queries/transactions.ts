@@ -45,12 +45,10 @@ export type UpdateTransactionInput = {
 
 export type SubTransactionInput = {
   /**
-   * Nullable to match the DB schema: `recurring_sub_transactions.category_id`
-   * is `ON DELETE SET NULL` (mirroring `transactions.categoryId`). The
-   * server still rejects null categories at insert time via
-   * `assertSplitsBalanced`; nullability is only relevant for reads.
+   * Category or transfer account for the sub-transaction.
    */
-  categoryId: number | null;
+  categoryId?: number | null;
+  transferAccountId?: number | null;
   amount: number;
   memo?: string;
 };
@@ -92,12 +90,13 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number }[]> {
+): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null }[]> {
   return db
     .select({
       id: transactions.id,
       accountId: transactions.accountId,
       amount: transactions.amount,
+      transferAccountId: transactions.transferAccountId,
     })
     .from(transactions)
     .where(eq(transactions.parentId, parentId));
@@ -107,7 +106,7 @@ async function getChildren(
  * Validate that a set of sub-transactions constitutes a balanced split.
  * Throws TransactionError if not. Rules:
  *   - at least 2 children
- *   - every child has a category
+ *   - every child has a category or transfer account
  *   - the *signed* sum of child amounts matches the *signed* parent amount
  *     to the cent. Mixed signs are allowed (e.g. a Paycheck with a negative
  *     tax deduction) so the children retain their original sign.
@@ -119,9 +118,13 @@ export function assertSplitsBalanced(
   if (children.length < 2) {
     throw new TransactionError("split must have at least two sub-transactions");
   }
-  for (const c of children) {
-    if (!c.categoryId) {
-      throw new TransactionError("each sub-transaction must have a category");
+  for (let i = 0; i < children.length; i++) {
+    const c = children[i]!;
+    if (!c.categoryId && !c.transferAccountId) {
+      throw new TransactionError(`sub-transaction ${i + 1} must have a category or transfer account`);
+    }
+    if (c.categoryId && c.transferAccountId) {
+      throw new TransactionError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
   }
   const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
@@ -138,17 +141,11 @@ export function assertSplitsBalanced(
  * insert. For a transfer the row's `categoryId` is forced to null and
  * the `payee` is auto-set to "Transfer : <other account name>" if blank.
  *
- * A row with both `transferAccountId` and `parentId` is rejected; YNAB4
- * does not allow transfers inside a split, and neither do we.
- *
  * Reconciled status is never set by direct insert — only the reconcile
  * flow may set `"r"`. This keeps a single source of truth for the
  * "lastReconciledAt" account metadata and prevents orphan-R rows.
  */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
-  if (input.transferAccountId != null && input.parentId != null) {
-    throw new TransactionError("sub-transaction cannot be a transfer");
-  }
   if (input.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
@@ -158,20 +155,28 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     if (input.transferAccountId === input.accountId) {
       throw new TransactionError("transfer account must differ from source account");
     }
-    return createTransfer(db, input, input.transferAccountId);
+    if (input.parentId == null) {
+      return createTransfer(db, input, input.transferAccountId);
+    }
+  }
+
+  let payee = input.payee;
+  if (input.transferAccountId != null && !payee.trim()) {
+    const destName = await getAccountName(db, input.transferAccountId);
+    payee = `Transfer : ${destName ?? "Unknown"}`;
   }
 
   const [row] = await db
     .insert(transactions)
     .values({
       accountId: input.accountId,
-      categoryId: input.categoryId,
+      categoryId: input.transferAccountId != null ? null : input.categoryId,
       date: input.date,
-      payee: input.payee,
+      payee,
       memo: input.memo,
       amount: input.amount,
       status: input.status ?? "c",
-      transferAccountId: null,
+      transferAccountId: input.transferAccountId ?? null,
       parentId: input.parentId ?? null,
     })
     .returning();
@@ -182,6 +187,9 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
   const isSplitParent = input.parentId == null && input.skipBalance === true;
   if (!isSplitParent) {
     await applyBalance(db, input.accountId, input.amount);
+    if (input.transferAccountId != null) {
+      await applyBalance(db, input.transferAccountId, -input.amount);
+    }
   }
   return row;
 }
@@ -199,9 +207,6 @@ export async function createTransfer(
 ) {
   if (transferAccountId === baseInput.accountId) {
     throw new TransactionError("transfer account must differ from source account");
-  }
-  if (baseInput.parentId != null) {
-    throw new TransactionError("sub-transaction cannot be a transfer");
   }
 
   let payee = baseInput.payee;
@@ -221,7 +226,7 @@ export async function createTransfer(
       amount: baseInput.amount,
       status: baseInput.status ?? "c",
       transferAccountId,
-      parentId: null,
+      parentId: baseInput.parentId ?? null,
     })
     .returning();
 
@@ -274,21 +279,32 @@ export async function createSplitWithChildren(
 
   const childRows = [];
   for (const c of children) {
+    let payee = parent.payee;
+    const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+    const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+    if (transferAccountId) {
+      const destName = await getAccountName(db, transferAccountId);
+      payee = `Transfer : ${destName ?? "Unknown"}`;
+    }
+
     const [child] = await db
       .insert(transactions)
       .values({
         accountId: parent.accountId,
-        categoryId: c.categoryId,
+        categoryId,
         date: parent.date,
-        payee: parent.payee,
+        payee,
         memo: c.memo ?? "",
         amount: c.amount,
         status: parentStatus,
-        transferAccountId: null,
+        transferAccountId,
         parentId: parentRow!.id,
       })
       .returning();
     await applyBalance(db, parent.accountId, c.amount);
+    if (transferAccountId) {
+      await applyBalance(db, transferAccountId, -c.amount);
+    }
     childRows.push(child);
   }
 
@@ -399,6 +415,9 @@ export async function updateSplit(
   const oldChildren = await getChildren(db, parentId);
   for (const c of oldChildren) {
     await applyBalance(db, parent.accountId, -Number(c.amount));
+    if (c.transferAccountId != null) {
+      await applyBalance(db, c.transferAccountId, Number(c.amount));
+    }
   }
   if (oldChildren.length > 0) {
     await db.delete(transactions).where(eq(transactions.parentId, parentId));
@@ -421,22 +440,33 @@ export async function updateSplit(
 
   const newChildren = [];
   for (const c of children) {
+    let payee = newPayee;
+    const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+    const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+    if (transferAccountId) {
+      const destName = await getAccountName(db, transferAccountId);
+      payee = `Transfer : ${destName ?? "Unknown"}`;
+    }
+
     const [row] = await db
       .insert(transactions)
       .values({
         accountId: parent.accountId,
-        categoryId: c.categoryId,
+        categoryId,
         date: newDate,
-        payee: newPayee,
+        payee,
         // Children inherit the parent's memo unless they have their own.
         memo: c.memo ?? newMemo ?? "",
         amount: c.amount,
         status: newStatus,
-        transferAccountId: null,
+        transferAccountId,
         parentId,
       })
       .returning();
     await applyBalance(db, parent.accountId, c.amount);
+    if (transferAccountId) {
+      await applyBalance(db, transferAccountId, -c.amount);
+    }
     newChildren.push(row);
   }
 
@@ -459,6 +489,9 @@ export async function deleteTransaction(db: Database, id: number) {
 
   if (existing.parentId != null) {
     await applyBalance(db, existing.accountId, -Number(existing.amount));
+    if (existing.transferAccountId != null) {
+      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+    }
   } else if (existing.transferAccountId != null) {
     await applyBalance(db, existing.accountId, -Number(existing.amount));
     await applyBalance(db, existing.transferAccountId, Number(existing.amount));
@@ -467,6 +500,9 @@ export async function deleteTransaction(db: Database, id: number) {
     if (children.length > 0) {
       for (const c of children) {
         await applyBalance(db, existing.accountId, -Number(c.amount));
+        if (c.transferAccountId != null) {
+          await applyBalance(db, c.transferAccountId, Number(c.amount));
+        }
       }
     } else {
       await applyBalance(db, existing.accountId, -Number(existing.amount));

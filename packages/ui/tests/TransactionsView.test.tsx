@@ -136,5 +136,70 @@ describe("TransactionsView", () => {
     fireEvent.click(screen.getByText("Costco Wholesale Split"));
     expect(onEdit).toHaveBeenCalledWith(9001);
   });
+
+  it("renders incoming split transfers on the destination account register", () => {
+    const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    // Account 1 (TD) has a split with an expense child and a transfer child to Account 2 (Rewards Visa).
+    const splitParent = {
+      id: 9100,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-20",
+      payee: "Expense & Visa Transfer",
+      memo: "Combined",
+      amount: "-100.00",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    const splitExpenseChild = {
+      id: 9101,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-20",
+      payee: "Expense & Visa Transfer",
+      memo: "Expense part",
+      amount: "-60.00",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9100,
+    };
+    const splitTransferChild = {
+      id: 9102,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-20",
+      payee: "Transfer : TD First Class Travel Visa",
+      memo: "Visa transfer part",
+      amount: "-40.00",
+      status: "c" as const,
+      transferAccountId: 2,
+      parentId: 9100,
+    };
+
+    data.transactions.unshift(splitParent, splitExpenseChild, splitTransferChild);
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={2} // Viewing Account 2 (Rewards Visa)
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // On Account 2's register, the incoming split transfer should display with payee "Transfer : TD Unlimited Chequing"
+    expect(screen.getByText("Transfer : TD Unlimited Chequing")).toBeInTheDocument();
+    expect(screen.getByText("$40.00")).toBeInTheDocument();
+
+    // Clicking the transfer opens the parent split transaction (9100)
+    fireEvent.click(screen.getByText("Transfer : TD Unlimited Chequing"));
+    expect(onEdit).toHaveBeenCalledWith(9100);
+  });
 });
+
 

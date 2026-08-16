@@ -331,8 +331,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "-100" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
       // Children retain the sign the user types. Parent is -100, so we
       // type -60 and -40; the sum matches the parent.
       fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
@@ -378,8 +378,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "4000" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 
@@ -416,8 +416,8 @@ describe("TransactionModal", () => {
       const parent = allZeros[0]!;
       fireEvent.change(parent, { target: { value: "4000" } });
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
-      pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-2000" } });
 
@@ -425,6 +425,44 @@ describe("TransactionModal", () => {
       expect(saveBtn).toBeDisabled();
       fireEvent.click(saveBtn);
       expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it("enables save for a split containing a transfer sub-transaction", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+        target: { value: "Split with Transfer" },
+      });
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "-100" } });
+
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "transfer:2");
+      fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        amount: number;
+        subTransactions: { categoryId: number | null; transferAccountId: number | null; amount: number }[];
+      };
+      expect(payload.amount).toBe(-100);
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: -60 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: null, transferAccountId: 2, amount: -40 });
     });
 
     it("pre-populates sub-rows when editing an existing split parent", () => {
@@ -606,8 +644,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "-200" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
-    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
+    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
     // Children retain the typed sign (no coercion by the modal).
     fireEvent.change(subAmounts[0]!, { target: { value: "-120" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-80" } });
@@ -719,8 +757,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "4000" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "10");
-    pickPlaceholderDropdownByIndexByValue(/category…/i, 0, "11");
+    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
+    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
     fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 

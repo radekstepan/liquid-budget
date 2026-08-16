@@ -102,7 +102,8 @@ export function TransactionModal({
   const [subRows, setSubRows] = useState<SubTransaction[]>(
     initialChildren
       ? initialChildren.map((c) => ({
-          categoryId: c.categoryId ?? 0,
+          categoryId: c.categoryId ?? null,
+          transferAccountId: c.transferAccountId ?? null,
           // Preserve the child's signed amount on edit (no Math.abs coercion).
           // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
           // by the validation layer.
@@ -110,8 +111,8 @@ export function TransactionModal({
           memo: c.memo ?? "",
         }))
       : [
-          { categoryId: 0, amount: 0, memo: "" },
-          { categoryId: 0, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
         ]
   );
 
@@ -131,14 +132,14 @@ export function TransactionModal({
     if (next === "single") {
       setTransferAccountId("");
       setSubRows([
-        { categoryId: 0, amount: 0, memo: "" },
-        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else if (next === "transfer") {
       setCategoryId("");
       setSubRows([
-        { categoryId: 0, amount: 0, memo: "" },
-        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else {
       setTransferAccountId("");
@@ -185,7 +186,8 @@ export function TransactionModal({
         amount: a,
         status: cleared ? "c" : "u",
         subTransactions: subRows.map((r) => ({
-          categoryId: r.categoryId,
+          categoryId: r.categoryId ?? null,
+          transferAccountId: r.transferAccountId ?? null,
           // Sub-row amounts are passed through verbatim (signed) so the
           // server-side validation sees the same numbers the user typed.
           // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
@@ -347,54 +349,96 @@ export function TransactionModal({
         <div className="mt-1">
           <div className="y-label mb-1.5 block">Sub-transactions</div>
           <div className="space-y-1.5">
-            {subRows.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
-                <Select
-                  value={row.categoryId || ""}
-                  onChange={(v) => {
-                    const next = v === "" ? 0 : Number(v);
-                    setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, categoryId: next } : r))
-                    );
-                  }}
-                  className="w-full"
-                >
-                  <option value="">Category…</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </Select>
-                <TextField
-                  value={row.amount || ""}
-                  onChange={(e) => {
-                    const v = evalAmount(e.target.value);
-                    setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
-                    );
-                  }}
-                  placeholder="0.00"
-                  inputMode="decimal"
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  aria-label="Remove sub-transaction"
-                  className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
-                  onClick={() =>
-                    setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
-                  }
-                  disabled={subRows.length <= 2}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {subRows.map((row, i) => {
+              const selectValue = row.transferAccountId
+                ? `transfer:${row.transferAccountId}`
+                : row.categoryId
+                  ? `category:${row.categoryId}`
+                  : "";
+              return (
+                <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
+                  <Select
+                    value={selectValue}
+                    onChange={(v) => {
+                      if (v.startsWith("transfer:")) {
+                        const nextAcc = Number(v.slice("transfer:".length));
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, transferAccountId: nextAcc, categoryId: null }
+                              : r
+                          )
+                        );
+                      } else if (v.startsWith("category:")) {
+                        const nextCat = Number(v.slice("category:".length));
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, categoryId: nextCat, transferAccountId: null }
+                              : r
+                          )
+                        );
+                      } else {
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, categoryId: null, transferAccountId: null }
+                              : r
+                          )
+                        );
+                      }
+                    }}
+                    className="w-full"
+                    searchable
+                  >
+                    <option value="">Category or Transfer…</option>
+                    <optgroup label="Transfers">
+                      {otherAccounts.map((a) => (
+                        <option key={a.id} value={`transfer:${a.id}`}>
+                          Transfer : {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Categories">
+                      {categories.map((c) => (
+                        <option key={c.id} value={`category:${c.id}`}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </Select>
+                  <TextField
+                    value={row.amount || ""}
+                    onChange={(e) => {
+                      const v = evalAmount(e.target.value);
+                      setSubRows((rs) =>
+                        rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
+                      );
+                    }}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove sub-transaction"
+                    className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                    onClick={() =>
+                      setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
+                    }
+                    disabled={subRows.length <= 2}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
           <div className="mt-2 flex items-center gap-3">
             <Button
               size="sm"
               onClick={() =>
-                setSubRows((rs) => [...rs, { categoryId: 0, amount: 0, memo: "" }])
+                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
               }
             >
               + Add sub-transaction
@@ -851,54 +895,96 @@ export function RecurringModal({
         <div className="mt-1">
           <div className="y-label mb-1.5 block">Sub-transactions</div>
           <div className="space-y-1.5">
-            {subRows.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
-                <Select
-                  value={row.categoryId || ""}
-                  onChange={(v) => {
-                    const next = v === "" ? 0 : Number(v);
-                    setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, categoryId: next } : r))
-                    );
-                  }}
-                  className="w-full"
-                >
-                  <option value="">Category…</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </Select>
-                <TextField
-                  value={row.amount || ""}
-                  onChange={(e) => {
-                    const v = evalAmount(e.target.value);
-                    setSubRows((rs) =>
-                      rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
-                    );
-                  }}
-                  placeholder="0.00"
-                  inputMode="decimal"
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  aria-label="Remove sub-transaction"
-                  className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
-                  onClick={() =>
-                    setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
-                  }
-                  disabled={subRows.length <= 2}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {subRows.map((row, i) => {
+              const selectValue = row.transferAccountId
+                ? `transfer:${row.transferAccountId}`
+                : row.categoryId
+                  ? `category:${row.categoryId}`
+                  : "";
+              return (
+                <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
+                  <Select
+                    value={selectValue}
+                    onChange={(v) => {
+                      if (v.startsWith("transfer:")) {
+                        const nextAcc = Number(v.slice("transfer:".length));
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, transferAccountId: nextAcc, categoryId: null }
+                              : r
+                          )
+                        );
+                      } else if (v.startsWith("category:")) {
+                        const nextCat = Number(v.slice("category:".length));
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, categoryId: nextCat, transferAccountId: null }
+                              : r
+                          )
+                        );
+                      } else {
+                        setSubRows((rs) =>
+                          rs.map((r, j) =>
+                            i === j
+                              ? { ...r, categoryId: null, transferAccountId: null }
+                              : r
+                          )
+                        );
+                      }
+                    }}
+                    className="w-full"
+                    searchable
+                  >
+                    <option value="">Category or Transfer…</option>
+                    <optgroup label="Transfers">
+                      {otherAccounts.map((a) => (
+                        <option key={a.id} value={`transfer:${a.id}`}>
+                          Transfer : {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Categories">
+                      {categories.map((c) => (
+                        <option key={c.id} value={`category:${c.id}`}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </Select>
+                  <TextField
+                    value={row.amount || ""}
+                    onChange={(e) => {
+                      const v = evalAmount(e.target.value);
+                      setSubRows((rs) =>
+                        rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
+                      );
+                    }}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove sub-transaction"
+                    className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                    onClick={() =>
+                      setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
+                    }
+                    disabled={subRows.length <= 2}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
           <div className="mt-2 flex items-center gap-3">
             <Button
               size="sm"
               onClick={() =>
-                setSubRows((rs) => [...rs, { categoryId: 0, amount: 0, memo: "" }])
+                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
               }
             >
               + Add sub-transaction

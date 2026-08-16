@@ -79,13 +79,12 @@ export type Transaction = {
 
 export type SubTransaction = {
   /**
-   * Nullable to match the DB schema for `recurring_sub_transactions.category_id`
-   * (ON DELETE SET NULL). The server still rejects null categories at insert
-   * time; nullability is only relevant for reads.
+   * Nullable when the subtransaction is a transfer to another account.
    */
   categoryId: number | null;
   amount: number;
   memo?: string;
+  transferAccountId?: number | null;
 };
 
 export type Recurring = {
@@ -113,6 +112,7 @@ export type RecurringSubTransaction = {
   amount: string;
   memo: string;
   sort: number;
+  transferAccountId?: number | null;
 };
 
 export type BudgetData = {

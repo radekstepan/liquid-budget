@@ -255,20 +255,27 @@ export async function importYnab4(db: Db, ynabData: any) {
             if (st.isTombstone) continue;
             let subCatId = categoryIdMap.get(st.categoryId) || null;
             let subPayee = "";
+            let subTransferAccountId: number | null = null;
 
             if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
               const targetId = st.payeeId.split(":")[1];
               const foundTarget = targetId ? accountIdMap.get(targetId) : null;
               if (foundTarget) {
+                subTransferAccountId = foundTarget;
                 subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
               }
             } else if (st.targetAccountId) {
               const foundTarget = accountIdMap.get(st.targetAccountId);
               if (foundTarget) {
+                subTransferAccountId = foundTarget;
                 subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
               }
             } else if (st.payeeId) {
               subPayee = payeeMap.get(st.payeeId) || "";
+            }
+
+            if (subTransferAccountId != null) {
+              subCatId = null;
             }
 
             await db.insert(transactions).values({
@@ -284,7 +291,7 @@ export async function importYnab4(db: Db, ynabData: any) {
                   : t.cleared === "Uncleared"
                     ? "u"
                     : "c",
-              transferAccountId: null,
+              transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
             });
             totalImportedTxCount++;
@@ -292,49 +299,13 @@ export async function importYnab4(db: Db, ynabData: any) {
         }
       } else {
         // Non-split transaction
-        // Check if this is the standalone side of a split transfer
+        // Check if this is the standalone side of a split transfer in YNAB4
         const linkedSub = t.transferTransactionId ? subTxById.get(t.transferTransactionId) : null;
         if (linkedSub) {
-          let payee = payeeMap.get(t.payeeId) || "";
-          if (t.payeeId && t.payeeId.startsWith("Payee/Transfer:")) {
-            const targetId = t.payeeId.split(":")[1];
-            const foundTarget = targetId ? accountIdMap.get(targetId) : null;
-            if (foundTarget) {
-              payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
-            }
-          } else if (t.targetAccountId) {
-            const foundTarget = accountIdMap.get(t.targetAccountId);
-            if (foundTarget) {
-              payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
-            }
-          }
-
-          let catId = categoryIdMap.get(t.categoryId) || null;
-          if (
-            t.categoryId === "Category/__ImmediateIncome__" ||
-            t.categoryId === "Category/__DeferredIncome__" ||
-            t.categoryId === "Category/__Split__"
-          ) {
-            catId = null;
-          }
-
-          await db.insert(transactions).values({
-            accountId: accId,
-            categoryId: catId,
-            date: t.date,
-            payee,
-            memo: t.memo || "",
-            amount: t.amount || 0,
-            status:
-              t.cleared === "Reconciled"
-                ? "r"
-                : t.cleared === "Uncleared"
-                  ? "u"
-                  : "c",
-            transferAccountId: null,
-            parentId: null,
-          });
-          totalImportedTxCount++;
+          // This was the duplicate counterpart of a split subtransaction in YNAB4.
+          // Since the subtransaction on the parent split now carries transferAccountId,
+          // the transfer is already fully accounted for without needing this duplicate row.
+          continue;
         } else if (t.transferTransactionId) {
           // Top-level regular transfer pair
           if (processedTransferIds.has(t.entityId)) {

@@ -12,7 +12,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type SubTxn = { categoryId: number; amount: number; memo?: string };
+type SubTxn = {
+  categoryId?: number | null;
+  transferAccountId?: number | null;
+  amount: number;
+  memo?: string;
+};
 
 function parseSubTransactions(raw: unknown): SubTxn[] {
   if (!Array.isArray(raw)) {
@@ -23,13 +28,15 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
       throw new TransactionError(`subTransactions[${i}] is not an object`);
     }
     const o = c as Record<string, unknown>;
-    const categoryId = Number(o.categoryId);
+    const categoryId = o.categoryId ? Number(o.categoryId) : null;
+    const transferAccountId = o.transferAccountId ? Number(o.transferAccountId) : null;
     const amount = Number(o.amount);
-    if (!categoryId || Number.isNaN(amount)) {
-      throw new TransactionError(`subTransactions[${i}] missing categoryId or amount`);
+    if ((!categoryId && !transferAccountId) || Number.isNaN(amount)) {
+      throw new TransactionError(`subTransactions[${i}] missing categoryId/transferAccountId or amount`);
     }
     return {
       categoryId,
+      transferAccountId,
       amount,
       memo: typeof o.memo === "string" ? o.memo : undefined,
     };

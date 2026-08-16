@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:reset": "yarn build && node dist/db-reset.js",
+    "db:import": "yarn build && node dist/db-import.js",
     "db:migrate": "yarn build && node dist/migrate.js",
     "coverage": "vitest run --coverage"
   },
