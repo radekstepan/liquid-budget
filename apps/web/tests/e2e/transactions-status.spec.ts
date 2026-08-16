@@ -9,7 +9,7 @@
 //     way to set it, and the cycle button is disabled in that case)
 //   - editing a transaction through the modal actually round-trips
 //     the change (the existing test only asserts the modal opens)
-//   - split children render *no* ClearedFlag (TransactionsView.tsx:250-256)
+//   - split parent renders ClearedFlag and subtransactions are not in list
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
@@ -161,11 +161,11 @@ test("editing a transaction through the modal persists the new amount", async ({
   await expect(row).toContainText("$9.99");
 });
 
-test("split children render no ClearedFlag (status column is empty)", async ({ page }) => {
+test("split transactions render parent ClearedFlag and no subtransaction rows in list", async ({ page }) => {
   // Create a fresh split so we don't depend on seed data and so the
   // test survives a dev DB with leftover state.
   const stamp = Date.now();
-  const payee = `PW Split Child ${stamp}`;
+  const payee = `PW Split Parent Flag ${stamp}`;
 
   await page.getByRole("button", { name: "Add Transaction" }).click();
   const modal = page.locator(".y-modal").last();
@@ -187,16 +187,17 @@ test("split children render no ClearedFlag (status column is empty)", async ({ p
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
-  // Find a child row (has the ↳ glyph in the payee cell —
-  // TransactionsView.tsx:218).
-  const childRow = page
-    .locator("tbody tr.y-row")
-    .filter({ hasText: "↳" })
-    .first();
-  await expect(childRow).toBeVisible();
+  // The parent row renders in the register with its ClearedFlag.
+  const parentRow = page.getByRole("row").filter({ hasText: payee }).first();
+  await expect(parentRow).toBeVisible();
+  const flag = parentRow.locator(".y-cleared");
+  await expect(flag).toHaveText("C");
 
-  // The status column (9th td, index 8) renders nothing for a
-  // child — no .y-cleared element.
-  const statusCell = childRow.locator("td").nth(8);
-  await expect(statusCell.locator(".y-cleared")).toHaveCount(0);
+  // Cycling the ClearedFlag on the split parent toggles C -> U.
+  await flag.click();
+  await expect(flag).toHaveText("U");
+
+  // No child rows (with ↳ glyph) exist in the register.
+  const childCount = await page.locator("tbody tr.y-row", { hasText: "↳" }).count();
+  expect(childCount).toBe(0);
 });

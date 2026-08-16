@@ -36,6 +36,7 @@ export function CalendarView({
 
   const byDay = new Map<number, { payee: string; amount: number; cat: string }[]>();
   for (const t of data.transactions) {
+    if (t.parentId != null) continue;
     if (!t.date.startsWith(month)) continue;
     const day = Number(t.date.slice(8, 10));
     const arr = byDay.get(day) ?? [];
@@ -53,7 +54,7 @@ export function CalendarView({
   while (cells.length % 7 !== 0) cells.push(null);
 
   const monthTotal = data.transactions
-    .filter((t) => t.date.startsWith(month))
+    .filter((t) => t.parentId == null && t.date.startsWith(month))
     .reduce((s, t) => s + num(t.amount), 0);
 
   const dateIso = (d: number) => {

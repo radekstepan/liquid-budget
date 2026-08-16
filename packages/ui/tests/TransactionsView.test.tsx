@@ -68,5 +68,73 @@ describe("TransactionsView", () => {
     const balanceCell = cells[cells.length - 1]!;
     expect(balanceCell.textContent).toBe("$10,875.55");
   });
+
+  it("does not render subtransactions in the list and shows Split (Multiple Categories) for split parent", () => {
+    const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    const splitParent = {
+      id: 9001,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Groceries and Electronics",
+      amount: "-150.00",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    const splitChild1 = {
+      id: 9002,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Groceries part",
+      amount: "-100.00",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+    const splitChild2 = {
+      id: 9003,
+      accountId: 1,
+      categoryId: 2,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Electronics part",
+      amount: "-50.00",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+
+    data.transactions.unshift(splitParent, splitChild1, splitChild2);
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // Parent row is rendered
+    expect(screen.getAllByText("Costco Wholesale Split").length).toBe(1);
+    expect(screen.getByText("Split (Multiple Categories)")).toBeInTheDocument();
+
+    // Child memos or child rows are NOT rendered in the table list
+    expect(screen.queryByText("Groceries part")).not.toBeInTheDocument();
+    expect(screen.queryByText("Electronics part")).not.toBeInTheDocument();
+    expect(screen.queryByText("↳")).not.toBeInTheDocument();
+
+    // Clicking parent row opens it for edit
+    fireEvent.click(screen.getByText("Costco Wholesale Split"));
+    expect(onEdit).toHaveBeenCalledWith(9001);
+  });
 });
 
