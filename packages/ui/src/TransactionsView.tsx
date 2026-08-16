@@ -81,43 +81,60 @@ export function TransactionsView({
     return computeRunningBalances(sorted, accountBalances, accountFilter ?? undefined);
   }, [data.transactions, accountFilter, accountBalances]);
 
+  const splitParentIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const t of data.transactions) {
+      if (t.parentId != null) set.add(t.parentId);
+    }
+    return set;
+  }, [data.transactions]);
+
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
-    if (!q) return rows;
+    const parentRows = rows.filter((r) => r.parentId == null);
+    if (!q) return parentRows;
 
-    const matchingParentIds = new Set<number>();
-    for (const r of rows) {
-      if (r.parentId != null) continue;
+    const childrenByParent = new Map<number, Transaction[]>();
+    for (const t of data.transactions) {
+      if (t.parentId != null) {
+        let list = childrenByParent.get(t.parentId);
+        if (!list) {
+          list = [];
+          childrenByParent.set(t.parentId, list);
+        }
+        list.push(t);
+      }
+    }
+
+    return parentRows.filter((r) => {
       const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
       if (
         r.payee.toLowerCase().includes(q) ||
         catName.toLowerCase().includes(q) ||
         (r.memo ?? "").toLowerCase().includes(q)
       ) {
-        matchingParentIds.add(r.id);
+        return true;
       }
-    }
-
-    return rows.filter((r) => {
-      if (r.parentId != null) {
-        if (matchingParentIds.has(r.parentId)) return true;
-        const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
-        return (
-          r.payee.toLowerCase().includes(q) ||
-          catName.toLowerCase().includes(q) ||
-          (r.memo ?? "").toLowerCase().includes(q)
-        );
+      const children = childrenByParent.get(r.id);
+      if (children) {
+        return children.some((c) => {
+          const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
+          return (
+            c.payee.toLowerCase().includes(q) ||
+            childCat.toLowerCase().includes(q) ||
+            (c.memo ?? "").toLowerCase().includes(q)
+          );
+        });
       }
-      return matchingParentIds.has(r.id);
+      return false;
     });
-  }, [rows, deferredSearch, categoryById]);
+  }, [rows, deferredSearch, data.transactions, categoryById]);
 
   const totals = useMemo(() => {
     let inflow = 0;
     let outflow = 0;
     let count = 0;
     for (const r of filtered) {
-      if (r.parentId != null) continue;
       count++;
       if (r.amount > 0) inflow += r.amount;
       else outflow += -r.amount;
@@ -235,20 +252,20 @@ export function TransactionsView({
                 )}
                 {visibleRows.map((t, idx) => {
                   const globalIndex = startIndex + idx;
-                  const isChild = t.parentId != null;
                   const outflow = t.amount < 0 ? -t.amount : 0;
                   const inflow = t.amount > 0 ? t.amount : 0;
+                  const isSplit = splitParentIds.has(t.id);
                   const catName =
                     t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
-                  const displayCat = catName || (t.transferAccountId ? "Transfer" : "");
+                  const displayCat = isSplit
+                    ? "Split (Multiple Categories)"
+                    : catName || (t.transferAccountId ? "Transfer" : "");
                   return (
                     <tr
                       key={t.id}
-                      className={`group y-row ${globalIndex % 2 === 1 ? "alt" : ""} ${
-                        isChild ? "!bg-[var(--y-panel-alt)]" : ""
-                      }`}
-                      onClick={() => !isChild && onEdit(t.id)}
-                      style={{ cursor: isChild ? "default" : "pointer" }}
+                      className={`group y-row ${globalIndex % 2 === 1 ? "alt" : ""}`}
+                      onClick={() => onEdit(t.id)}
+                      style={{ cursor: "pointer" }}
                     >
                       <td className="y-num">{t.date}</td>
                       {!accountFilter && (
@@ -257,14 +274,6 @@ export function TransactionsView({
                         </td>
                       )}
                       <td className="truncate" style={{ color: "var(--y-ink)" }}>
-                        {isChild && (
-                          <span
-                            className="inline-block mr-[5px] align-[-2px]"
-                            style={{ color: "var(--y-ink-faint)" }}
-                          >
-                            ↳
-                          </span>
-                        )}
                         {t.payee}
                       </td>
                       <td
@@ -273,11 +282,7 @@ export function TransactionsView({
                           color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
                         }}
                       >
-                        {displayCat || (
-                          <span className="italic" style={{ color: "var(--y-ink-faint)" }}>
-                            Transfer
-                          </span>
-                        )}
+                        {displayCat}
                       </td>
                       <td className="truncate italic" style={{ color: "var(--y-ink-faint)" }}>
                         {t.memo}
@@ -293,26 +298,22 @@ export function TransactionsView({
                         {inflow ? money(inflow) : ""}
                       </td>
                       <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                        {isChild ? null : (
-                          <ClearedFlag
-                            state={t.status}
-                            onCycle={() => onCycleStatus(t.id)}
-                            disabled={t.status === "r"}
-                          />
-                        )}
+                        <ClearedFlag
+                          state={t.status}
+                          onCycle={() => onCycleStatus(t.id)}
+                          disabled={t.status === "r"}
+                        />
                       </td>
                       <td
                         className="num y-num"
                         style={{
-                          color: isChild
-                            ? "var(--y-ink-faint)"
-                            : t.runningBalance < 0
-                              ? "var(--y-red)"
-                              : "var(--y-ink)",
-                          fontWeight: !isChild && t.runningBalance < 0 ? 700 : 400,
+                          color: t.runningBalance < 0
+                            ? "var(--y-red)"
+                            : "var(--y-ink)",
+                          fontWeight: t.runningBalance < 0 ? 700 : 400,
                         }}
                       >
-                        {isChild ? "—" : money(t.runningBalance)}
+                        {money(t.runningBalance)}
                       </td>
                     </tr>
                   );

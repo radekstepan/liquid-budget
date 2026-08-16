@@ -57,7 +57,7 @@ test("creates a transfer between two accounts", async ({ page }) => {
   await expect(row.first()).toContainText("Transfer");
 });
 
-test("creates a 2-way split and renders the indented children", async ({ page }) => {
+test("creates a 2-way split and renders in register with children visible only in modal", async ({ page }) => {
   const uniquePayee = `PW Split ${Date.now()}`;
   const stamp = uniquePayee.split(" ").pop()!;
 
@@ -91,14 +91,23 @@ test("creates a 2-way split and renders the indented children", async ({ page })
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
-  // The parent row should be visible.
+  // The parent row should be visible in the register with "Split (Multiple Categories)".
   const parentRow = page.getByRole("row").filter({ hasText: stamp }).first();
   await expect(parentRow).toBeVisible();
+  await expect(parentRow).toContainText("Split (Multiple Categories)");
 
-  // Indented children rows (↳ glyph) should be in the register.
+  // Subtransactions (↳ glyph) should NOT be in the register list.
   const childCount = await page.locator("tbody tr.y-row", { hasText: "↳" }).count();
-  // At least 2 children.
-  expect(childCount).toBeGreaterThanOrEqual(2);
+  expect(childCount).toBe(0);
+
+  // Clicking the parent row opens the modal with the subtransactions.
+  await parentRow.click();
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+  const editDecimals = editModal.locator('input[inputmode="decimal"]');
+  await expect(editDecimals.nth(0)).toHaveValue("-100.00");
+  await expect(editDecimals.nth(1)).toHaveValue("-60.00");
+  await expect(editDecimals.nth(2)).toHaveValue("-40.00");
 });
 
 test("split editor disables save when children don't sum to the parent total", async ({
