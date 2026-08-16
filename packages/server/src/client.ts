@@ -29,8 +29,13 @@ const globalForDb = globalThis as typeof globalThis & {
   __ynabDb?: Db;
 };
 
-export function openDb(path: string): Db {
-  const sqlite = new Database(path);
+import { mkdirSync } from "fs";
+
+export function openDb(dbPath: string): Db {
+  if (dbPath !== ":memory:") {
+    mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
+  }
+  const sqlite = new Database(dbPath);
   // Enable WAL mode and foreign keys for every connection.
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");

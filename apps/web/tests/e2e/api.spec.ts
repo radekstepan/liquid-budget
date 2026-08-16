@@ -12,7 +12,7 @@
 //     surface in the budget UI but is still round-tripped by the API
 import { test, expect, request as apiRequest } from "@playwright/test";
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 test("GET /api/health returns ok", async () => {
   const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
