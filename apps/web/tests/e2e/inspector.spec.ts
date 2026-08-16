@@ -2,12 +2,10 @@
 //
 // Covers Inspector chrome (packages/ui/src/Inspector.tsx):
 //   - Settings cog opens the menu with "Import YNAB4 Backup" and
-//     "Reset demo data" (Inspector.tsx:65-92)
-//   - the Summary panel renders the six expected rows
-//     (Inspector.tsx:129-143)
-//   - the "Average Assigned" panel renders
-//   - the "History (12 mo)" panel renders 12 month bars
-//     (Inspector.tsx:150-187)
+//     "Reset demo data"
+//   - the Net Monthly panel renders Net Cash Flow, Income, and Expenses
+//   - the Net Worth (12 mo) panel renders 12 interactive month jump buttons
+//   - the Trends & Insights panel renders
 import { test, expect, type Page } from "@playwright/test";
 
 async function waitForReady(page: Page) {
@@ -25,25 +23,22 @@ test("Settings cog opens the menu with both options", async ({ page }) => {
   await expect(page.getByText("Reset demo data")).toBeVisible();
 });
 
-test("Summary panel shows the six expected rows", async ({ page }) => {
-  for (const label of [
-    "Assigned",
-    "Outflow",
-    "Available",
-    "Carried Forward",
-    "Total Available",
-    "To Be Budgeted",
-  ]) {
-    await expect(
-      page.locator(".y-panel").filter({ hasText: "Summary" }).getByText(label, { exact: true })
-    ).toBeVisible();
-  }
+test("Net Monthly panel shows cash flow breakdown", async ({ page }) => {
+  const panel = page.locator(".y-panel").filter({ hasText: "Net Monthly" });
+  await expect(panel.getByText("Net Cash Flow")).toBeVisible();
+  await expect(panel.getByText("Income (Inflow)")).toBeVisible();
+  await expect(panel.getByText("Expenses (Outflow)")).toBeVisible();
 });
 
-test("History panel renders 12 month bars", async ({ page }) => {
-  const bars = page
+test("Net Worth (12 mo) panel renders 12 month buttons", async ({ page }) => {
+  const buttons = page
     .locator(".y-panel")
-    .filter({ hasText: "History (12 mo)" })
+    .filter({ hasText: "Net Worth (12 mo)" })
     .locator('button[aria-label^="Jump to "]');
-  await expect(bars).toHaveCount(12);
+  await expect(buttons).toHaveCount(12);
+});
+
+test("Trends & Insights panel renders", async ({ page }) => {
+  const panel = page.locator(".y-panel").filter({ hasText: "Trends & Insights" });
+  await expect(panel).toBeVisible();
 });

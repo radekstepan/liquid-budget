@@ -98,7 +98,7 @@ test("Expense Breakdown tab renders the donut and legend", async ({ page }) => {
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {
   await page.getByRole("button", { name: "Net Worth", exact: true }).click();
-  const panel = page.locator(".y-panel-head").filter({ hasText: "Net Worth" }).locator("..");
+  const panel = page.locator("main .y-panel-head").filter({ hasText: "Net Worth" }).locator("..");
   await expect(panel.locator("svg")).toBeVisible();
   // Three months in the default range → bar markers visible.
   await expect(panel.locator("rect").first()).toBeVisible();

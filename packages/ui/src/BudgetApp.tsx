@@ -2,7 +2,17 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { computeBudget, num, parseMonthKey, monthKey, todayISO, DEMO_MONTH } from "@ynab/logic";
+import {
+  computeBudget,
+  computeCashFlow,
+  computeTrailingNetWorth,
+  computeMonthlyInsights,
+  num,
+  parseMonthKey,
+  monthKey,
+  todayISO,
+  DEMO_MONTH,
+} from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
@@ -203,6 +213,16 @@ export function BudgetApp({
       : currentAssigned;
     return { history: hist, avg: average };
   }, [data, month, summary.assigned]);
+
+  const cashFlow = useMemo(() => computeCashFlow(data, month), [data, month]);
+  const trailingNetWorth = useMemo(
+    () => computeTrailingNetWorth(data, month, 12),
+    [data, month]
+  );
+  const insights = useMemo(
+    () => computeMonthlyInsights(data, month, budget),
+    [data, month, budget]
+  );
 
   const assign = useCallback(
     async (categoryId: number, amount: number, m?: string) => {
@@ -419,6 +439,9 @@ export function BudgetApp({
         tbb={budget.tbb}
         overBudgeted={budget.overBudgeted}
         priorSurplus={budget.priorSurplus}
+        cashFlow={cashFlow}
+        trailingNetWorth={trailingNetWorth}
+        insights={insights}
         onSelectMonth={setMonth}
         onResetDemo={api.resetDemo}
         onImportYnab4={api.importYnab4}
