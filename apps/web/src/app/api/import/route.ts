@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import AdmZip from "adm-zip";
-import { getDefaultDb, importYnab4 } from "@ynab/server";
+import { getDefaultDb, importYnab4, extractYnab4DataFromZip } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,26 +13,7 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // Parse ZIP
-    const zip = new AdmZip(buffer);
-    const zipEntries = zip.getEntries();
-    
-    // Find the .ynab4 file
-    let ynab4JsonStr = "";
-    for (const entry of zipEntries) {
-      if (entry.entryName.endsWith(".ynab4")) {
-        ynab4JsonStr = zip.readAsText(entry);
-        break;
-      }
-    }
-
-    if (!ynab4JsonStr) {
-      return NextResponse.json({ error: "Could not find .ynab4 file inside the zip" }, { status: 400 });
-    }
-
-    const ynabData = JSON.parse(ynab4JsonStr);
+    const { ynabData } = extractYnab4DataFromZip(arrayBuffer);
 
     const db = getDefaultDb();
     const summary = await importYnab4(db, ynabData);

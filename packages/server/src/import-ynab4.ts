@@ -1,7 +1,40 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
+import AdmZip from "adm-zip";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
+
+export interface ExtractedYnab4Data {
+  ynabData: any;
+  settingsXml?: string;
+}
+
+/**
+ * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
+ */
+export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): ExtractedYnab4Data {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const zip = new AdmZip(buf);
+  const zipEntries = zip.getEntries();
+
+  let ynab4JsonStr = "";
+  let settingsXml: string | undefined = undefined;
+
+  for (const entry of zipEntries) {
+    if (entry.entryName.endsWith(".ynab4")) {
+      ynab4JsonStr = zip.readAsText(entry);
+    } else if (entry.entryName.endsWith(".ybsettings")) {
+      settingsXml = zip.readAsText(entry);
+    }
+  }
+
+  if (!ynab4JsonStr) {
+    throw new Error("Could not find .ynab4 data file inside the zip archive");
+  }
+
+  const ynabData = JSON.parse(ynab4JsonStr);
+  return { ynabData, settingsXml };
+}
 
 export async function importYnab4(db: Db, ynabData: any) {
   // CRITICAL: Wrap the entire wipe-and-import in a SQLite transaction.
@@ -40,9 +73,11 @@ export async function importYnab4(db: Db, ynabData: any) {
     // 2. Insert Accounts
     const accountIdMap = new Map<string, number>();
     let accountSort = 0;
-    for (const acc of yAccounts) {
-      if (acc.isTombstone) continue;
+    const nonTombstoneAccounts = yAccounts
+      .filter((a: any) => !a.isTombstone)
+      .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
+    for (const acc of nonTombstoneAccounts) {
       const kind =
         acc.accountType === "CreditCard" || acc.accountType === "LineofCredit"
           ? "credit"
@@ -65,6 +100,8 @@ export async function importYnab4(db: Db, ynabData: any) {
           balance: 0, // To be computed from transactions
           onBudget: !!acc.onBudget,
           sort: accountSort++,
+          lastReconciledAt: acc.lastReconciledDate || null,
+          lastReconciledBalance: acc.lastReconciledBalance != null ? Number(acc.lastReconciledBalance) : null,
         })
         .returning();
 
@@ -75,11 +112,11 @@ export async function importYnab4(db: Db, ynabData: any) {
     const categoryIdMap = new Map<string, number>();
     let groupSort = 0;
 
-    for (const mc of yMasterCategories) {
-      if (mc.isTombstone) continue;
-      // Skip Hidden Categories and special system ones that are not OUTFLOW
-      if (mc.name === "Hidden Categories" || mc.type !== "OUTFLOW") continue;
+    const nonTombstoneMC = yMasterCategories
+      .filter((mc: any) => !mc.isTombstone && mc.type === "OUTFLOW")
+      .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
+    for (const mc of nonTombstoneMC) {
       const [gRow] = await db
         .insert(categoryGroups)
         .values({
@@ -90,9 +127,11 @@ export async function importYnab4(db: Db, ynabData: any) {
         .returning();
 
       let catSort = 0;
-      for (const sc of mc.subCategories || []) {
-        if (sc.isTombstone) continue;
+      const nonTombstoneSC = (mc.subCategories || [])
+        .filter((sc: any) => !sc.isTombstone)
+        .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
+      for (const sc of nonTombstoneSC) {
         const [cRow] = await db
           .insert(categories)
           .values({
@@ -161,97 +200,239 @@ export async function importYnab4(db: Db, ynabData: any) {
     const allAccountsForMap = await db.select().from(accounts);
     for (const a of allAccountsForMap) accNameMap.set(a.id, a.name);
 
+    // Build subTransactions and transactions lookup
+    const subTxById = new Map<string, { parent: any; sub: any }>();
+    const txById = new Map<string, any>();
+    for (const t of yTransactions) {
+      if (!t.isTombstone) {
+        txById.set(t.entityId, t);
+        for (const st of t.subTransactions || []) {
+          if (!st.isTombstone) {
+            subTxById.set(st.entityId, { parent: t, sub: st });
+          }
+        }
+      }
+    }
+
+    const processedTransferIds = new Set<string>();
+    let totalImportedTxCount = 0;
+
     for (const t of yTransactions) {
       if (t.isTombstone) continue;
 
       const accId = accountIdMap.get(t.accountId);
       if (!accId) continue;
 
-      let payee = payeeMap.get(t.payeeId) || "";
-      let transferAccountId = t.targetAccountId ? accountIdMap.get(t.targetAccountId) || null : null;
+      const hasSubs = Array.isArray(t.subTransactions) && t.subTransactions.length > 0;
 
-      if (t.payeeId && t.payeeId.startsWith("Payee/Transfer:")) {
-        const targetId = t.payeeId.split(":")[1];
-        const foundTarget = targetId ? accountIdMap.get(targetId) : null;
-        if (foundTarget) {
-          transferAccountId = foundTarget;
-          payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
-        }
-      }
-
-      let catId = categoryIdMap.get(t.categoryId) || null;
-      if (
-        t.categoryId === "Category/__ImmediateIncome__" ||
-        t.categoryId === "Category/__DeferredIncome__" ||
-        t.categoryId === "Category/__Split__"
-      ) {
-        catId = null;
-      }
-
-      const [insertedT] = await db
-        .insert(transactions)
-        .values({
-          accountId: accId,
-          categoryId: catId,
-          date: t.date,
-          payee,
-          memo: t.memo || "",
-          amount: t.amount || 0,
-          status:
-            t.cleared === "Reconciled"
-              ? "r"
-              : t.cleared === "Uncleared"
-                ? "u"
-                : "c",
-          transferAccountId,
-        })
-        .returning();
-
-      if (t.subTransactions && t.subTransactions.length > 0 && insertedT) {
-        for (const st of t.subTransactions) {
-          if (st.isTombstone) continue;
-          let subCatId = categoryIdMap.get(st.categoryId) || null;
-          let subTransferAccId = st.targetAccountId ? accountIdMap.get(st.targetAccountId) || null : null;
-          let subPayee = "";
-
-          if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
-            const targetId = st.payeeId.split(":")[1];
-            const foundTarget = targetId ? accountIdMap.get(targetId) : null;
-            if (foundTarget) {
-              subTransferAccId = foundTarget;
-              subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
-            }
-          } else if (st.targetAccountId) {
-             const foundTarget = accountIdMap.get(st.targetAccountId);
-             if (foundTarget) {
-               subTransferAccId = foundTarget;
-               subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
-             }
-          }
-
-          await db.insert(transactions).values({
+      if (hasSubs) {
+        // Split transaction parent
+        let payee = payeeMap.get(t.payeeId) || "";
+        const [insertedT] = await db
+          .insert(transactions)
+          .values({
             accountId: accId,
-            categoryId: subCatId,
+            categoryId: null,
             date: t.date,
-            payee: subPayee,
-            memo: st.memo || "",
-            amount: st.amount || 0,
+            payee,
+            memo: t.memo || "",
+            amount: t.amount || 0,
             status:
               t.cleared === "Reconciled"
                 ? "r"
                 : t.cleared === "Uncleared"
                   ? "u"
                   : "c",
-            transferAccountId: subTransferAccId,
-            parentId: insertedT.id
+            transferAccountId: null,
+            parentId: null,
+          })
+          .returning();
+
+        totalImportedTxCount++;
+
+        if (insertedT) {
+          for (const st of t.subTransactions) {
+            if (st.isTombstone) continue;
+            let subCatId = categoryIdMap.get(st.categoryId) || null;
+            let subPayee = "";
+
+            if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
+              const targetId = st.payeeId.split(":")[1];
+              const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+              if (foundTarget) {
+                subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+              }
+            } else if (st.targetAccountId) {
+              const foundTarget = accountIdMap.get(st.targetAccountId);
+              if (foundTarget) {
+                subPayee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+              }
+            } else if (st.payeeId) {
+              subPayee = payeeMap.get(st.payeeId) || "";
+            }
+
+            await db.insert(transactions).values({
+              accountId: accId,
+              categoryId: subCatId,
+              date: t.date,
+              payee: subPayee,
+              memo: st.memo || "",
+              amount: st.amount || 0,
+              status:
+                t.cleared === "Reconciled"
+                  ? "r"
+                  : t.cleared === "Uncleared"
+                    ? "u"
+                    : "c",
+              transferAccountId: null,
+              parentId: insertedT.id,
+            });
+            totalImportedTxCount++;
+          }
+        }
+      } else {
+        // Non-split transaction
+        // Check if this is the standalone side of a split transfer
+        const linkedSub = t.transferTransactionId ? subTxById.get(t.transferTransactionId) : null;
+        if (linkedSub) {
+          let payee = payeeMap.get(t.payeeId) || "";
+          if (t.payeeId && t.payeeId.startsWith("Payee/Transfer:")) {
+            const targetId = t.payeeId.split(":")[1];
+            const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+            if (foundTarget) {
+              payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+            }
+          } else if (t.targetAccountId) {
+            const foundTarget = accountIdMap.get(t.targetAccountId);
+            if (foundTarget) {
+              payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+            }
+          }
+
+          let catId = categoryIdMap.get(t.categoryId) || null;
+          if (
+            t.categoryId === "Category/__ImmediateIncome__" ||
+            t.categoryId === "Category/__DeferredIncome__" ||
+            t.categoryId === "Category/__Split__"
+          ) {
+            catId = null;
+          }
+
+          await db.insert(transactions).values({
+            accountId: accId,
+            categoryId: catId,
+            date: t.date,
+            payee,
+            memo: t.memo || "",
+            amount: t.amount || 0,
+            status:
+              t.cleared === "Reconciled"
+                ? "r"
+                : t.cleared === "Uncleared"
+                  ? "u"
+                  : "c",
+            transferAccountId: null,
+            parentId: null,
           });
+          totalImportedTxCount++;
+        } else if (t.transferTransactionId) {
+          // Top-level regular transfer pair
+          if (processedTransferIds.has(t.entityId)) {
+            // Already imported from counterpart
+            continue;
+          }
+
+          const partner = txById.get(t.transferTransactionId);
+          processedTransferIds.add(t.entityId);
+          if (partner) processedTransferIds.add(partner.entityId);
+
+          let sourceAccEntityId = t.accountId;
+          let destAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);
+          let amount = t.amount || 0;
+          let memo = t.memo || "";
+          let cleared = t.cleared;
+
+          // Normalize so source is outflow (negative amount) if counterpart exists and is negative
+          if (amount > 0 && partner && (partner.amount || 0) < 0) {
+            sourceAccEntityId = partner.accountId;
+            destAccEntityId = t.accountId;
+            amount = partner.amount || 0;
+            if (!memo && partner.memo) memo = partner.memo;
+            cleared = partner.cleared;
+          }
+
+          const sourceAccId = accountIdMap.get(sourceAccEntityId);
+          const destAccId = destAccEntityId ? accountIdMap.get(destAccEntityId) || null : null;
+
+          if (!sourceAccId) continue;
+
+          let payee = "";
+          if (destAccId) {
+            payee = "Transfer : " + (accNameMap.get(destAccId) || "Unknown");
+          } else if (t.payeeId) {
+            payee = payeeMap.get(t.payeeId) || "";
+          }
+
+          await db.insert(transactions).values({
+            accountId: sourceAccId,
+            categoryId: null,
+            date: t.date,
+            payee,
+            memo,
+            amount,
+            status:
+              cleared === "Reconciled"
+                ? "r"
+                : cleared === "Uncleared"
+                  ? "u"
+                  : "c",
+            transferAccountId: destAccId,
+            parentId: null,
+          });
+          totalImportedTxCount++;
+        } else {
+          // Plain transaction (or standalone transfer without transferTransactionId)
+          let targetAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);
+          let destAccId = targetAccEntityId ? accountIdMap.get(targetAccEntityId) || null : null;
+          let payee = "";
+          if (destAccId) {
+            payee = "Transfer : " + (accNameMap.get(destAccId) || "Unknown");
+          } else {
+            payee = payeeMap.get(t.payeeId) || "";
+          }
+
+          let catId = categoryIdMap.get(t.categoryId) || null;
+          if (
+            destAccId ||
+            t.categoryId === "Category/__ImmediateIncome__" ||
+            t.categoryId === "Category/__DeferredIncome__" ||
+            t.categoryId === "Category/__Split__"
+          ) {
+            catId = null;
+          }
+
+          await db.insert(transactions).values({
+            accountId: accId,
+            categoryId: catId,
+            date: t.date,
+            payee,
+            memo: t.memo || "",
+            amount: t.amount || 0,
+            status:
+              t.cleared === "Reconciled"
+                ? "r"
+                : t.cleared === "Uncleared"
+                  ? "u"
+                  : "c",
+            transferAccountId: destAccId,
+            parentId: null,
+          });
+          totalImportedTxCount++;
         }
       }
     }
 
-    // 6. Compute real balances of accounts. (Extracted for testability — see
-    // `recomputeAccountBalances` below for the bug fix that accounts for
-    // incoming transfers.)
+    // 6. Compute real balances of accounts
     await recomputeAccountBalances(db);
 
     // 7. Insert Scheduled (Recurring) Transactions
@@ -264,9 +445,6 @@ export async function importYnab4(db: Db, ynabData: any) {
       let payee = payeeMap.get(st.payeeId) || "";
       let transferAccountId = st.targetAccountId ? accountIdMap.get(st.targetAccountId) || null : null;
 
-      // YNAB4's transfer convention is `Payee/Transfer:<AccountId>`. Honour it
-      // for scheduled transactions the same way the transactions importer
-      // does (lines 158-165 above).
       if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
         const targetId = st.payeeId.split(":")[1];
         const foundTarget = targetId ? accountIdMap.get(targetId) : null;
@@ -291,10 +469,25 @@ export async function importYnab4(db: Db, ynabData: any) {
         catId = null;
       }
 
-      let frequency = st.frequency || "monthly";
-      frequency = frequency.toLowerCase();
-      if (!["monthly", "weekly", "biweekly", "yearly"].includes(frequency)) {
-        frequency = "monthly"; // default fallback
+      let frequency = (st.frequency || "monthly").toLowerCase();
+      if (frequency === "everyotherweek") frequency = "biweekly";
+      const validFrequencies = [
+        "daily",
+        "weekly",
+        "biweekly",
+        "twiceamonth",
+        "every4weeks",
+        "monthly",
+        "everyothermonth",
+        "every3months",
+        "every4months",
+        "twiceayear",
+        "yearly",
+        "every2years",
+        "once",
+      ];
+      if (!validFrequencies.includes(frequency)) {
+        frequency = "monthly";
       }
 
       const [insertedR] = await db
@@ -312,10 +505,6 @@ export async function importYnab4(db: Db, ynabData: any) {
         .returning();
 
       if (hasSubs && insertedR) {
-        // Recurring splits don't support transfer sub-rows (the
-        // `recurring_sub_transactions` schema has no transferAccountId),
-        // matching the no-transfer-in-a-split YNAB4 rule. Sub-row
-        // `targetAccountId` is intentionally ignored.
         let sort = 0;
         for (const sub of st.subTransactions) {
           if (sub.isTombstone) continue;
@@ -343,7 +532,7 @@ export async function importYnab4(db: Db, ynabData: any) {
       accounts: accountIdMap.size,
       categoryGroups: groupSort,
       categories: categoryIdMap.size,
-      transactions: yTransactions.length,
+      transactions: totalImportedTxCount,
     };
     db.run(sql`COMMIT`);
     return result;
@@ -357,15 +546,10 @@ export async function importYnab4(db: Db, ynabData: any) {
  * Recompute every account's `balance` from the current set of
  * transactions. Exported for testability.
  *
- * Outflows: rows posted to this account as the source
- *   (regular + transfer source — both live on the source's `accountId`).
- * Inflows: rows where this account is the transfer destination
- *   (the source row is stored against the source's `accountId`; the
- *   destination's balance is `-sourceAmount`, mirroring `createTransfer`).
- *
- * The previous implementation only summed rows where
- * `accountId === a.id`, which silently dropped every incoming transfer
- * and left imported destination-account balances permanently wrong.
+ * Outflows: non-parent rows posted to this account as the source.
+ * Inflows: non-parent rows where this account is the transfer destination
+ *   (the source row is stored against the source's `accountId` with negative amount;
+ *   the destination's balance is `-sourceAmount`).
  */
 export async function recomputeAccountBalances(db: Db): Promise<void> {
   const allAccs = await db.select().from(accounts);
@@ -373,7 +557,12 @@ export async function recomputeAccountBalances(db: Db): Promise<void> {
     const outRes = await db
       .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
       .from(transactions)
-      .where(eq(transactions.accountId, a.id));
+      .where(
+        and(
+          eq(transactions.accountId, a.id),
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+        )
+      );
 
     const inRes = await db
       .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
@@ -381,7 +570,8 @@ export async function recomputeAccountBalances(db: Db): Promise<void> {
       .where(
         and(
           eq(transactions.transferAccountId, a.id),
-          isNotNull(transactions.transferAccountId)
+          isNotNull(transactions.transferAccountId),
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
         )
       );
 
