@@ -96,10 +96,25 @@ test("Expense Breakdown tab renders the donut and legend", async ({ page }) => {
   await expect(panel.getByText("AMEX Cobalt")).toBeVisible();
 });
 
-test("Net Worth tab renders the full-screen chart", async ({ page }) => {
+test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {
   await page.getByRole("button", { name: "Net Worth", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Net Worth" }).locator("..");
   await expect(panel.locator("svg")).toBeVisible();
   // Three months in the default range → bar markers visible.
   await expect(panel.locator("rect").first()).toBeVisible();
+
+  // Scale toggle
+  const linearBtn = panel.getByRole("button", { name: "Linear", exact: true });
+  const logBtn = panel.getByRole("button", { name: "Log", exact: true });
+  await expect(linearBtn).toBeVisible();
+  await expect(logBtn).toBeVisible();
+
+  // Switch to Log scale
+  await logBtn.click();
+  await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.locator("rect").first()).toBeVisible();
+
+  // Switch back to Linear scale
+  await linearBtn.click();
+  await expect(panel.locator("svg")).toBeVisible();
 });

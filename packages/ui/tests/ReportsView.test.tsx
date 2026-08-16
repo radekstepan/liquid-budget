@@ -196,6 +196,37 @@ describe("ReportsView", () => {
     expect(svg!.querySelectorAll("path").length).toBe(2);
   });
 
+  it("Net Worth tab toggles between Linear and Log scale modes", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "8200.00", onBudget: true, sort: 0 },
+        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "500000.00", onBudget: false, sort: 1 },
+        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-300000.00", onBudget: false, sort: 2 },
+      ],
+    };
+    renderView({ data });
+    clickTab("Net Worth");
+    const panel = findPanel("Net Worth")!;
+    expect(panel).toBeTruthy();
+
+    const linearBtn = within(panel).getByRole("button", { name: "Linear" });
+    const logBtn = within(panel).getByRole("button", { name: "Log" });
+    expect(linearBtn).toBeInTheDocument();
+    expect(logBtn).toBeInTheDocument();
+
+    // Toggle to Log
+    fireEvent.click(logBtn);
+    expect(panel.querySelector("svg")).not.toBeNull();
+    // Grid lines and decade ticks should render in log mode
+    expect(within(panel).getByText("$1M")).toBeInTheDocument();
+    expect(within(panel).getByText("-$1M")).toBeInTheDocument();
+
+    // Toggle back to Linear
+    fireEvent.click(linearBtn);
+    expect(panel.querySelector("svg")).not.toBeNull();
+  });
+
   it("Expense Breakdown tab renders the donut SVG and legend", () => {
     renderView();
     clickTab("Expense Breakdown");
