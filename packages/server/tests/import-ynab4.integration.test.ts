@@ -86,6 +86,7 @@ const ynabData = {
       payeeId: null,
       categoryId: null,
       targetAccountId: "acc2",
+      transferTransactionId: "t3",
     },
     {
       entityId: "t3",
@@ -95,6 +96,8 @@ const ynabData = {
       cleared: "Uncleared",
       payeeId: "Payee/Transfer:acc1",
       categoryId: null,
+      targetAccountId: "acc1",
+      transferTransactionId: "t2",
     },
     {
       entityId: "t4",
@@ -182,9 +185,9 @@ describe("importYnab4 full import", () => {
     const result = await importYnab4(db, ynabData);
     expect(result).toEqual({
       accounts: 3,
-      categoryGroups: 2, // Everyday + "Credit Card Payments"
+      categoryGroups: 3, // Everyday + "Hidden Categories" + "Credit Card Payments"
       categories: 1, // only mapped subcategories (sc1); CC-payment cats aren't in the map
-      transactions: 7, // raw yTransactions.length, tombstones included
+      transactions: 6, // 1 regular + 1 transfer (de-duplicated from pair) + 1 income + 1 split parent + 2 split children
     });
   });
 
@@ -199,13 +202,13 @@ describe("importYnab4 full import", () => {
     expect(byName.get("Deleted")).toBeUndefined();
   });
 
-  it("skips hidden/non-outflow groups and tombstones, and creates the CC payment group", async () => {
+  it("skips non-outflow groups and tombstones, imports hidden groups, and creates the CC payment group", async () => {
     await importYnab4(db, ynabData);
     const { groups, categories } = await getBudgetData(db);
     const groupNames = groups.map((g) => g.name);
     expect(groupNames).toContain("Everyday");
+    expect(groupNames).toContain("Hidden Categories");
     expect(groupNames).toContain("Credit Card Payments");
-    expect(groupNames).not.toContain("Hidden Categories");
     expect(groupNames).not.toContain("Income");
 
     const catNames = categories.map((c) => c.name);
@@ -223,15 +226,15 @@ describe("importYnab4 full import", () => {
     const { transactions } = await getBudgetData(db);
     const byPayee = new Map(transactions.map((t) => [t.payee, t]));
 
-    // Tombstone and unknown-account rows are dropped.
-    expect(transactions).toHaveLength(7);
+    // Tombstone, unknown-account rows, and duplicate transfer counterparts are dropped.
+    expect(transactions).toHaveLength(6);
 
     const regular = byPayee.get("Grocery Store");
     expect(regular).toMatchObject({ amount: "-100", status: "c", date: "2026-06-01" });
 
     const transfer = transactions.find((t) => t.payee.startsWith("Transfer :"));
     expect(transfer).toBeTruthy();
-    expect(Number(transfer!.amount)).toBe(500);
+    expect(Number(transfer!.amount)).toBe(-500);
 
     const income = byPayee.get("Employer");
     expect(income).toMatchObject({ amount: "3000", status: "r", categoryId: null });
@@ -278,15 +281,17 @@ describe("importYnab4 full import", () => {
     expect(Number(splitR.subTransactions[0]!.amount)).toBe(-300);
   });
 
-  it("recomputes balances including incoming transfers", async () => {
+  it("recomputes balances correctly without double-counting transfers or split parents", async () => {
     await importYnab4(db, ynabData);
     const { accounts } = await getBudgetData(db);
     const byName = new Map(accounts.map((a) => [a.name, a]));
 
-    // Chequing: -100 (t1) - 500 (t2 source) + 3000 (t4) - 150 (split
-    // parent) - 100 - 50 (split children) − (500 transfer in from Visa)
-    // = 2100 − 500 = 1600. RRSP has no transactions.
-    expect(Number(byName.get("Chequing")!.balance)).toBeCloseTo(1600);
+    // Chequing: -100 (t1) - 500 (t2 transfer to Visa) + 3000 (t4) - 100 - 50 (t5 split children; parent excluded)
+    // = 2250.
+    // Visa: +500 (from incoming transfer of -500: 0 - (-500) = 500).
+    // RRSP has no transactions = 0.
+    expect(Number(byName.get("Chequing")!.balance)).toBeCloseTo(2250);
+    expect(Number(byName.get("Visa")!.balance)).toBeCloseTo(500);
     expect(Number(byName.get("RRSP")!.balance)).toBeCloseTo(0);
   });
 });
