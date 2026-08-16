@@ -94,28 +94,33 @@ export function computeRunningBalances(
   const runningBalanceById = new Map<number, number>();
 
   if (anchorAccountId != null) {
-    walkAccount(
-      parsed,
-      parentIds,
-      (r) =>
-        r.accountId === anchorAccountId ||
-        r.transferAccountId === anchorAccountId,
-      (r) => (r.accountId === anchorAccountId ? r.amount : -r.amount),
-      accountBalances.get(anchorAccountId) ?? 0,
-      runningBalanceById
-    );
+    let bal = accountBalances.get(anchorAccountId) ?? 0;
+    for (const r of parsed) {
+      if (parentIds.has(r.id)) continue;
+      const isSource = r.accountId === anchorAccountId;
+      const isDest = r.transferAccountId === anchorAccountId;
+      if (!isSource && !isDest) continue;
+      runningBalanceById.set(r.id, bal);
+      const delta = isSource ? r.amount : -r.amount;
+      bal -= delta;
+    }
   } else {
-    const accountIds = new Set<number>();
-    for (const r of parsed) accountIds.add(r.accountId);
-    for (const acctId of accountIds) {
-      walkAccount(
-        parsed,
-        parentIds,
-        (r) => r.accountId === acctId,
-        (r) => r.amount,
-        accountBalances.get(acctId) ?? 0,
-        runningBalanceById
-      );
+    const byAccount = new Map<number, ParsedTxn[]>();
+    for (const r of parsed) {
+      if (parentIds.has(r.id)) continue;
+      let list = byAccount.get(r.accountId);
+      if (!list) {
+        list = [];
+        byAccount.set(r.accountId, list);
+      }
+      list.push(r);
+    }
+    for (const [acctId, acctRows] of byAccount) {
+      let bal = accountBalances.get(acctId) ?? 0;
+      for (const r of acctRows) {
+        runningBalanceById.set(r.id, bal);
+        bal -= r.amount;
+      }
     }
   }
 
@@ -147,27 +152,6 @@ export function computeRunningBalances(
 }
 
 /* ---------------- internal helpers ---------------- */
-
-function walkAccount(
-  parsed: ParsedTxn[],
-  parentIds: Set<number>,
-  filterFn: (r: ParsedTxn) => boolean,
-  deltaFn: (r: ParsedTxn) => number,
-  startBalance: number,
-  out: Map<number, number>
-): void {
-  const rows = parsed
-    .filter(filterFn)
-    .filter((r) => !parentIds.has(r.id))
-    .slice()
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-
-  let bal = startBalance;
-  for (const r of rows) {
-    out.set(r.id, bal);
-    bal -= deltaFn(r);
-  }
-}
 
 function numSafe(s: string | number | null | undefined): number {
   if (s == null) return 0;

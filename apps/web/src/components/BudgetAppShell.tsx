@@ -77,15 +77,57 @@ export function BudgetAppShell() {
       await reload();
     },
     updateTransaction: async (id, t) => {
-      await jsonReq("/api/transactions", {
-        method: "PATCH",
-        body: JSON.stringify({ id, ...t }),
+      let snapshot: BudgetData | null = null;
+      setData((prev) => {
+        if (!prev) return prev;
+        snapshot = prev;
+        const transactions = prev.transactions.map((x) => {
+          if (x.id !== id) return x;
+          return {
+            ...x,
+            ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
+            ...(t.categoryId !== undefined ? { categoryId: t.categoryId } : {}),
+            ...(t.date !== undefined ? { date: t.date } : {}),
+            ...(t.payee !== undefined ? { payee: t.payee } : {}),
+            ...(t.memo !== undefined ? { memo: t.memo } : {}),
+            ...(t.amount !== undefined ? { amount: t.amount.toFixed(2) } : {}),
+            ...(t.status !== undefined ? { status: t.status } : {}),
+          };
+        });
+        return { ...prev, transactions };
       });
-      await reload();
+      try {
+        await jsonReq("/api/transactions", {
+          method: "PATCH",
+          body: JSON.stringify({ id, ...t }),
+        });
+        if (t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined) {
+          await reload();
+        }
+      } catch (e) {
+        if (snapshot) setData(snapshot);
+        await reload().catch(() => {});
+        throw e;
+      }
     },
     deleteTransaction: async (id) => {
-      await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
-      await reload();
+      let snapshot: BudgetData | null = null;
+      setData((prev) => {
+        if (!prev) return prev;
+        snapshot = prev;
+        const transactions = prev.transactions.filter(
+          (x) => x.id !== id && x.parentId !== id
+        );
+        return { ...prev, transactions };
+      });
+      try {
+        await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
+        await reload();
+      } catch (e) {
+        if (snapshot) setData(snapshot);
+        await reload().catch(() => {});
+        throw e;
+      }
     },
     addRecurring: async (v) => {
       await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });

@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { computeRunningBalances, num } from "@ynab/logic";
 import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money } from "@ynab/theme";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
+
+const ROW_HEIGHT = 27;
+const OVERSCAN = 15;
 
 export function TransactionsView({
   data,
@@ -25,6 +28,32 @@ export function TransactionsView({
   onCycleStatus: (id: number) => void;
 }) {
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setContainerHeight(el.clientHeight);
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setContainerHeight(entry.contentRect.height);
+        }
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    if (containerRef.current) {
+      setScrollTop(containerRef.current.scrollTop);
+    }
+  }, []);
 
   const accountById = useMemo(
     () => new Map(data.accounts.map((a) => [a.id, a] as const)),
@@ -53,30 +82,66 @@ export function TransactionsView({
   }, [data.transactions, accountFilter, accountBalances]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     if (!q) return rows;
-    const childIds = new Set(rows.filter((r) => r.parentId != null).map((r) => r.parentId!));
-    return rows.filter(
-      (r) =>
+
+    const matchingParentIds = new Set<number>();
+    for (const r of rows) {
+      if (r.parentId != null) continue;
+      const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
+      if (
         r.payee.toLowerCase().includes(q) ||
-        (categoryById.get(r.categoryId ?? -1)?.name ?? "").toLowerCase().includes(q) ||
-        (r.memo ?? "").toLowerCase().includes(q) ||
-        (r.parentId != null && childIds.has(r.id))
-    );
-  }, [rows, search, categoryById]);
+        catName.toLowerCase().includes(q) ||
+        (r.memo ?? "").toLowerCase().includes(q)
+      ) {
+        matchingParentIds.add(r.id);
+      }
+    }
+
+    return rows.filter((r) => {
+      if (r.parentId != null) {
+        if (matchingParentIds.has(r.parentId)) return true;
+        const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
+        return (
+          r.payee.toLowerCase().includes(q) ||
+          catName.toLowerCase().includes(q) ||
+          (r.memo ?? "").toLowerCase().includes(q)
+        );
+      }
+      return matchingParentIds.has(r.id);
+    });
+  }, [rows, deferredSearch, categoryById]);
 
   const totals = useMemo(() => {
     let inflow = 0;
     let outflow = 0;
+    let count = 0;
     for (const r of filtered) {
       if (r.parentId != null) continue;
+      count++;
       if (r.amount > 0) inflow += r.amount;
       else outflow += -r.amount;
     }
-    return { inflow, outflow, net: inflow - outflow, count: filtered.filter((r) => r.parentId == null).length };
+    return { inflow, outflow, net: inflow - outflow, count };
   }, [filtered]);
 
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
+  const colCount = accountFilter ? 8 : 9;
+
+  // Virtualization window calculations
+  const totalCount = filtered.length;
+  // If containerHeight is 0 (e.g. during test runs or initial mount), render all rows or reasonable batch
+  const isMeasured = containerHeight > 0;
+  const startIndex = isMeasured
+    ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+    : 0;
+  const endIndex = isMeasured
+    ? Math.min(totalCount, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN)
+    : totalCount;
+
+  const topHeight = startIndex * ROW_HEIGHT;
+  const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
+  const visibleRows = filtered.slice(startIndex, endIndex);
 
   return (
     <div className="flex h-full flex-col">
@@ -127,9 +192,13 @@ export function TransactionsView({
         </span>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto y-scroll">
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="flex-1 min-h-0 overflow-auto y-scroll"
+      >
         <table className="y-table">
-          <thead className="y-thead">
+          <thead className="y-thead y-thead--sticky">
             <tr>
               <th style={{ width: 92 }}>Date</th>
               {!accountFilter && <th style={{ width: 130 }}>Account</th>}
@@ -153,94 +222,107 @@ export function TransactionsView({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-6 y-hint">
+                <td colSpan={colCount} className="text-center py-6 y-hint">
                   No transactions match your filter.
                 </td>
               </tr>
             ) : (
-              filtered.map((t, i) => {
-                const isChild = t.parentId != null;
-                const outflow = t.amount < 0 ? -t.amount : 0;
-                const inflow = t.amount > 0 ? t.amount : 0;
-                const catName =
-                  t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
-                const displayCat = catName || (t.transferAccountId ? "Transfer" : "");
-                return (
-                  <tr
-                    key={t.id}
-                    className={`group y-row ${i % 2 === 1 ? "alt" : ""} ${
-                      isChild ? "!bg-[var(--y-panel-alt)]" : ""
-                    }`}
-                    onClick={() => !isChild && onEdit(t.id)}
-                    style={{ cursor: isChild ? "default" : "pointer" }}
-                  >
-                    <td className="y-num">{t.date}</td>
-                    {!accountFilter && (
-                      <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
-                        {accountById.get(t.accountId)?.name ?? ""}
-                      </td>
-                    )}
-                    <td className="truncate" style={{ color: "var(--y-ink)" }}>
-                      {isChild && (
-                        <span
-                          className="inline-block mr-[5px] align-[-2px]"
-                          style={{ color: "var(--y-ink-faint)" }}
-                        >
-                          ↳
-                        </span>
-                      )}
-                      {t.payee}
-                    </td>
-                    <td
-                      className="truncate"
-                      style={{
-                        color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
-                      }}
-                    >
-                      {displayCat || (
-                        <span className="italic" style={{ color: "var(--y-ink-faint)" }}>
-                          Transfer
-                        </span>
-                      )}
-                    </td>
-                    <td className="truncate italic" style={{ color: "var(--y-ink-faint)" }}>
-                      {t.memo}
-                    </td>
-                    <td className="num y-num">{outflow ? money(outflow) : ""}</td>
-                    <td
-                      className="num y-num"
-                      style={{
-                        color: inflow ? "var(--y-green-dk)" : undefined,
-                        fontWeight: inflow ? 700 : 400,
-                      }}
-                    >
-                      {inflow ? money(inflow) : ""}
-                    </td>
-                    <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                      {isChild ? null : (
-                        <ClearedFlag
-                          state={t.status}
-                          onCycle={() => onCycleStatus(t.id)}
-                          disabled={t.status === "r"}
-                        />
-                      )}
-                    </td>
-                    <td
-                      className="num y-num"
-                      style={{
-                        color: isChild
-                          ? "var(--y-ink-faint)"
-                          : t.runningBalance < 0
-                            ? "var(--y-red)"
-                            : "var(--y-ink)",
-                        fontWeight: !isChild && t.runningBalance < 0 ? 700 : 400,
-                      }}
-                    >
-                      {isChild ? "—" : money(t.runningBalance)}
-                    </td>
+              <>
+                {topHeight > 0 && (
+                  <tr style={{ height: topHeight }}>
+                    <td colSpan={colCount} style={{ height: topHeight, padding: 0, border: 0 }} />
                   </tr>
-                );
-              })
+                )}
+                {visibleRows.map((t, idx) => {
+                  const globalIndex = startIndex + idx;
+                  const isChild = t.parentId != null;
+                  const outflow = t.amount < 0 ? -t.amount : 0;
+                  const inflow = t.amount > 0 ? t.amount : 0;
+                  const catName =
+                    t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
+                  const displayCat = catName || (t.transferAccountId ? "Transfer" : "");
+                  return (
+                    <tr
+                      key={t.id}
+                      className={`group y-row ${globalIndex % 2 === 1 ? "alt" : ""} ${
+                        isChild ? "!bg-[var(--y-panel-alt)]" : ""
+                      }`}
+                      onClick={() => !isChild && onEdit(t.id)}
+                      style={{ cursor: isChild ? "default" : "pointer" }}
+                    >
+                      <td className="y-num">{t.date}</td>
+                      {!accountFilter && (
+                        <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
+                          {accountById.get(t.accountId)?.name ?? ""}
+                        </td>
+                      )}
+                      <td className="truncate" style={{ color: "var(--y-ink)" }}>
+                        {isChild && (
+                          <span
+                            className="inline-block mr-[5px] align-[-2px]"
+                            style={{ color: "var(--y-ink-faint)" }}
+                          >
+                            ↳
+                          </span>
+                        )}
+                        {t.payee}
+                      </td>
+                      <td
+                        className="truncate"
+                        style={{
+                          color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
+                        }}
+                      >
+                        {displayCat || (
+                          <span className="italic" style={{ color: "var(--y-ink-faint)" }}>
+                            Transfer
+                          </span>
+                        )}
+                      </td>
+                      <td className="truncate italic" style={{ color: "var(--y-ink-faint)" }}>
+                        {t.memo}
+                      </td>
+                      <td className="num y-num">{outflow ? money(outflow) : ""}</td>
+                      <td
+                        className="num y-num"
+                        style={{
+                          color: inflow ? "var(--y-green-dk)" : undefined,
+                          fontWeight: inflow ? 700 : 400,
+                        }}
+                      >
+                        {inflow ? money(inflow) : ""}
+                      </td>
+                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                        {isChild ? null : (
+                          <ClearedFlag
+                            state={t.status}
+                            onCycle={() => onCycleStatus(t.id)}
+                            disabled={t.status === "r"}
+                          />
+                        )}
+                      </td>
+                      <td
+                        className="num y-num"
+                        style={{
+                          color: isChild
+                            ? "var(--y-ink-faint)"
+                            : t.runningBalance < 0
+                              ? "var(--y-red)"
+                              : "var(--y-ink)",
+                          fontWeight: !isChild && t.runningBalance < 0 ? 700 : 400,
+                        }}
+                      >
+                        {isChild ? "—" : money(t.runningBalance)}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {bottomHeight > 0 && (
+                  <tr style={{ height: bottomHeight }}>
+                    <td colSpan={colCount} style={{ height: bottomHeight, padding: 0, border: 0 }} />
+                  </tr>
+                )}
+              </>
             )}
           </tbody>
         </table>
