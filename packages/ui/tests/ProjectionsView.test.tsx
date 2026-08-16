@@ -81,8 +81,8 @@ describe("ProjectionsView", () => {
 
   it("includes biweekly entries in the projection flow", () => {
     // One biweekly entry of $2000 (e.g. a biweekly paycheck).
-    // biweeklyNet = 2000 * 2.16 = 4320.
-    // 12-month delta = 4320 * 12 = 51,840.
+    // biweeklyNet = 2000 * (26 / 12) = 4333.33.
+    // 12-month delta = (2000 * 26 / 12) * 12 = 52,000.
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
       groups: emptyGroups,
@@ -92,16 +92,31 @@ describe("ProjectionsView", () => {
       recurring: [rec(1, "biweekly", 2000)],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, 4320)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, (2000 * 26) / 12)).length).toBeGreaterThan(0);
+  });
+
+  it("includes twiceamonth entries (2x/month) in the projection flow", () => {
+    // One twiceamonth entry of $4152.97 (e.g. salary twice a month).
+    // monthlyNet = 4152.97 * 2 = 8305.94.
+    const data = {
+      accounts: [acct({ id: 1, balance: "0" })],
+      groups: emptyGroups,
+      categories: emptyCategories,
+      assignments: [],
+      transactions: [],
+      recurring: [rec(1, "twiceamonth", 4152.97)],
+    };
+    render(<ProjectionsView data={data} month="2026-07" />);
+    expect(screen.getAllByText(expectedProjected(0, 4152.97 * 2)).length).toBeGreaterThan(0);
   });
 
   it("combines monthly, weekly, biweekly, and yearly entries correctly", () => {
     // monthly:    -100           → -100
-    // weekly:     +50 * 4.33     → +216.5
-    // biweekly:   +200 * 2.16    → +432
+    // weekly:     +50 * (52/12)  → +216.67
+    // biweekly:   +200 * (26/12) → +433.33
     // yearly:     +1200 / 12     → +100
-    // perMonth                      = +648.5
-    // 12-month delta                 = +7,782
+    // perMonth                      = +650
+    // 12-month delta                 = +7,800
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
       groups: emptyGroups,
@@ -116,7 +131,7 @@ describe("ProjectionsView", () => {
       ],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, 648.5)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, 650)).length).toBeGreaterThan(0);
   });
 
   it("excludes inactive biweekly entries", () => {
@@ -133,12 +148,13 @@ describe("ProjectionsView", () => {
     expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
   });
 
-  it("ignores transfer biweekly entries (net zero across accounts)", () => {
-    // A biweekly transfer is stored with transferAccountId set; the
-    // projection logic uses netMonthlyAmount which returns 0 for
-    // transfers, so they must not contribute to flow.
+  it("ignores liquid-to-liquid transfer entries (net zero across liquid accounts)", () => {
+    // A transfer between two liquid accounts has 0 net effect on total liquid funds.
     const data = {
-      accounts: [acct({ id: 1, balance: "0" })],
+      accounts: [
+        acct({ id: 1, balance: "0" }),
+        acct({ id: 2, name: "Savings", balance: "0" }),
+      ],
       groups: emptyGroups,
       categories: emptyCategories,
       assignments: [],
@@ -154,10 +170,35 @@ describe("ProjectionsView", () => {
     expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
   });
 
+  it("incorporates transfers from off-budget accounts into liquid accounts", () => {
+    // A transfer from an off-budget account (e.g. salary/business account) into Chequing (liquid)
+    const data = {
+      accounts: [
+        acct({ id: 1, name: "Chequing", kind: "liquid", balance: "1000" }),
+        acct({ id: 2, name: "Company", kind: "offbudget", balance: "50000" }),
+      ],
+      groups: emptyGroups,
+      categories: emptyCategories,
+      assignments: [],
+      transactions: [],
+      recurring: [
+        {
+          ...rec(1, "twiceamonth", -4000),
+          accountId: 2, // on Company account
+          transferAccountId: 1, // transferring to Chequing
+        },
+      ],
+    };
+    render(<ProjectionsView data={data} month="2026-07" />);
+    // Inflow into liquid = +4000 * 2 = 8000/mo.
+    // In 12 mo = 1000 + 8000 * 12 = 97,000.
+    expect(screen.getAllByText("$97,000.00").length).toBeGreaterThan(0);
+  });
+
   it("uses split children for biweekly entries (signed sum)", () => {
     // Biweekly split: +5000 gross, -1000 taxes → net 4000.
-    // biweeklyNet = 4000 * 2.16 = 8640.
-    // 12 months = 103,680.
+    // biweeklyNet = 4000 * (26 / 12) = 8666.67.
+    // 12 months = 104,000.
     const subs: RecurringSubTransaction[] = [
       { id: 1, recurringId: 1, categoryId: 1, amount: "5000", memo: "", sort: 0 },
       { id: 2, recurringId: 1, categoryId: 1, amount: "-1000", memo: "", sort: 1 },
@@ -173,6 +214,6 @@ describe("ProjectionsView", () => {
       ],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, 8640)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, (4000 * 26) / 12)).length).toBeGreaterThan(0);
   });
 });

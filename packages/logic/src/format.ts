@@ -272,7 +272,9 @@ export function todayISO(): string {
 
 /**
  * Advance an ISO date (YYYY-MM-DD) by one step of the given frequency.
- * Supported frequencies: "weekly", "biweekly", "monthly", "yearly".
+ * Supported frequencies: "daily", "weekly", "biweekly", "twiceamonth",
+ * "every4weeks", "monthly", "everyothermonth", "every3months", "every4months",
+ * "twiceayear", "yearly", "every2years".
  * Anything else falls back to monthly.
  *
  * Monthly and yearly advances clamp the day to the last valid day of the
@@ -282,16 +284,89 @@ export function todayISO(): string {
 export function nextDateFor(frequency: string, iso: string): string {
   const d = new Date(iso + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return iso;
-  switch (frequency) {
+  const norm = (frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+  switch (norm) {
+    case "daily":
+      d.setUTCDate(d.getUTCDate() + 1);
+      break;
     case "weekly":
       d.setUTCDate(d.getUTCDate() + 7);
       break;
     case "biweekly":
+    case "everyotherweek":
       d.setUTCDate(d.getUTCDate() + 14);
       break;
-    case "yearly":
-      d.setUTCFullYear(d.getUTCFullYear() + 1);
+    case "twiceamonth":
+    case "semimonthly": {
+      const day = d.getUTCDate();
+      if (day < 15) {
+        d.setUTCDate(15);
+      } else {
+        const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+        if (day < lastDay) {
+          d.setUTCDate(lastDay);
+        } else {
+          d.setUTCDate(1);
+          d.setUTCMonth(d.getUTCMonth() + 1);
+        }
+      }
       break;
+    }
+    case "every4weeks":
+      d.setUTCDate(d.getUTCDate() + 28);
+      break;
+    case "everyothermonth":
+    case "bimonthly": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + 2);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "every3months":
+    case "quarterly": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + 3);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "every4months": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + 4);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "twiceayear":
+    case "semiannually": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + 6);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "every2years": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCFullYear(d.getUTCFullYear() + 2);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "yearly":
+    case "annually": {
+      const originalDay = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCFullYear(d.getUTCFullYear() + 1);
+      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
     case "monthly":
     default: {
       const originalDay = d.getUTCDate();

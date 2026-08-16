@@ -14,10 +14,55 @@
  *               children contribute to category outflows at post time.
  */
 
-import type { Recurring, RecurringSubTransaction } from "./types.js";
+import type { Account, Recurring, RecurringSubTransaction } from "./types.js";
 import { num } from "./format.js";
 
 export type RecurringFlavour = "single" | "transfer" | "split";
+
+/**
+ * Returns the average monthly multiplier for a given recurring frequency.
+ * E.g. "twiceamonth" -> 2, "monthly" -> 1, "biweekly" -> 26/12 (~2.1667),
+ * "weekly" -> 52/12 (~4.3333), "yearly" -> 1/12 (~0.0833).
+ */
+export function frequencyMonthlyMultiplier(frequency: string): number {
+  const norm = (frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+  switch (norm) {
+    case "daily":
+      return 365 / 12;
+    case "weekly":
+      return 52 / 12;
+    case "biweekly":
+    case "everyotherweek":
+      return 26 / 12;
+    case "twiceamonth":
+    case "semimonthly":
+      return 2;
+    case "every4weeks":
+      return 13 / 12;
+    case "monthly":
+      return 1;
+    case "everyothermonth":
+    case "bimonthly":
+      return 0.5;
+    case "every3months":
+    case "quarterly":
+      return 1 / 3;
+    case "every4months":
+      return 0.25;
+    case "twiceayear":
+    case "semiannually":
+      return 2 / 12;
+    case "yearly":
+    case "annually":
+      return 1 / 12;
+    case "every2years":
+      return 1 / 24;
+    case "once":
+      return 0;
+    default:
+      return 1;
+  }
+}
 
 /**
  * Classify a `Recurring` row. `children` is the array of
@@ -44,17 +89,86 @@ export function getRecurringChildren(
 }
 
 /**
+ * Calculate the net impact of a single recurring entry occurrence on the
+ * total liquid account balance (Checking, Cash, Savings), taking into account
+ * transfer directions between liquid, credit, and off-budget accounts.
+ */
+export function recurringLiquidFlow(
+  r: Recurring,
+  children: RecurringSubTransaction[],
+  accounts: Account[] | Map<number, { kind: string }>
+): number {
+  const accMap =
+    accounts instanceof Map
+      ? accounts
+      : new Map(accounts.map((a) => [a.id, a]));
+
+  const sourceKind = accMap.get(r.accountId)?.kind;
+
+  // Split recurring
+  if (children.length > 0) {
+    return children.reduce((s, c) => {
+      const amt = num(c.amount);
+      if (c.transferAccountId != null) {
+        const destKind = accMap.get(c.transferAccountId)?.kind;
+        if (sourceKind === "liquid" && destKind !== "liquid") {
+          return s + amt;
+        }
+        if (sourceKind !== "liquid" && destKind === "liquid") {
+          return s - amt;
+        }
+        return s;
+      }
+      if (sourceKind === "liquid" || sourceKind === "credit") {
+        return s + amt;
+      }
+      return s;
+    }, 0);
+  }
+
+  // Transfer recurring
+  if (r.transferAccountId != null) {
+    const destKind = accMap.get(r.transferAccountId)?.kind;
+    if (sourceKind === "liquid" && destKind === "liquid") {
+      // Transfer within liquid pool has 0 net effect on overall liquid cash
+      return 0;
+    }
+    if (sourceKind === "liquid" && destKind !== "liquid") {
+      // Money leaving liquid (e.g. transfer to credit card, loan, or investment)
+      return num(r.amount);
+    }
+    if (sourceKind !== "liquid" && destKind === "liquid") {
+      // Money entering liquid from offbudget / external account
+      return -num(r.amount);
+    }
+    return 0;
+  }
+
+  // Single recurring
+  if (sourceKind === "liquid" || sourceKind === "credit") {
+    return num(r.amount);
+  }
+  return 0;
+}
+
+/**
  * The amount that a recurring entry contributes to monthly net flow
  * for summary / projection purposes.
  *
- *   - Single:  the row's amount (signed).
- *   - Transfer: 0 (the source and destination balance movements cancel).
- *   - Split:   the sum of children (which equals the parent's |amount|).
+ *   - When accounts is provided: uses account-aware liquid flow.
+ *   - When accounts is omitted:
+ *       - Single:  the row's amount (signed).
+ *       - Transfer: 0 (the source and destination balance movements cancel).
+ *       - Split:   the sum of children (which equals the parent's |amount|).
  */
 export function netMonthlyAmount(
   r: Recurring,
-  children: RecurringSubTransaction[]
+  children: RecurringSubTransaction[],
+  accounts?: Account[] | Map<number, { kind: string }>
 ): number {
+  if (accounts) {
+    return recurringLiquidFlow(r, children, accounts);
+  }
   if (r.transferAccountId != null) return 0;
   if (children.length > 0) {
     return children.reduce((s, c) => s + num(c.amount), 0);

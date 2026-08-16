@@ -2,7 +2,13 @@
 
 import { useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, netMonthlyAmount, recurringFlavour } from "@ynab/logic";
+import {
+  fmt,
+  num,
+  netMonthlyAmount,
+  frequencyMonthlyMultiplier,
+  recurringFlavour,
+} from "@ynab/logic";
 import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
 
 export function RecurringView({
@@ -23,18 +29,22 @@ export function RecurringView({
   const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
-  // Per-row net rule: single = its amount; transfer = 0; split = sum of children.
+  // Calculate monthly flow across all frequencies and accounts.
   const monthlyOut = data.recurring
-    .filter((r) => r.active && r.frequency === "monthly")
+    .filter((r) => r.active)
     .reduce((s, r) => {
-      const v = netMonthlyAmount(r, r.subTransactions ?? []);
-      return s + (v < 0 ? v : 0);
+      const v = netMonthlyAmount(r, r.subTransactions ?? [], data.accounts);
+      const mult = frequencyMonthlyMultiplier(r.frequency);
+      const monthlyV = v * mult;
+      return s + (monthlyV < 0 ? monthlyV : 0);
     }, 0);
   const monthlyIn = data.recurring
-    .filter((r) => r.active && r.frequency === "monthly")
+    .filter((r) => r.active)
     .reduce((s, r) => {
-      const v = netMonthlyAmount(r, r.subTransactions ?? []);
-      return s + (v > 0 ? v : 0);
+      const v = netMonthlyAmount(r, r.subTransactions ?? [], data.accounts);
+      const mult = frequencyMonthlyMultiplier(r.frequency);
+      const monthlyV = v * mult;
+      return s + (monthlyV > 0 ? monthlyV : 0);
     }, 0);
 
   return (
