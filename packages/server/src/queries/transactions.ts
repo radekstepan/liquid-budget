@@ -64,6 +64,17 @@ export class TransactionError extends Error {
   }
 }
 
+export function assertValidAmount(amount: unknown): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) {
+    throw new TransactionError("Amount must be a valid number", 400);
+  }
+  if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+    throw new TransactionError("Amount exceeds safe integer range", 400);
+  }
+  return Math.round(n);
+}
+
 async function applyBalance(db: Database, accountId: number, delta: number) {
   await db
     .update(accounts)
@@ -125,6 +136,7 @@ export function assertSplitsBalanced(
   parentAmount: number,
   children: SubTransactionInput[]
 ): void {
+  assertValidAmount(parentAmount);
   if (children.length < 2) {
     throw new TransactionError("split must have at least two sub-transactions");
   }
@@ -136,9 +148,7 @@ export function assertSplitsBalanced(
     if (c.categoryId && c.transferAccountId) {
       throw new TransactionError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
-    if (!Number.isFinite(Number(c.amount))) {
-      throw new TransactionError(`sub-transaction ${i + 1} amount is not a valid number`);
-    }
+    assertValidAmount(c.amount);
   }
   const sum = children.reduce((s, c) => s + Number(c.amount), 0);
   if (sum !== parentAmount) {
@@ -159,6 +169,7 @@ export function assertSplitsBalanced(
  * "lastReconciledAt" account metadata and prevents orphan-R rows.
  */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
+  assertValidAmount(input.amount);
   if (input.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
@@ -230,6 +241,7 @@ export async function createTransfer(
   baseInput: CreateTransactionInput,
   transferAccountId: number
 ) {
+  assertValidAmount(baseInput.amount);
   if (transferAccountId === baseInput.accountId) {
     throw new TransactionError("transfer account must differ from source account");
   }
@@ -395,7 +407,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.date != null) p.date = String(patch.date);
   if (patch.payee != null) p.payee = String(patch.payee);
   if (patch.memo != null) p.memo = String(patch.memo);
-  if (patch.amount != null) p.amount = Number(patch.amount);
+  if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.status != null) p.status = patch.status;
 
   const isParent = existing.parentId == null && existing.transferAccountId == null;

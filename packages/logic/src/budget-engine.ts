@@ -61,6 +61,111 @@ export function isIncomeTransaction(
 }
 
 // ---------------------------------------------------------------------------
+// Indexing & Memoization Cache for High Performance
+// ---------------------------------------------------------------------------
+
+type IndexedBudgetData = {
+  assignedByMonth: Map<string, Map<number, number>>;
+  assignedTotalByMonth: Map<string, number>;
+  outflowByMonth: Map<string, Map<number, number>>;
+  spendByAccountMonth: Map<string, Map<number, number>>;
+  incomeByMonth: Map<string, number>;
+  carryoverByMonth: Map<string, Map<number, number>>;
+  surplusByMonth: Map<string, number>;
+};
+
+const budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+
+function getOrBuildIndex(
+  data: BudgetData,
+  splitParentIds: Set<number>,
+  accountMap: Map<number, Account>
+): IndexedBudgetData {
+  let cached = budgetDataIndexCache.get(data);
+  if (cached) return cached;
+
+  const assignedByMonth = new Map<string, Map<number, number>>();
+  const assignedTotalByMonth = new Map<string, number>();
+
+  for (const a of data.assignments) {
+    const amt = num(a.amount);
+    let m = assignedByMonth.get(a.month);
+    if (!m) {
+      m = new Map();
+      assignedByMonth.set(a.month, m);
+    }
+    m.set(a.categoryId, Math.round((m.get(a.categoryId) ?? 0) + amt));
+    assignedTotalByMonth.set(
+      a.month,
+      Math.round((assignedTotalByMonth.get(a.month) ?? 0) + amt)
+    );
+  }
+
+  const outflowByMonth = new Map<string, Map<number, number>>();
+  const spendByAccountMonth = new Map<string, Map<number, number>>();
+  const incomeByMonth = new Map<string, number>();
+
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    const mk = t.date.slice(0, 7);
+    const amt = num(t.amount);
+
+    if (t.categoryId != null) {
+      let m = outflowByMonth.get(mk);
+      if (!m) {
+        m = new Map();
+        outflowByMonth.set(mk, m);
+      }
+      m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + amt));
+    }
+
+    if (isIncomeTransaction(t, accountMap)) {
+      incomeByMonth.set(mk, Math.round((incomeByMonth.get(mk) ?? 0) + amt));
+    }
+
+    // 1. Categorised spending/refunds on credit card accounts
+    if (t.categoryId != null) {
+      let s = spendByAccountMonth.get(mk);
+      if (!s) {
+        s = new Map();
+        spendByAccountMonth.set(mk, s);
+      }
+      s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) + -amt));
+    }
+
+    // 2. Payments to credit cards
+    if (t.transferAccountId != null) {
+      let s = spendByAccountMonth.get(mk);
+      if (!s) {
+        s = new Map();
+        spendByAccountMonth.set(mk, s);
+      }
+      const paymentAmount = Math.abs(amt);
+      s.set(
+        t.transferAccountId,
+        Math.round((s.get(t.transferAccountId) ?? 0) - paymentAmount)
+      );
+      if (amt > 0) {
+        s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) - amt));
+      }
+    }
+  }
+
+  cached = {
+    assignedByMonth,
+    assignedTotalByMonth,
+    outflowByMonth,
+    spendByAccountMonth,
+    incomeByMonth,
+    carryoverByMonth: new Map(),
+    surplusByMonth: new Map(),
+  };
+
+  budgetDataIndexCache.set(data, cached);
+  return cached;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -79,6 +184,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   }
 
   const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
+  const index = getOrBuildIndex(data, splitParentIds, accountMap);
 
   // 1. Determine the ordered list of months we need to walk through.
   const months = getMonthsWithData(data);
@@ -95,19 +201,22 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   }
 
   // Build cumulative carryover per category up to (but not including) `month`.
-  const carryoverMap = buildCarryoverMap(data, months, month, splitParentIds, ccPayCatToAccount);
+  const carryoverMap = buildCarryoverMap(
+    data,
+    index,
+    months,
+    month,
+    ccPayCatToAccount
+  );
 
   // 2. Compute the current month's raw outflow per category.
-  const outflowMap = buildOutflowMap(data, month, splitParentIds);
+  const outflowMap = index.outflowByMonth.get(month) ?? new Map<number, number>();
 
-  // 3. CC buffer for this month: charges increase buffer, refunds & payments decrease buffer.
-  const ccBufferMap = buildCCBufferMap(data, month, splitParentIds, ccPayCatToAccount);
+  // 3. CC buffer for this month.
+  const ccBufferMap = buildCCBufferMap(index, month, ccPayCatToAccount);
 
   // 4. Assignments for the current month.
-  const assignMap = new Map<number, number>();
-  for (const a of data.assignments) {
-    if (a.month === month) assignMap.set(a.categoryId, num(a.amount));
-  }
+  const assignMap = index.assignedByMonth.get(month) ?? new Map<number, number>();
 
   // 5. Build CatRow for every category.
   const catsByGroup = new Map<number, CatRow[]>();
@@ -118,7 +227,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
     const outflow = Math.min(0, rawFlow);
 
     const ccBuffer = ccBufferMap.get(c.id) ?? 0;
-    const available = carryoverIn + assigned + rawFlow + ccBuffer;
+    const available = Math.round(carryoverIn + assigned + rawFlow + ccBuffer);
 
     const fundedPct = computeFundedPct(c.goalTarget, assigned, available);
 
@@ -145,18 +254,18 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
       const rows = (catsByGroup.get(group.id) ?? []).sort(
         (a, b) => a.category.sort - b.category.sort
       );
-      const assigned = rows.reduce((s, r) => s + r.assigned, 0);
-      const outflow = rows.reduce((s, r) => s + r.outflow, 0);
-      const available = rows.reduce((s, r) => s + r.available, 0);
+      const assigned = Math.round(rows.reduce((s, r) => s + r.assigned, 0));
+      const outflow = Math.round(rows.reduce((s, r) => s + r.outflow, 0));
+      const available = Math.round(rows.reduce((s, r) => s + r.available, 0));
       return { group, rows, assigned, outflow, available };
     });
 
   // 7. Compute cumulative TBB.
   // Prior months' surplus TBB carries forward into this month's available pool.
-  const priorSurplus = computePriorTBBSurplus(data, months, month, splitParentIds, accountMap);
-  const totalIncome = computeMonthIncome(data, month, splitParentIds, accountMap);
-  const totalAssigned = groups.reduce((s, g) => s + g.assigned, 0);
-  const tbb = totalIncome - totalAssigned + priorSurplus;
+  const priorSurplus = computePriorTBBSurplus(index, months, month);
+  const totalIncome = index.incomeByMonth.get(month) ?? 0;
+  const totalAssigned = Math.round(groups.reduce((s, g) => s + g.assigned, 0));
+  const tbb = Math.round(totalIncome - totalAssigned + priorSurplus);
 
   return {
     groups,
@@ -185,57 +294,38 @@ export function getMonthsWithData(data: BudgetData): string[] {
 
 /**
  * Build a Map<categoryId, carryoverIn> for the target month by walking all
- * prior months in chronological order.
+ * prior months in chronological order with memoization.
  */
 function buildCarryoverMap(
   data: BudgetData,
+  index: IndexedBudgetData,
   orderedMonths: string[],
   targetMonth: string,
-  splitParentIds: Set<number>,
   ccPayCatToAccount: Map<number, number>
 ): Map<number, number> {
+  const cached = index.carryoverByMonth.get(targetMonth);
+  if (cached) return cached;
+
   // Seed: every category starts with its manual carryover value.
-  const balance = new Map<number, number>(
+  let currentBalance = new Map<number, number>(
     data.categories.map((c) => [c.id, num(c.carryover)])
   );
 
   const priorMonths = orderedMonths.filter((m) => m < targetMonth);
 
-  // assignedByMonth: month → Map<catId, amount>
-  const assignedByMonth = new Map<string, Map<number, number>>();
-  for (const a of data.assignments) {
-    let m = assignedByMonth.get(a.month);
-    if (!m) {
-      m = new Map();
-      assignedByMonth.set(a.month, m);
-    }
-    m.set(a.categoryId, (m.get(a.categoryId) ?? 0) + num(a.amount));
-  }
-
-  // outflowByMonth: month → Map<catId, rawSum>
-  const outflowByMonth = new Map<string, Map<number, number>>();
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null) continue;
-    const mk = t.date.slice(0, 7);
-    let m = outflowByMonth.get(mk);
-    if (!m) {
-      m = new Map();
-      outflowByMonth.set(mk, m);
-    }
-    m.set(t.categoryId, (m.get(t.categoryId) ?? 0) + num(t.amount));
-  }
-
-  // spendByAccountMonth: month → Map<accountId, net CC buffer>
-  const spendByAccountMonth = buildSpendByAccountMonth(data, splitParentIds);
-
   for (const month of priorMonths) {
-    const aMap = assignedByMonth.get(month) ?? new Map<number, number>();
-    const oMap = outflowByMonth.get(month) ?? new Map<number, number>();
-    const spendByAcc = spendByAccountMonth.get(month) ?? new Map<number, number>();
+    const monthCached = index.carryoverByMonth.get(month);
+    if (monthCached) {
+      currentBalance = new Map(monthCached);
+    }
 
+    const aMap = index.assignedByMonth.get(month) ?? new Map<number, number>();
+    const oMap = index.outflowByMonth.get(month) ?? new Map<number, number>();
+    const spendByAcc = index.spendByAccountMonth.get(month) ?? new Map<number, number>();
+
+    const nextBalance = new Map<number, number>();
     for (const c of data.categories) {
-      const prev = balance.get(c.id) ?? 0;
+      const prev = currentBalance.get(c.id) ?? 0;
       const assigned = aMap.get(c.id) ?? 0;
       const rawFlow = oMap.get(c.id) ?? 0;
 
@@ -245,75 +335,31 @@ function buildCarryoverMap(
         ccBuffer = spendByAcc.get(linkedAcc) ?? 0;
       }
 
-      balance.set(c.id, prev + assigned + rawFlow + ccBuffer);
+      nextBalance.set(
+        c.id,
+        Math.round(prev + assigned + rawFlow + ccBuffer)
+      );
     }
+    currentBalance = nextBalance;
   }
 
-  return balance;
-}
-
-/** Sum all outflow transactions for each category in the target month. */
-function buildOutflowMap(
-  data: BudgetData,
-  month: string,
-  splitParentIds: Set<number>
-): Map<number, number> {
-  const map = new Map<number, number>();
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null) continue;
-    if (!t.date.startsWith(month)) continue;
-    map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + num(t.amount));
-  }
-  return map;
+  index.carryoverByMonth.set(targetMonth, currentBalance);
+  return currentBalance;
 }
 
 /**
- * Build the CC buffer map for a single target month.
- * For each CC payment category:
- *   - Categorised spend on linked credit card adds -amt (positive charges increase buffer, refunds decrease buffer).
- *   - Transfers to the linked credit card subtract the payment amount from the buffer.
+ * Build the CC buffer map for a single target month from pre-indexed spend.
  */
 function buildCCBufferMap(
-  data: BudgetData,
+  index: IndexedBudgetData,
   month: string,
-  splitParentIds: Set<number>,
   ccPayCatToAccount: Map<number, number>
 ): Map<number, number> {
   if (ccPayCatToAccount.size === 0) return new Map();
 
-  const spendByAccount = new Map<number, number>();
-  const linkedAccountSet = new Set(ccPayCatToAccount.values());
-
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    if (!t.date.startsWith(month)) continue;
-
-    const amt = num(t.amount);
-
-    // 1. Categorised charges/refunds on the credit card account itself
-    if (t.categoryId != null && linkedAccountSet.has(t.accountId)) {
-      // Spending (amt < 0) adds positive credit (-amt); refund (amt > 0) reduces buffer (-amt)
-      spendByAccount.set(t.accountId, (spendByAccount.get(t.accountId) ?? 0) + (-amt));
-    }
-
-    // 2. Payments to the card
-    // Transfer from another account to the card: destination is linkedAccount
-    if (t.transferAccountId != null && linkedAccountSet.has(t.transferAccountId)) {
-      // Outflow on source (amt < 0): payment of |amt| draws down CC buffer
-      const paymentAmount = Math.abs(amt);
-      spendByAccount.set(
-        t.transferAccountId,
-        (spendByAccount.get(t.transferAccountId) ?? 0) - paymentAmount
-      );
-    }
-    // Inflow transfer entered on the card account: source is linkedAccount with amt > 0
-    if (t.transferAccountId != null && linkedAccountSet.has(t.accountId) && amt > 0) {
-      spendByAccount.set(t.accountId, (spendByAccount.get(t.accountId) ?? 0) - amt);
-    }
-  }
-
+  const spendByAccount = index.spendByAccountMonth.get(month) ?? new Map<number, number>();
   const result = new Map<number, number>();
+
   for (const [catId, accountId] of ccPayCatToAccount) {
     const buffer = spendByAccount.get(accountId) ?? 0;
     if (buffer !== 0) result.set(catId, buffer);
@@ -322,94 +368,32 @@ function buildCCBufferMap(
 }
 
 /**
- * Build month → Map<accountId, net CC buffer>.
- * Used for the carryover chain to apply CC buffers across prior months.
- */
-function buildSpendByAccountMonth(
-  data: BudgetData,
-  splitParentIds: Set<number>
-): Map<string, Map<number, number>> {
-  const result = new Map<string, Map<number, number>>();
-
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    const mk = t.date.slice(0, 7);
-    const amt = num(t.amount);
-
-    let m = result.get(mk);
-    if (!m) {
-      m = new Map();
-      result.set(mk, m);
-    }
-
-    // 1. Categorised spending/refunds on the card
-    if (t.categoryId != null) {
-      m.set(t.accountId, (m.get(t.accountId) ?? 0) + (-amt));
-    }
-
-    // 2. Payments to the card
-    if (t.transferAccountId != null) {
-      // Outflow on source (amt < 0) to transferAccountId (card)
-      const paymentAmount = Math.abs(amt);
-      m.set(t.transferAccountId, (m.get(t.transferAccountId) ?? 0) - paymentAmount);
-      // Inflow transfer on the card account itself
-      if (amt > 0) {
-        m.set(t.accountId, (m.get(t.accountId) ?? 0) - amt);
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
- * Sum all positive income transactions in the month.
- */
-function computeMonthIncome(
-  data: BudgetData,
-  month: string,
-  splitParentIds: Set<number>,
-  accountMap: Map<number, Account>
-): number {
-  return data.transactions
-    .filter((t) => {
-      if (!t.date.startsWith(month)) return false;
-      if (splitParentIds.has(t.id)) return false;
-      return isIncomeTransaction(t, accountMap);
-    })
-    .reduce((s, t) => s + num(t.amount), 0);
-}
-
-/**
- * Compute the cumulative TBB surplus from all prior months.
- * In YNAB4, a positive TBB from a previous month carries forward.
- * A negative TBB (over-budgeted) stays in that month.
+ * Compute the cumulative TBB surplus from all prior months with memoization.
  */
 function computePriorTBBSurplus(
-  data: BudgetData,
+  index: IndexedBudgetData,
   orderedMonths: string[],
-  targetMonth: string,
-  splitParentIds: Set<number>,
-  accountMap: Map<number, Account>
+  targetMonth: string
 ): number {
-  const priorMonths = orderedMonths.filter((m) => m < targetMonth);
-  if (priorMonths.length === 0) return 0;
+  const cached = index.surplusByMonth.get(targetMonth);
+  if (cached !== undefined) return cached;
 
-  // Group assignments by month for fast lookup.
-  const assignedByMonth = new Map<string, number>();
-  for (const a of data.assignments) {
-    assignedByMonth.set(a.month, (assignedByMonth.get(a.month) ?? 0) + num(a.amount));
+  const priorMonths = orderedMonths.filter((m) => m < targetMonth);
+  if (priorMonths.length === 0) {
+    index.surplusByMonth.set(targetMonth, 0);
+    return 0;
   }
 
   let surplus = 0;
   for (const m of priorMonths) {
-    const income = computeMonthIncome(data, m, splitParentIds, accountMap);
-    const assigned = assignedByMonth.get(m) ?? 0;
-    const tbb = income - assigned + surplus;
+    const income = index.incomeByMonth.get(m) ?? 0;
+    const assigned = index.assignedTotalByMonth.get(m) ?? 0;
+    const tbb = Math.round(income - assigned + surplus);
     // Only positive TBB carries forward; deficit stays in its own month.
     surplus = Math.max(0, tbb);
   }
 
+  index.surplusByMonth.set(targetMonth, surplus);
   return surplus;
 }
 

@@ -32,11 +32,20 @@ describe("format", () => {
     expect(num("-0")).toBe(0);
   });
 
+  it("num throws RangeError on integer overflow beyond MAX_SAFE_INTEGER", () => {
+    expect(() => num("9007199254740992")).toThrow(RangeError);
+    expect(() => num(Number.MAX_SAFE_INTEGER + 100)).toThrow(RangeError);
+  });
+
   it("dollarsToCents converts dollar amounts to integer cents", () => {
     expect(dollarsToCents(3.14)).toBe(314);
     expect(dollarsToCents(-42.50)).toBe(-4250);
     expect(dollarsToCents(0)).toBe(0);
     expect(dollarsToCents(null)).toBe(0);
+  });
+
+  it("dollarsToCents throws RangeError on overflow", () => {
+    expect(() => dollarsToCents(1e16)).toThrow(RangeError);
   });
 
   it("monthKey zero-pads single-digit months", () => {
@@ -209,6 +218,11 @@ describe("format", () => {
 
     it("returns null for double-dot numbers", () => {
       expect(evalAmount("1.2.3")).toBeNull();
+    });
+
+    it("returns null on integer overflow beyond MAX_SAFE_INTEGER", () => {
+      expect(evalAmount("99999999999999999999999999999999")).toBeNull();
+      expect(evalAmount("1e20 * 1e20")).toBeNull();
     });
   });
 });

@@ -7,6 +7,7 @@ export * from "./queries/categories.js";
 export * from "./queries/recurring.js";
 export * from "./queries/transactions.js";
 export * from "./queries/reconcile.js";
+export * from "./queries/diagnostics.js";
 export { seedDatabase, resetDatabase, DEMO_MONTH } from "./seed.js";
 export { importYnab4, extractYnab4DataFromZip, type ExtractedYnab4Data } from "./import-ynab4.js";
 // Re-export ClearedStatus from logic so API routes and the web app

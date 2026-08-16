@@ -84,6 +84,17 @@ describe("accounts queries", () => {
       const set = updateCall?.set as Record<string, unknown>;
       expect(set).toEqual({ name: "Only" });
     });
+
+    it("does not permit updating account balance directly", async () => {
+      mock.respondWith("update:accounts", [{ id: 1 }]);
+
+      // Attempting to pass balance via any type assertion is ignored
+      await updateAccount(mock.db, 1, { name: "Safe", ...({ balance: 99999 } as any) });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toEqual({ name: "Safe" });
+      expect(set.balance).toBeUndefined();
+    });
   });
 
   describe("deleteAccount", () => {

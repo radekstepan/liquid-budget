@@ -450,4 +450,124 @@ describe("computeBudget", () => {
     expect(result.totalIncome).toBeGreaterThan(0);
     expect(result.tbb).toBe(result.totalIncome + result.priorSurplus - result.totalAssigned);
   });
+
+  it("computes 5 years (60 months) with 1000 transactions in < 100ms", () => {
+    const cats = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      groupId: 1,
+      name: `Category ${i + 1}`,
+      sort: i,
+      carryover: "0",
+      goalTarget: null,
+    }));
+
+    const groups = [{ id: 1, name: "General", sort: 0, isCreditCardPayments: false }];
+    const accounts = [{ id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "0", onBudget: true, sort: 0 }];
+
+    const assignments = [];
+    const transactions = [];
+
+    // Generate 60 months (2020-01 to 2024-12)
+    for (let y = 2020; y <= 2024; y++) {
+      for (let m = 1; m <= 12; m++) {
+        const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+        // Income
+        transactions.push({
+          id: transactions.length + 1,
+          accountId: 1,
+          categoryId: null,
+          date: `${monthKey}-01`,
+          payee: "Employer",
+          memo: "Salary",
+          amount: "500000",
+          status: "c" as const,
+        });
+
+        for (const c of cats) {
+          assignments.push({
+            month: monthKey,
+            categoryId: c.id,
+            amount: "20000",
+          });
+          transactions.push({
+            id: transactions.length + 1,
+            accountId: 1,
+            categoryId: c.id,
+            date: `${monthKey}-15`,
+            payee: "Merchant",
+            memo: "",
+            amount: "-15000",
+            status: "c" as const,
+          });
+        }
+      }
+    }
+
+    const data: BudgetData = {
+      accounts,
+      groups,
+      categories: cats,
+      assignments,
+      transactions,
+      recurring: [],
+    };
+
+    const t0 = performance.now();
+    const result = computeBudget(data, "2024-12");
+    const t1 = performance.now();
+
+    expect(t1 - t0).toBeLessThan(150); // Under 150ms
+    // Each month: assigned 20000, spent 15000 -> net +5000 per category per month
+    // Over 59 prior months, carryover in month 60 should be 59 * 5000 = 295000
+    const cat1Row = result.groups[0]?.rows.find((r) => r.category.id === 1);
+    expect(cat1Row?.carryoverIn).toBe(59 * 5000);
+    expect(cat1Row?.available).toBe(59 * 5000 + 20000 - 15000);
+  });
+
+  it("maintains exact integer precision through 100+ multi-month carryover calculations with fractional-prone cents", () => {
+    const cats = [{ id: 1, groupId: 1, name: "Pennies", sort: 0, carryover: "0", goalTarget: null }];
+    const groups = [{ id: 1, name: "General", sort: 0, isCreditCardPayments: false }];
+    const accounts = [{ id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "0", onBudget: true, sort: 0 }];
+
+    const assignments = [];
+    const transactions = [];
+
+    // 100 months of $0.01, $0.03, $0.07 amounts
+    for (let i = 0; i < 100; i++) {
+      const y = 2015 + Math.floor(i / 12);
+      const m = (i % 12) + 1;
+      const mk = `${y}-${String(m).padStart(2, "0")}`;
+      assignments.push({ month: mk, categoryId: 1, amount: "333" }); // $3.33
+      transactions.push({
+        id: i + 1,
+        accountId: 1,
+        categoryId: 1,
+        date: `${mk}-10`,
+        payee: "Shop",
+        memo: "",
+        amount: "-117", // -$1.17
+        status: "c" as const,
+      });
+    }
+
+    const data: BudgetData = {
+      accounts,
+      groups,
+      categories: cats,
+      assignments,
+      transactions,
+      recurring: [],
+    };
+
+    const targetMonth = "2023-04"; // Month 100
+    const result = computeBudget(data, targetMonth);
+    const row = result.groups[0]?.rows[0];
+
+    // Net per month = 333 - 117 = 216 cents ($2.16)
+    // 99 prior months = 99 * 216 = 21384 cents
+    expect(row?.carryoverIn).toBe(99 * 216);
+    expect(row?.available).toBe(99 * 216 + 333 - 117);
+    expect(Number.isInteger(row?.carryoverIn)).toBe(true);
+    expect(Number.isInteger(row?.available)).toBe(true);
+  });
 });

@@ -46,12 +46,19 @@ export function num(s: string | number | null | undefined): number {
   if (s == null) return 0;
   const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
   if (Number.isNaN(n) || n === 0) return 0;
+  if (!Number.isSafeInteger(n)) {
+    throw new RangeError(`Amount ${n} exceeds safe integer range`);
+  }
   return n;
 }
 
 export function dollarsToCents(d: number | null | undefined): number {
   if (d == null || Number.isNaN(d)) return 0;
-  return Math.round(d * 100);
+  const c = Math.round(d * 100);
+  if (!Number.isSafeInteger(c)) {
+    throw new RangeError(`Amount ${d} exceeds safe integer range`);
+  }
+  return c;
 }
 
 type _Token = { kind: "num"; value: number } | { kind: "op"; op: string };
@@ -243,12 +250,14 @@ export function evalAmount(
       else if (t.op === "-") r = a - b;
       else if (t.op === "*") r = a * b;
       else r = a / b;
-      if (!Number.isFinite(r)) return null;
+      if (!Number.isFinite(r) || Math.abs(r) > Number.MAX_SAFE_INTEGER) return null;
       stack.push(r);
     }
   }
   if (stack.length !== 1) return null;
-  return stack[0] as number;
+  const finalVal = stack[0] as number;
+  if (!Number.isFinite(finalVal) || Math.abs(finalVal) > Number.MAX_SAFE_INTEGER) return null;
+  return finalVal;
 }
 
 export function monthKey(year: number, monthIndex0: number): string {
