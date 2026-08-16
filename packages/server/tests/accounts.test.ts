@@ -39,6 +39,20 @@ describe("accounts queries", () => {
       const row = await createAccount(mock.db, { name: "First" });
       expect(row).toMatchObject({ id: 1, sort: 0 });
     });
+
+    it("supports creating an archived account", async () => {
+      mock.respondWith("select:accounts", [{ max: 0 }]);
+      mock.respondWith("insert:accounts", [{ id: 2, archived: true }]);
+
+      const row = await createAccount(mock.db, { name: "Old", archived: true });
+      expect(row).toMatchObject({ id: 2, archived: true });
+
+      const insertCall = mock.calls.find((c) => c.op === "insert");
+      expect(insertCall?.values).toMatchObject({
+        name: "Old",
+        archived: true,
+      });
+    });
   });
 
   describe("updateAccount", () => {
@@ -50,6 +64,16 @@ describe("accounts queries", () => {
 
       const updateCall = mock.calls.find((c) => c.op === "update");
       expect(updateCall?.set).toMatchObject({ name: "New Name" });
+    });
+
+    it("applies archived true or false in the patch", async () => {
+      mock.respondWith("update:accounts", [{ id: 1, archived: true }]);
+
+      const row = await updateAccount(mock.db, 1, { archived: true });
+      expect(row).toMatchObject({ id: 1, archived: true });
+
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      expect(updateCall?.set).toMatchObject({ archived: true });
     });
 
     it("does not set fields that are not in the patch", async () => {

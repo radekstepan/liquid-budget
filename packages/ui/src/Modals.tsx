@@ -67,7 +67,8 @@ export function TransactionModal({
   // Detect if `initial` is a split parent and pre-populate children.
   const initialChildren = useMemo(() => {
     if (!initial || !allTransactions) return undefined;
-    return getSplitChildren(allTransactions, initial.id);
+    const children = getSplitChildren(allTransactions, initial.id);
+    return [...children].sort((a, b) => a.id - b.id);
   }, [initial, allTransactions]);
 
   const isInitialTransfer = !!initial?.transferAccountId;
@@ -81,8 +82,12 @@ export function TransactionModal({
     isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
   );
 
+  const availableAccounts = useMemo(() => {
+    return accounts.filter((a) => !a.archived || a.id === initial?.accountId);
+  }, [accounts, initial?.accountId]);
+
   const [accountId, setAccountId] = useState(
-    initial?.accountId ?? defaultAccountId ?? accounts[0]?.id ?? 0
+    initial?.accountId ?? defaultAccountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [date, setDate] = useState(initial?.date ?? defaultDate ?? todayISO());
@@ -107,7 +112,7 @@ export function TransactionModal({
           // Preserve the child's signed amount on edit (no Math.abs coercion).
           // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
           // by the validation layer.
-          amount: num(c.amount),
+          amount: (num(c.amount).toFixed(2) as unknown) as number,
           memo: c.memo ?? "",
         }))
       : [
@@ -116,15 +121,18 @@ export function TransactionModal({
         ]
   );
 
-  const otherAccounts = accounts.filter((a) => a.id !== accountId);
+  const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
 
   // Signed parent amount and signed child total — validation is sign-aware
   // and the sub-row "Σ … / …" footer uses Math.abs() for the colour check only.
   const parentAmount = evalAmount(amount) ?? 0;
-  const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
+  const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
-    return validateSubTransactions(parentAmount, subRows);
+    return validateSubTransactions(
+      parentAmount,
+      subRows.map((r) => ({ ...r, amount: evalAmount(String(r.amount)) ?? 0 }))
+    );
   }, [mode, parentAmount, subRows]);
 
   const switchingMode = (next: "single" | "transfer" | "split") => {
@@ -192,7 +200,7 @@ export function TransactionModal({
           // server-side validation sees the same numbers the user typed.
           // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
           // supported by the validation layer.
-          amount: Number(r.amount),
+          amount: evalAmount(String(r.amount)) ?? 0,
           memo: r.memo,
         })),
       });
@@ -392,13 +400,6 @@ export function TransactionModal({
                     searchable
                   >
                     <option value="">Category or Transfer…</option>
-                    <optgroup label="Transfers">
-                      {otherAccounts.map((a) => (
-                        <option key={a.id} value={`transfer:${a.id}`}>
-                          Transfer : {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
                     <optgroup label="Categories">
                       {categories.map((c) => (
                         <option key={c.id} value={`category:${c.id}`}>
@@ -406,13 +407,20 @@ export function TransactionModal({
                         </option>
                       ))}
                     </optgroup>
+                    <optgroup label="Transfers">
+                      {otherAccounts.map((a) => (
+                        <option key={a.id} value={`transfer:${a.id}`}>
+                          Transfer : {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   </Select>
                   <TextField
-                    value={row.amount || ""}
+                    value={row.amount === 0 ? "" : String(row.amount)}
                     onChange={(e) => {
-                      const v = evalAmount(e.target.value);
+                      const val = e.target.value;
                       setSubRows((rs) =>
-                        rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
+                        rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
                       );
                     }}
                     placeholder="0.00"
@@ -634,7 +642,13 @@ export function RecurringModal({
     isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
   );
 
-  const [accountId, setAccountId] = useState(initial?.accountId ?? accounts[0]?.id ?? 0);
+  const availableAccounts = useMemo(() => {
+    return accounts.filter((a) => !a.archived || a.id === initial?.accountId);
+  }, [accounts, initial?.accountId]);
+
+  const [accountId, setAccountId] = useState(
+    initial?.accountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
+  );
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [amount, setAmount] = useState(initial ? initialAmt.toFixed(2) : "");
@@ -655,7 +669,7 @@ export function RecurringModal({
           // Preserve the child's signed amount on edit (no Math.abs coercion).
           // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
           // by the validation layer.
-          amount: num(c.amount),
+          amount: (num(c.amount).toFixed(2) as unknown) as number,
           memo: c.memo ?? "",
         }))
       : [
@@ -664,14 +678,17 @@ export function RecurringModal({
         ]
   );
 
-  const otherAccounts = accounts.filter((a) => a.id !== accountId);
+  const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
 
   // Signed parent amount and signed child total — validation is sign-aware.
   const parentAmount = evalAmount(amount) ?? 0;
-  const subTotal = subRows.reduce((s, r) => s + Number(r.amount) || 0, 0);
+  const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
-    return validateRecurringSubTransactions(parentAmount, subRows);
+    return validateRecurringSubTransactions(
+      parentAmount,
+      subRows.map((r) => ({ ...r, amount: evalAmount(String(r.amount)) ?? 0 }))
+    );
   }, [mode, parentAmount, subRows]);
 
   const switchingMode = (next: "single" | "transfer" | "split") => {
@@ -734,7 +751,7 @@ export function RecurringModal({
           // server-side validation sees the same numbers the user typed.
           // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
           // supported by the validation layer.
-          amount: Number(r.amount),
+          amount: evalAmount(String(r.amount)) ?? 0,
           memo: r.memo,
         })),
       });
@@ -939,13 +956,6 @@ export function RecurringModal({
                     searchable
                   >
                     <option value="">Category or Transfer…</option>
-                    <optgroup label="Transfers">
-                      {otherAccounts.map((a) => (
-                        <option key={a.id} value={`transfer:${a.id}`}>
-                          Transfer : {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
                     <optgroup label="Categories">
                       {categories.map((c) => (
                         <option key={c.id} value={`category:${c.id}`}>
@@ -953,13 +963,20 @@ export function RecurringModal({
                         </option>
                       ))}
                     </optgroup>
+                    <optgroup label="Transfers">
+                      {otherAccounts.map((a) => (
+                        <option key={a.id} value={`transfer:${a.id}`}>
+                          Transfer : {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   </Select>
                   <TextField
-                    value={row.amount || ""}
+                    value={row.amount === 0 ? "" : String(row.amount)}
                     onChange={(e) => {
-                      const v = evalAmount(e.target.value);
+                      const val = e.target.value;
                       setSubRows((rs) =>
-                        rs.map((r, j) => (i === j ? { ...r, amount: v == null ? 0 : v } : r))
+                        rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
                       );
                     }}
                     placeholder="0.00"
@@ -1041,6 +1058,8 @@ export function AccountModal({
   onClose,
   onSave,
   onDelete,
+  onArchive,
+  onUnarchive,
 }: {
   initial?: Account;
   /** Number of transactions tied to this account. Used only in edit mode to size the delete confirm copy. */
@@ -1055,6 +1074,8 @@ export function AccountModal({
   }) => void;
   /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
   onDelete?: () => Promise<void>;
+  onArchive?: () => Promise<void>;
+  onUnarchive?: () => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">(initial?.kind ?? "liquid");
@@ -1063,10 +1084,16 @@ export function AccountModal({
   );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [unarchiving, setUnarchiving] = useState(false);
 
   useEffect(() => {
     setConfirmingDelete(false);
     setDeleting(false);
+    setConfirmingArchive(false);
+    setArchiving(false);
+    setUnarchiving(false);
   }, [initial?.id]);
 
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
@@ -1076,6 +1103,7 @@ export function AccountModal({
     onSave({ name: name.trim(), kind, groupLabel, balance: b, onBudget: kind !== "offbudget" });
   };
   const isEdit = !!initial;
+  const isArchived = Boolean(initial?.archived);
   const txCount = transactionCount ?? 0;
 
   const confirmDelete = async () => {
@@ -1088,14 +1116,38 @@ export function AccountModal({
     }
   };
 
+  const confirmArchive = async () => {
+    if (!onArchive) return;
+    setArchiving(true);
+    try {
+      await onArchive();
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const handleUnarchive = async () => {
+    if (!onUnarchive) return;
+    setUnarchiving(true);
+    try {
+      await onUnarchive();
+    } finally {
+      setUnarchiving(false);
+    }
+  };
+
   return (
     <Modal
       title={
         confirmingDelete
           ? `Delete "${initial?.name ?? "Account"}"?`
-          : isEdit
-            ? "Edit Account"
-            : "Add Account"
+          : confirmingArchive
+            ? `Archive "${initial?.name ?? "Account"}"?`
+            : isEdit
+              ? isArchived
+                ? "Edit Account (Archived)"
+                : "Edit Account"
+              : "Add Account"
       }
       onClose={onClose}
       footer={
@@ -1108,9 +1160,33 @@ export function AccountModal({
               {deleting ? "Deleting…" : "Yes, delete it"}
             </Btn>
           </>
+        ) : confirmingArchive ? (
+          <>
+            <Btn onClick={() => setConfirmingArchive(false)} disabled={archiving}>
+              Cancel
+            </Btn>
+            <Btn variant="primary" onClick={confirmArchive} disabled={archiving}>
+              {archiving ? "Archiving…" : "Yes, archive it"}
+            </Btn>
+          </>
         ) : (
           <>
-            <div style={{ marginRight: "auto" }}>
+            <div className="flex items-center gap-1.5" style={{ marginRight: "auto" }}>
+              {isEdit && isArchived && onUnarchive && (
+                <Btn
+                  onClick={handleUnarchive}
+                  disabled={unarchiving}
+                >
+                  {unarchiving ? "Unarchiving…" : "Unarchive account"}
+                </Btn>
+              )}
+              {isEdit && !isArchived && onArchive && (
+                <Btn
+                  onClick={() => setConfirmingArchive(true)}
+                >
+                  Archive account
+                </Btn>
+              )}
               {isEdit && onDelete && (
                 <Btn
                   variant="danger"
@@ -1143,8 +1219,19 @@ export function AccountModal({
             </ul>
           </Notice>
         </>
+      ) : confirmingArchive ? (
+        <>
+          <Notice tone="info" title="Archive vs. Delete">
+            Archiving hides this account from your active budget and account lists while keeping all past transactions and balances intact. You can view or unarchive it at any time.
+          </Notice>
+        </>
       ) : (
         <>
+          {isArchived && (
+            <Notice tone="info" title="This account is archived">
+              Archived accounts are hidden from active budget lists, but all transaction history is preserved.
+            </Notice>
+          )}
           <Field label="Account Name">
             <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
           </Field>

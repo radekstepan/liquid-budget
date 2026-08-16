@@ -75,7 +75,7 @@ test("creates a 2-way split and renders in register with children visible only i
 
   // Pick categories and amounts for the two sub-rows.
   const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: "Category…",
+    hasText: /Category/i,
   });
   await subCategoryTriggers.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
@@ -122,7 +122,7 @@ test("split editor disables save when children don't sum to the parent total", a
   await allDecimals.nth(0).fill("-100");
 
   const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: "Category…",
+    hasText: /Category/i,
   });
   await subCategoryTriggers.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();

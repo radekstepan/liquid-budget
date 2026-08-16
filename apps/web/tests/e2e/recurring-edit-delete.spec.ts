@@ -193,7 +193,7 @@ test("adding a recurring Split enables Save when children balance", async ({ pag
   await allDecimals.nth(0).fill("-30");
 
   const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: "Category…",
+    hasText: /Category/i,
   });
   await subCategoryTriggers.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();

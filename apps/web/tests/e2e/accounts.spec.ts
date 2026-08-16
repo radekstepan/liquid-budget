@@ -108,3 +108,74 @@ test("deletes an account after accepting the confirm dialog", async ({ page }) =
     page.getByRole("button", { name: new RegExp(`^${name} `) })
   ).toHaveCount(0);
 });
+
+test("archives an account and unarchives it back to active accounts", async ({ page }) => {
+  const name = `PW Archive ${Date.now()}`;
+  await page.getByRole("button", { name: "Add Account" }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator("input").first().fill(name);
+  await addModal.locator(".y-select-trigger").first().click();
+  await page.locator('.y-dropdown [data-value="liquid"]').click();
+  await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
+  await addModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Add Account" })
+    .click();
+  await expect(addModal).toBeHidden();
+
+  // Active account is visible in sidebar
+  await expect(
+    page.getByRole("button", { name: new RegExp(`^${name} `) })
+  ).toBeVisible();
+
+  // Step 1: Open Edit modal and archive it
+  await page
+    .getByRole("button", { name: `Edit account ${name}` })
+    .click({ force: true });
+
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.locator(".y-modal-head")).toHaveText("Edit Account");
+
+  await editModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Archive account" })
+    .click();
+  await expect(editModal.locator(".y-modal-head")).toContainText("Archive");
+
+  await editModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Yes, archive it" })
+    .click();
+  await expect(editModal).toBeHidden();
+
+  // Step 2: The account is now in the "Archived Accounts" section
+  const archivedHeader = page.getByRole("button", { name: /Archived Accounts/ });
+  await expect(archivedHeader).toBeVisible();
+
+  // Expand the archived accounts section
+  await archivedHeader.click();
+  const archivedRow = page.getByRole("button", { name: new RegExp(`^${name} `) });
+  await expect(archivedRow).toBeVisible();
+
+  // Click the archived account to navigate to its register
+  await archivedRow.click();
+  await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+
+  // Step 3: Unarchive the account
+  await page
+    .getByRole("button", { name: `Edit account ${name}` })
+    .click({ force: true });
+
+  const unarchiveModal = page.locator(".y-modal").last();
+  await expect(unarchiveModal.locator(".y-modal-head")).toHaveText("Edit Account (Archived)");
+  await unarchiveModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Unarchive account" })
+    .click();
+  await expect(unarchiveModal).toBeHidden();
+
+  // Step 4: Verify it is restored to active accounts
+  await expect(
+    page.getByRole("button", { name: new RegExp(`^${name} `) })
+  ).toBeVisible();
+});

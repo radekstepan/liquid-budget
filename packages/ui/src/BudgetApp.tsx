@@ -128,7 +128,13 @@ export type BudgetAppApi = {
   deleteAccount: (id: number) => Promise<void>;
   updateAccount: (
     id: number,
-    patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number; sort?: number }
+    patch: {
+      name?: string;
+      kind?: "liquid" | "credit" | "offbudget";
+      balance?: number;
+      sort?: number;
+      archived?: boolean;
+    }
   ) => Promise<void>;
   reorderAccount: (id: number, sort: number) => Promise<void>;
   reconcileAccount: (input: {
@@ -526,6 +532,14 @@ export function BudgetApp({
               kind: v.kind,
               balance: v.balance,
             });
+            setModal({ kind: "none" });
+          }}
+          onArchive={async () => {
+            await api.updateAccount(editingAccount.id, { archived: true });
+            setModal({ kind: "none" });
+          }}
+          onUnarchive={async () => {
+            await api.updateAccount(editingAccount.id, { archived: false });
             setModal({ kind: "none" });
           }}
           onDelete={async () => {

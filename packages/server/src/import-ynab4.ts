@@ -91,6 +91,8 @@ export async function importYnab4(db: Db, ynabData: any) {
           : "Budget Accounts"
         : "Off Budget";
 
+      const isArchived = Boolean(acc.hidden || acc.closed || acc.isClosed);
+
       const [row] = await db
         .insert(accounts)
         .values({
@@ -102,6 +104,7 @@ export async function importYnab4(db: Db, ynabData: any) {
           sort: accountSort++,
           lastReconciledAt: acc.lastReconciledDate || null,
           lastReconciledBalance: acc.lastReconciledBalance != null ? Number(acc.lastReconciledBalance) : null,
+          archived: isArchived,
         })
         .returning();
 

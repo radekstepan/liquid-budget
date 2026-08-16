@@ -110,6 +110,11 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
       />
     ),
     edit: <path d="M11.2 2.4 13.6 4.8 5.6 12.8 2.4 13.6 3.2 10.4z" strokeWidth="1.4" strokeLinejoin="round" />,
+    archive: (
+      <>
+        <path d="M2.5 3.5h11v3h-11zM3.5 6.5v6.5h9v-6.5M6.5 9h3" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
+      </>
+    ),
     trash: (
       <>
         <path d="M3.5 4.5h9M6 4.5V3h4v1.5M4.7 4.5l.7 9h5.2l.7-9" strokeWidth="1.4" strokeLinejoin="round" />

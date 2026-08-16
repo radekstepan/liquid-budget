@@ -906,4 +906,41 @@ describe("AccountModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("triggers onArchive from the confirmation step in edit mode", async () => {
+    const onArchive = vi.fn();
+    render(
+      <AccountModal
+        initial={{ id: 1, name: "Active Checking", kind: "liquid", balance: "100.00", onBudget: true, sort: 0 }}
+        onClose={() => {}}
+        onSave={() => {}}
+        onArchive={onArchive}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
+    expect(screen.getByText(/archive vs\. delete/i)).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
+    });
+    expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers onUnarchive when editing an archived account", async () => {
+    const onUnarchive = vi.fn();
+    render(
+      <AccountModal
+        initial={{ id: 2, name: "Old Checking", kind: "liquid", balance: "0.00", onBudget: true, sort: 1, archived: true }}
+        onClose={() => {}}
+        onSave={() => {}}
+        onUnarchive={onUnarchive}
+      />
+    );
+
+    expect(screen.getByText(/this account is archived/i)).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
+    });
+    expect(onUnarchive).toHaveBeenCalledTimes(1);
+  });
 });
