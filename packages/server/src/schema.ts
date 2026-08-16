@@ -4,6 +4,7 @@ import {
   integer,
   real,
   uniqueIndex,
+  index,
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
@@ -55,23 +56,31 @@ export const assignments = sqliteTable(
   })
 );
 
-export const transactions = sqliteTable("transactions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  accountId: integer("account_id")
-    .notNull()
-    .references(() => accounts.id, { onDelete: "cascade" }),
-  categoryId: integer("category_id").references(() => categories.id, {
-    onDelete: "set null",
-  }),
-  date: text("date").notNull(),
-  payee: text("payee").notNull().default(""),
-  memo: text("memo").notNull().default(""),
-  amount: real("amount").notNull().default(0),
-  status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
-  createdAt: text("created_at").notNull().default(""),
-  parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
-  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
-});
+export const transactions = sqliteTable(
+  "transactions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    date: text("date").notNull(),
+    payee: text("payee").notNull().default(""),
+    memo: text("memo").notNull().default(""),
+    amount: real("amount").notNull().default(0),
+    status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
+    createdAt: text("created_at").notNull().default(""),
+    parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
+    transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    accountDateIdx: index("transactions_account_date_idx").on(t.accountId, t.date),
+    dateIdx: index("transactions_date_idx").on(t.date),
+    parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
+  })
+);
 
 export const recurring = sqliteTable("recurring", {
   id: integer("id").primaryKey({ autoIncrement: true }),

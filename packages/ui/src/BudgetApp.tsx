@@ -265,14 +265,22 @@ export function BudgetApp({
     const futureCap = thisYear + 5;
     let minY = thisYear;
     let maxY = futureCap;
-    const consider = (key: string) => {
-      const y = Number(key.slice(0, 4));
+    const consider = (key: string | undefined) => {
+      if (!key) return;
+      const y = parseInt(key.slice(0, 4), 10);
       if (Number.isFinite(y)) {
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
     };
-    for (const t of data.transactions) consider(t.date);
+    const txns = data.transactions;
+    if (txns.length > 0) {
+      consider(txns[0]?.date);
+      consider(txns[txns.length - 1]?.date);
+      if (txns.length <= 100) {
+        for (const t of txns) consider(t.date);
+      }
+    }
     for (const a of data.assignments) consider(a.month);
     return { minYear: minY, maxYear: maxY };
   }, [data.transactions, data.assignments]);

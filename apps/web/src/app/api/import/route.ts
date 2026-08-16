@@ -13,7 +13,13 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const { ynabData } = extractYnab4DataFromZip(arrayBuffer);
+    let ynabData: any;
+    try {
+      const extracted = extractYnab4DataFromZip(arrayBuffer);
+      ynabData = extracted.ynabData;
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message || "Invalid backup archive" }, { status: 400 });
+    }
 
     const db = getDefaultDb();
     const summary = await importYnab4(db, ynabData);
