@@ -128,8 +128,9 @@ export type BudgetAppApi = {
   deleteAccount: (id: number) => Promise<void>;
   updateAccount: (
     id: number,
-    patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number }
+    patch: { name?: string; kind?: "liquid" | "credit" | "offbudget"; balance?: number; sort?: number }
   ) => Promise<void>;
+  reorderAccount: (id: number, sort: number) => Promise<void>;
   reconcileAccount: (input: {
     accountId: number;
     statementBalance: number;
@@ -237,7 +238,7 @@ export function BudgetApp({
   );
 
   const navigateView = useCallback((v: View) => {
-    if (v === "transactions") setAccountFilter(null);
+    setAccountFilter(null);
     setView(v);
   }, []);
 
@@ -362,6 +363,7 @@ export function BudgetApp({
         }}
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
+        onReorderAccount={api.reorderAccount}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>

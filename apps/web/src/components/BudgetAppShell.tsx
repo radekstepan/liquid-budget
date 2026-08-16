@@ -286,6 +286,13 @@ export function BudgetAppShell() {
       });
       await reload();
     },
+    reorderAccount: async (id, sort) => {
+      await jsonReq("/api/accounts", {
+        method: "PATCH",
+        body: JSON.stringify({ id, sort }),
+      });
+      await reload();
+    },
     reconcileAccount: async ({ accountId, statementBalance, adjustmentCategoryId }) => {
       await jsonReq("/api/reconcile", {
         method: "POST",

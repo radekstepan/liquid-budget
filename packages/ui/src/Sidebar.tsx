@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { Account } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
 import { Button, Icon, cx } from "@ynab/theme";
@@ -22,6 +22,11 @@ const NAV_TOP: NavItem[] = [
   { key: "projections", label: "Projections", icon: "projections" },
 ];
 
+const DEFAULT_WIDTH = 214;
+const MIN_WIDTH = 170;
+const MAX_WIDTH = 450;
+const STORAGE_KEY = "ynab_sidebar_width";
+
 export function Sidebar({
   view,
   setView,
@@ -30,6 +35,7 @@ export function Sidebar({
   onSelectAccount,
   onAddAccount,
   onEditAccount,
+  onReorderAccount,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -38,6 +44,7 @@ export function Sidebar({
   onSelectAccount: (id: number) => void;
   onAddAccount: () => void;
   onEditAccount?: (id: number) => void;
+  onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
 }) {
   const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
   const seen = new Set(accounts.map((a) => a.groupLabel));
@@ -48,6 +55,104 @@ export function Sidebar({
     Retirement: true,
   });
   const [nwOpen, setNwOpen] = useState(true);
+
+  // Resizable sidebar width with localStorage persistence
+  const [width, setWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const n = parseInt(saved, 10);
+          if (!isNaN(n) && n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
+        }
+      } catch {}
+    }
+    return DEFAULT_WIDTH;
+  });
+
+  const isResizing = useRef(false);
+  const dragAccId = useRef<number | null>(null);
+  const [accOverId, setAccOverId] = useState<number | null>(null);
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, moveEvent.clientX));
+      setWidth(newWidth);
+    };
+
+    const onMouseUp = (upEvent: MouseEvent) => {
+      if (!isResizing.current) return;
+      isResizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      const finalWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, upEvent.clientX));
+      try {
+        localStorage.setItem(STORAGE_KEY, String(finalWidth));
+      } catch {}
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const resetWidth = () => {
+    setWidth(DEFAULT_WIDTH);
+    try {
+      localStorage.setItem(STORAGE_KEY, String(DEFAULT_WIDTH));
+    } catch {}
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "move";
+    dragAccId.current = id;
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (accOverId !== id) setAccOverId(id);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetAcc: Account, list: Account[]) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const srcId = dragAccId.current;
+    if (srcId == null || srcId === targetAcc.id || !onReorderAccount) {
+      dragAccId.current = null;
+      setAccOverId(null);
+      return;
+    }
+
+    const srcIdx = list.findIndex((a) => a.id === srcId);
+    const tgtIdx = list.findIndex((a) => a.id === targetAcc.id);
+    if (srcIdx === -1 || tgtIdx === -1) {
+      dragAccId.current = null;
+      setAccOverId(null);
+      return;
+    }
+
+    const reordered = [...list];
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(tgtIdx, 0, moved!);
+
+    reordered.forEach((acc, idx) => {
+      if (acc.sort !== idx) {
+        onReorderAccount(acc.id, idx);
+      }
+    });
+
+    dragAccId.current = null;
+    setAccOverId(null);
+  };
 
   const liquid = accounts.filter((a) => a.kind === "liquid");
   const credit = accounts.filter((a) => a.kind === "credit");
@@ -64,13 +169,18 @@ export function Sidebar({
   const accountsFor = (label: string) => accounts.filter((a) => a.groupLabel === label);
 
   return (
-    <aside className="y-sidebar flex h-full w-[214px] shrink-0 flex-col">
+    <aside
+      className="y-sidebar relative flex h-full shrink-0 flex-col"
+      style={{ width: `${width}px` }}
+    >
       <div className="px-3 pt-3 pb-2">
         <div className="flex items-center gap-2">
           <div className="y-logo">L</div>
           <div className="leading-none">
             <div className="text-[13px] font-bold text-white tracking-wide">LIQUID</div>
-            <div className="text-[9px] tracking-[.14em]" style={{ color: "var(--y-side-ink-dim)" }}>MY BUDGET</div>
+            <div className="text-[9px] tracking-[.14em]" style={{ color: "var(--y-side-ink-dim)" }}>
+              MY BUDGET
+            </div>
           </div>
         </div>
       </div>
@@ -105,8 +215,7 @@ export function Sidebar({
         <span
           className="y-side-amt"
           style={{
-            color:
-              liquidTotal + creditTotal < 0 ? "var(--y-side-neg)" : undefined,
+            color: liquidTotal + creditTotal < 0 ? "var(--y-side-neg)" : undefined,
             fontWeight: 500,
           }}
         >
@@ -142,13 +251,19 @@ export function Sidebar({
               </button>
               {!isCollapsed &&
                 list.map((a) => {
-                  const isSelected = selectedAccountId === a.id;
+                  const isSelected = view === "transactions" && selectedAccountId === a.id;
+                  const isDropTarget = accOverId === a.id;
                   const hasActions = Boolean(onEditAccount);
                   return (
                     <div
                       key={a.id}
-                      className="group relative w-full"
+                      className={cx("group relative w-full", isDropTarget && "bg-[rgba(78,170,213,0.25)]")}
                       style={{ paddingLeft: 0 }}
+                      draggable={Boolean(onReorderAccount)}
+                      onDragStart={(e) => handleDragStart(e, a.id)}
+                      onDragOver={(e) => handleDragOver(e, a.id)}
+                      onDragLeave={() => setAccOverId(null)}
+                      onDrop={(e) => handleDrop(e, a, list)}
                     >
                       <button
                         onClick={() => onSelectAccount(a.id)}
@@ -169,9 +284,7 @@ export function Sidebar({
                         </span>
                       </button>
                       {hasActions && onEditAccount && (
-                        <div
-                          className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
-                        >
+                        <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -204,38 +317,57 @@ export function Sidebar({
 
       <div className="y-side-section-divider" />
       <div className="y-side-nw">
-          <button
-            onClick={() => setNwOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5"
-            style={{ color: "var(--y-side-ink)" }}
-          >
-            <span className={cx("y-tri ml-[4px] mr-1", nwOpen && "is-open")} style={{ borderLeftColor: "var(--y-side-sel-top)" }} />
-            <span className="text-[11px] font-bold">Net Worth</span>
-            <span className="y-side-amt text-white" style={{ fontWeight: 700 }}>
-              {fmt(netWorth)}
-            </span>
-          </button>
-          {nwOpen && (
-            <div className="mt-2 space-y-[3px]">
-              {[
-                ["Liquid Accounts", liquidTotal],
-                ["Credit Cards", creditTotal],
-                ["Off-Budget Assets", offAssets],
-                ["Off-Budget Liabilities", offLiab],
-              ].map(([label, val]) => (
-                <div key={label as string} className="flex items-center justify-between text-[10.5px]">
-                  <span style={{ color: "var(--y-side-ink-dim)" }}>{label as string}</span>
-                  <span
-                    className="y-num font-medium"
-                    style={{ color: (val as number) < 0 ? "var(--y-side-neg)" : "var(--y-side-ink)" }}
-                  >
-                    {fmt(val as number)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => setNwOpen((o) => !o)}
+          className="flex w-full items-center gap-1.5"
+          style={{ color: "var(--y-side-ink)" }}
+        >
+          <span
+            className={cx("y-tri ml-[4px] mr-1", nwOpen && "is-open")}
+            style={{ borderLeftColor: "var(--y-side-sel-top)" }}
+          />
+          <span className="text-[11px] font-bold">Net Worth</span>
+          <span className="y-side-amt text-white" style={{ fontWeight: 700 }}>
+            {fmt(netWorth)}
+          </span>
+        </button>
+        {nwOpen && (
+          <div className="mt-2 space-y-[3px]">
+            {[
+              ["Liquid Accounts", liquidTotal],
+              ["Credit Cards", creditTotal],
+              ["Off-Budget Assets", offAssets],
+              ["Off-Budget Liabilities", offLiab],
+            ].map(([label, val]) => (
+              <div
+                key={label as string}
+                className="flex items-center justify-between text-[10.5px]"
+              >
+                <span style={{ color: "var(--y-side-ink-dim)" }}>
+                  {label as string}
+                </span>
+                <span
+                  className="y-num font-medium"
+                  style={{
+                    color: (val as number) < 0 ? "var(--y-side-neg)" : "var(--y-side-ink)",
+                  }}
+                >
+                  {fmt(val as number)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Vertical Drag Resize Handle on the Right Edge */}
+      <div
+        onMouseDown={startResizing}
+        onDoubleClick={resetWidth}
+        className="absolute right-0 top-0 bottom-0 w-[5px] -mr-[2.5px] cursor-col-resize z-30 hover:bg-[var(--y-side-sel-top)] opacity-0 hover:opacity-100 transition-opacity"
+        title="Drag to resize sidebar (double-click to reset)"
+        aria-label="Resize sidebar"
+      />
     </aside>
   );
 }
