@@ -127,6 +127,20 @@ describe("format", () => {
       expect(nextDateFor("yearly", "2026-07-01")).toBe("2027-07-01");
     });
 
+    it("advances twiceamonth correctly (1st -> 15th, 15th -> month end, month end -> 1st next month)", () => {
+      expect(nextDateFor("twiceamonth", "2026-07-01")).toBe("2026-07-15");
+      expect(nextDateFor("twiceamonth", "2026-07-15")).toBe("2026-07-31");
+      expect(nextDateFor("twiceamonth", "2026-07-31")).toBe("2026-08-01");
+    });
+
+    it("advances daily by 1 day", () => {
+      expect(nextDateFor("daily", "2026-07-01")).toBe("2026-07-02");
+    });
+
+    it("advances every4weeks by 28 days", () => {
+      expect(nextDateFor("every4weeks", "2026-07-01")).toBe("2026-07-29");
+    });
+
     it("falls back to monthly for unknown frequencies", () => {
       expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
     });

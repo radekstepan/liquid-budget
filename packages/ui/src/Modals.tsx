@@ -816,6 +816,7 @@ export function RecurringModal({
           >
             <option value="weekly">Weekly</option>
             <option value="biweekly">Biweekly</option>
+            <option value="twiceamonth">Twice a month</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </Select>

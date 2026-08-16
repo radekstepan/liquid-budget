@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  frequencyMonthlyMultiplier,
   getRecurringChildren,
   netMonthlyAmount,
   recurringFlavour,
@@ -72,6 +73,24 @@ describe("getRecurringChildren", () => {
   });
 });
 
+describe("frequencyMonthlyMultiplier", () => {
+  it("returns correct multipliers for various frequencies", () => {
+    expect(frequencyMonthlyMultiplier("twiceamonth")).toBe(2);
+    expect(frequencyMonthlyMultiplier("semimonthly")).toBe(2);
+    expect(frequencyMonthlyMultiplier("monthly")).toBe(1);
+    expect(frequencyMonthlyMultiplier("biweekly")).toBeCloseTo(26 / 12);
+    expect(frequencyMonthlyMultiplier("weekly")).toBeCloseTo(52 / 12);
+    expect(frequencyMonthlyMultiplier("every4weeks")).toBeCloseTo(13 / 12);
+    expect(frequencyMonthlyMultiplier("everyothermonth")).toBe(0.5);
+    expect(frequencyMonthlyMultiplier("every3months")).toBeCloseTo(1 / 3);
+    expect(frequencyMonthlyMultiplier("twiceayear")).toBeCloseTo(2 / 12);
+    expect(frequencyMonthlyMultiplier("yearly")).toBeCloseTo(1 / 12);
+    expect(frequencyMonthlyMultiplier("every2years")).toBeCloseTo(1 / 24);
+    expect(frequencyMonthlyMultiplier("daily")).toBeCloseTo(365 / 12);
+    expect(frequencyMonthlyMultiplier("once")).toBe(0);
+  });
+});
+
 describe("netMonthlyAmount", () => {
   it("returns the row amount for singles", () => {
     expect(
@@ -79,7 +98,7 @@ describe("netMonthlyAmount", () => {
     ).toBe(-50);
   });
 
-  it("returns 0 for transfers (net zero across accounts)", () => {
+  it("returns 0 for transfers when accounts is omitted", () => {
     expect(
       netMonthlyAmount(base({ amount: "-500", transferAccountId: 2 }), [])
     ).toBe(0);
@@ -92,6 +111,47 @@ describe("netMonthlyAmount", () => {
         [sub({ amount: "-120" }), sub({ amount: "-80" })]
       )
     ).toBe(-200);
+  });
+
+  describe("account-aware liquid flow", () => {
+    const accounts = [
+      { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid" as const, groupLabel: "Budget", balance: "5000", onBudget: true, sort: 1 },
+      { id: 3, name: "Visa", kind: "credit" as const, groupLabel: "Budget", balance: "-200", onBudget: true, sort: 2 },
+      { id: 4, name: "TFSA", kind: "offbudget" as const, groupLabel: "Off", balance: "10000", onBudget: false, sort: 3 },
+    ];
+
+    it("returns 0 for liquid-to-liquid transfer", () => {
+      // Transfer -500 from Checking (id 1) to Savings (id 2)
+      expect(
+        netMonthlyAmount(base({ accountId: 1, amount: "-500", transferAccountId: 2 }), [], accounts)
+      ).toBe(0);
+    });
+
+    it("returns negative flow for transfer from liquid to offbudget / credit", () => {
+      // Transfer -455.50 from Checking (id 1) to TFSA (id 4)
+      expect(
+        netMonthlyAmount(base({ accountId: 1, amount: "-455.50", transferAccountId: 4 }), [], accounts)
+      ).toBe(-455.5);
+    });
+
+    it("returns positive flow for transfer from offbudget to liquid (salary / transfer in)", () => {
+      // Transfer -4152.97 recorded on Business TFSA (id 4) to Checking (id 1)
+      expect(
+        netMonthlyAmount(base({ accountId: 4, amount: "-4152.97", transferAccountId: 1 }), [], accounts)
+      ).toBe(4152.97);
+
+      // Or transfer +4152.97 recorded on Checking (id 1) from Business (id 4)
+      expect(
+        netMonthlyAmount(base({ accountId: 1, amount: "4152.97", transferAccountId: 4 }), [], accounts)
+      ).toBe(4152.97);
+    });
+
+    it("returns 0 for offbudget single expense / tracking item", () => {
+      expect(
+        netMonthlyAmount(base({ accountId: 4, amount: "-100" }), [], accounts)
+      ).toBe(0);
+    });
   });
 });
 

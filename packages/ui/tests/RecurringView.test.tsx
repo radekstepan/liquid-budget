@@ -107,6 +107,26 @@ describe("RecurringView", () => {
     expect(screen.getByText("$1,500.00")).toBeInTheDocument();
   });
 
+  it("incorporates twiceamonth frequencies in the summary strip", () => {
+    const data = makeData();
+    data.recurring.push({
+      id: 5,
+      accountId: 1,
+      categoryId: 10,
+      payee: "Bonus",
+      amount: "500.00",
+      frequency: "twiceamonth",
+      nextDate: "2026-06-15",
+      active: true,
+      subTransactions: [],
+    });
+    renderView({ data });
+    // Income: 3000 + 500*2 = 4000. Bills: -1500. Net = 2500.
+    expect(screen.getAllByText("$4,000.00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("-$1,500.00").length).toBeGreaterThan(0);
+    expect(screen.getByText("$2,500.00")).toBeInTheDocument();
+  });
+
   it("renders cards with hints for each flavour", () => {
     renderView();
     expect(screen.getByText("Rent")).toBeInTheDocument();

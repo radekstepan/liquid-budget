@@ -542,8 +542,9 @@ describe("RecurringModal", () => {
     const list = screen.getByRole("listbox");
     const optionEls = within(list).getAllByRole("option") as HTMLButtonElement[];
     const values = optionEls.map((o) => o.getAttribute("data-value"));
-    expect(values).toContain("biweekly");
     expect(values).toContain("weekly");
+    expect(values).toContain("biweekly");
+    expect(values).toContain("twiceamonth");
     expect(values).toContain("monthly");
     expect(values).toContain("yearly");
   });

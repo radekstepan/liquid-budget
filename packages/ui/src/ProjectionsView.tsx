@@ -2,7 +2,14 @@
 
 import { useState, type ReactNode } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, netMonthlyAmount, MONTHS_LONG, parseMonthKey } from "@ynab/logic";
+import {
+  fmt,
+  num,
+  netMonthlyAmount,
+  frequencyMonthlyMultiplier,
+  MONTHS_LONG,
+  parseMonthKey,
+} from "@ynab/logic";
 import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
 import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
@@ -12,20 +19,14 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
     .filter((a) => a.kind === "liquid")
     .reduce((s, a) => s + num(a.balance), 0);
 
-  // Per-row net rule: single = its amount; transfer = 0; split = sum of children.
-  const monthlyNet = data.recurring
-    .filter((r) => r.active && r.frequency === "monthly")
-    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []), 0);
-  const weeklyNet = data.recurring
-    .filter((r) => r.active && r.frequency === "weekly")
-    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) * 4.33, 0);
-  const yearlyNet = data.recurring
-    .filter((r) => r.active && r.frequency === "yearly")
-    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) / 12, 0);
-  const biweeklyNet = data.recurring
-    .filter((r) => r.active && r.frequency === "biweekly")
-    .reduce((s, r) => s + netMonthlyAmount(r, r.subTransactions ?? []) * 2.16, 0);
-  const perMonth = monthlyNet + weeklyNet + biweeklyNet + yearlyNet;
+  // Calculate net monthly liquid flow across all active recurring items and frequencies.
+  const perMonth = data.recurring
+    .filter((r) => r.active)
+    .reduce((s, r) => {
+      const flow = netMonthlyAmount(r, r.subTransactions ?? [], data.accounts);
+      const mult = frequencyMonthlyMultiplier(r.frequency);
+      return s + flow * mult;
+    }, 0);
 
   const points: { label: string; value: number }[] = [];
   let bal = liquidNow;
