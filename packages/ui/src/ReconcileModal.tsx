@@ -65,7 +65,7 @@ export function ReconcileModal({
   busy?: boolean;
 }) {
   const [statementInput, setStatementInput] = useState(
-    state.workingBalance.toFixed(2)
+    (state.workingBalance / 100).toFixed(2)
   );
   const [adjustmentCategoryId, setAdjustmentCategoryId] = useState<number | "">(
     pickFirstCategory(categories, groups)
@@ -73,15 +73,15 @@ export function ReconcileModal({
 
   const statementBalance = useMemo(() => {
     const n = evalAmount(statementInput);
-    return n != null && Number.isFinite(n) ? n : NaN;
+    return n != null && Number.isFinite(n) ? Math.round(n * 100) : NaN;
   }, [statementInput]);
 
   const diff = useMemo(() => {
     if (!Number.isFinite(statementBalance)) return NaN;
-    return round2(statementBalance - state.workingBalance);
+    return statementBalance - state.workingBalance;
   }, [statementBalance, state.workingBalance]);
 
-  const balanced = Number.isFinite(diff) && Math.abs(diff) < 0.005;
+  const balanced = Number.isFinite(diff) && diff === 0;
   const needsAdjustment = !balanced;
   const eligibleCategories = useMemo(
     () => categories.filter((c) => !isCreditCardCategory(c, groups)),

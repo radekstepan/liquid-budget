@@ -1,4 +1,4 @@
-import { evalAmount, fmtSigned } from "@ynab/logic";
+import { evalAmount, fmtSigned, dollarsToCents } from "@ynab/logic";
 
 export function AmountPreview({ value }: { value: string }) {
   if (!value || !value.trim()) return null;
@@ -12,7 +12,7 @@ export function AmountPreview({ value }: { value: string }) {
       className="mt-1 text-[11px]"
       style={{ color: "var(--y-ink-faint)" }}
     >
-      = {fmtSigned(n)}
+      = {fmtSigned(dollarsToCents(n))}
     </div>
   );
 }

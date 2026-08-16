@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 import { TransactionError } from "./transactions.js";
@@ -47,9 +47,7 @@ export type ReconcileResult = {
   adjustmentTransactionId: number | null;
   /**
    * Working balance minus statement balance AFTER the operation.
-   * Always exactly 0 on success; non-zero only if a sub-cent
-   * rounding residual is left, in which case `reconcileAccount`
-   * throws.
+   * Always exactly 0 on success.
    */
   finalDiff: number;
   /** Echoed back for the API layer to update the UI. */
@@ -84,13 +82,13 @@ export async function getReconcileState(
   const currentBalance = Number(acct.balance);
   // Working balance = current account balance − sum of uncleared
   // amounts. This is the figure the bank statement should match.
-  const workingBalance = round2(currentBalance - unclearedTotal);
+  const workingBalance = currentBalance - unclearedTotal;
 
   return {
     accountId,
     accountName: acct.name,
     workingBalance,
-    unclearedTotal: round2(unclearedTotal),
+    unclearedTotal,
     unclearedCount: Number(agg?.unclearedCount ?? 0),
     clearedCount: Number(agg?.clearedCount ?? 0),
     reconciledCount: Number(agg?.reconciledCount ?? 0),
@@ -113,9 +111,9 @@ export async function getReconcileState(
  *      `amount = -diff`, `status = 'c'`, memo = RECONCILE_ADJUSTMENT_MEMO,
  *      and the user-chosen category. The working balance now matches
  *      the statement.
- *   5. Flip every currently-`"c"` row in the account to `"r"`. The
- *      just-created adjustment is itself cleared and will be picked
- *      up on the next reconciliation.
+ *   5. Flip every currently-`"c"` row in the account with date <= today to `"r"`
+ *      and stamp `reconciledAt`. The just-created adjustment is itself cleared
+ *      and will be picked up on the next reconciliation.
  *   6. Stamp `lastReconciledAt` / `lastReconciledBalance` on the account.
  *
  * Returns counts so the UI can render "Marked 7 transactions Reconciled".
@@ -125,47 +123,56 @@ export async function reconcileAccount(
   input: ReconcileInput
 ): Promise<ReconcileResult> {
   const state = await getReconcileState(db, input.accountId);
-  const diff = round2(state.workingBalance - input.statementBalance);
+  const diff = state.workingBalance - input.statementBalance;
 
-  let adjustmentTransactionId: number | null = null;
-  if (Math.abs(diff) >= 0.005) {
-    if (input.adjustmentCategoryId == null) {
-      throw new TransactionError(
-        "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
-        422
+  db.run(sql`BEGIN`);
+  try {
+    let adjustmentTransactionId: number | null = null;
+    if (diff !== 0) {
+      if (input.adjustmentCategoryId == null) {
+        throw new TransactionError(
+          "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
+          422
+        );
+      }
+      adjustmentTransactionId = await postAdjustment(
+        db,
+        input.accountId,
+        -diff,
+        input.adjustmentCategoryId
       );
     }
-    adjustmentTransactionId = await postAdjustment(
-      db,
-      input.accountId,
-      -diff,
-      input.adjustmentCategoryId
-    );
+
+    const today = todayISO();
+    // Flip every Cleared row in the account dated on or before today to Reconciled.
+    const flip = await db
+      .update(transactions)
+      .set({ status: "r", reconciledAt: today })
+      .where(
+        and(
+          eq(transactions.accountId, input.accountId),
+          eq(transactions.status, "c"),
+          sql`${transactions.date} <= ${today}`
+        )
+      )
+      .returning({ id: transactions.id });
+
+    await db
+      .update(accounts)
+      .set({ lastReconciledAt: today, lastReconciledBalance: input.statementBalance })
+      .where(eq(accounts.id, input.accountId));
+
+    db.run(sql`COMMIT`);
+    return {
+      reconciledCount: flip.length,
+      adjustmentTransactionId,
+      finalDiff: 0,
+      lastReconciledAt: today,
+    };
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
   }
-
-  // Flip every Cleared row in the account to Reconciled. The just-
-  // created adjustment is itself Cleared and stays that way until the
-  // next reconciliation.
-  const flip = await db
-    .update(transactions)
-    .set({ status: "r" })
-    .where(
-      and(eq(transactions.accountId, input.accountId), eq(transactions.status, "c"))
-    )
-    .returning({ id: transactions.id });
-
-  const today = todayISO();
-  await db
-    .update(accounts)
-    .set({ lastReconciledAt: today, lastReconciledBalance: input.statementBalance })
-    .where(eq(accounts.id, input.accountId));
-
-  return {
-    reconciledCount: flip.length,
-    adjustmentTransactionId,
-    finalDiff: 0,
-    lastReconciledAt: today,
-  };
 }
 
 async function postAdjustment(
@@ -174,28 +181,26 @@ async function postAdjustment(
   amount: number,
   categoryId: number
 ): Promise<number> {
-  // Inserted directly (bypassing createTransaction) because that
-  // helper is overkill for a single row that does its own balance
-  // update. We still write `status: "c"` so the next reconciliation
-  // picks it up if the user has not yet added the missing txn.
+  const today = todayISO();
   const [row] = await db
     .insert(transactions)
     .values({
       accountId,
       categoryId,
-      date: todayISO(),
+      date: today,
       payee: RECONCILE_ADJUSTMENT_MEMO,
       memo: RECONCILE_ADJUSTMENT_MEMO,
       amount,
       status: "c",
       transferAccountId: null,
       parentId: null,
+      isIncome: false,
     })
     .returning();
 
   await db
     .update(accounts)
-    .set({ balance: sql`${accounts.balance} + ${round2(amount).toFixed(2)}` })
+    .set({ balance: sql`${accounts.balance} + ${Math.round(amount)}` })
     .where(eq(accounts.id, accountId));
 
   return row!.id;
@@ -204,11 +209,11 @@ async function postAdjustment(
 /**
  * Reverse the most recent reconciliation. Specifically:
  *
- *   - Flip every Reconciled row with `date <= lastReconciledAt` back
- *     to Cleared.
+ *   - Flip every Reconciled row with `reconciledAt === lastReconciledAt` back
+ *     to Cleared (and clear reconciledAt).
  *   - Delete the auto-generated adjustment row (memo =
- *     RECONCILE_ADJUSTMENT_MEMO) if it is still Cleared/Reconciled
- *     within the same window, reversing its balance effect.
+ *     RECONCILE_ADJUSTMENT_MEMO) from the most recent reconciliation,
+ *     reversing its balance effect.
  *   - Clear `lastReconciledAt` / `lastReconciledBalance` on the account.
  *
  * Throws 404 if the account has never been reconciled.
@@ -227,55 +232,56 @@ export async function unreconcileAccount(
 
   const lastDate = acct.lastReconciledAt;
 
-  const flipped = await db
-    .update(transactions)
-    .set({ status: "c" })
-    .where(
-      and(
-        eq(transactions.accountId, accountId),
-        eq(transactions.status, "r"),
-        // SQLite stores dates as text; lexical compare is correct for
-        // YYYY-MM-DD format.
-        sql`${transactions.date} <= ${lastDate}`
+  db.run(sql`BEGIN`);
+  try {
+    // Only flip rows from the most recent reconciliation batch.
+    // Fall back to date <= lastDate if reconciledAt is null on legacy rows.
+    const flipped = await db
+      .update(transactions)
+      .set({ status: "c", reconciledAt: null })
+      .where(
+        and(
+          eq(transactions.accountId, accountId),
+          eq(transactions.status, "r"),
+          sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
+        )
       )
-    )
-    .returning({ id: transactions.id });
+      .returning({ id: transactions.id });
 
-  // Find the synthetic adjustment row to delete. Match on memo and
-  // date in the same window so a user-typed transaction with the
-  // same memo (e.g. they manually re-typed the words "Reconciliation
-  // balance") is left alone. Take only the first hit — in practice
-  // there is at most one per reconciliation.
-  const adjustmentRows = await db
-    .select({ id: transactions.id, amount: transactions.amount })
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.accountId, accountId),
-        eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
-        sql`${transactions.date} <= ${lastDate}`
+    // Find the most recent synthetic adjustment row to delete.
+    const adjustmentRows = await db
+      .select({ id: transactions.id, amount: transactions.amount })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.accountId, accountId),
+          eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
+          sql`${transactions.date} <= ${lastDate}`
+        )
       )
-    );
-  const adjustment = adjustmentRows[0];
+      .orderBy(desc(transactions.date), desc(transactions.id))
+      .limit(1);
+    const adjustment = adjustmentRows[0];
 
-  let deletedAdjustmentId: number | null = null;
-  if (adjustment) {
+    let deletedAdjustmentId: number | null = null;
+    if (adjustment) {
+      await db
+        .update(accounts)
+        .set({ balance: sql`${accounts.balance} - ${Math.round(Number(adjustment.amount))}` })
+        .where(eq(accounts.id, accountId));
+      await db.delete(transactions).where(eq(transactions.id, adjustment.id));
+      deletedAdjustmentId = adjustment.id;
+    }
+
     await db
       .update(accounts)
-      .set({ balance: sql`${accounts.balance} - ${Number(adjustment.amount).toFixed(2)}` })
+      .set({ lastReconciledAt: null, lastReconciledBalance: null })
       .where(eq(accounts.id, accountId));
-    await db.delete(transactions).where(eq(transactions.id, adjustment.id));
-    deletedAdjustmentId = adjustment.id;
+
+    db.run(sql`COMMIT`);
+    return { flipped: flipped.length, deletedAdjustmentId };
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
   }
-
-  await db
-    .update(accounts)
-    .set({ lastReconciledAt: null, lastReconciledBalance: null })
-    .where(eq(accounts.id, accountId));
-
-  return { flipped: flipped.length, deletedAdjustmentId };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

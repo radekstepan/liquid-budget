@@ -8,26 +8,26 @@ function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
     groups: [
       {
         group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
-        assigned: 1600,
-        outflow: -70,
-        available: 30,
+        assigned: 160000,
+        outflow: -7000,
+        available: 3000,
         rows: [
           {
             category: { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
             carryoverIn: 0,
-            assigned: 100,
-            outflow: -50,
+            assigned: 10000,
+            outflow: -5000,
             ccBuffer: 0,
-            available: 50,
+            available: 5000,
             fundedPct: 1,
           },
           {
             category: { id: 11, groupId: 1, name: "Rent", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
             carryoverIn: 0,
-            assigned: 1500,
-            outflow: -1520,
+            assigned: 150000,
+            outflow: -152000,
             ccBuffer: 0,
-            available: -20,
+            available: -2000,
             fundedPct: 1,
           },
         ],
@@ -52,26 +52,26 @@ function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
       {
         group: { id: 3, name: "Credit Cards", sort: 2, isCreditCardPayments: true },
         assigned: 0,
-        outflow: -100,
-        available: -100,
+        outflow: -10000,
+        available: -10000,
         rows: [
           {
             category: { id: 30, groupId: 3, name: "AMEX", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
             carryoverIn: 0,
             assigned: 0,
-            outflow: -100,
-            ccBuffer: 100,
+            outflow: -10000,
+            ccBuffer: 10000,
             available: 0,
             fundedPct: 0,
           },
         ],
       },
     ],
-    tbb: -10,
-    totalIncome: 2000,
+    tbb: -1000,
+    totalIncome: 200000,
     priorSurplus: 0,
     overBudgeted: true,
-    totalAssigned: 1600,
+    totalAssigned: 160000,
     ...overrides,
   };
 }
@@ -225,7 +225,7 @@ describe("BudgetView", () => {
       const input = document.querySelector("input.y-inline-amt")!;
       fireEvent.change(input, { target: { value: "200" } });
       fireEvent.keyDown(input, { key: "Enter" });
-      expect(onAssign).toHaveBeenCalledWith(10, 200, "2026-06");
+      expect(onAssign).toHaveBeenCalledWith(10, 20000, "2026-06");
     });
 
     it("commits on blur", () => {
@@ -235,7 +235,7 @@ describe("BudgetView", () => {
       const input = document.querySelector("input.y-inline-amt")!;
       fireEvent.change(input, { target: { value: "100 + 50" } });
       fireEvent.blur(input);
-      expect(onAssign).toHaveBeenCalledWith(10, 150, "2026-06");
+      expect(onAssign).toHaveBeenCalledWith(10, 15000, "2026-06");
     });
 
     it("cancels on Escape without committing", () => {
@@ -269,7 +269,7 @@ describe("BudgetView", () => {
     });
 
     it("is hidden when not overbudgeted", () => {
-      renderView({ budget: makeBudget({ tbb: 10, overBudgeted: false }) });
+      renderView({ budget: makeBudget({ tbb: 1000, overBudgeted: false }) });
       expect(screen.queryByText(/overbudgeted by/)).not.toBeInTheDocument();
     });
 
@@ -430,7 +430,7 @@ describe("BudgetView", () => {
       const input = groceriesRow.querySelector("input.y-inline-amt")!;
       fireEvent.change(input, { target: { value: "250" } });
       fireEvent.keyDown(input, { key: "Enter" });
-      expect(onAssign).toHaveBeenCalledWith(10, 250, "2026-06");
+      expect(onAssign).toHaveBeenCalledWith(10, 25000, "2026-06");
     });
   });
 

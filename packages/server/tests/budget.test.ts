@@ -30,7 +30,7 @@ describe("budget queries", () => {
   });
 
   it("getBudgetData returns the selected rows in the BudgetData shape", async () => {
-    mock.respondWith("select:accounts", [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "100.00", onBudget: true, sort: 0 }]);
+    mock.respondWith("select:accounts", [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: 10000, onBudget: true, sort: 0 }]);
     mock.respondWith("select:category_groups", [{ id: 1, name: "G", sort: 0, isCreditCardPayments: false }]);
     mock.respondWith("select:categories", []);
     mock.respondWith("select:assignments", []);

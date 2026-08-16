@@ -13,6 +13,8 @@ describe("TransactionsView", () => {
         onAdd={() => {}}
         onEdit={() => {}}
         onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
       />
     );
 
@@ -34,6 +36,8 @@ describe("TransactionsView", () => {
         onAdd={onAdd}
         onEdit={() => {}}
         onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
@@ -42,8 +46,6 @@ describe("TransactionsView", () => {
 
   it("renders a Balance column anchored at each account's current balance", () => {
     const data = makeSeedBudgetData();
-    // Pick any account that has transactions; the seed's TD Unlimited
-    // Chequing (id=1) has several rows.
     render(
       <TransactionsView
         data={data}
@@ -56,12 +58,8 @@ describe("TransactionsView", () => {
       />
     );
 
-    // The Balance header is present.
     expect(screen.getByText("Balance")).toBeInTheDocument();
 
-    // The first body row in the table corresponds to the newest TD
-    // transaction in the seed. Its running balance should equal the
-    // account's current balance: $10,875.55.
     const tbody = screen.getAllByRole("rowgroup")[1]!;
     const firstRow = within(tbody).getAllByRole("row")[0]!;
     const cells = within(firstRow).getAllByRole("cell");
@@ -79,7 +77,7 @@ describe("TransactionsView", () => {
       date: "2026-07-15",
       payee: "Costco Wholesale Split",
       memo: "Groceries and Electronics",
-      amount: "-150.00",
+      amount: "-15000",
       status: "c" as const,
       transferAccountId: null,
       parentId: null,
@@ -91,7 +89,7 @@ describe("TransactionsView", () => {
       date: "2026-07-15",
       payee: "Costco Wholesale Split",
       memo: "Groceries part",
-      amount: "-100.00",
+      amount: "-10000",
       status: "c" as const,
       transferAccountId: null,
       parentId: 9001,
@@ -103,7 +101,7 @@ describe("TransactionsView", () => {
       date: "2026-07-15",
       payee: "Costco Wholesale Split",
       memo: "Electronics part",
-      amount: "-50.00",
+      amount: "-5000",
       status: "c" as const,
       transferAccountId: null,
       parentId: 9001,
@@ -123,16 +121,13 @@ describe("TransactionsView", () => {
       />
     );
 
-    // Parent row is rendered
     expect(screen.getAllByText("Costco Wholesale Split").length).toBe(1);
     expect(screen.getByText("Split (Multiple Categories)")).toBeInTheDocument();
 
-    // Child memos or child rows are NOT rendered in the table list
     expect(screen.queryByText("Groceries part")).not.toBeInTheDocument();
     expect(screen.queryByText("Electronics part")).not.toBeInTheDocument();
     expect(screen.queryByText("↳")).not.toBeInTheDocument();
 
-    // Clicking parent row opens it for edit
     fireEvent.click(screen.getByText("Costco Wholesale Split"));
     expect(onEdit).toHaveBeenCalledWith(9001);
   });
@@ -140,7 +135,6 @@ describe("TransactionsView", () => {
   it("renders incoming split transfers on the destination account register", () => {
     const data = makeSeedBudgetData();
     const onEdit = vi.fn();
-    // Account 1 (TD) has a split with an expense child and a transfer child to Account 2 (Rewards Visa).
     const splitParent = {
       id: 9100,
       accountId: 1,
@@ -148,7 +142,7 @@ describe("TransactionsView", () => {
       date: "2026-07-20",
       payee: "Expense & Visa Transfer",
       memo: "Combined",
-      amount: "-100.00",
+      amount: "-10000",
       status: "c" as const,
       transferAccountId: null,
       parentId: null,
@@ -160,7 +154,7 @@ describe("TransactionsView", () => {
       date: "2026-07-20",
       payee: "Expense & Visa Transfer",
       memo: "Expense part",
-      amount: "-60.00",
+      amount: "-6000",
       status: "c" as const,
       transferAccountId: null,
       parentId: 9100,
@@ -170,11 +164,11 @@ describe("TransactionsView", () => {
       accountId: 1,
       categoryId: null,
       date: "2026-07-20",
-      payee: "Transfer : TD First Class Travel Visa",
+      payee: "Transfer : Scotia Passport Visa",
       memo: "Visa transfer part",
-      amount: "-40.00",
+      amount: "-4000",
       status: "c" as const,
-      transferAccountId: 2,
+      transferAccountId: 6,
       parentId: 9100,
     };
 
@@ -183,7 +177,7 @@ describe("TransactionsView", () => {
     render(
       <TransactionsView
         data={data}
-        accountFilter={2} // Viewing Account 2 (Rewards Visa)
+        accountFilter={6}
         onAdd={() => {}}
         onEdit={onEdit}
         onDelete={() => {}}
@@ -192,14 +186,10 @@ describe("TransactionsView", () => {
       />
     );
 
-    // On Account 2's register, the incoming split transfer should display with payee "Transfer : TD Unlimited Chequing"
     expect(screen.getByText("Transfer : TD Unlimited Chequing")).toBeInTheDocument();
     expect(screen.getByText("$40.00")).toBeInTheDocument();
 
-    // Clicking the transfer opens the parent split transaction (9100)
     fireEvent.click(screen.getByText("Transfer : TD Unlimited Chequing"));
     expect(onEdit).toHaveBeenCalledWith(9100);
   });
 });
-
-

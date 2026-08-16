@@ -6,7 +6,8 @@
  */
 
 import type { BudgetData } from "./types.js";
-import { num } from "./format.js";
+import { fmt, num } from "./format.js";
+import { isIncomeTransaction } from "./budget-engine.js";
 
 export type NetWorthPoint = {
   month: string;
@@ -146,9 +147,9 @@ export function computeNetWorthReport(
 
     points.push({
       month: m,
-      assets: Math.round(assets * 100) / 100,
-      debts: Math.round(debts * 100) / 100,
-      net: Math.round((assets + debts) * 100) / 100,
+      assets,
+      debts,
+      net: assets + debts,
     });
   }
 
@@ -171,6 +172,7 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
   for (const t of data.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   let income = 0;
   let outflow = 0;
@@ -180,16 +182,14 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
     if (t.date.slice(0, 7) !== month) continue;
 
     const amt = num(t.amount);
-    if (t.transferAccountId == null && amt > 0) {
+    if (isIncomeTransaction(t, accountMap)) {
       income += amt;
     } else if (t.transferAccountId == null && amt < 0) {
       outflow += Math.abs(amt);
     }
   }
 
-  income = Math.round(income * 100) / 100;
-  outflow = Math.round(outflow * 100) / 100;
-  const net = Math.round((income - outflow) * 100) / 100;
+  const net = income - outflow;
   const savingsRate =
     income > 0
       ? Math.round(((income - outflow) / income) * 1000) / 10
@@ -230,7 +230,7 @@ export function computeTrailingNetWorth(
   const points = computeNetWorthReport(data, startMonth, endMonth);
   const currentNet = points[points.length - 1]?.net ?? 0;
   const startNet = points[0]?.net ?? 0;
-  const delta = Math.round((currentNet - startNet) * 100) / 100;
+  const delta = currentNet - startNet;
   const pctDelta =
     startNet !== 0 ? Math.round((delta / Math.abs(startNet)) * 1000) / 10 : 0;
 
@@ -276,7 +276,7 @@ export function computeMonthlyInsights(
   const priorMonths = new Set([m1, m2, m3]);
 
   const currentSpendByCat = new Map<number, number>();
-  const priorSpendByCat = new Map<number, number[]>();
+  const priorSpendByCatMonth = new Map<number, Map<string, number>>();
 
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
@@ -293,17 +293,26 @@ export function computeMonthlyInsights(
         (currentSpendByCat.get(t.categoryId) ?? 0) + absAmt
       );
     } else if (priorMonths.has(mk)) {
-      const arr = priorSpendByCat.get(t.categoryId) ?? [];
-      arr.push(absAmt);
-      priorSpendByCat.set(t.categoryId, arr);
+      let mMap = priorSpendByCatMonth.get(t.categoryId);
+      if (!mMap) {
+        mMap = new Map();
+        priorSpendByCatMonth.set(t.categoryId, mMap);
+      }
+      mMap.set(mk, (mMap.get(mk) ?? 0) + absAmt);
     }
   }
 
+  // Count how many prior months actually exist in data
+  const allDataMonths = new Set(data.transactions.map((t) => t.date.slice(0, 7)));
+  const existingPriorMonthsCount = [m1, m2, m3].filter((m) => allDataMonths.has(m)).length;
+  const divisor = Math.max(1, existingPriorMonthsCount);
+
   // Calculate 3-month average and % difference for categories
   for (const [catId, currentSpend] of currentSpendByCat.entries()) {
-    const prior = priorSpendByCat.get(catId) ?? [];
-    if (prior.length > 0) {
-      const avg3mo = prior.reduce((a, b) => a + b, 0) / 3;
+    const mMap = priorSpendByCatMonth.get(catId);
+    if (mMap && mMap.size > 0) {
+      const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
+      const avg3mo = Math.round(totalPriorSpend / divisor);
       if (avg3mo > 0) {
         const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
         const name = catMap.get(catId) ?? "Unknown";
@@ -312,10 +321,10 @@ export function computeMonthlyInsights(
           type: "trend",
           categoryId: catId,
           categoryName: name,
-          amount: Math.round(currentSpend * 100) / 100,
-          avgAmount: Math.round(avg3mo * 100) / 100,
+          amount: currentSpend,
+          avgAmount: avg3mo,
           pctChange: pct,
-          message: `${name}: $${Math.round(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
+          message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
         });
       }
     }
@@ -334,4 +343,3 @@ export function computeMonthlyInsights(
 
   return insights;
 }
-

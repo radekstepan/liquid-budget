@@ -26,8 +26,6 @@ const byId = (rows: RegisterRow[], id: number) => {
   return r;
 };
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
 /* ---------------- tests ---------------- */
 
 describe("computeRunningBalances", () => {
@@ -37,81 +35,67 @@ describe("computeRunningBalances", () => {
 
   it("anchors the newest row at the account's current balance", () => {
     const rows = [
-      t({ accountId: 1, date: "2026-06-30", amount: -100 }),
-      t({ accountId: 1, date: "2026-06-29", amount: -50 }),
+      t({ accountId: 1, date: "2026-06-30", amount: -10000 }),
+      t({ accountId: 1, date: "2026-06-29", amount: -5000 }),
     ];
-    const balances = new Map([[1, 1000]]);
+    const balances = new Map([[1, 100000]]);
     const out = computeRunningBalances(rows, balances);
-    // Newest row anchors at the current balance.
-    expect(round2(byId(out, rows[0]!.id).runningBalance)).toBe(1000);
-    // One row older: balance after that row = current − amount(newer row)
-    // = 1000 − (−100) = 1100.
-    expect(round2(byId(out, rows[1]!.id).runningBalance)).toBe(1100);
+    expect(byId(out, rows[0]!.id).runningBalance).toBe(100000);
+    expect(byId(out, rows[1]!.id).runningBalance).toBe(110000);
   });
 
   it("walks through multiple rows, accumulating each newer row's signed amount", () => {
     const rows = [
-      t({ accountId: 1, date: "2026-06-30", amount: -100 }),
-      t({ accountId: 1, date: "2026-06-25", amount: 500 }),
-      t({ accountId: 1, date: "2026-06-20", amount: -200 }),
+      t({ accountId: 1, date: "2026-06-30", amount: -10000 }),
+      t({ accountId: 1, date: "2026-06-25", amount: 50000 }),
+      t({ accountId: 1, date: "2026-06-20", amount: -20000 }),
     ];
-    const balances = new Map([[1, 1000]]);
+    const balances = new Map([[1, 100000]]);
     const out = computeRunningBalances(rows, balances);
-    // Newest = current.
-    expect(round2(byId(out, rows[0]!.id).runningBalance)).toBe(1000);
-    // After the +500 inflow (between 06-30 and 06-25) the balance was
-    // 1000 − (−100) = 1100.
-    expect(round2(byId(out, rows[1]!.id).runningBalance)).toBe(1100);
-    // Oldest: pre-newer-rows balance. Newer contributions: -100 + 500
-    // = +400. So pre = 1000 − 400 = 600.
-    expect(round2(byId(out, rows[2]!.id).runningBalance)).toBe(600);
+    expect(byId(out, rows[0]!.id).runningBalance).toBe(100000);
+    expect(byId(out, rows[1]!.id).runningBalance).toBe(110000);
+    expect(byId(out, rows[2]!.id).runningBalance).toBe(60000);
   });
 
   it("keeps accounts independent in the per-account view (no anchor)", () => {
-    const a = t({ accountId: 1, date: "2026-06-30", amount: -100 });
-    const b = t({ accountId: 2, date: "2026-06-30", amount: 50 });
-    const c = t({ accountId: 1, date: "2026-06-29", amount: 1000 });
+    const a = t({ accountId: 1, date: "2026-06-30", amount: -10000 });
+    const b = t({ accountId: 2, date: "2026-06-30", amount: 5000 });
+    const c = t({ accountId: 1, date: "2026-06-29", amount: 100000 });
     const balances = new Map([
-      [1, 5000],
-      [2, 200],
+      [1, 500000],
+      [2, 20000],
     ]);
     const out = computeRunningBalances([a, b, c], balances);
-    expect(round2(byId(out, a.id).runningBalance)).toBe(5000);
-    expect(round2(byId(out, b.id).runningBalance)).toBe(200);
-    // The older account-1 row accumulates the newer account-1 amount
-    // (-100): 5000 − (−100) = 5100.
-    expect(round2(byId(out, c.id).runningBalance)).toBe(5100);
+    expect(byId(out, a.id).runningBalance).toBe(500000);
+    expect(byId(out, b.id).runningBalance).toBe(20000);
+    expect(byId(out, c.id).runningBalance).toBe(510000);
   });
 
   it("anchor mode applies the row's amount to the anchor's balance", () => {
-    const a = t({ accountId: 1, date: "2026-06-30", amount: -100 });
-    const b = t({ accountId: 2, date: "2026-06-30", amount: 50 });
+    const a = t({ accountId: 1, date: "2026-06-30", amount: -10000 });
+    const b = t({ accountId: 2, date: "2026-06-30", amount: 5000 });
     const balances = new Map([
-      [1, 1000],
-      [2, 500],
+      [1, 100000],
+      [2, 50000],
     ]);
     const out = computeRunningBalances([a, b], balances, 1);
-    expect(round2(byId(out, a.id).runningBalance)).toBe(1000);
-    // The account-2 row has no anchor walk entry; falls back to its
-    // own account's current balance.
-    expect(round2(byId(out, b.id).runningBalance)).toBe(500);
+    expect(byId(out, a.id).runningBalance).toBe(100000);
+    expect(byId(out, b.id).runningBalance).toBe(50000);
   });
 
   it("applies transfer rows from the source's perspective when not anchored", () => {
-    // No anchor: the row is on the source's accountId, so the walk
-    // uses the source's perspective.
     const transfer = t({
       accountId: 1,
       transferAccountId: 2,
       date: "2026-06-30",
-      amount: -100,
+      amount: -10000,
     });
     const balances = new Map([
-      [1, 1000],
-      [2, 500],
+      [1, 100000],
+      [2, 50000],
     ]);
     const out = computeRunningBalances([transfer], balances);
-    expect(round2(byId(out, transfer.id).runningBalance)).toBe(1000);
+    expect(byId(out, transfer.id).runningBalance).toBe(100000);
   });
 
   it("applies transfer rows with the opposite sign when the anchor is the destination", () => {
@@ -119,54 +103,44 @@ describe("computeRunningBalances", () => {
       accountId: 1,
       transferAccountId: 2,
       date: "2026-06-30",
-      amount: -100,
+      amount: -10000,
     });
     const balances = new Map([
-      [1, 1000],
-      [2, 500],
+      [1, 100000],
+      [2, 50000],
     ]);
     const out = computeRunningBalances([transfer], balances, 2);
-    // The transfer is the only row on account 2; its running balance
-    // equals the current destination balance (500).
-    expect(round2(byId(out, transfer.id).runningBalance)).toBe(500);
+    expect(byId(out, transfer.id).runningBalance).toBe(50000);
   });
 
   it("skips split parents in the walk (children carry the balance effect)", () => {
-    const parent = t({ accountId: 1, date: "2026-06-30", amount: -150 });
-    const c1 = t({ accountId: 1, date: "2026-06-30", amount: -100, parentId: 999 });
-    const c2 = t({ accountId: 1, date: "2026-06-30", amount: -50, parentId: 999 });
+    const parent = t({ accountId: 1, date: "2026-06-30", amount: -15000 });
+    const c1 = t({ accountId: 1, date: "2026-06-30", amount: -10000, parentId: 999 });
+    const c2 = t({ accountId: 1, date: "2026-06-30", amount: -5000, parentId: 999 });
     parent.id = 999;
-    const balances = new Map([[1, 1000]]);
+    const balances = new Map([[1, 100000]]);
     const out = computeRunningBalances([parent, c1, c2], balances);
-    // Children sorted date-desc by input order: c1, c2. Walk: c1.rb =
-    // 1000, bal -= -100 = 1100; c2.rb = 1100, bal -= -50 = 1150.
-    expect(round2(byId(out, c1.id).runningBalance)).toBe(1000);
-    expect(round2(byId(out, c2.id).runningBalance)).toBe(1100);
+    expect(byId(out, c1.id).runningBalance).toBe(100000);
+    expect(byId(out, c2.id).runningBalance).toBe(110000);
   });
 
   it("mirrors split parents to the post-cluster value (newest child's running balance)", () => {
-    const parent = t({ accountId: 1, date: "2026-06-30", amount: -150 });
-    const c1 = t({ accountId: 1, date: "2026-06-30", amount: -100, parentId: 999 });
-    const c2 = t({ accountId: 1, date: "2026-06-30", amount: -50, parentId: 999 });
+    const parent = t({ accountId: 1, date: "2026-06-30", amount: -15000 });
+    const c1 = t({ accountId: 1, date: "2026-06-30", amount: -10000, parentId: 999 });
+    const c2 = t({ accountId: 1, date: "2026-06-30", amount: -5000, parentId: 999 });
     parent.id = 999;
-    const balances = new Map([[1, 1000]]);
+    const balances = new Map([[1, 100000]]);
     const out = computeRunningBalances([parent, c1, c2], balances);
-    // Post-cluster = balance right after the entire cluster = running
-    // balance of the chronologically-newest child (c1, the first in
-    // the date-desc sort). That's 1000.
-    expect(round2(byId(out, parent.id).runningBalance)).toBe(1000);
+    expect(byId(out, parent.id).runningBalance).toBe(100000);
   });
 
   it("falls back to the row's own account balance when no walk entry exists", () => {
-    const a = t({ accountId: 1, date: "2026-06-30", amount: -100 });
+    const a = t({ accountId: 1, date: "2026-06-30", amount: -10000 });
     const balances = new Map([
-      [1, 1000],
-      [2, 200],
+      [1, 100000],
+      [2, 20000],
     ]);
-    // Anchor is account 2; the input row is on account 1 with no
-    // transferAccountId, so it doesn't participate in the anchor walk
-    // and falls back to its own account's current balance.
     const out = computeRunningBalances([a], balances, 2);
-    expect(round2(byId(out, a.id).runningBalance)).toBe(1000);
+    expect(byId(out, a.id).runningBalance).toBe(100000);
   });
 });

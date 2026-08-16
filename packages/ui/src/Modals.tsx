@@ -62,7 +62,7 @@ export function TransactionModal({
   onClose: () => void;
   onSave: (t: TransactionSavePayload) => void;
 }) {
-  const initialAmt = initial ? num(initial.amount) : 0;
+  const initialAmt = initial ? num(initial.amount) / 100 : 0;
 
   // Detect if `initial` is a split parent and pre-populate children.
   const initialChildren = useMemo(() => {
@@ -109,10 +109,7 @@ export function TransactionModal({
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
-          // Preserve the child's signed amount on edit (no Math.abs coercion).
-          // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
-          // by the validation layer.
-          amount: (num(c.amount).toFixed(2) as unknown) as number,
+          amount: ((num(c.amount) / 100).toFixed(2) as unknown) as number,
           memo: c.memo ?? "",
         }))
       : [
@@ -123,15 +120,18 @@ export function TransactionModal({
 
   const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
 
-  // Signed parent amount and signed child total — validation is sign-aware
-  // and the sub-row "Σ … / …" footer uses Math.abs() for the colour check only.
+  // Signed parent amount and signed child total in dollars for UI display
   const parentAmount = evalAmount(amount) ?? 0;
   const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
+    const parentCents = Math.round(parentAmount * 100);
     return validateSubTransactions(
-      parentAmount,
-      subRows.map((r) => ({ ...r, amount: evalAmount(String(r.amount)) ?? 0 }))
+      parentCents,
+      subRows.map((r) => ({
+        ...r,
+        amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+      }))
     );
   }, [mode, parentAmount, subRows]);
 
@@ -156,11 +156,9 @@ export function TransactionModal({
   };
 
   const save = () => {
-    // Use the typed value as-is (sign is part of the input). The user
-    // is expected to type the sign: positive for inflows, negative for
-    // outflows. (No outflow/inflow toggle in this modal.)
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
+    const amountCents = Math.round(a * 100);
 
     if (mode === "transfer") {
       if (!payee.trim() && !transferAccountId) return;
@@ -174,7 +172,7 @@ export function TransactionModal({
         date,
         payee: payee.trim() || `Transfer : ${destName}`,
         memo: memo.trim(),
-        amount: a,
+        amount: amountCents,
         status: cleared ? "c" : "u",
         transferAccountId: Number(transferAccountId),
       });
@@ -183,7 +181,7 @@ export function TransactionModal({
 
     if (mode === "split") {
       if (!payee.trim()) return;
-      if (subValidation) return; // disable save via validation
+      if (subValidation) return;
       onSave({
         id: initial?.id,
         accountId,
@@ -191,16 +189,12 @@ export function TransactionModal({
         date,
         payee: payee.trim(),
         memo: memo.trim(),
-        amount: a,
+        amount: amountCents,
         status: cleared ? "c" : "u",
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId ?? null,
           transferAccountId: r.transferAccountId ?? null,
-          // Sub-row amounts are passed through verbatim (signed) so the
-          // server-side validation sees the same numbers the user typed.
-          // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
-          // supported by the validation layer.
-          amount: evalAmount(String(r.amount)) ?? 0,
+          amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
           memo: r.memo,
         })),
       });
@@ -216,7 +210,7 @@ export function TransactionModal({
       date,
       payee: payee.trim(),
       memo: memo.trim(),
-      amount: a,
+      amount: amountCents,
       status: cleared ? "c" : "u",
     });
   };
@@ -264,16 +258,6 @@ export function TransactionModal({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label={mode === "split" ? "Total" : "Amount"}>
-          <TextField
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-            className={inputClass}
-          />
-          <AmountPreview value={amount} />
-        </Field>
         <Field label="Date">
           <TextField
             type="date"
@@ -282,6 +266,17 @@ export function TransactionModal({
             className={inputClass}
           />
         </Field>
+        <Field label={mode === "split" ? "Total Amount" : "Amount"}>
+          <TextField
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            inputMode="decimal"
+            autoFocus
+            className={inputClass}
+          />
+          <AmountPreview value={amount} />
+        </Field>
       </div>
 
       {mode !== "transfer" && (
@@ -289,7 +284,7 @@ export function TransactionModal({
           <TextField
             value={payee}
             onChange={(e) => setPayee(e.target.value)}
-            placeholder="e.g. Whole Foods"
+            placeholder="e.g. Superstore"
             className={inputClass}
           />
         </Field>
@@ -303,7 +298,7 @@ export function TransactionModal({
             className="w-full"
             disabled={mode === "transfer"}
           >
-            {accounts.map((a) => (
+            {availableAccounts.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </Select>
@@ -329,7 +324,7 @@ export function TransactionModal({
               onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
               className="w-full"
             >
-              <option value="">Uncategorized</option>
+              <option value="">Income (To be Budgeted)</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -341,7 +336,11 @@ export function TransactionModal({
       {mode === "transfer" && (
         <Field label="Payee (auto-generated, override optional)">
           <TextField
-            value={payee}
+            value={
+              payee.startsWith("Transfer : ")
+                ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                : payee
+            }
             onChange={(e) => setPayee(e.target.value)}
             placeholder={
               transferAccountId
@@ -455,7 +454,7 @@ export function TransactionModal({
               className="ml-auto text-[11.5px] y-num"
               style={{
                 color:
-                  Math.abs(subTotal - parentAmount) < 0.005
+                  Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
                     ? "var(--y-green-dk)"
                     : "var(--y-red)",
                 fontWeight: 700,
@@ -475,14 +474,20 @@ export function TransactionModal({
         </div>
       )}
 
-      <Field label="Memo (optional)">
-        <TextField value={memo} onChange={(e) => setMemo(e.target.value)} className={inputClass} />
+      <Field label="Memo">
+        <TextField
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          placeholder="Optional notes"
+          className={inputClass}
+        />
       </Field>
-      <div className="mt-2 mb-0 flex items-end pb-1">
+
+      <div className="pt-1">
         <Checkbox
           checked={cleared}
           onChange={setCleared}
-          label="Cleared (posted to bank)"
+          label="Cleared (bank has processed this)"
         />
       </div>
     </Modal>
@@ -500,11 +505,12 @@ export function CategoryModal({
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [hasGoal, setHasGoal] = useState(!!initial?.goalTarget);
-  const [goal, setGoal] = useState(initial?.goalTarget ?? "");
-  const initCarryover = initial?.carryover ? Number(initial.carryover) : 0;
+  const initGoal = initial?.goalTarget ? num(initial.goalTarget) / 100 : 0;
+  const [goal, setGoal] = useState(initGoal !== 0 ? initGoal.toFixed(2) : "");
+  const initCarryover = initial?.carryover ? num(initial.carryover) / 100 : 0;
   const [hasCarryover, setHasCarryover] = useState(initCarryover !== 0);
   const [carryover, setCarryover] = useState(
-    initCarryover !== 0 ? String(initCarryover) : ""
+    initCarryover !== 0 ? initCarryover.toFixed(2) : ""
   );
 
   return (
@@ -520,8 +526,8 @@ export function CategoryModal({
               name.trim() &&
               onSave({
                 name: name.trim(),
-                goalTarget: hasGoal ? evalAmount(goal) ?? 0 : null,
-                carryover: hasCarryover ? evalAmount(carryover) ?? 0 : undefined,
+                goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
+                carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
               })
             }
           >
@@ -629,10 +635,10 @@ export function RecurringModal({
     nextDate: string;
     active: boolean;
     transferAccountId?: number | null;
-    subTransactions?: { categoryId: number | null; amount: number; memo?: string }[];
+    subTransactions?: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
   }) => void;
 }) {
-  const initialAmt = initial ? num(initial.amount) : 0;
+  const initialAmt = initial ? num(initial.amount) / 100 : 0;
   const initialChildren = initial?.subTransactions ?? [];
 
   const isInitialTransfer = !!initial?.transferAccountId;
@@ -666,28 +672,30 @@ export function RecurringModal({
     initialChildren.length > 0
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId,
-          // Preserve the child's signed amount on edit (no Math.abs coercion).
-          // Mixed-sign splits (e.g. Paycheck with a tax deduction) are supported
-          // by the validation layer.
-          amount: (num(c.amount).toFixed(2) as unknown) as number,
+          transferAccountId: c.transferAccountId ?? null,
+          amount: ((num(c.amount) / 100).toFixed(2) as unknown) as number,
           memo: c.memo ?? "",
         }))
       : [
-          { categoryId: 0, amount: 0, memo: "" },
-          { categoryId: 0, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
         ]
   );
 
   const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
 
-  // Signed parent amount and signed child total — validation is sign-aware.
+  // Signed parent amount and signed child total in dollars for UI display
   const parentAmount = evalAmount(amount) ?? 0;
   const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
+    const parentCents = Math.round(parentAmount * 100);
     return validateRecurringSubTransactions(
-      parentAmount,
-      subRows.map((r) => ({ ...r, amount: evalAmount(String(r.amount)) ?? 0 }))
+      parentCents,
+      subRows.map((r) => ({
+        ...r,
+        amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+      }))
     );
   }, [mode, parentAmount, subRows]);
 
@@ -696,14 +704,14 @@ export function RecurringModal({
     if (next === "single") {
       setTransferAccountId("");
       setSubRows([
-        { categoryId: 0, amount: 0, memo: "" },
-        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else if (next === "transfer") {
       setCategoryId("");
       setSubRows([
-        { categoryId: 0, amount: 0, memo: "" },
-        { categoryId: 0, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else {
       setTransferAccountId("");
@@ -714,6 +722,7 @@ export function RecurringModal({
   const save = () => {
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
+    const amountCents = Math.round(a * 100);
 
     if (mode === "transfer") {
       if (!transferAccountId) return;
@@ -724,7 +733,7 @@ export function RecurringModal({
         accountId,
         categoryId: null,
         payee: payee.trim() || `Transfer : ${destName}`,
-        amount: a,
+        amount: amountCents,
         frequency,
         nextDate,
         active,
@@ -735,23 +744,20 @@ export function RecurringModal({
 
     if (mode === "split") {
       if (!payee.trim()) return;
-      if (subValidation) return; // disable save via validation
+      if (subValidation) return;
       onSave({
         id: initial?.id,
         accountId,
         categoryId: null,
         payee: payee.trim(),
-        amount: a,
+        amount: amountCents,
         frequency,
         nextDate,
         active,
         subTransactions: subRows.map((r) => ({
-          categoryId: r.categoryId,
-          // Sub-row amounts are passed through verbatim (signed) so the
-          // server-side validation sees the same numbers the user typed.
-          // Mixed-sign splits (e.g. +5000 gross pay, -1000 tax) are
-          // supported by the validation layer.
-          amount: evalAmount(String(r.amount)) ?? 0,
+          categoryId: r.categoryId ?? null,
+          transferAccountId: r.transferAccountId ?? null,
+          amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
           memo: r.memo,
         })),
       });
@@ -765,7 +771,7 @@ export function RecurringModal({
       accountId,
       categoryId: categoryId === "" ? null : Number(categoryId),
       payee: payee.trim(),
-      amount: a,
+      amount: amountCents,
       frequency,
       nextDate,
       active,
@@ -1011,7 +1017,7 @@ export function RecurringModal({
               className="ml-auto text-[11.5px] y-num"
               style={{
                 color:
-                  Math.abs(subTotal - parentAmount) < 0.005
+                  Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
                     ? "var(--y-green-dk)"
                     : "var(--y-red)",
                 fontWeight: 700,
@@ -1080,7 +1086,7 @@ export function AccountModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState<"liquid" | "credit" | "offbudget">(initial?.kind ?? "liquid");
   const [balance, setBalance] = useState(
-    initial != null ? String(Math.abs(Number(initial.balance))) : ""
+    initial != null ? (Math.abs(num(initial.balance)) / 100).toFixed(2) : ""
   );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1100,7 +1106,9 @@ export function AccountModal({
   const save = () => {
     if (!name.trim()) return;
     const b = evalAmount(balance) ?? 0;
-    onSave({ name: name.trim(), kind, groupLabel, balance: b, onBudget: kind !== "offbudget" });
+    const bCents = Math.round(b * 100);
+    const finalBalance = kind === "credit" ? -Math.abs(bCents) : bCents;
+    onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget" });
   };
   const isEdit = !!initial;
   const isArchived = Boolean(initial?.archived);
@@ -1171,91 +1179,94 @@ export function AccountModal({
           </>
         ) : (
           <>
-            <div className="flex items-center gap-1.5" style={{ marginRight: "auto" }}>
-              {isEdit && isArchived && onUnarchive && (
-                <Btn
-                  onClick={handleUnarchive}
-                  disabled={unarchiving}
-                >
-                  {unarchiving ? "Unarchiving…" : "Unarchive account"}
-                </Btn>
-              )}
-              {isEdit && !isArchived && onArchive && (
-                <Btn
-                  onClick={() => setConfirmingArchive(true)}
-                >
-                  Archive account
-                </Btn>
-              )}
-              {isEdit && onDelete && (
-                <Btn
-                  variant="danger"
-                  onClick={() => setConfirmingDelete(true)}
-                >
-                  Delete account
-                </Btn>
-              )}
-            </div>
             <Btn onClick={onClose}>Cancel</Btn>
-            <Btn variant="primary" onClick={save}>
-              {isEdit ? "Save Changes" : "Add Account"}
+            {isEdit && !isArchived && onArchive && (
+              <Btn onClick={() => setConfirmingArchive(true)}>Archive</Btn>
+            )}
+            {isEdit && isArchived && onUnarchive && (
+              <Btn onClick={handleUnarchive} disabled={unarchiving}>
+                {unarchiving ? "Unarchiving…" : "Unarchive"}
+              </Btn>
+            )}
+            {isEdit && onDelete && (
+              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete…
+              </Btn>
+            )}
+            <Btn variant="primary" onClick={save} disabled={!name.trim()}>
+              Save
             </Btn>
           </>
         )
       }
     >
       {confirmingDelete ? (
-        <>
-          <Notice tone="danger" title="This cannot be undone">
-            Deleting this account will permanently remove:
-            <ul className="list-disc pl-5 mt-1 space-y-[2px]">
-              {txCount > 0 ? (
-                <li>
-                  <strong className="y-num">{txCount}</strong>{" "}
-                  {txCount === 1 ? "transaction" : "transactions"}
-                </li>
-              ) : null}
-              <li>the account and its history</li>
-            </ul>
-          </Notice>
-        </>
+        <div className="space-y-2 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
+          <p>
+            Are you sure you want to delete <strong>{initial?.name}</strong>?
+          </p>
+          {txCount > 0 ? (
+            <Notice tone="warn" title="Associated transactions will be removed">
+              This account has {txCount} transaction{txCount === 1 ? "" : "s"}. Deleting it
+              will permanently remove them and recalculate category balances.
+            </Notice>
+          ) : (
+            <p className="y-hint text-[11.5px]">This account has no transactions and can be safely deleted.</p>
+          )}
+        </div>
       ) : confirmingArchive ? (
-        <>
-          <Notice tone="info" title="Archive vs. Delete">
-            Archiving hides this account from your active budget and account lists while keeping all past transactions and balances intact. You can view or unarchive it at any time.
-          </Notice>
-        </>
+        <div className="space-y-2 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
+          <p>
+            Archive <strong>{initial?.name}</strong>?
+          </p>
+          <p className="y-hint text-[11.5px]">
+            Archived accounts are hidden from the sidebar and new transaction dropdowns,
+            but all transaction history and reports are preserved. You can unarchive it
+            at any time.
+          </p>
+        </div>
       ) : (
         <>
-          {isArchived && (
-            <Notice tone="info" title="This account is archived">
-              Archived accounts are hidden from active budget lists, but all transaction history is preserved.
-            </Notice>
-          )}
-          <Field label="Account Name">
-            <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
-          </Field>
-          <Field label="Type">
-            <Select
-              value={kind}
-              onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
-              className="w-full"
-            >
-              <option value="liquid">Liquid (Cash / Checking / Savings)</option>
-              <option value="credit">Credit Card</option>
-              <option value="offbudget">Off-Budget (Retirement / Asset)</option>
-            </Select>
-          </Field>
-          <Field label="Current Balance">
+          <Field label="Name">
             <TextField
-              value={balance}
-              onChange={(e) => setBalance(e.target.value)}
-              placeholder="0.00"
-              inputMode="decimal"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. TD Chequing"
+              autoFocus
               className={inputClass}
             />
-            <AmountPreview value={balance} />
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Account Type">
+              <Select
+                value={kind}
+                onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
+                className="w-full"
+                disabled={isEdit}
+              >
+                <option value="liquid">Checking / Savings / Cash</option>
+                <option value="credit">Credit Card</option>
+                <option value="offbudget">Tracking (Investment/Property)</option>
+              </Select>
+            </Field>
+            <Field label="Starting Balance">
+              <TextField
+                value={balance}
+                onChange={(e) => setBalance(e.target.value)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className={inputClass}
+                disabled={isEdit}
+              />
+              {!isEdit && <AmountPreview value={balance} />}
+            </Field>
+          </div>
+          {isEdit && (
+            <div className="y-hint text-[11px] pt-1">
+              Account type and starting balance are locked after creation. To adjust the
+              working balance, add a transaction or use the Reconcile flow.
+            </div>
+          )}
         </>
       )}
     </Modal>

@@ -68,7 +68,7 @@ function txn(
     date: `${month}-${String(day).padStart(2, "0")}`,
     payee,
     memo: "",
-    amount: String(amount),
+    amount: String(amount * 100),
     status: "u",
   };
 }
@@ -76,7 +76,7 @@ function txn(
 function makeData(): BudgetData {
   return {
     accounts: [
-      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 0 },
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
     ],
     groups: [],
     categories: [
@@ -178,9 +178,9 @@ describe("ReportsView", () => {
     const data: BudgetData = {
       ...makeData(),
       accounts: [
-        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "8200.00", onBudget: true, sort: 0 },
-        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "500000.00", onBudget: false, sort: 1 },
-        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-300000.00", onBudget: false, sort: 2 },
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "820000", onBudget: true, sort: 0 },
+        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "50000000", onBudget: false, sort: 1 },
+        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-30000000", onBudget: false, sort: 2 },
       ],
     };
     renderView({ data });
@@ -200,9 +200,9 @@ describe("ReportsView", () => {
     const data: BudgetData = {
       ...makeData(),
       accounts: [
-        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "8200.00", onBudget: true, sort: 0 },
-        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "500000.00", onBudget: false, sort: 1 },
-        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-300000.00", onBudget: false, sort: 2 },
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "820000", onBudget: true, sort: 0 },
+        { id: 2, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "50000000", onBudget: false, sort: 1 },
+        { id: 3, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-30000000", onBudget: false, sort: 2 },
       ],
     };
     renderView({ data });

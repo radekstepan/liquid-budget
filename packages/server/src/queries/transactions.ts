@@ -67,7 +67,7 @@ export class TransactionError extends Error {
 async function applyBalance(db: Database, accountId: number, delta: number) {
   await db
     .update(accounts)
-    .set({ balance: sql`${accounts.balance} + ${delta.toFixed(2)}` })
+    .set({ balance: sql`${accounts.balance} + ${Math.round(delta)}` })
     .where(eq(accounts.id, accountId));
 }
 
@@ -77,6 +77,14 @@ async function getAccountName(db: Database, accountId: number): Promise<string |
     .from(accounts)
     .where(eq(accounts.id, accountId));
   return row?.name ?? null;
+}
+
+async function isAccountOnBudget(db: Database, accountId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ onBudget: accounts.onBudget })
+    .from(accounts)
+    .where(eq(accounts.id, accountId));
+  return row?.onBudget ?? true;
 }
 
 async function childCount(db: Database, parentId: number): Promise<number> {
@@ -90,13 +98,15 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null }[]> {
+): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string }[]> {
   return db
     .select({
       id: transactions.id,
       accountId: transactions.accountId,
       amount: transactions.amount,
       transferAccountId: transactions.transferAccountId,
+      categoryId: transactions.categoryId,
+      memo: transactions.memo,
     })
     .from(transactions)
     .where(eq(transactions.parentId, parentId));
@@ -126,11 +136,14 @@ export function assertSplitsBalanced(
     if (c.categoryId && c.transferAccountId) {
       throw new TransactionError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
+    if (!Number.isFinite(Number(c.amount))) {
+      throw new TransactionError(`sub-transaction ${i + 1} amount is not a valid number`);
+    }
   }
-  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
-  if (Math.abs(sum - parentAmount) > 0.005) {
+  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
+  if (sum !== parentAmount) {
     throw new TransactionError(
-      `split children do not sum to parent: ${sum.toFixed(2)} vs ${parentAmount.toFixed(2)}`
+      `split children do not sum to parent: ${sum} vs ${parentAmount}`
     );
   }
 }
@@ -166,32 +179,44 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     payee = `Transfer : ${destName ?? "Unknown"}`;
   }
 
-  const [row] = await db
-    .insert(transactions)
-    .values({
-      accountId: input.accountId,
-      categoryId: input.transferAccountId != null ? null : input.categoryId,
-      date: input.date,
-      payee,
-      memo: input.memo,
-      amount: input.amount,
-      status: input.status ?? "c",
-      transferAccountId: input.transferAccountId ?? null,
-      parentId: input.parentId ?? null,
-    })
-    .returning();
+  db.run(sql`BEGIN`);
+  try {
+    const onBudget = await isAccountOnBudget(db, input.accountId);
+    const isSplitParent = input.parentId == null && input.skipBalance === true;
+    const isTransfer = input.transferAccountId != null;
+    const isIncome = !isTransfer && !isSplitParent && input.parentId == null && input.categoryId == null && input.amount > 0 && onBudget;
 
-  // Children and regular rows apply their own balance; split parents do not.
-  // `skipBalance` is only honoured for parents (parentId == null). Children
-  // always apply their own balance, regardless of any `skipBalance` flag.
-  const isSplitParent = input.parentId == null && input.skipBalance === true;
-  if (!isSplitParent) {
-    await applyBalance(db, input.accountId, input.amount);
-    if (input.transferAccountId != null) {
-      await applyBalance(db, input.transferAccountId, -input.amount);
+    const [row] = await db
+      .insert(transactions)
+      .values({
+        accountId: input.accountId,
+        categoryId: input.transferAccountId != null ? null : input.categoryId,
+        date: input.date,
+        payee,
+        memo: input.memo,
+        amount: input.amount,
+        status: input.status ?? "c",
+        transferAccountId: input.transferAccountId ?? null,
+        parentId: input.parentId ?? null,
+        isIncome,
+      })
+      .returning();
+
+    // Children and regular rows apply their own balance; split parents do not.
+    // `skipBalance` is only honoured for parents (parentId == null). Children
+    // always apply their own balance, regardless of any `skipBalance` flag.
+    if (!isSplitParent) {
+      await applyBalance(db, input.accountId, input.amount);
+      if (input.transferAccountId != null) {
+        await applyBalance(db, input.transferAccountId, -input.amount);
+      }
     }
+    db.run(sql`COMMIT`);
+    return row;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
   }
-  return row;
 }
 
 /**
@@ -215,24 +240,32 @@ export async function createTransfer(
     payee = `Transfer : ${destName ?? "Unknown"}`;
   }
 
-  const [row] = await db
-    .insert(transactions)
-    .values({
-      accountId: baseInput.accountId,
-      categoryId: null,
-      date: baseInput.date,
-      payee,
-      memo: baseInput.memo,
-      amount: baseInput.amount,
-      status: baseInput.status ?? "c",
-      transferAccountId,
-      parentId: baseInput.parentId ?? null,
-    })
-    .returning();
+  db.run(sql`BEGIN`);
+  try {
+    const [row] = await db
+      .insert(transactions)
+      .values({
+        accountId: baseInput.accountId,
+        categoryId: null,
+        date: baseInput.date,
+        payee,
+        memo: baseInput.memo,
+        amount: baseInput.amount,
+        status: baseInput.status ?? "c",
+        transferAccountId,
+        parentId: baseInput.parentId ?? null,
+        isIncome: false,
+      })
+      .returning();
 
-  await applyBalance(db, baseInput.accountId, baseInput.amount);
-  await applyBalance(db, transferAccountId, -baseInput.amount);
-  return row;
+    await applyBalance(db, baseInput.accountId, baseInput.amount);
+    await applyBalance(db, transferAccountId, -baseInput.amount);
+    db.run(sql`COMMIT`);
+    return row;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 /**
@@ -262,53 +295,63 @@ export async function createSplitWithChildren(
     );
   }
 
-  const [parentRow] = await db
-    .insert(transactions)
-    .values({
-      accountId: parent.accountId,
-      categoryId: null,
-      date: parent.date,
-      payee: parent.payee,
-      memo: parent.memo,
-      amount: parent.amount,
-      status: parentStatus,
-      transferAccountId: null,
-      parentId: null,
-    })
-    .returning();
-
-  const childRows = [];
-  for (const c of children) {
-    let payee = parent.payee;
-    const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-    const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
-    if (transferAccountId) {
-      const destName = await getAccountName(db, transferAccountId);
-      payee = `Transfer : ${destName ?? "Unknown"}`;
-    }
-
-    const [child] = await db
+  db.run(sql`BEGIN`);
+  try {
+    const [parentRow] = await db
       .insert(transactions)
       .values({
         accountId: parent.accountId,
-        categoryId,
+        categoryId: null,
         date: parent.date,
-        payee,
-        memo: c.memo ?? "",
-        amount: c.amount,
+        payee: parent.payee,
+        memo: parent.memo,
+        amount: parent.amount,
         status: parentStatus,
-        transferAccountId,
-        parentId: parentRow!.id,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
       })
       .returning();
-    await applyBalance(db, parent.accountId, c.amount);
-    if (transferAccountId) {
-      await applyBalance(db, transferAccountId, -c.amount);
-    }
-    childRows.push(child);
-  }
 
-  return { parent: parentRow, children: childRows };
+    const onBudget = await isAccountOnBudget(db, parent.accountId);
+    const childRows = [];
+    for (const c of children) {
+      let payee = parent.payee;
+      const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+      const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+      if (transferAccountId) {
+        const destName = await getAccountName(db, transferAccountId);
+        payee = `Transfer : ${destName ?? "Unknown"}`;
+      }
+      const isIncome = transferAccountId == null && categoryId == null && c.amount > 0 && onBudget;
+
+      const [child] = await db
+        .insert(transactions)
+        .values({
+          accountId: parent.accountId,
+          categoryId,
+          date: parent.date,
+          payee,
+          memo: c.memo ?? "",
+          amount: c.amount,
+          status: parentStatus,
+          transferAccountId,
+          parentId: parentRow!.id,
+          isIncome,
+        })
+        .returning();
+      await applyBalance(db, parent.accountId, c.amount);
+      if (transferAccountId) {
+        await applyBalance(db, transferAccountId, -c.amount);
+      }
+      childRows.push(child);
+    }
+    db.run(sql`COMMIT`);
+    return { parent: parentRow, children: childRows };
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 /**
@@ -334,9 +377,21 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     throw new TransactionError("parentId cannot be changed via update");
   }
 
+  if (
+    existing.transferAccountId != null &&
+    patch.accountId != null &&
+    Number(patch.accountId) === existing.transferAccountId
+  ) {
+    throw new TransactionError("transfer account must differ from source account");
+  }
+
   const p: Record<string, unknown> = {};
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if ("categoryId" in patch) p.categoryId = patch.categoryId ?? null;
+  if (existing.transferAccountId != null) {
+    p.categoryId = null;
+  } else if ("categoryId" in patch) {
+    p.categoryId = patch.categoryId ?? null;
+  }
   if (patch.date != null) p.date = String(patch.date);
   if (patch.payee != null) p.payee = String(patch.payee);
   if (patch.memo != null) p.memo = String(patch.memo);
@@ -359,27 +414,55 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
   }
 
-  const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
-  const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
+  db.run(sql`BEGIN`);
+  try {
+    const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
+    const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
 
-  if (existing.transferAccountId != null) {
-    await applyBalance(db, existing.accountId, -Number(existing.amount));
-    await applyBalance(db, existing.transferAccountId, Number(existing.amount));
-    await applyBalance(db, newAccountId, newAmount);
-    await applyBalance(db, existing.transferAccountId, -newAmount);
-  } else if (!isSplitParent) {
-    if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
+    if (existing.transferAccountId != null) {
       await applyBalance(db, existing.accountId, -Number(existing.amount));
-      if (newAccountId !== existing.accountId) {
-        await applyBalance(db, newAccountId, newAmount);
-      } else {
-        await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+      await applyBalance(db, newAccountId, newAmount);
+      await applyBalance(db, existing.transferAccountId, -newAmount);
+    } else if (!isSplitParent) {
+      if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
+        await applyBalance(db, existing.accountId, -Number(existing.amount));
+        if (newAccountId !== existing.accountId) {
+          await applyBalance(db, newAccountId, newAmount);
+        } else {
+          await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+        }
       }
     }
-  }
 
-  const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
-  return row;
+    const onBudget = await isAccountOnBudget(db, newAccountId);
+    const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
+    const isIncome =
+      existing.transferAccountId == null &&
+      !isSplitParent &&
+      existing.parentId == null &&
+      finalCatId == null &&
+      newAmount > 0 &&
+      onBudget;
+    p.isIncome = isIncome;
+
+    const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
+
+    // If this row is a child of a split, verify that the parent is still balanced
+    if (existing.parentId != null) {
+      const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
+      if (parent) {
+        const siblings = await getChildren(db, existing.parentId);
+        assertSplitsBalanced(Number(parent.amount), siblings);
+      }
+    }
+
+    db.run(sql`COMMIT`);
+    return row;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 /**
@@ -412,65 +495,75 @@ export async function updateSplit(
 
   assertSplitsBalanced(parent.amount, children);
 
-  const oldChildren = await getChildren(db, parentId);
-  for (const c of oldChildren) {
-    await applyBalance(db, parent.accountId, -Number(c.amount));
-    if (c.transferAccountId != null) {
-      await applyBalance(db, c.transferAccountId, Number(c.amount));
+  db.run(sql`BEGIN`);
+  try {
+    const oldChildren = await getChildren(db, parentId);
+    for (const c of oldChildren) {
+      await applyBalance(db, parent.accountId, -Number(c.amount));
+      if (c.transferAccountId != null) {
+        await applyBalance(db, c.transferAccountId, Number(c.amount));
+      }
     }
-  }
-  if (oldChildren.length > 0) {
-    await db.delete(transactions).where(eq(transactions.parentId, parentId));
-  }
-
-  const pf: Record<string, unknown> = {};
-  if (parentFields.date != null) pf.date = String(parentFields.date);
-  if (parentFields.payee != null) pf.payee = String(parentFields.payee);
-  if (parentFields.memo != null) pf.memo = String(parentFields.memo);
-  if (parentFields.status != null) pf.status = parentFields.status;
-  if (Object.keys(pf).length > 0) {
-    await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
-  }
-
-  const newMemo = (pf.memo as string | undefined) ?? parent.memo;
-  const newDate = (pf.date as string | undefined) ?? parent.date;
-  const newPayee = (pf.payee as string | undefined) ?? parent.payee;
-  const newStatus: ClearedStatus =
-    (pf.status as ClearedStatus | undefined) ?? (parent.status as ClearedStatus);
-
-  const newChildren = [];
-  for (const c of children) {
-    let payee = newPayee;
-    const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-    const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
-    if (transferAccountId) {
-      const destName = await getAccountName(db, transferAccountId);
-      payee = `Transfer : ${destName ?? "Unknown"}`;
+    if (oldChildren.length > 0) {
+      await db.delete(transactions).where(eq(transactions.parentId, parentId));
     }
 
-    const [row] = await db
-      .insert(transactions)
-      .values({
-        accountId: parent.accountId,
-        categoryId,
-        date: newDate,
-        payee,
-        // Children inherit the parent's memo unless they have their own.
-        memo: c.memo ?? newMemo ?? "",
-        amount: c.amount,
-        status: newStatus,
-        transferAccountId,
-        parentId,
-      })
-      .returning();
-    await applyBalance(db, parent.accountId, c.amount);
-    if (transferAccountId) {
-      await applyBalance(db, transferAccountId, -c.amount);
+    const pf: Record<string, unknown> = {};
+    if (parentFields.date != null) pf.date = String(parentFields.date);
+    if (parentFields.payee != null) pf.payee = String(parentFields.payee);
+    if (parentFields.memo != null) pf.memo = String(parentFields.memo);
+    if (parentFields.status != null) pf.status = parentFields.status;
+    if (Object.keys(pf).length > 0) {
+      await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
     }
-    newChildren.push(row);
-  }
 
-  return { parent: { ...parent, ...pf }, children: newChildren };
+    const newMemo = (pf.memo as string | undefined) ?? parent.memo;
+    const newDate = (pf.date as string | undefined) ?? parent.date;
+    const newPayee = (pf.payee as string | undefined) ?? parent.payee;
+    const newStatus: ClearedStatus =
+      (pf.status as ClearedStatus | undefined) ?? (parent.status as ClearedStatus);
+
+    const onBudget = await isAccountOnBudget(db, parent.accountId);
+    const newChildren = [];
+    for (const c of children) {
+      let payee = newPayee;
+      const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
+      const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+      if (transferAccountId) {
+        const destName = await getAccountName(db, transferAccountId);
+        payee = `Transfer : ${destName ?? "Unknown"}`;
+      }
+      const isIncome = transferAccountId == null && categoryId == null && c.amount > 0 && onBudget;
+
+      const [row] = await db
+        .insert(transactions)
+        .values({
+          accountId: parent.accountId,
+          categoryId,
+          date: newDate,
+          payee,
+          // Children inherit the parent's memo unless they have their own.
+          memo: c.memo ?? newMemo ?? "",
+          amount: c.amount,
+          status: newStatus,
+          transferAccountId,
+          parentId,
+          isIncome,
+        })
+        .returning();
+      await applyBalance(db, parent.accountId, c.amount);
+      if (transferAccountId) {
+        await applyBalance(db, transferAccountId, -c.amount);
+      }
+      newChildren.push(row);
+    }
+
+    db.run(sql`COMMIT`);
+    return { parent: { ...parent, ...pf }, children: newChildren };
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 /**
@@ -479,7 +572,7 @@ export async function updateSplit(
  * reverse the children's balance effects beforehand.
  *
  *   - split parent: reverse each child's balance, then cascade deletes them
- *   - split child: reverse only its own balance
+ *   - split child: reverse only its own balance (and if only 1 child remains, clean up parent)
  *   - transfer: reverse both source and destination balances
  *   - regular: reverse its own balance
  */
@@ -487,28 +580,50 @@ export async function deleteTransaction(db: Database, id: number) {
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
-  if (existing.parentId != null) {
-    await applyBalance(db, existing.accountId, -Number(existing.amount));
-    if (existing.transferAccountId != null) {
-      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
-    }
-  } else if (existing.transferAccountId != null) {
-    await applyBalance(db, existing.accountId, -Number(existing.amount));
-    await applyBalance(db, existing.transferAccountId, Number(existing.amount));
-  } else {
-    const children = await getChildren(db, id);
-    if (children.length > 0) {
-      for (const c of children) {
-        await applyBalance(db, existing.accountId, -Number(c.amount));
-        if (c.transferAccountId != null) {
-          await applyBalance(db, c.transferAccountId, Number(c.amount));
-        }
-      }
-    } else {
+  db.run(sql`BEGIN`);
+  try {
+    if (existing.parentId != null) {
       await applyBalance(db, existing.accountId, -Number(existing.amount));
-    }
-  }
+      if (existing.transferAccountId != null) {
+        await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+      }
+      await db.delete(transactions).where(eq(transactions.id, id));
 
-  await db.delete(transactions).where(eq(transactions.id, id));
-  return existing;
+      // Check remaining children of the split parent.
+      // If only 1 child remains, a 1-child split is invalid so delete parent and the remaining child.
+      const remaining = await getChildren(db, existing.parentId);
+      if (remaining.length === 1) {
+        const lastChild = remaining[0]!;
+        await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
+        if (lastChild.transferAccountId != null) {
+          await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
+        }
+        await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+        await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+      }
+    } else if (existing.transferAccountId != null) {
+      await applyBalance(db, existing.accountId, -Number(existing.amount));
+      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+      await db.delete(transactions).where(eq(transactions.id, id));
+    } else {
+      const children = await getChildren(db, id);
+      if (children.length > 0) {
+        for (const c of children) {
+          await applyBalance(db, existing.accountId, -Number(c.amount));
+          if (c.transferAccountId != null) {
+            await applyBalance(db, c.transferAccountId, Number(c.amount));
+          }
+        }
+      } else {
+        await applyBalance(db, existing.accountId, -Number(existing.amount));
+      }
+      await db.delete(transactions).where(eq(transactions.id, id));
+    }
+
+    db.run(sql`COMMIT`);
+    return existing;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }

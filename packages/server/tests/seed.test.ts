@@ -60,7 +60,7 @@ describe("seedDatabase", () => {
     const td = data.accounts.find((a) => a.name === "TD Unlimited Chequing");
     expect(td).toBeTruthy();
     expect(td!.lastReconciledAt).toBe("2026-04-10");
-    expect(Number(td!.lastReconciledBalance)).toBeCloseTo(6083.58);
+    expect(Number(td!.lastReconciledBalance)).toBe(608358);
   });
 
   it("marks exactly one category group as credit-card payments", async () => {

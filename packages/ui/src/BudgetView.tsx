@@ -815,7 +815,7 @@ function CategoryMonthCell({
 
   const commit = () => {
     const v = evalAmount(draft);
-    if (v != null) onAssign(v);
+    if (v != null) onAssign(Math.round(v * 100));
     setEditing(false);
   };
 
@@ -848,7 +848,7 @@ function CategoryMonthCell({
     <button
       type="button"
       onClick={() => {
-        setDraft(value.toFixed(2));
+        setDraft((value / 100).toFixed(2));
         setEditing(true);
       }}
       className="y-inline-amt cursor-text"

@@ -3,15 +3,16 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { CalendarView } from "../src/CalendarView.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 
-function txn(day: number, payee: string, amount: number): Transaction {
+function txn(day: number, payee: string, amountInDollars: number): Transaction {
+  const amountCents = Math.round(amountInDollars * 100);
   return {
-    id: day * 100 + Math.abs(amount),
+    id: day * 100 + Math.abs(amountCents),
     accountId: 1,
     categoryId: 10,
     date: `2026-06-${String(day).padStart(2, "0")}`,
     payee,
     memo: "",
-    amount: String(amount),
+    amount: String(amountCents),
     status: "u",
   };
 }
@@ -19,7 +20,7 @@ function txn(day: number, payee: string, amount: number): Transaction {
 function makeData(txns: Transaction[]): BudgetData {
   return {
     accounts: [
-      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 0 },
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
     ],
     groups: [],
     categories: [

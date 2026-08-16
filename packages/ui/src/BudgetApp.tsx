@@ -341,12 +341,12 @@ export function BudgetApp({
     const unclearedCount = txns.filter((t) => t.status === "u").length;
     const clearedCount = txns.filter((t) => t.status === "c").length;
     const reconciledCount = txns.filter((t) => t.status === "r").length;
-    const workingBalance = round2(num(acct.balance) - unclearedTotal);
+    const workingBalance = num(acct.balance) - unclearedTotal;
     return {
       accountId: acct.id,
       accountName: acct.name,
       workingBalance,
-      unclearedTotal: round2(unclearedTotal),
+      unclearedTotal,
       unclearedCount,
       clearedCount,
       reconciledCount,

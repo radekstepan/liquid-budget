@@ -231,6 +231,7 @@ export async function importYnab4(db: Db, ynabData: any) {
       if (hasSubs) {
         // Split transaction parent
         let payee = payeeMap.get(t.payeeId) || "";
+        const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || t.categoryId === "Category/__DeferredIncome__") && (t.amount || 0) > 0;
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -248,6 +249,8 @@ export async function importYnab4(db: Db, ynabData: any) {
                   : "c",
             transferAccountId: null,
             parentId: null,
+            isIncome: isParentIncome,
+            reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
           })
           .returning();
 
@@ -281,6 +284,12 @@ export async function importYnab4(db: Db, ynabData: any) {
               subCatId = null;
             }
 
+            const isChildIncome =
+              (st.categoryId === "Category/__ImmediateIncome__" ||
+                st.categoryId === "Category/__DeferredIncome__" ||
+                (subCatId === null && subTransferAccountId === null)) &&
+              (st.amount || 0) > 0;
+
             await db.insert(transactions).values({
               accountId: accId,
               categoryId: subCatId,
@@ -296,6 +305,8 @@ export async function importYnab4(db: Db, ynabData: any) {
                     : "c",
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
+              isIncome: isChildIncome,
+              reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
             });
             totalImportedTxCount++;
           }
@@ -362,6 +373,8 @@ export async function importYnab4(db: Db, ynabData: any) {
                   : "c",
             transferAccountId: destAccId,
             parentId: null,
+            isIncome: false,
+            reconciledAt: cleared === "Reconciled" ? (t.date || null) : null,
           });
           totalImportedTxCount++;
         } else {
@@ -376,14 +389,20 @@ export async function importYnab4(db: Db, ynabData: any) {
           }
 
           let catId = categoryIdMap.get(t.categoryId) || null;
+          const isSpecialIncomeCat =
+            t.categoryId === "Category/__ImmediateIncome__" ||
+            t.categoryId === "Category/__DeferredIncome__";
           if (
             destAccId ||
-            t.categoryId === "Category/__ImmediateIncome__" ||
-            t.categoryId === "Category/__DeferredIncome__" ||
+            isSpecialIncomeCat ||
             t.categoryId === "Category/__Split__"
           ) {
             catId = null;
           }
+
+          const isTxIncome =
+            (isSpecialIncomeCat || (catId === null && destAccId === null)) &&
+            (t.amount || 0) > 0;
 
           await db.insert(transactions).values({
             accountId: accId,
@@ -400,6 +419,8 @@ export async function importYnab4(db: Db, ynabData: any) {
                   : "c",
             transferAccountId: destAccId,
             parentId: null,
+            isIncome: isTxIncome,
+            reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
           });
           totalImportedTxCount++;
         }

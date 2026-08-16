@@ -4,10 +4,10 @@ import { Sidebar } from "../src/Sidebar.js";
 import type { Account } from "@ynab/logic";
 
 const accounts: Account[] = [
-  { id: 1, name: "Cash", kind: "liquid", groupLabel: "Liquid", balance: "320.00", onBudget: true, sort: 0 },
-  { id: 2, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "1658.08", onBudget: true, sort: 1 },
-  { id: 3, name: "Chase", kind: "credit", groupLabel: "Credit Cards", balance: "-823.47", onBudget: true, sort: 2 },
-  { id: 4, name: "Retirement", kind: "offbudget", groupLabel: "Retirement", balance: "58000.00", onBudget: false, sort: 3 },
+  { id: 1, name: "Cash", kind: "liquid", groupLabel: "Liquid", balance: "32000", onBudget: true, sort: 0 },
+  { id: 2, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "165808", onBudget: true, sort: 1 },
+  { id: 3, name: "Chase", kind: "credit", groupLabel: "Credit Cards", balance: "-82347", onBudget: true, sort: 2 },
+  { id: 4, name: "Retirement", kind: "offbudget", groupLabel: "Retirement", balance: "5800000", onBudget: false, sort: 3 },
 ];
 
 describe("Sidebar", () => {
@@ -200,7 +200,7 @@ describe("Sidebar", () => {
   it("renders Archived Accounts section when archived accounts exist", () => {
     const mixedAccounts: Account[] = [
       ...accounts,
-      { id: 99, name: "Old Bank", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 4, archived: true },
+      { id: 99, name: "Old Bank", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 4, archived: true },
     ];
     const onSelectAccount = vi.fn();
     render(

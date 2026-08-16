@@ -28,24 +28,30 @@ export const MONTHS_LONG = [
   "December",
 ];
 
-export function fmt(n: number): string {
-  const abs = Math.abs(n);
+export function fmt(cents: number): string {
+  const abs = Math.abs(cents) / 100;
   const s = abs.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return (n < 0 ? "-$" : "$") + s;
+  return (cents < 0 ? "-$" : "$") + s;
 }
 
-export function fmtSigned(n: number): string {
-  if (n === 0) return "$0.00";
-  return fmt(n);
+export function fmtSigned(cents: number): string {
+  if (cents === 0) return "$0.00";
+  return fmt(cents);
 }
 
 export function num(s: string | number | null | undefined): number {
   if (s == null) return 0;
-  const n = typeof s === "number" ? s : parseFloat(s);
-  return Number.isNaN(n) ? 0 : n;
+  const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
+  if (Number.isNaN(n) || n === 0) return 0;
+  return n;
+}
+
+export function dollarsToCents(d: number | null | undefined): number {
+  if (d == null || Number.isNaN(d)) return 0;
+  return Math.round(d * 100);
 }
 
 type _Token = { kind: "num"; value: number } | { kind: "op"; op: string };
