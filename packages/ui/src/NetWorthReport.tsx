@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { fmt, MONTHS, monthLabel, parseMonthKey } from "@ynab/logic";
+import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@ynab/logic";
 import { Panel } from "@ynab/theme";
 import {
   ChartTip,
@@ -13,12 +13,7 @@ import {
   useElementSize,
 } from "./chartUtils.js";
 
-export type NetWorthPoint = {
-  month: string;
-  assets: number;
-  debts: number;
-  net: number;
-};
+export type { NetWorthPoint };
 
 const AXIS_LINE = "#b6b6b1";
 const GRID = "#dcdcd8";
@@ -86,14 +81,13 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     if (hover == null) return null;
     const p = points[hover.idx];
     if (!p) return null;
-    const total = p.assets + p.debts;
     return (
       <div className="space-y-[3px]">
         <div className="text-[11px] font-bold mb-1" style={{ color: "#f2f5f7" }}>
           {monthLabel(p.month)}
         </div>
         <TipLabel color={ASSETS_COLOR} label="Assets" value={fmt(p.assets)} />
-        <TipLabel color={DEBTS_COLOR} label="Debts" value={fmt(p.debts)} pct={total ? Math.round((p.debts / total) * 100) + "%" : undefined} />
+        <TipLabel color={DEBTS_COLOR} label="Debts" value={fmt(p.debts)} />
         <TipLabel color={NET_COLOR} label="Net" value={fmt(p.net)} />
       </div>
     );
