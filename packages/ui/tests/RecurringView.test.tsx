@@ -6,8 +6,8 @@ import type { BudgetData } from "@ynab/logic";
 function makeData(): BudgetData {
   return {
     accounts: [
-      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 0 },
-      { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "0.00", onBudget: true, sort: 1 },
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 1 },
     ],
     groups: [],
     categories: [
@@ -22,7 +22,7 @@ function makeData(): BudgetData {
         accountId: 1,
         categoryId: 11,
         payee: "Rent",
-        amount: "-1500.00",
+        amount: "-150000",
         frequency: "monthly",
         nextDate: "2026-06-01",
         active: true,
@@ -33,7 +33,7 @@ function makeData(): BudgetData {
         accountId: 1,
         categoryId: null,
         payee: "To Savings",
-        amount: "-200.00",
+        amount: "-20000",
         frequency: "monthly",
         nextDate: "2026-06-15",
         active: true,
@@ -45,13 +45,13 @@ function makeData(): BudgetData {
         accountId: 1,
         categoryId: null,
         payee: "Paycheck split",
-        amount: "3000.00",
+        amount: "300000",
         frequency: "monthly",
         nextDate: "2026-06-25",
         active: true,
         subTransactions: [
-          { id: 31, recurringId: 3, categoryId: 10, amount: "2000.00", memo: "", sort: 0 },
-          { id: 32, recurringId: 3, categoryId: 11, amount: "1000.00", memo: "", sort: 1 },
+          { id: 31, recurringId: 3, categoryId: 10, amount: "200000", memo: "", sort: 0 },
+          { id: 32, recurringId: 3, categoryId: 11, amount: "100000", memo: "", sort: 1 },
         ],
       },
       {
@@ -59,7 +59,7 @@ function makeData(): BudgetData {
         accountId: 1,
         categoryId: 10,
         payee: "Paused bill",
-        amount: "-100.00",
+        amount: "-10000",
         frequency: "monthly",
         nextDate: "2026-06-05",
         active: false,
@@ -97,8 +97,6 @@ describe("RecurringView", () => {
 
   it("computes the monthly income / bills / net strip", () => {
     renderView();
-    // Income: split children sum +3000. Bills: only the active single
-    // monthly entry (-1500); the paused entry is excluded.
     expect(screen.getByText("Monthly Income")).toBeInTheDocument();
     expect(screen.getAllByText("$3,000.00").length).toBeGreaterThan(0);
     expect(screen.getByText("Monthly Bills")).toBeInTheDocument();
@@ -114,14 +112,13 @@ describe("RecurringView", () => {
       accountId: 1,
       categoryId: 10,
       payee: "Bonus",
-      amount: "500.00",
+      amount: "50000",
       frequency: "twiceamonth",
       nextDate: "2026-06-15",
       active: true,
       subTransactions: [],
     });
     renderView({ data });
-    // Income: 3000 + 500*2 = 4000. Bills: -1500. Net = 2500.
     expect(screen.getAllByText("$4,000.00").length).toBeGreaterThan(0);
     expect(screen.getAllByText("-$1,500.00").length).toBeGreaterThan(0);
     expect(screen.getByText("$2,500.00")).toBeInTheDocument();

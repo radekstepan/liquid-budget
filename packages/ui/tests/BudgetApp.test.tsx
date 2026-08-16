@@ -78,7 +78,7 @@ describe("BudgetApp", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     expect(screen.getByRole("button", { name: /^accounts/i })).toBeInTheDocument();
-    expect(screen.getAllByText("To Be Budgeted").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/To Be Budgeted|Overbudgeted/i).length).toBeGreaterThan(0);
     // The single-month budget view has a MonthNav with prev/next buttons
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /next month/i })).toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("BudgetApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
     fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
 
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
       target: { value: "Coffee" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
@@ -121,7 +121,7 @@ describe("BudgetApp", () => {
     const call = calls.find((c) => c.method === "addTransaction");
     expect(call?.args[0]).toMatchObject({
       payee: "Coffee",
-      amount: -5.5,
+      amount: -550,
     });
   });
 
@@ -150,20 +150,20 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Edit Account")).toBeInTheDocument();
 
     // Step 1: enter the confirm panel.
-    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
     const heading = screen.getByText(`Delete "${account?.name ?? ""}"?`);
     expect(heading).toBeInTheDocument();
     if (txCount > 0) {
-      expect(screen.getByText(txCount.toString())).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(`This account has ${txCount} transaction`))).toBeInTheDocument();
     }
-    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(screen.getByText(/permanently remove/i)).toBeInTheDocument();
 
     // Step 2: cancel must NOT delete.
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(calls.some((c) => c.method === "deleteAccount")).toBe(false);
 
     // Re-open confirm and accept.
-    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
     });
@@ -216,7 +216,7 @@ describe("BudgetApp", () => {
     });
     fireEvent.click(editBtn);
 
-    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
     });
@@ -247,9 +247,9 @@ describe("BudgetApp", () => {
     });
     fireEvent.click(editBtn);
 
-    expect(screen.getByText(/this account is archived/i)).toBeInTheDocument();
+    expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
     });
 
     expect(

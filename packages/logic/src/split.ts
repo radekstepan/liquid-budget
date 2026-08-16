@@ -7,7 +7,7 @@
  */
 
 import type { Transaction, SubTransaction } from "./types.js";
-import { num } from "./format.js";
+import { fmt, num } from "./format.js";
 
 /** A transaction is a child of a split iff its `parentId` is set. */
 export function isSplitChild(t: Transaction): boolean {
@@ -60,23 +60,12 @@ export function splitChildrenTotal(all: Transaction[], parentId: number): number
 }
 
 /**
- * Returns true if the split's children sum to the parent's amount to
- * the cent. A parent with no children is considered "unbalanced" for
- * the purposes of this check (since splits must have >= 2 children).
- */
-export function isSplitBalanced(parent: Transaction, all: Transaction[]): boolean {
-  const children = getSplitChildren(all, parent.id);
-  if (children.length < 2) return false;
-  return Math.abs(splitChildrenTotal(all, parent.id) - num(parent.amount)) < 0.005;
-}
-
-/**
  * Classify a set of sub-transactions for the UI. Mirrors the
  * server-side `assertSplitsBalanced` — returns an error string or null.
  *
  * Children use their *signed* amounts so mixed-sign splits (e.g. a
  * Paycheck with a negative tax deduction) are supported. The signed
- * sum must equal the parent's signed amount to the cent.
+ * sum must equal the parent's signed amount.
  */
 export function validateSubTransactions(
   parentAmount: number,
@@ -88,10 +77,16 @@ export function validateSubTransactions(
     if (!c.categoryId && !c.transferAccountId) {
       return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
     }
+    if (c.categoryId && c.transferAccountId) {
+      return `Sub-transaction ${i + 1} cannot have both a category and transfer account.`;
+    }
+    if (!Number.isFinite(Number(c.amount))) {
+      return `Sub-transaction ${i + 1} amount is not a valid number.`;
+    }
   }
-  const sum = children.reduce((s, c) => s + Number(c.amount) || 0, 0);
-  if (Math.abs(sum - parentAmount) > 0.005) {
-    return `Sub-transactions sum to ${sum.toFixed(2)} but parent is ${parentAmount.toFixed(2)}.`;
+  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
+  if (sum !== parentAmount) {
+    return `Sub-transactions sum to ${fmt(sum)} but parent is ${fmt(parentAmount)}.`;
   }
   return null;
 }

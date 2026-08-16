@@ -36,6 +36,8 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       status: (t.status as ClearedStatus) ?? "c",
       // createdAt is already a text string in SQLite
       createdAt: t.createdAt,
+      isIncome: Boolean(t.isIncome),
+      reconciledAt: t.reconciledAt,
     })),
     recurring: recur.map((r) => ({
       ...r,

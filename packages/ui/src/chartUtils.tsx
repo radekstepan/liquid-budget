@@ -22,13 +22,14 @@ export function colorAt(i: number): string {
   return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length] ?? "#888";
 }
 
-export function fmtShort(n: number): string {
-  const abs = Math.abs(n);
-  const sign = n < 0 ? "-" : "";
+export function fmtShort(cents: number): string {
+  const dollars = cents / 100;
+  const abs = Math.abs(dollars);
+  const sign = dollars < 0 ? "-" : "";
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
   if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2).replace(/\.?0+$/, "")}K`;
-  return fmt(n);
+  return fmt(cents);
 }
 
 export function niceTicks(min: number, max: number, count = 5): number[] {
@@ -65,7 +66,7 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
   if (minVal < 0) {
     const minAbs = Math.abs(minVal);
     const maxPower = Math.ceil(Math.log10(Math.max(10, minAbs)));
-    const minPower = Math.max(2, maxPower >= 5 ? 3 : 2);
+    const minPower = Math.max(4, maxPower >= 7 ? 5 : 4);
     for (let p = maxPower; p >= minPower; p--) {
       ticks.push(-Math.pow(10, p));
     }
@@ -75,7 +76,7 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
 
   if (maxVal > 0) {
     const maxPower = Math.ceil(Math.log10(Math.max(10, maxVal)));
-    const minPower = Math.max(2, maxPower >= 5 ? 3 : 2);
+    const minPower = Math.max(4, maxPower >= 7 ? 5 : 4);
     for (let p = minPower; p <= maxPower; p++) {
       ticks.push(Math.pow(10, p));
     }

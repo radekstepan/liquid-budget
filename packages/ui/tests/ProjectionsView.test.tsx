@@ -45,7 +45,7 @@ const emptyCategories: Category[] = [];
 function rec(
   id: number,
   frequency: Recurring["frequency"],
-  amount: number,
+  amountInDollars: number,
   active = true
 ): Recurring {
   return {
@@ -53,21 +53,21 @@ function rec(
     accountId: 1,
     categoryId: 1,
     payee: `R${id}`,
-    amount: String(amount),
+    amount: String(Math.round(amountInDollars * 100)),
     frequency,
     nextDate: "2026-07-01",
     active,
   };
 }
 
-function expectedProjected(liquidNow: number, perMonth: number): string {
-  return fmt(liquidNow + perMonth * 12);
+function expectedProjected(liquidNowCents: number, perMonthCents: number): string {
+  return fmt(Math.round(liquidNowCents + perMonthCents * 12));
 }
 
 describe("ProjectionsView", () => {
   it("returns perMonth=0 when no recurring items exist", () => {
     const data = {
-      accounts: [acct({ id: 1, balance: "1000" })],
+      accounts: [acct({ id: 1, balance: "100000" })],
       groups: emptyGroups,
       categories: emptyCategories,
       assignments: [],
@@ -81,8 +81,8 @@ describe("ProjectionsView", () => {
 
   it("includes biweekly entries in the projection flow", () => {
     // One biweekly entry of $2000 (e.g. a biweekly paycheck).
-    // biweeklyNet = 2000 * (26 / 12) = 4333.33.
-    // 12-month delta = (2000 * 26 / 12) * 12 = 52,000.
+    // biweeklyNet = 200000 * (26 / 12)
+    // 12-month delta = (200000 * 26 / 12) * 12 = 5,200,000 cents ($52,000).
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
       groups: emptyGroups,
@@ -92,12 +92,12 @@ describe("ProjectionsView", () => {
       recurring: [rec(1, "biweekly", 2000)],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, (2000 * 26) / 12)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, (200000 * 26) / 12)).length).toBeGreaterThan(0);
   });
 
   it("includes twiceamonth entries (2x/month) in the projection flow", () => {
     // One twiceamonth entry of $4152.97 (e.g. salary twice a month).
-    // monthlyNet = 4152.97 * 2 = 8305.94.
+    // monthlyNet = 415297 * 2 = 830594.
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
       groups: emptyGroups,
@@ -107,16 +107,16 @@ describe("ProjectionsView", () => {
       recurring: [rec(1, "twiceamonth", 4152.97)],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, 4152.97 * 2)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, 415297 * 2)).length).toBeGreaterThan(0);
   });
 
   it("combines monthly, weekly, biweekly, and yearly entries correctly", () => {
-    // monthly:    -100           → -100
-    // weekly:     +50 * (52/12)  → +216.67
-    // biweekly:   +200 * (26/12) → +433.33
-    // yearly:     +1200 / 12     → +100
-    // perMonth                      = +650
-    // 12-month delta                 = +7,800
+    // monthly:    -100           → -10000
+    // weekly:     +50 * (52/12)  → +21666.67
+    // biweekly:   +200 * (26/12) → +43333.33
+    // yearly:     +1200 / 12     → +10000
+    // perMonth                      = +65000 cents ($650.00)
+    // 12-month delta                 = +780,000 cents ($7,800.00)
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
       groups: emptyGroups,
@@ -131,7 +131,7 @@ describe("ProjectionsView", () => {
       ],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, 650)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, 65000)).length).toBeGreaterThan(0);
   });
 
   it("excludes inactive biweekly entries", () => {
@@ -174,8 +174,8 @@ describe("ProjectionsView", () => {
     // A transfer from an off-budget account (e.g. salary/business account) into Chequing (liquid)
     const data = {
       accounts: [
-        acct({ id: 1, name: "Chequing", kind: "liquid", balance: "1000" }),
-        acct({ id: 2, name: "Company", kind: "offbudget", balance: "50000" }),
+        acct({ id: 1, name: "Chequing", kind: "liquid", balance: "100000" }),
+        acct({ id: 2, name: "Company", kind: "offbudget", balance: "5000000" }),
       ],
       groups: emptyGroups,
       categories: emptyCategories,
@@ -190,18 +190,18 @@ describe("ProjectionsView", () => {
       ],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    // Inflow into liquid = +4000 * 2 = 8000/mo.
-    // In 12 mo = 1000 + 8000 * 12 = 97,000.
+    // Inflow into liquid = +4000 * 2 = 8000/mo ($8,000.00/mo = 800,000 cents/mo).
+    // In 12 mo = 1000 + 8000 * 12 = $97,000 ($97,000.00).
     expect(screen.getAllByText("$97,000.00").length).toBeGreaterThan(0);
   });
 
   it("uses split children for biweekly entries (signed sum)", () => {
-    // Biweekly split: +5000 gross, -1000 taxes → net 4000.
-    // biweeklyNet = 4000 * (26 / 12) = 8666.67.
-    // 12 months = 104,000.
+    // Biweekly split: +5000 gross, -1000 taxes → net 4000 ($4,000 = 400,000 cents).
+    // biweeklyNet = 400000 * (26 / 12).
+    // 12 months = $104,000.
     const subs: RecurringSubTransaction[] = [
-      { id: 1, recurringId: 1, categoryId: 1, amount: "5000", memo: "", sort: 0 },
-      { id: 2, recurringId: 1, categoryId: 1, amount: "-1000", memo: "", sort: 1 },
+      { id: 1, recurringId: 1, categoryId: 1, amount: "500000", memo: "", sort: 0 },
+      { id: 2, recurringId: 1, categoryId: 1, amount: "-100000", memo: "", sort: 1 },
     ];
     const data = {
       accounts: [acct({ id: 1, balance: "0" })],
@@ -214,6 +214,6 @@ describe("ProjectionsView", () => {
       ],
     };
     render(<ProjectionsView data={data} month="2026-07" />);
-    expect(screen.getAllByText(expectedProjected(0, (4000 * 26) / 12)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(expectedProjected(0, (400000 * 26) / 12)).length).toBeGreaterThan(0);
   });
 });

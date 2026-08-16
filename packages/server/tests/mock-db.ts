@@ -72,6 +72,7 @@ interface Chain {
   from(table: unknown): Chain;
   where(w: unknown): Chain;
   orderBy(o: unknown): Chain;
+  limit(l: number): Chain;
   set(s: unknown): Chain;
   values(v: unknown): Chain;
   returning(): Promise<Row[]>;
@@ -112,6 +113,9 @@ function makeChain(
     },
     orderBy(o) {
       entry.orderBy = o;
+      return chain;
+    },
+    limit(l) {
       return chain;
     },
     set(s) {

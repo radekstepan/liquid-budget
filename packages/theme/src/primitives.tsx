@@ -15,7 +15,7 @@ export const cx = (...c: (string | false | undefined | null)[]) =>
 /* -------------------------------------------------- money */
 export const money = (n: number, showZero = true) => {
   if (n === 0 && !showZero) return "";
-  const s = Math.abs(n).toLocaleString("en-US", {
+  const s = (Math.abs(n) / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });

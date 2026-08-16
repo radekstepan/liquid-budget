@@ -76,6 +76,8 @@ export type Transaction = {
   createdAt?: string;
   parentId?: number | null;
   transferAccountId?: number | null;
+  isIncome?: boolean;
+  reconciledAt?: string | null;
 };
 
 export type SubTransaction = {

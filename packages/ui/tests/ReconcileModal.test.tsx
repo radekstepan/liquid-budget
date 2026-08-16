@@ -7,8 +7,8 @@ import { openDropdown } from "./dropdown.js";
 const state: ReconcileModalState = {
   accountId: 7,
   accountName: "Chequing",
-  workingBalance: 1250.5,
-  unclearedTotal: -50,
+  workingBalance: 125050,
+  unclearedTotal: -5000,
   unclearedCount: 2,
   clearedCount: 3,
   reconciledCount: 10,
@@ -70,7 +70,7 @@ describe("ReconcileModal", () => {
     fireEvent.click(reconcile);
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
-      statementBalance: 1250.5,
+      statementBalance: 125050,
       adjustmentCategoryId: null,
     });
   });
@@ -104,7 +104,7 @@ describe("ReconcileModal", () => {
     fireEvent.click(reconcile);
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
-      statementBalance: 1000,
+      statementBalance: 100000,
       adjustmentCategoryId: 10,
     });
   });
@@ -164,7 +164,7 @@ describe("ReconcileModal", () => {
     fireEvent.click(reconcile);
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
-      statementBalance: 1250.5,
+      statementBalance: 125050,
       adjustmentCategoryId: null,
     });
   });
@@ -174,7 +174,7 @@ describe("ReconcileModal", () => {
       state: {
         ...state,
         lastReconciledAt: "2026-06-01",
-        lastReconciledBalance: 1200,
+        lastReconciledBalance: 120000,
       },
     });
     expect(screen.getByText(/already reconciled/i)).toBeInTheDocument();

@@ -1,45 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
-import { evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
 
 describe("format", () => {
-  it("fmt signs negative numbers", () => {
+  it("fmt signs negative numbers and formats cents as dollars", () => {
     expect(fmt(0)).toBe("$0.00");
-    expect(fmt(123)).toBe("$123.00");
-    expect(fmt(-123)).toBe("-$123.00");
-    expect(fmt(1234.5)).toBe("$1,234.50");
+    expect(fmt(12300)).toBe("$123.00");
+    expect(fmt(-12300)).toBe("-$123.00");
+    expect(fmt(123450)).toBe("$1,234.50");
   });
 
   it("fmt handles large numbers with comma separators", () => {
-    expect(fmt(1234567.89)).toBe("$1,234,567.89");
-    expect(fmt(-1234567.89)).toBe("-$1,234,567.89");
-  });
-
-  it("fmt rounds correctly at 2 decimal places", () => {
-    expect(fmt(0.005)).toBe("$0.01"); // rounds up
-    expect(fmt(0.004)).toBe("$0.00"); // rounds down
+    expect(fmt(123456789)).toBe("$1,234,567.89");
+    expect(fmt(-123456789)).toBe("-$1,234,567.89");
   });
 
   it("fmtSigned shows zero as $0.00", () => {
     expect(fmtSigned(0)).toBe("$0.00");
-    expect(fmtSigned(-5)).toBe("-$5.00");
+    expect(fmtSigned(-500)).toBe("-$5.00");
   });
 
-  it("num parses strings and handles nullish/NaN", () => {
-    expect(num("3.14")).toBeCloseTo(3.14);
-    expect(num(7)).toBe(7);
+  it("num parses integer strings and handles nullish/NaN", () => {
+    expect(num("314")).toBe(314);
+    expect(num(700)).toBe(700);
     expect(num(null)).toBe(0);
     expect(num(undefined)).toBe(0);
     expect(num("not a number")).toBe(0);
   });
 
-  it("num returns 0 for dollar-sign-prefixed strings (not a supported format)", () => {
-    // "$1,234.56" is not parseable by parseFloat — callers should strip symbols first
-    expect(num("$1,234.56")).toBe(0);
+  it("num handles negative integer strings", () => {
+    expect(num("-4250")).toBe(-4250);
+    expect(num("-0")).toBe(0);
   });
 
-  it("num handles negative strings", () => {
-    expect(num("-42.50")).toBeCloseTo(-42.5);
-    expect(num("-0")).toBeCloseTo(0); // parseFloat("-0") is IEEE -0, use toBeCloseTo
+  it("dollarsToCents converts dollar amounts to integer cents", () => {
+    expect(dollarsToCents(3.14)).toBe(314);
+    expect(dollarsToCents(-42.50)).toBe(-4250);
+    expect(dollarsToCents(0)).toBe(0);
+    expect(dollarsToCents(null)).toBe(0);
   });
 
   it("monthKey zero-pads single-digit months", () => {
@@ -57,7 +54,6 @@ describe("format", () => {
   });
 
   it("monthKey / parseMonthKey round-trip across year boundary", () => {
-    // Simulating Dec 2025 + 1 → Jan 2026
     const dec = parseMonthKey("2025-12");
     const total = dec.year * 12 + dec.month0 + 1;
     const nextKey = monthKey(Math.floor(total / 12), total % 12);
@@ -77,22 +73,9 @@ describe("format", () => {
   });
 
   it("todayISO uses the local timezone, not UTC", () => {
-    // The bug: `new Date().toISOString().slice(0, 10)` renders the
-    // UTC date. A user entering a transaction at 9:30 PM PDT on
-    // Aug 5, 2026 sees it post-dated to Aug 6, 2026.
-    //
-    // The fix: shift the date by the local TZ offset before slicing.
-    //
-    // We mock `Date.prototype.getTimezoneOffset` to simulate a
-    // host running in PDT (offset = 420 min = 7h west of UTC),
-    // freeze the clock at the exact instant that exposes the bug,
-    // and assert the function returns the local-calendar date.
-    // This works regardless of the host's actual TZ.
     const realOffset = Date.prototype.getTimezoneOffset;
     Date.prototype.getTimezoneOffset = () => 420; // PDT, UTC-7
 
-    // 2026-08-06T04:30:00Z = 2026-08-05 21:30 PDT — the exact
-    // instant where UTC says Aug 6 but local says Aug 5.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-06T04:30:00Z"));
     try {
@@ -119,7 +102,6 @@ describe("format", () => {
     });
 
     it("clamps to last day when next month is shorter", () => {
-      // Jan 31 + 1 month = Feb 28 (2026 is not a leap year)
       expect(nextDateFor("monthly", "2026-01-31")).toBe("2026-02-28");
     });
 
@@ -145,88 +127,88 @@ describe("format", () => {
       expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
     });
 
-  it("returns input unchanged for invalid date", () => {
-    expect(nextDateFor("monthly", "not-a-date")).toBe("not-a-date");
-  });
-});
-
-describe("evalAmount", () => {
-  it("returns null for nullish / empty input", () => {
-    expect(evalAmount(null)).toBeNull();
-    expect(evalAmount(undefined)).toBeNull();
-    expect(evalAmount("")).toBeNull();
-    expect(evalAmount("   ")).toBeNull();
+    it("returns input unchanged for invalid date", () => {
+      expect(nextDateFor("monthly", "not-a-date")).toBe("not-a-date");
+    });
   });
 
-  it("parses plain numbers", () => {
-    expect(evalAmount("0")).toBe(0);
-    expect(evalAmount("100")).toBe(100);
-    expect(evalAmount("3.14")).toBeCloseTo(3.14);
-    expect(evalAmount(42)).toBe(42);
-  });
+  describe("evalAmount", () => {
+    it("returns null for nullish / empty input", () => {
+      expect(evalAmount(null)).toBeNull();
+      expect(evalAmount(undefined)).toBeNull();
+      expect(evalAmount("")).toBeNull();
+      expect(evalAmount("   ")).toBeNull();
+    });
 
-  it("evaluates +, -, *, / with correct precedence", () => {
-    expect(evalAmount("100 + 50")).toBe(150);
-    expect(evalAmount("100 - 50")).toBe(50);
-    expect(evalAmount("100 * 2")).toBe(200);
-    expect(evalAmount("100 / 4")).toBe(25);
-    expect(evalAmount("100 + 50 * 2")).toBe(200);
-    expect(evalAmount("2 + 3 * 4")).toBe(14);
-  });
+    it("parses plain numbers", () => {
+      expect(evalAmount("0")).toBe(0);
+      expect(evalAmount("100")).toBe(100);
+      expect(evalAmount("3.14")).toBeCloseTo(3.14);
+      expect(evalAmount(42)).toBe(42);
+    });
 
-  it("honours parentheses", () => {
-    expect(evalAmount("(10 + 5) * 2")).toBe(30);
-    expect(evalAmount("((1 + 2) * 3) - 1")).toBe(8);
-  });
+    it("evaluates +, -, *, / with correct precedence", () => {
+      expect(evalAmount("100 + 50")).toBe(150);
+      expect(evalAmount("100 - 50")).toBe(50);
+      expect(evalAmount("100 * 2")).toBe(200);
+      expect(evalAmount("100 / 4")).toBe(25);
+      expect(evalAmount("100 + 50 * 2")).toBe(200);
+      expect(evalAmount("2 + 3 * 4")).toBe(14);
+    });
 
-  it("handles unary minus and plus", () => {
-    expect(evalAmount("-50 + 100")).toBe(50);
-    expect(evalAmount("100 + -50")).toBe(50);
-    expect(evalAmount("2 * -3")).toBe(-6);
-    expect(evalAmount("(-5)")).toBe(-5);
-  });
+    it("honours parentheses", () => {
+      expect(evalAmount("(10 + 5) * 2")).toBe(30);
+      expect(evalAmount("((1 + 2) * 3) - 1")).toBe(8);
+    });
 
-  it("is left-associative for same-precedence ops", () => {
-    expect(evalAmount("10 - 3 - 2")).toBe(5);
-    expect(evalAmount("20 / 4 / 5")).toBe(1);
-  });
+    it("handles unary minus and plus", () => {
+      expect(evalAmount("-50 + 100")).toBe(50);
+      expect(evalAmount("100 + -50")).toBe(50);
+      expect(evalAmount("2 * -3")).toBe(-6);
+      expect(evalAmount("(-5)")).toBe(-5);
+    });
 
-  it("strips $ , _ and whitespace before parsing", () => {
-    expect(evalAmount("$1,234.56")).toBeCloseTo(1234.56);
-    expect(evalAmount("$1,234.56 + 10")).toBeCloseTo(1244.56);
-    expect(evalAmount("1_000 + 500")).toBe(1500);
-    expect(evalAmount("  100  +  50  ")).toBe(150);
-  });
+    it("is left-associative for same-precedence ops", () => {
+      expect(evalAmount("10 - 3 - 2")).toBe(5);
+      expect(evalAmount("20 / 4 / 5")).toBe(1);
+    });
 
-  it("accepts leading and trailing dots", () => {
-    expect(evalAmount(".5")).toBe(0.5);
-    expect(evalAmount(".5 + .25")).toBeCloseTo(0.75);
-    expect(evalAmount("5.")).toBe(5);
-  });
+    it("strips $ , _ and whitespace before parsing", () => {
+      expect(evalAmount("$1,234.56")).toBeCloseTo(1234.56);
+      expect(evalAmount("$1,234.56 + 10")).toBeCloseTo(1244.56);
+      expect(evalAmount("1_000 + 500")).toBe(1500);
+      expect(evalAmount("  100  +  50  ")).toBe(150);
+    });
 
-  it("returns null for incomplete expressions", () => {
-    expect(evalAmount("100 +")).toBeNull();
-    expect(evalAmount("* 5")).toBeNull();
-    expect(evalAmount("(")).toBeNull();
-    expect(evalAmount("(100 + 50")).toBeNull();
-    expect(evalAmount("100 50")).toBeNull();
-  });
+    it("accepts leading and trailing dots", () => {
+      expect(evalAmount(".5")).toBe(0.5);
+      expect(evalAmount(".5 + .25")).toBeCloseTo(0.75);
+      expect(evalAmount("5.")).toBe(5);
+    });
 
-  it("returns null for invalid characters", () => {
-    expect(evalAmount("abc")).toBeNull();
-    expect(evalAmount("1; alert(1)")).toBeNull();
-    expect(evalAmount("1 + abc")).toBeNull();
-    expect(evalAmount("sqrt(4)")).toBeNull();
-    expect(evalAmount("2 ^ 3")).toBeNull();
-  });
+    it("returns null for incomplete expressions", () => {
+      expect(evalAmount("100 +")).toBeNull();
+      expect(evalAmount("* 5")).toBeNull();
+      expect(evalAmount("(")).toBeNull();
+      expect(evalAmount("(100 + 50")).toBeNull();
+      expect(evalAmount("100 50")).toBeNull();
+    });
 
-  it("returns null for division by zero", () => {
-    expect(evalAmount("100 / 0")).toBeNull();
-    expect(evalAmount("0 / 0")).toBeNull();
-  });
+    it("returns null for invalid characters", () => {
+      expect(evalAmount("abc")).toBeNull();
+      expect(evalAmount("1; alert(1)")).toBeNull();
+      expect(evalAmount("1 + abc")).toBeNull();
+      expect(evalAmount("sqrt(4)")).toBeNull();
+      expect(evalAmount("2 ^ 3")).toBeNull();
+    });
 
-  it("returns null for double-dot numbers", () => {
-    expect(evalAmount("1.2.3")).toBeNull();
+    it("returns null for division by zero", () => {
+      expect(evalAmount("100 / 0")).toBeNull();
+      expect(evalAmount("0 / 0")).toBeNull();
+    });
+
+    it("returns null for double-dot numbers", () => {
+      expect(evalAmount("1.2.3")).toBeNull();
+    });
   });
-});
 });

@@ -44,17 +44,15 @@ describe("recurring flavour helpers", () => {
 
   it("classifies a row with children as split", () => {
     expect(
-      recurringFlavour(base(), [sub({ amount: "10" }), sub({ amount: "20" })])
+      recurringFlavour(base(), [sub({ amount: "1000" }), sub({ amount: "2000" })])
     ).toBe("split");
   });
 
   it("transferAccountId takes precedence over children", () => {
-    // A transfer cannot also be a split; the queries enforce this, but
-    // the flavour helper follows the discriminator convention.
     expect(
       recurringFlavour(
         base({ transferAccountId: 2 }),
-        [sub({ amount: "10" })]
+        [sub({ amount: "1000" })]
       )
     ).toBe("transfer");
   });
@@ -94,62 +92,58 @@ describe("frequencyMonthlyMultiplier", () => {
 describe("netMonthlyAmount", () => {
   it("returns the row amount for singles", () => {
     expect(
-      netMonthlyAmount(base({ amount: "-50" }), [])
-    ).toBe(-50);
+      netMonthlyAmount(base({ amount: "-5000" }), [])
+    ).toBe(-5000);
   });
 
   it("returns 0 for transfers when accounts is omitted", () => {
     expect(
-      netMonthlyAmount(base({ amount: "-500", transferAccountId: 2 }), [])
+      netMonthlyAmount(base({ amount: "-50000", transferAccountId: 2 }), [])
     ).toBe(0);
   });
 
   it("returns the sum of children for splits", () => {
     expect(
       netMonthlyAmount(
-        base({ amount: "-200" }),
-        [sub({ amount: "-120" }), sub({ amount: "-80" })]
+        base({ amount: "-20000" }),
+        [sub({ amount: "-12000" }), sub({ amount: "-8000" })]
       )
-    ).toBe(-200);
+    ).toBe(-20000);
   });
 
   describe("account-aware liquid flow", () => {
     const accounts = [
-      { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 0 },
-      { id: 2, name: "Savings", kind: "liquid" as const, groupLabel: "Budget", balance: "5000", onBudget: true, sort: 1 },
-      { id: 3, name: "Visa", kind: "credit" as const, groupLabel: "Budget", balance: "-200", onBudget: true, sort: 2 },
-      { id: 4, name: "TFSA", kind: "offbudget" as const, groupLabel: "Off", balance: "10000", onBudget: false, sort: 3 },
+      { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid" as const, groupLabel: "Budget", balance: "500000", onBudget: true, sort: 1 },
+      { id: 3, name: "Visa", kind: "credit" as const, groupLabel: "Budget", balance: "-20000", onBudget: true, sort: 2 },
+      { id: 4, name: "TFSA", kind: "offbudget" as const, groupLabel: "Off", balance: "1000000", onBudget: false, sort: 3 },
     ];
 
     it("returns 0 for liquid-to-liquid transfer", () => {
-      // Transfer -500 from Checking (id 1) to Savings (id 2)
       expect(
-        netMonthlyAmount(base({ accountId: 1, amount: "-500", transferAccountId: 2 }), [], accounts)
+        netMonthlyAmount(base({ accountId: 1, amount: "-50000", transferAccountId: 2 }), [], accounts)
       ).toBe(0);
     });
 
     it("returns negative flow for transfer from liquid to offbudget / credit", () => {
-      // Transfer -455.50 from Checking (id 1) to TFSA (id 4)
       expect(
-        netMonthlyAmount(base({ accountId: 1, amount: "-455.50", transferAccountId: 4 }), [], accounts)
-      ).toBe(-455.5);
+        netMonthlyAmount(base({ accountId: 1, amount: "-45550", transferAccountId: 4 }), [], accounts)
+      ).toBe(-45550);
     });
 
     it("returns positive flow for transfer from offbudget to liquid (salary / transfer in)", () => {
-      // Transfer -4152.97 recorded on Business TFSA (id 4) to Checking (id 1)
       expect(
-        netMonthlyAmount(base({ accountId: 4, amount: "-4152.97", transferAccountId: 1 }), [], accounts)
-      ).toBe(4152.97);
+        netMonthlyAmount(base({ accountId: 4, amount: "-415297", transferAccountId: 1 }), [], accounts)
+      ).toBe(415297);
 
-      // Or transfer +4152.97 recorded on Checking (id 1) from Business (id 4)
       expect(
-        netMonthlyAmount(base({ accountId: 1, amount: "4152.97", transferAccountId: 4 }), [], accounts)
-      ).toBe(4152.97);
+        netMonthlyAmount(base({ accountId: 1, amount: "415297", transferAccountId: 4 }), [], accounts)
+      ).toBe(415297);
     });
 
     it("returns 0 for offbudget single expense / tracking item", () => {
       expect(
-        netMonthlyAmount(base({ accountId: 4, amount: "-100" }), [], accounts)
+        netMonthlyAmount(base({ accountId: 4, amount: "-10000" }), [], accounts)
       ).toBe(0);
     });
   });
@@ -158,54 +152,51 @@ describe("netMonthlyAmount", () => {
 describe("validateRecurringSubTransactions", () => {
   it("returns null for a balanced split", () => {
     expect(
-      validateRecurringSubTransactions(200, [
-        { categoryId: 1, amount: 120 },
-        { categoryId: 2, amount: 80 },
+      validateRecurringSubTransactions(20000, [
+        { categoryId: 1, amount: 12000 },
+        { categoryId: 2, amount: 8000 },
       ])
     ).toBeNull();
   });
 
   it("rejects fewer than 2 children", () => {
     expect(
-      validateRecurringSubTransactions(200, [{ categoryId: 1, amount: 200 }])
+      validateRecurringSubTransactions(20000, [{ categoryId: 1, amount: 20000 }])
     ).toMatch(/at least two/i);
   });
 
-  it("rejects a child with no category", () => {
+  it("rejects a child with no category and no transfer", () => {
     expect(
-      validateRecurringSubTransactions(200, [
-        { categoryId: 0, amount: 100 },
-        { categoryId: 2, amount: 100 },
+      validateRecurringSubTransactions(20000, [
+        { categoryId: 0, amount: 10000 },
+        { categoryId: 2, amount: 10000 },
       ])
     ).toMatch(/missing a category/i);
   });
 
   it("rejects unbalanced children", () => {
     expect(
-      validateRecurringSubTransactions(200, [
-        { categoryId: 1, amount: 120 },
-        { categoryId: 2, amount: 70 },
+      validateRecurringSubTransactions(20000, [
+        { categoryId: 1, amount: 12000 },
+        { categoryId: 2, amount: 7000 },
       ])
     ).toMatch(/sum to/);
   });
 
   it("accepts a mixed-sign split (Paycheck + tax deduction)", () => {
-    // Previously rejected because |+5000| + |-1000| = 6000 ≠ |+4000|.
-    // The fix: validation uses signed sums so a +5000 gross with a
-    // -1000 tax deduction netted to +4000 is valid.
     expect(
-      validateRecurringSubTransactions(4000, [
-        { categoryId: 1, amount: 5000 },
-        { categoryId: 2, amount: -1000 },
+      validateRecurringSubTransactions(400000, [
+        { categoryId: 1, amount: 500000 },
+        { categoryId: 2, amount: -100000 },
       ])
     ).toBeNull();
   });
 
   it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
     expect(
-      validateRecurringSubTransactions(4000, [
-        { categoryId: 1, amount: 5000 },
-        { categoryId: 2, amount: -1001 },
+      validateRecurringSubTransactions(400000, [
+        { categoryId: 1, amount: 500000 },
+        { categoryId: 2, amount: -100001 },
       ])
     ).toMatch(/sum to/);
   });

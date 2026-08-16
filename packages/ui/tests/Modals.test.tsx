@@ -17,13 +17,13 @@ import type {
 import { pickFromOpenDropdownByValue, pickPlaceholderDropdownByIndexByValue } from "./dropdown.js";
 
 const accounts: Account[] = [
-  { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100.00", onBudget: true, sort: 0 },
-  { id: 2, name: "Credit", kind: "credit", groupLabel: "Cards", balance: "-50.00", onBudget: true, sort: 1 },
+  { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
+  { id: 2, name: "Credit", kind: "credit", groupLabel: "Cards", balance: "-5000", onBudget: true, sort: 1 },
 ];
 
 const categories: Category[] = [
   { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
-  { id: 11, groupId: 1, name: "Rent", sort: 1, carryover: "0", goalTarget: "1500.00", linkedAccountId: null },
+  { id: 11, groupId: 1, name: "Rent", sort: 1, carryover: "0", goalTarget: "150000", linkedAccountId: null },
 ];
 
 describe("CategoryModal", () => {
@@ -51,7 +51,7 @@ describe("CategoryModal", () => {
     const goalInput = screen.getByPlaceholderText("1000.00");
     fireEvent.change(goalInput, { target: { value: "2000" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 2000 });
+    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 200000 });
   });
 
   it("pre-fills the name and goal when editing an existing category", () => {
@@ -80,7 +80,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
       target: { value: "Whole Foods" },
     });
     // The only "0.00" placeholder in single mode is the amount field.
@@ -91,7 +91,7 @@ describe("TransactionModal", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Whole Foods",
-      amount: -42.5,
+      amount: -4250,
       categoryId: null,
     });
   });
@@ -107,7 +107,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
       target: { value: "Payroll" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
@@ -116,7 +116,7 @@ describe("TransactionModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Payroll",
-      amount: 1000,
+      amount: 100000,
     });
   });
 
@@ -161,7 +161,7 @@ describe("TransactionModal", () => {
       date: "2026-06-10",
       payee: "IGA",
       memo: "",
-      amount: "-12.34",
+      amount: "-1234",
       cleared: true,
     };
     render(
@@ -242,7 +242,7 @@ describe("TransactionModal", () => {
         accountId: 1,
         transferAccountId: 2,
         categoryId: null,
-        amount: -100,
+        amount: -10000,
         payee: "Transfer : Credit",
       });
     });
@@ -277,7 +277,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      expect(screen.getByText("Total")).toBeInTheDocument();
+      expect(screen.getByText("Total Amount")).toBeInTheDocument();
       expect(screen.getByText("Sub-transactions")).toBeInTheDocument();
     });
 
@@ -293,7 +293,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
         target: { value: "Costco" },
       });
       // Type the parent total first.
@@ -323,7 +323,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
         target: { value: "Costco" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -347,12 +347,12 @@ describe("TransactionModal", () => {
         subTransactions: { categoryId: number; amount: number }[];
         categoryId: number | null;
       };
-      expect(payload.amount).toBe(-100);
+      expect(payload.amount).toBe(-10000);
       expect(payload.categoryId).toBeNull();
       expect(payload.subTransactions).toHaveLength(2);
       // Children are passed through with their typed sign (no coercion).
-      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -60 });
-      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -40 });
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -6000 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -4000 });
     });
 
     it("enables save for a mixed-sign split (Paycheck + tax deduction)", () => {
@@ -370,7 +370,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
         target: { value: "Employer Inc." },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -391,9 +391,9 @@ describe("TransactionModal", () => {
         amount: number;
         subTransactions: { categoryId: number; amount: number }[];
       };
-      expect(payload.amount).toBe(4000);
-      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 5000 });
-      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -1000 });
+      expect(payload.amount).toBe(400000);
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 500000 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -100000 });
     });
 
     it("keeps save disabled when signed child sum doesn't match parent", () => {
@@ -409,7 +409,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
         target: { value: "X" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -439,7 +439,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
         target: { value: "Split with Transfer" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -460,9 +460,9 @@ describe("TransactionModal", () => {
         amount: number;
         subTransactions: { categoryId: number | null; transferAccountId: number | null; amount: number }[];
       };
-      expect(payload.amount).toBe(-100);
-      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: -60 });
-      expect(payload.subTransactions[1]).toMatchObject({ categoryId: null, transferAccountId: 2, amount: -40 });
+      expect(payload.amount).toBe(-10000);
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: -6000 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: null, transferAccountId: 2, amount: -4000 });
     });
 
     it("pre-populates sub-rows when editing an existing split parent", () => {
@@ -474,7 +474,7 @@ describe("TransactionModal", () => {
         date: "2026-07-01",
         payee: "Costco",
         memo: "",
-        amount: "-100",
+        amount: "-10000",
         cleared: true,
       };
       const allTransactions: Transaction[] = [
@@ -486,7 +486,7 @@ describe("TransactionModal", () => {
           date: "2026-07-01",
           payee: "Costco",
           memo: "",
-          amount: "-60",
+          amount: "-6000",
           cleared: true,
           parentId: 1,
         },
@@ -497,7 +497,7 @@ describe("TransactionModal", () => {
           date: "2026-07-01",
           payee: "Costco",
           memo: "",
-          amount: "-40",
+          amount: "-4000",
           cleared: true,
           parentId: 1,
         },
@@ -568,7 +568,7 @@ describe("RecurringModal", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Hydro",
-      amount: -80,
+      amount: -8000,
       frequency: "biweekly",
     });
   });
@@ -580,7 +580,7 @@ describe("RecurringModal", () => {
       accountId: 1,
       categoryId: 10,
       payee: "Spotify",
-      amount: "-9.99",
+      amount: "-999",
       frequency: "monthly",
       nextDate: "2026-07-01",
       active: true,
@@ -619,7 +619,7 @@ describe("RecurringModal", () => {
     expect(payload).toMatchObject({
       accountId: 1,
       transferAccountId: 2,
-      amount: -500,
+      amount: -50000,
     });
     expect(payload.categoryId).toBeNull();
     // Payee auto-derived as "Transfer : Credit" since blank.
@@ -637,7 +637,7 @@ describe("RecurringModal", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(screen.getByLabelText(/^payee$/i), {
       target: { value: "Costco" },
     });
     const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -661,12 +661,12 @@ describe("RecurringModal", () => {
       categoryId: number | null;
       payee: string;
     };
-    expect(payload.amount).toBe(-200);
+    expect(payload.amount).toBe(-20000);
     expect(payload.categoryId).toBeNull();
     expect(payload.payee).toBe("Costco");
     expect(payload.subTransactions).toHaveLength(2);
-    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -120 });
-    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -80 });
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -12000 });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -8000 });
   });
 
   it("re-uses transferAccountId and subTransactions when editing", () => {
@@ -676,7 +676,7 @@ describe("RecurringModal", () => {
       accountId: 1,
       categoryId: null,
       payee: "AMEX Payment",
-      amount: "-1000",
+      amount: "-100000",
       frequency: "monthly",
       nextDate: "2026-07-20",
       active: true,
@@ -700,22 +700,22 @@ describe("RecurringModal", () => {
       accountId: 1,
       transferAccountId: 2,
       payee: "AMEX Payment",
-      amount: -1000,
+      amount: -100000,
     });
   });
 
   it("opens a split row in split mode with its children pre-populated", () => {
     const onSave = vi.fn();
     const subs: RecurringSubTransaction[] = [
-      { id: 1, recurringId: 9, categoryId: 10, amount: "-120", memo: "g", sort: 0 },
-      { id: 2, recurringId: 9, categoryId: 11, amount: "-80",  memo: "h", sort: 1 },
+      { id: 1, recurringId: 9, categoryId: 10, amount: "-12000", memo: "g", sort: 0 },
+      { id: 2, recurringId: 9, categoryId: 11, amount: "-8000",  memo: "h", sort: 1 },
     ];
     const initial = {
       id: 9,
       accountId: 1,
       categoryId: null,
       payee: "Costco",
-      amount: "-200",
+      amount: "-20000",
       frequency: "monthly",
       nextDate: "2026-07-01",
       active: true,
@@ -750,7 +750,7 @@ describe("RecurringModal", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(screen.getByLabelText(/^payee$/i), {
       target: { value: "Employer Inc." },
     });
     const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -771,9 +771,9 @@ describe("RecurringModal", () => {
       amount: number;
       subTransactions: { categoryId: number; amount: number }[];
     };
-    expect(payload.amount).toBe(4000);
-    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 5000 });
-    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -1000 });
+    expect(payload.amount).toBe(400000);
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 500000 });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -100000 });
   });
 });
 
@@ -816,20 +816,19 @@ describe("AccountModal", () => {
   it("saves a liquid account with a positive balance", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    // The modal title and the primary button both read "Add Account".
-    expect(screen.getAllByText("Add Account").length).toBeGreaterThan(0);
-    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+    expect(screen.getByText("Add Account")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: /name/i }), {
       target: { value: "Savings" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "250.75" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Savings",
       kind: "liquid",
       groupLabel: "Liquid",
-      balance: 250.75,
+      balance: 25075,
       onBudget: true,
     });
   });
@@ -837,19 +836,19 @@ describe("AccountModal", () => {
   it("saves a credit card account on-budget", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+    fireEvent.change(screen.getByRole("textbox", { name: /name/i }), {
       target: { value: "Visa" },
     });
     pickFromOpenDropdownByValue(/type/i, "credit");
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-300" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Visa",
       kind: "credit",
       groupLabel: "Credit Cards",
-      balance: -300,
+      balance: -30000,
       onBudget: true,
     });
   });
@@ -857,11 +856,11 @@ describe("AccountModal", () => {
   it("saves an off-budget account", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    fireEvent.change(screen.getByRole("textbox", { name: /account name/i }), {
+    fireEvent.change(screen.getByRole("textbox", { name: /name/i }), {
       target: { value: "RRSP" },
     });
     pickFromOpenDropdownByValue(/type/i, "offbudget");
-    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "RRSP",
       kind: "offbudget",
@@ -874,7 +873,7 @@ describe("AccountModal", () => {
   it("does not call onSave when the name is empty", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    fireEvent.click(screen.getByRole("button", { name: /add account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -882,20 +881,20 @@ describe("AccountModal", () => {
     const onSave = vi.fn();
     render(
       <AccountModal
-        initial={{ name: "Chequing", kind: "liquid", balance: "-125.00" }}
+        initial={{ name: "Chequing", kind: "liquid", balance: "-12500" }}
         onClose={() => {}}
         onSave={onSave}
       />
     );
     expect(screen.getByText("Edit Account")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Chequing")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("125")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(screen.getByDisplayValue("125.00")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Chequing",
       kind: "liquid",
       groupLabel: "Liquid",
-      balance: 125,
+      balance: 12500,
       onBudget: true,
     });
   });
@@ -911,15 +910,15 @@ describe("AccountModal", () => {
     const onArchive = vi.fn();
     render(
       <AccountModal
-        initial={{ id: 1, name: "Active Checking", kind: "liquid", balance: "100.00", onBudget: true, sort: 0 }}
+        initial={{ id: 1, name: "Active Checking", kind: "liquid", balance: "10000", onBudget: true, sort: 0 }}
         onClose={() => {}}
         onSave={() => {}}
         onArchive={onArchive}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
-    expect(screen.getByText(/archive vs\. delete/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    expect(screen.getByText(/archived accounts are hidden/i)).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
     });
@@ -930,16 +929,16 @@ describe("AccountModal", () => {
     const onUnarchive = vi.fn();
     render(
       <AccountModal
-        initial={{ id: 2, name: "Old Checking", kind: "liquid", balance: "0.00", onBudget: true, sort: 1, archived: true }}
+        initial={{ id: 2, name: "Old Checking", kind: "liquid", balance: "0", onBudget: true, sort: 1, archived: true }}
         onClose={() => {}}
         onSave={() => {}}
         onUnarchive={onUnarchive}
       />
     );
 
-    expect(screen.getByText(/this account is archived/i)).toBeInTheDocument();
+    expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
     });
     expect(onUnarchive).toHaveBeenCalledTimes(1);
   });

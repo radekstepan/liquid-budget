@@ -2,7 +2,6 @@ import {
   sqliteTable,
   text,
   integer,
-  real,
   uniqueIndex,
   index,
   AnySQLiteColumn,
@@ -13,11 +12,11 @@ export const accounts = sqliteTable("accounts", {
   name: text("name").notNull(),
   kind: text("kind").notNull(),
   groupLabel: text("group_label").notNull(),
-  balance: real("balance").notNull().default(0),
+  balance: integer("balance").notNull().default(0),
   onBudget: integer("on_budget", { mode: "boolean" }).notNull().default(true),
   sort: integer("sort").notNull().default(0),
   lastReconciledAt: text("last_reconciled_at"),
-  lastReconciledBalance: real("last_reconciled_balance"),
+  lastReconciledBalance: integer("last_reconciled_balance"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
 });
 
@@ -35,8 +34,8 @@ export const categories = sqliteTable("categories", {
     .references(() => categoryGroups.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   sort: integer("sort").notNull().default(0),
-  carryover: real("carryover").notNull().default(0),
-  goalTarget: real("goal_target"),
+  carryover: integer("carryover").notNull().default(0),
+  goalTarget: integer("goal_target"),
   linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
     onDelete: "cascade",
   }),
@@ -50,7 +49,7 @@ export const assignments = sqliteTable(
       .notNull()
       .references(() => categories.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
-    amount: real("amount").notNull().default(0),
+    amount: integer("amount").notNull().default(0),
   },
   (t) => ({
     uniq: uniqueIndex("assignments_cat_month_uniq").on(t.categoryId, t.month),
@@ -70,11 +69,13 @@ export const transactions = sqliteTable(
     date: text("date").notNull(),
     payee: text("payee").notNull().default(""),
     memo: text("memo").notNull().default(""),
-    amount: real("amount").notNull().default(0),
+    amount: integer("amount").notNull().default(0),
     status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
     createdAt: text("created_at").notNull().default(""),
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
+    isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
+    reconciledAt: text("reconciled_at"),
   },
   (t) => ({
     accountDateIdx: index("transactions_account_date_idx").on(t.accountId, t.date),
@@ -92,28 +93,22 @@ export const recurring = sqliteTable("recurring", {
     onDelete: "set null",
   }),
   payee: text("payee").notNull().default(""),
-  amount: real("amount").notNull().default(0),
+  amount: integer("amount").notNull().default(0),
   frequency: text("frequency").notNull().default("monthly"),
   nextDate: text("next_date").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
 });
-// ^ `transfer_account_id` is in the schema from day one (was previously
-//   added at boot by an ALTER TABLE inside a try/catch in seed.ts).
 
 export const recurringSubTransactions = sqliteTable("recurring_sub_transactions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   recurringId: integer("recurring_id")
     .notNull()
     .references(() => recurring.id, { onDelete: "cascade" }),
-  // Nullable + ON DELETE SET NULL (matches `transactions.categoryId`) so that
-  // deleting a category that happens to be used in a recurring split
-  // does not crash with a foreign key constraint violation. The recurring
-  // children simply end up uncategorised.
   categoryId: integer("category_id").references(() => categories.id, {
     onDelete: "set null",
   }),
-  amount: real("amount").notNull().default(0),
+  amount: integer("amount").notNull().default(0),
   memo: text("memo").notNull().default(""),
   sort: integer("sort").notNull().default(0),
 });
