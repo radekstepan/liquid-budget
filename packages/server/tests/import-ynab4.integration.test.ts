@@ -169,7 +169,10 @@ const ynabData = {
       frequency: "monthly",
       payeeId: "p1",
       categoryId: "Category/__Split__",
-      subTransactions: [{ categoryId: "sc1", amount: -300 }],
+      subTransactions: [
+        { categoryId: "sc1", amount: -200 },
+        { categoryId: null, targetAccountId: "acc2", amount: -100 },
+      ],
     },
     { entityId: "sX", accountId: "acc1", date: "2026-07-05", amount: -1, frequency: "monthly", payeeId: null, categoryId: null, isTombstone: true },
   ],
@@ -277,8 +280,10 @@ describe("importYnab4 full import", () => {
     // Split scheduled: children imported, parent category forced null.
     const splitR = recurring.find((r) => r.subTransactions.length > 0)!;
     expect(splitR.categoryId).toBeNull();
-    expect(splitR.subTransactions).toHaveLength(1);
-    expect(Number(splitR.subTransactions[0]!.amount)).toBe(-30000);
+    expect(splitR.subTransactions).toHaveLength(2);
+    expect(Number(splitR.subTransactions[0]!.amount)).toBe(-20000);
+    expect(Number(splitR.subTransactions[1]!.amount)).toBe(-10000);
+    expect(splitR.subTransactions[1]!.transferAccountId).toBeTruthy();
   });
 
   it("recomputes balances correctly without double-counting transfers or split parents", async () => {

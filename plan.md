@@ -48,7 +48,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-08** | F-08 | Data Integrity | **High (P1)** | Reconciled transactions (`status: "r"`) are editable/deletable via API without guard | `packages/server/src/queries/transactions.ts` | ✅ **Resolved** |
 | **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-10** | F-07, BUG-32, BUG-33 | Reconciliation | **High (P1)** | Reconciliation lacks round tracking (`reconciliation_id`), leaks future-dated rows into working balance, and flips adjustment row to 'r' | `packages/server/src/queries/reconcile.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-11** | F-06, BUG-20 | API / Importer | **High (P1)** | Recurring API rejects transfer sub-rows that UI sends; importer silently drops recurring transfer children | `apps/web/src/app/api/recurring/route.ts`, `packages/server/src/import-ynab4.ts` |
+| **UNI-11** | F-06, BUG-20 | API / Importer | **High (P1)** | Recurring API rejects transfer sub-rows that UI sends; importer silently drops recurring transfer children | `apps/web/src/app/api/recurring/route.ts`, `packages/server/src/import-ynab4.ts` | ✅ **Resolved** |
 | **UNI-12** | BUG-05, BUG-06, F-09 | Concurrency | **High (P1)** | `createAccount` sort calc and `upsertAssignment` select-then-insert are not transaction-wrapped (race condition / 500 error) | `packages/server/src/queries/accounts.ts`, `packages/server/src/queries/assignments.ts` |
 | **UNI-13** | BUG-08 | Build | **High (P1)** | Stale `dist/compute.js` artifact references non-existent exports (`computeGroups`, `summarize`) | `packages/logic/dist/compute.js` |
 | **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` |
@@ -298,6 +298,7 @@ Despite strong foundations, the application has critical financial calculation d
 #### UNI-11 (F-06, BUG-20, BUG-21): Sub-Transaction Validation & Parser Unification
 - **Root Cause:** `apps/web/src/app/api/recurring/route.ts` contains a custom parser that mandates `categoryId` on every split row, rejecting valid transfer splits. `packages/server/src/queries/recurring.ts` correctly validates category-XOR-transfer.
 - **Actionable Solution:** Remove duplicate ad-hoc parsers in route handlers. Unify all sub-transaction validation on `@ynab/logic` and `@ynab/server` shared validators.
+- **Resolution (UNI-11):** Updated `parseSubTransactions` in `apps/web/src/app/api/recurring/route.ts` to accept `transferAccountId` alongside `categoryId`. Updated `importYnab4` in `packages/server/src/import-ynab4.ts` to resolve `subTransferAccountId` for scheduled transaction split children so transfer split rows are never silently discarded. Added test coverage in `packages/server/tests/import-ynab4.integration.test.ts`.
 
 ---
 
