@@ -10,7 +10,7 @@ export class CategoryError extends Error {
 }
 
 export type CreateCategoryGroupInput = { name: string };
-export type CreateCategoryInput = { groupId: number; name: string; goalTarget?: number | null };
+export type CreateCategoryInput = { groupId: number; name: string; goalTarget?: number | null; carryover?: number | null };
 
 /**
  * Insert a new category group at sort = max(existing sort) + 1.
@@ -63,6 +63,7 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
         name: String(input.name ?? "New Category"),
         sort: Number(maxRow?.max ?? -1) + 1,
         goalTarget: input.goalTarget != null ? Number(input.goalTarget) : null,
+        carryover: input.carryover != null ? Number(input.carryover) : 0,
       })
       .returning();
     db.run(sql`COMMIT`);

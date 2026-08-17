@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     groupId,
     name: body.name,
     goalTarget: body.goalTarget != null ? Number(body.goalTarget) : null,
+    carryover: body.carryover != null ? Number(body.carryover) : undefined,
   });
   return Response.json(row);
 }

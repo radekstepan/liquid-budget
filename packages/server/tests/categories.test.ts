@@ -45,6 +45,17 @@ describe("categories queries", () => {
       expect(row).toMatchObject({ id: 1, sort: 3 });
     });
 
+    it("UNI-05 / BUG-02: stores carryover amount on category creation", async () => {
+      mock.respondWith("select:categories", [{ max: 0 }]);
+      mock.respondWith("insert:categories", [{ id: 2, name: "Savings Goal", carryover: 50000 }]);
+      const row = await createCategory(mock.db, {
+        groupId: 1,
+        name: "Savings Goal",
+        carryover: 50000,
+      });
+      expect(row).toMatchObject({ id: 2, name: "Savings Goal", carryover: 50000 });
+    });
+
     it("wraps the read-then-write in BEGIN/COMMIT (race fix)", async () => {
       mock.respondWith("select:categories", [{ max: 2 }]);
       mock.respondWith("insert:categories", [{ id: 1, sort: 3 }]);
