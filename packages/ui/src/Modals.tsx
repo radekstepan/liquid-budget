@@ -573,12 +573,18 @@ export function TransactionModal({
 
 export function CategoryModal({
   initial,
+  transactionCount = 0,
+  otherCategories = [],
   onClose,
   onSave,
+  onDelete,
 }: {
   initial?: Category;
+  transactionCount?: number;
+  otherCategories?: Category[];
   onClose: () => void;
   onSave: (v: { name: string; goalTarget: number | null; carryover?: number }) => void;
+  onDelete?: (opts?: { moveToCategoryId?: number }) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [hasGoal, setHasGoal] = useState(!!initial?.goalTarget);
@@ -590,69 +596,150 @@ export function CategoryModal({
     initCarryover !== 0 ? initCarryover.toFixed(2) : ""
   );
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [moveToCategoryId, setMoveToCategoryId] = useState<number | "">(
+    otherCategories[0]?.id ?? ""
+  );
+
+  const confirmDelete = async () => {
+    if (!onDelete) return;
+    if (transactionCount > 0 && !moveToCategoryId) return;
+    setDeleting(true);
+    try {
+      await onDelete(
+        transactionCount > 0 ? { moveToCategoryId: Number(moveToCategoryId) } : undefined
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <Modal
-      title={initial ? "Edit Category" : "New Category"}
+      title={
+        confirmingDelete
+          ? `Delete "${initial?.name}"?`
+          : initial
+            ? "Edit Category"
+            : "New Category"
+      }
       onClose={onClose}
       footer={
-        <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn
-            variant="primary"
-            onClick={() =>
-              name.trim() &&
-              onSave({
-                name: name.trim(),
-                goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
-                carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
-              })
-            }
-          >
-            Save
-          </Btn>
-        </>
+        confirmingDelete ? (
+          <>
+            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              Cancel
+            </Btn>
+            <Btn
+              variant="danger"
+              onClick={confirmDelete}
+              disabled={deleting || (transactionCount > 0 && !moveToCategoryId)}
+            >
+              {deleting ? "Deleting…" : "Yes, delete it"}
+            </Btn>
+          </>
+        ) : (
+          <>
+            <Btn onClick={onClose}>Cancel</Btn>
+            {initial && onDelete && (
+              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete…
+              </Btn>
+            )}
+            <Btn
+              variant="primary"
+              onClick={() =>
+                name.trim() &&
+                onSave({
+                  name: name.trim(),
+                  goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
+                  carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
+                })
+              }
+            >
+              Save
+            </Btn>
+          </>
+        )
       }
     >
-      <Field label="Name">
-        <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
-      </Field>
-      <div className="mb-2">
-        <Checkbox
-          checked={hasGoal}
-          onChange={setHasGoal}
-          label="Set a funding goal"
-        />
-      </div>
-      {hasGoal && (
-        <Field label="Goal Target">
-          <TextField
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="1000.00"
-            inputMode="decimal"
-            className={inputClass}
-          />
-          <AmountPreview value={goal} />
-        </Field>
-      )}
-      <div className="mb-2">
-        <Checkbox
-          checked={hasCarryover}
-          onChange={setHasCarryover}
-          label="Set opening carryover balance"
-        />
-      </div>
-      {hasCarryover && (
-        <Field label="Carryover Amount">
-          <TextField
-            value={carryover}
-            onChange={(e) => setCarryover(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-            className={inputClass}
-          />
-          <AmountPreview value={carryover} />
-        </Field>
+      {confirmingDelete ? (
+        <div className="space-y-3 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
+          <p>
+            Are you sure you want to delete <strong>{initial?.name}</strong>?
+          </p>
+          {transactionCount > 0 ? (
+            <div>
+              <Notice tone="warn" title="Existing transactions">
+                This category is referenced by {transactionCount} transaction(s).
+                Please select another category to reassign them to before deleting.
+              </Notice>
+              <div className="mt-3">
+                <Field label="Move transactions to">
+                  <Select
+                    value={moveToCategoryId}
+                    onChange={(v) => setMoveToCategoryId(v === "" ? "" : Number(v))}
+                    className="w-full"
+                  >
+                    <option value="">Select replacement category…</option>
+                    {otherCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            </div>
+          ) : (
+            <p className="y-hint text-[11.5px]">This category has no transactions and will be removed.</p>
+          )}
+        </div>
+      ) : (
+        <>
+          <Field label="Name">
+            <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
+          </Field>
+          <div className="mb-2">
+            <Checkbox
+              checked={hasGoal}
+              onChange={setHasGoal}
+              label="Set a funding goal"
+            />
+          </div>
+          {hasGoal && (
+            <Field label="Goal Target">
+              <TextField
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="1000.00"
+                inputMode="decimal"
+                className={inputClass}
+              />
+              <AmountPreview value={goal} />
+            </Field>
+          )}
+          <div className="mb-2">
+            <Checkbox
+              checked={hasCarryover}
+              onChange={setHasCarryover}
+              label="Set opening carryover balance"
+            />
+          </div>
+          {hasCarryover && (
+            <Field label="Carryover Amount">
+              <TextField
+                value={carryover}
+                onChange={(e) => setCarryover(e.target.value)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className={inputClass}
+              />
+              <AmountPreview value={carryover} />
+            </Field>
+          )}
+        </>
       )}
     </Modal>
   );

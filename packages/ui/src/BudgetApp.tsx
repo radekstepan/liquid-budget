@@ -113,7 +113,7 @@ export type BudgetAppApi = {
     categoryId: number | null,
     v: { name: string; goalTarget: number | null; carryover?: number }
   ) => Promise<void>;
-  deleteCategory: (id: number) => Promise<void>;
+  deleteCategory: (id: number, opts?: { moveToCategoryId?: number }) => Promise<void>;
   reorderCategory: (id: number, sort: number) => Promise<void>;
   reorderGroup: (id: number, sort: number) => Promise<void>;
   saveGroup: (groupId: number | null, name: string) => Promise<void>;
@@ -627,9 +627,17 @@ export function BudgetApp({
       {modal.kind === "editCategory" && editingCategory && (
         <CategoryModal
           initial={editingCategory}
+          transactionCount={
+            data.transactions.filter((t) => t.categoryId === editingCategory.id).length
+          }
+          otherCategories={data.categories.filter((c) => c.id !== editingCategory.id)}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.saveCategory(null, editingCategory.id, v);
+            setModal({ kind: "none" });
+          }}
+          onDelete={async (opts) => {
+            await api.deleteCategory(editingCategory.id, opts);
             setModal({ kind: "none" });
           }}
         />

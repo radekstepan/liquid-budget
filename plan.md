@@ -40,7 +40,7 @@ Despite strong foundations, the application has critical financial calculation d
 |---|---|---|---|---|---|---|
 | **UNI-01** | F-02 | Financial Math | **Critical (P0)** | Rolling TBB surplus walk ignores overspending in intermediate months $\to$ phantom budgetable money; breaks integrity invariant | `packages/logic/src/budget-engine.ts`, `packages/server/src/queries/diagnostics.ts` | ✅ **Resolved** |
 | **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | Pending |
+| **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
 | **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | Pending |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` |
 | **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` |
@@ -207,6 +207,7 @@ Despite strong foundations, the application has critical financial calculation d
     });
   }
   ```
+- **Resolution:** Implemented `CategoryError` (status 422) and updated `deleteCategory` in `packages/server/src/queries/categories.ts` to block bare deletions if transactions or scheduled transactions reference the category. Added atomic transaction reassignment via `moveToCategoryId` across `transactions`, `recurring`, and `recurring_sub_transactions`. Updated API DELETE route in `apps/web/src/app/api/categories/route.ts` and `BudgetAppShell.tsx`. Updated `CategoryModal` in `packages/ui/src/Modals.tsx` with reassignment selection UI when referenced transactions exist. Added comprehensive tests in `packages/server/tests/categories.test.ts` and `packages/ui/tests/Modals.test.tsx`.
 
 ---
 
