@@ -53,7 +53,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-13** | BUG-08 | Build | **High (P1)** | Stale `dist/compute.js` artifact references non-existent exports (`computeGroups`, `summarize`) | `packages/logic/dist/compute.js` | ✅ **Resolved** |
 | **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` | ✅ **Resolved** |
 | **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` | ✅ **Resolved** |
-| **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` |
+| **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` | ✅ **Resolved** |
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` |
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` |
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` |
@@ -138,6 +138,10 @@ Despite strong foundations, the application has critical financial calculation d
   3. In `budget-engine.ts`, attribute income to `t.incomeMonth ?? t.date.slice(0, 7)`.
   4. In `TransactionModal.tsx`, add income targeting selector: `[ Income for this Month | Income for Next Month ]`.
 - **Resolution:** Added `incomeMonth` to `transactions` table schema and SQL migration `0002_add_income_month_to_transactions.sql`. Implemented `nextMonthKey` and `prevMonthKey` in `@ynab/logic/src/format.ts`. Updated `import-ynab4.ts` to assign `incomeMonth` for `Category/__DeferredIncome__` on splits and plain transactions. Updated `budget-engine.ts` to attribute income using `t.incomeMonth || mk`. Updated `TransactionModal.tsx` and API routes to support selecting "Income: Available this month" vs "Income: Available next month". Added unit and server tests.
+
+#### UNI-16 (BUG-07): Budget Engine Docstring and Assignment Aggregation Accuracy
+- **Root Cause:** Docstring in `packages/logic/src/budget-engine.ts` previously had ambiguous phrasing regarding group summing versus non-CC groups in TBB calculation.
+- **Resolution (UNI-16):** Updated docstring and comments in `packages/logic/src/budget-engine.ts` to accurately reflect that `totalAssigned` sums all category assignments across all groups (including explicit CC debt paydown assignments). Verified with logic test suite.
 
 ---
 

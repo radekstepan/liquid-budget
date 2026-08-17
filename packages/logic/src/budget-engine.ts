@@ -13,10 +13,10 @@
  *
  * 2. TO BE BUDGETED (TBB) — cumulative
  *    tbb(month N) = income(N) - assigned(N) + surplusTBB(N-1) - overspent(N-1)
- *    Where surplusTBB = max(0, tbb of prior month) — surpluses carry forward,
- *    deficits do not (over-budgeting in one month doesn't retroactively reduce
- *    a future month's income, it just shows as a negative TBB in that month).
- *    Income = sum of positive income transactions in the month.
+ *    Where assigned(N) sums all category assignments across all groups (including
+ *    explicit debt paydown assignments in CC Payment categories).
+ *    surplusTBB carries forward prior rolling balances.
+ *    Income = sum of positive income transactions in the month (including deferred income).
  *    When tbb < 0 the user has "over-budgeted" (assigned more than earned).
  *
  *    Cash overspending: negative available in non-CC categories is clamped to
