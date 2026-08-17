@@ -75,6 +75,7 @@ interface Chain {
   limit(l: number): Chain;
   set(s: unknown): Chain;
   values(v: unknown): Chain;
+  onConflictDoUpdate(opts: unknown): Chain;
   returning(): Promise<Row[]>;
   then<T>(resolve: (v: T) => void, reject?: (e: unknown) => void): Promise<void>;
 }
@@ -124,6 +125,9 @@ function makeChain(
     },
     values(v) {
       entry.values = v;
+      return chain;
+    },
+    onConflictDoUpdate(opts) {
       return chain;
     },
     async returning() {

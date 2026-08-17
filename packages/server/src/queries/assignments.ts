@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { assignments } from "../schema.js";
 
@@ -9,25 +9,20 @@ export type UpsertAssignmentInput = {
 };
 
 export async function upsertAssignment(db: Database, input: UpsertAssignmentInput) {
-  const existing = await db
-    .select()
-    .from(assignments)
-    .where(
-      and(eq(assignments.categoryId, input.categoryId), eq(assignments.month, input.month))
-    );
-
-  if (existing.length > 0) {
+  db.run(sql`BEGIN`);
+  try {
     const [row] = await db
-      .update(assignments)
-      .set({ amount: input.amount })
-      .where(eq(assignments.id, existing[0]!.id))
+      .insert(assignments)
+      .values({ categoryId: input.categoryId, month: input.month, amount: input.amount })
+      .onConflictDoUpdate({
+        target: [assignments.categoryId, assignments.month],
+        set: { amount: input.amount },
+      })
       .returning();
+    db.run(sql`COMMIT`);
     return row;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
   }
-
-  const [row] = await db
-    .insert(assignments)
-    .values({ categoryId: input.categoryId, month: input.month, amount: input.amount })
-    .returning();
-  return row;
 }
