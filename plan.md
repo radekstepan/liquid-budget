@@ -71,7 +71,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` | ✅ **Resolved** |
-| **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` |
+| **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` | ✅ **Resolved** |
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` |
 | **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` |
 | **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` |
@@ -465,6 +465,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/client.ts:71-77`, `db` proxy cast internal references to `any`, bypassing compile-time SQL method inspection.
 - **Actionable Solution:** Add strict generic `ProxyHandler<Db>` with typed key parameters.
 - **Resolution (UNI-33):** Refactored `db` proxy in `packages/server/src/client.ts` to use strict generic typing `Proxy<Db>` with `get<K extends keyof Db>` property traps.
+
+---
+
+#### UNI-34 (BUG-27): Net Worth Trailing Percentage Delta with Zero Base
+- **Root Cause:** In `packages/logic/src/reports.ts:235`, `computeTrailingNetWorth` returned `0` when `startNet === 0` even if `delta !== 0`, incorrectly representing a 0% change when net worth grew or fell from zero.
+- **Actionable Solution:** Update `pctDelta` in `TrailingNetWorthSummary` to be `number | null`, returning `null` (undefined change) when `startNet === 0 && delta !== 0` and `0` when `startNet === 0 && delta === 0`. Update UI in `Inspector.tsx` to handle `null`.
+- **Resolution (UNI-34):** Updated `computeTrailingNetWorth` in `packages/logic/src/reports.ts` and `packages/ui/src/Inspector.tsx`. Added unit test coverage in `packages/logic/tests/reports.test.ts`.
 
 ---
 

@@ -272,8 +272,8 @@ export function Inspector({
             title="12-Month Change"
           >
             {effectiveNetWorth.delta >= 0 ? "▲" : "▼"}{" "}
-            {money(Math.abs(effectiveNetWorth.delta))}{" "}
-            ({effectiveNetWorth.pctDelta >= 0 ? "+" : ""}{effectiveNetWorth.pctDelta}%)
+            {money(Math.abs(effectiveNetWorth.delta))}
+            {effectiveNetWorth.pctDelta != null ? ` (${effectiveNetWorth.pctDelta >= 0 ? "+" : ""}${effectiveNetWorth.pctDelta}%)` : ""}
           </span>
         </div>
 
