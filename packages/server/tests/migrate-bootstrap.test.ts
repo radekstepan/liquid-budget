@@ -37,6 +37,16 @@ function expectedHash0000(): string {
   return createHash("sha256").update(sql).digest("hex");
 }
 
+function initLegacyTables(raw: Database.Database) {
+  const file = readFileSync(path.join(MIGRATIONS_FOLDER, "meta/_journal.json"), "utf-8");
+  const tag = (JSON.parse(file) as { entries: Array<{ tag: string }> }).entries[0]!.tag;
+  const sql = readFileSync(path.join(MIGRATIONS_FOLDER, `${tag}.sql`), "utf-8");
+  const statements = sql.split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
+  for (const stmt of statements) {
+    raw.exec(stmt);
+  }
+}
+
 describe("bootstrapMigrationJournal", () => {
   it("is a no-op on a fresh database", () => {
     const { db } = openRaw();
@@ -47,7 +57,7 @@ describe("bootstrapMigrationJournal", () => {
 
   it("is a no-op when the legacy tables exist but the journal table is missing", () => {
     const { db, raw } = openRaw();
-    raw.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`);
+    initLegacyTables(raw);
     // The journal table does not exist yet — migrate() must create it
     // before the bootstrap row can be inserted, so this call defers.
     expect(bootstrapMigrationJournal(db)).toBe("noop");
@@ -55,7 +65,7 @@ describe("bootstrapMigrationJournal", () => {
 
   it("inserts the synthetic journal row for a legacy database", () => {
     const { db, raw } = openRaw();
-    raw.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`);
+    initLegacyTables(raw);
     raw.exec(
       `CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC)`
     );
@@ -79,7 +89,7 @@ describe("bootstrapMigrationJournal", () => {
 
   it("is a no-op when the migration hash is already recorded", () => {
     const { db, raw } = openRaw();
-    raw.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`);
+    initLegacyTables(raw);
     raw.exec(
       `CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC)`
     );

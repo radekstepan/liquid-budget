@@ -31,6 +31,8 @@ export type CreateTransactionInput = {
    * child rows (children always apply their own balance).
    */
   skipBalance?: boolean;
+  isIncome?: boolean;
+  incomeMonth?: string | null;
 };
 
 export type UpdateTransactionInput = {
@@ -41,6 +43,8 @@ export type UpdateTransactionInput = {
   memo?: string;
   amount?: number;
   status?: ClearedStatus;
+  isIncome?: boolean;
+  incomeMonth?: string | null;
 };
 
 export type SubTransactionInput = {
@@ -195,7 +199,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const onBudget = await isAccountOnBudget(db, input.accountId);
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
-    const isIncome = !isTransfer && !isSplitParent && input.parentId == null && input.categoryId == null && input.amount > 0 && onBudget;
+    const isIncome = input.isIncome !== undefined ? input.isIncome : (!isTransfer && !isSplitParent && input.parentId == null && input.categoryId == null && input.amount > 0 && onBudget);
 
     const [row] = await db
       .insert(transactions)
@@ -210,6 +214,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         transferAccountId: input.transferAccountId ?? null,
         parentId: input.parentId ?? null,
         isIncome,
+        incomeMonth: input.incomeMonth ?? null,
       })
       .returning();
 
@@ -409,6 +414,8 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.memo != null) p.memo = String(patch.memo);
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.status != null) p.status = patch.status;
+  if ("incomeMonth" in patch) p.incomeMonth = patch.incomeMonth ?? null;
+  if ("isIncome" in patch) p.isIncome = patch.isIncome;
 
   const isParent = existing.parentId == null && existing.transferAccountId == null;
   // Always query child count for cleanliness; the count is used to decide
@@ -449,13 +456,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
     const onBudget = await isAccountOnBudget(db, newAccountId);
     const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
-    const isIncome =
+    const isIncome = "isIncome" in p ? p.isIncome : (
       existing.transferAccountId == null &&
       !isSplitParent &&
       existing.parentId == null &&
       finalCatId == null &&
       newAmount > 0 &&
-      onBudget;
+      onBudget
+    );
     p.isIncome = isIncome;
 
     const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();

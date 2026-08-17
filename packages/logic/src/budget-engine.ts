@@ -128,7 +128,8 @@ function getOrBuildIndex(
     }
 
     if (isIncomeTransaction(t, accountMap)) {
-      incomeByMonth.set(mk, Math.round((incomeByMonth.get(mk) ?? 0) + amt));
+      const incMonth = t.incomeMonth || mk;
+      incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + amt));
     }
 
     // 1. Categorised spending/refunds on credit card accounts
@@ -296,7 +297,10 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
 export function getMonthsWithData(data: BudgetData): string[] {
   const keys = new Set<string>();
   for (const a of data.assignments) keys.add(a.month);
-  for (const t of data.transactions) keys.add(t.date.slice(0, 7));
+  for (const t of data.transactions) {
+    keys.add(t.date.slice(0, 7));
+    if (t.incomeMonth) keys.add(t.incomeMonth);
+  }
   return [...keys].sort();
 }
 

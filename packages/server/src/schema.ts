@@ -75,6 +75,7 @@ export const transactions = sqliteTable(
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
     isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
+    incomeMonth: text("income_month"),
     reconciledAt: text("reconciled_at"),
   },
   (t) => ({

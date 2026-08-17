@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -19,6 +19,7 @@ export type TransactionSavePayload = {
   amount: number;
   status: "u" | "c" | "r";
   transferAccountId?: number | null;
+  incomeMonth?: string | null;
   /**
    * When set, the server will create a split: insert the parent with
    * the top-level fields and these N children, atomically. Mutually
@@ -101,7 +102,10 @@ export function TransactionModal({
   const [accountId, setAccountId] = useState(
     initial?.accountId ?? defaultAccountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
-  const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
+  const isInitialDeferred = initial?.categoryId == null && !!initial?.incomeMonth && initial.incomeMonth > (initial.date ? initial.date.slice(0, 7) : "");
+  const [categoryId, setCategoryId] = useState<number | "" | "__deferred__">(
+    initial?.categoryId ?? (isInitialDeferred ? "__deferred__" : "")
+  );
   const [date, setDate] = useState(initial?.date ?? defaultDate ?? todayISO());
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
@@ -225,15 +229,20 @@ export function TransactionModal({
 
     // single
     if (!payee.trim()) return;
+    const isDeferred = categoryId === "__deferred__";
+    const finalCatId = categoryId === "" || isDeferred ? null : Number(categoryId);
+    const incMonth = isDeferred ? nextMonthKey(date.slice(0, 7)) : null;
+
     onSave({
       id: initial?.id,
       accountId,
-      categoryId: categoryId === "" ? null : Number(categoryId),
+      categoryId: finalCatId,
       date,
       payee: payee.trim(),
       memo: memo.trim(),
       amount: amountCents,
       status: cleared ? "c" : "u",
+      incomeMonth: incMonth,
     });
   };
 
@@ -386,10 +395,11 @@ export function TransactionModal({
               <Field label="Category">
                 <Select
                   value={categoryId}
-                  onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
+                  onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
                   className="w-full"
                 >
-                  <option value="">Income (To be Budgeted)</option>
+                  <option value="">Income: Available this month</option>
+                  <option value="__deferred__">Income: Available next month</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}

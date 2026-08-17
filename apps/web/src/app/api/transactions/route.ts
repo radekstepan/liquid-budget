@@ -105,6 +105,7 @@ export async function POST(req: Request) {
       transferAccountId: body.transferAccountId ? Number(body.transferAccountId) : null,
       parentId: body.parentId ? Number(body.parentId) : null,
       skipBalance: !!body.skipBalance,
+      incomeMonth: body.incomeMonth !== undefined ? (body.incomeMonth ? String(body.incomeMonth) : null) : undefined,
     });
     return Response.json(row);
   } catch (e) {
@@ -156,6 +157,8 @@ export async function PATCH(req: Request) {
         "status" in body || "cleared" in body
           ? parseStatus(body.status ?? body.cleared, "c")
           : undefined,
+      incomeMonth:
+        "incomeMonth" in body ? (body.incomeMonth ? String(body.incomeMonth) : null) : undefined,
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);

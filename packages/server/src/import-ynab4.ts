@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
-import { dollarsToCents } from "@ynab/logic";
+import { dollarsToCents, nextMonthKey } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
@@ -241,7 +241,9 @@ export async function importYnab4(db: Db, ynabData: any) {
       if (hasSubs) {
         // Split transaction parent
         let payee = payeeMap.get(t.payeeId) || "";
-        const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || t.categoryId === "Category/__DeferredIncome__") && (t.amount || 0) > 0;
+        const isParentDeferred = t.categoryId === "Category/__DeferredIncome__";
+        const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || isParentDeferred) && (t.amount || 0) > 0;
+        const parentIncomeMonth = isParentDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -260,6 +262,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             transferAccountId: null,
             parentId: null,
             isIncome: isParentIncome,
+            incomeMonth: parentIncomeMonth,
             reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
           })
           .returning();
@@ -294,11 +297,13 @@ export async function importYnab4(db: Db, ynabData: any) {
               subCatId = null;
             }
 
+            const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
             const isChildIncome =
               (st.categoryId === "Category/__ImmediateIncome__" ||
-                st.categoryId === "Category/__DeferredIncome__" ||
+                isChildDeferred ||
                 (subCatId === null && subTransferAccountId === null)) &&
               (st.amount || 0) > 0;
+            const childIncomeMonth = isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
 
             await db.insert(transactions).values({
               accountId: accId,
@@ -316,6 +321,7 @@ export async function importYnab4(db: Db, ynabData: any) {
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
               isIncome: isChildIncome,
+              incomeMonth: childIncomeMonth,
               reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
             });
             totalImportedTxCount++;
@@ -399,9 +405,10 @@ export async function importYnab4(db: Db, ynabData: any) {
           }
 
           let catId = categoryIdMap.get(t.categoryId) || null;
+          const isTxDeferred = t.categoryId === "Category/__DeferredIncome__";
           const isSpecialIncomeCat =
             t.categoryId === "Category/__ImmediateIncome__" ||
-            t.categoryId === "Category/__DeferredIncome__";
+            isTxDeferred;
           if (
             destAccId ||
             isSpecialIncomeCat ||
@@ -413,6 +420,7 @@ export async function importYnab4(db: Db, ynabData: any) {
           const isTxIncome =
             (isSpecialIncomeCat || (catId === null && destAccId === null)) &&
             (t.amount || 0) > 0;
+          const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
 
           await db.insert(transactions).values({
             accountId: accId,
@@ -430,6 +438,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             transferAccountId: destAccId,
             parentId: null,
             isIncome: isTxIncome,
+            incomeMonth: txIncomeMonth,
             reconciledAt: t.cleared === "Reconciled" ? (t.date || null) : null,
           });
           totalImportedTxCount++;

@@ -39,7 +39,7 @@ Despite strong foundations, the application has critical financial calculation d
 | Unified ID | Source IDs | Area | Severity | Summary | Target Files | Status |
 |---|---|---|---|---|---|---|
 | **UNI-01** | F-02 | Financial Math | **Critical (P0)** | Rolling TBB surplus walk ignores overspending in intermediate months $\to$ phantom budgetable money; breaks integrity invariant | `packages/logic/src/budget-engine.ts`, `packages/server/src/queries/diagnostics.ts` | ✅ **Resolved** |
-| **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | Pending |
+| **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | Pending |
 | **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | Pending |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` |
@@ -137,6 +137,7 @@ Despite strong foundations, the application has critical financial calculation d
   2. Update `import-ynab4.ts` to assign `incomeMonth = nextMonthKey(txn.date.slice(0, 7))` when `masterCategoryId === deferredIncomeMasterId`.
   3. In `budget-engine.ts`, attribute income to `t.incomeMonth ?? t.date.slice(0, 7)`.
   4. In `TransactionModal.tsx`, add income targeting selector: `[ Income for this Month | Income for Next Month ]`.
+- **Resolution:** Added `incomeMonth` to `transactions` table schema and SQL migration `0002_add_income_month_to_transactions.sql`. Implemented `nextMonthKey` and `prevMonthKey` in `@ynab/logic/src/format.ts`. Updated `import-ynab4.ts` to assign `incomeMonth` for `Category/__DeferredIncome__` on splits and plain transactions. Updated `budget-engine.ts` to attribute income using `t.incomeMonth || mk`. Updated `TransactionModal.tsx` and API routes to support selecting "Income: Available this month" vs "Income: Available next month". Added unit and server tests.
 
 ---
 

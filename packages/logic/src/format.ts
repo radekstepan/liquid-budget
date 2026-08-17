@@ -274,6 +274,22 @@ export function monthLabel(key: string): string {
   return `${MONTHS_LONG[month0] ?? ""} ${year}`;
 }
 
+export function nextMonthKey(key: string): string {
+  const { year, month0 } = parseMonthKey(key);
+  if (month0 === 11) {
+    return monthKey(year + 1, 0);
+  }
+  return monthKey(year, month0 + 1);
+}
+
+export function prevMonthKey(key: string): string {
+  const { year, month0 } = parseMonthKey(key);
+  if (month0 === 0) {
+    return monthKey(year - 1, 11);
+  }
+  return monthKey(year, month0 - 1);
+}
+
 export function todayISO(): string {
   // Use the local timezone, not UTC. `toISOString()` always renders
   // in UTC, which would silently post-date a transaction entered late
