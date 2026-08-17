@@ -285,16 +285,15 @@ export function computeMonthlyInsights(
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (t.categoryId == null || t.transferAccountId != null) continue;
-    const amt = num(t.amount);
-    if (amt >= 0) continue;
+    if (isIncomeTransaction(t)) continue;
 
-    const absAmt = Math.abs(amt);
+    const netOutflow = -num(t.amount);
     const mk = t.date.slice(0, 7);
 
     if (mk === month) {
       currentSpendByCat.set(
         t.categoryId,
-        (currentSpendByCat.get(t.categoryId) ?? 0) + absAmt
+        (currentSpendByCat.get(t.categoryId) ?? 0) + netOutflow
       );
     } else if (priorMonths.has(mk)) {
       let mMap = priorSpendByCatMonth.get(t.categoryId);
@@ -302,7 +301,7 @@ export function computeMonthlyInsights(
         mMap = new Map();
         priorSpendByCatMonth.set(t.categoryId, mMap);
       }
-      mMap.set(mk, (mMap.get(mk) ?? 0) + absAmt);
+      mMap.set(mk, (mMap.get(mk) ?? 0) + netOutflow);
     }
   }
 

@@ -136,4 +136,30 @@ describe("computeMonthlyInsights", () => {
     expect(insights[0]?.avgAmount).toBe(10000); // Divided by 1, not 3
     expect(insights[0]?.pctChange).toBe(0);
   });
+
+  it("factors in refunds and returns to reduce net category spend (UNI-35 / BUG-28)", () => {
+    const data: BudgetData = {
+      accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
+      groups: [{ id: 1, name: "Daily", sort: 1, isCreditCardPayments: false }],
+      categories: [
+        { id: 10, groupId: 1, name: "Electronics", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        // Prior month: $200 spent in May
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "BestBuy", memo: "", amount: "-20000", status: "c" },
+        // Current month: $200 purchase + $100 return/refund in June -> net spend $100 (-50% vs May)
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "BestBuy", memo: "Purchase", amount: "-20000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 10, date: "2026-06-15", payee: "BestBuy Return", memo: "Refund", amount: "10000", status: "c" },
+      ],
+    };
+
+    const insights = computeMonthlyInsights(data, "2026-06");
+    expect(insights).toHaveLength(1);
+    expect(insights[0]?.categoryName).toBe("Electronics");
+    expect(insights[0]?.amount).toBe(10000); // $100 net
+    expect(insights[0]?.avgAmount).toBe(20000); // $200 avg
+    expect(insights[0]?.pctChange).toBe(-50); // -50%
+  });
 });
