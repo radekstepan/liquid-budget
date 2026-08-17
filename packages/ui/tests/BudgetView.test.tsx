@@ -564,5 +564,40 @@ describe("BudgetView", () => {
       expect(onEditCategory).toHaveBeenCalledTimes(1);
       expect(onEditCategory).toHaveBeenCalledWith(10);
     });
+
+    it("renders and triggers all quick budget options (UNI-19)", () => {
+      const onAssign = vi.fn();
+      const lastMonthAssignments = new Map([[10, 12000]]);
+      const spentLastMonthByCategory = new Map([[10, 8500]]);
+      const avgSpentByCategory = new Map([[10, 9500]]);
+      const avgBudgetedByCategory = new Map([[10, 11000]]);
+      const underfundedByCategory = new Map([[10, 3000]]);
+
+      renderView({
+        onAssign,
+        lastMonthAssignments,
+        spentLastMonthByCategory,
+        avgSpentByCategory,
+        avgBudgetedByCategory,
+        underfundedByCategory,
+      });
+
+      const dotsBtns = screen.getAllByRole("button", { name: /quick budget options/i });
+      expect(dotsBtns.length).toBeGreaterThan(0);
+
+      // Open quick budget menu for Groceries
+      fireEvent.click(dotsBtns[0]!);
+
+      expect(screen.getByRole("button", { name: /budgeted last month/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /spent last month/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /average budgeted/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /average spent/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /underfunded/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /set to zero/i })).toBeInTheDocument();
+
+      // Click Spent Last Month
+      fireEvent.click(screen.getByRole("button", { name: /spent last month/i }));
+      expect(onAssign).toHaveBeenCalledWith(10, 8500, "2026-06");
+    });
   });
 });

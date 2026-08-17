@@ -75,7 +75,9 @@ export function BudgetView({
   onReorderGroup,
   onClearOverdraft,
   lastMonthAssignments,
+  spentLastMonthByCategory,
   avgSpentByCategory,
+  avgBudgetedByCategory,
   underfundedByCategory,
 }: {
   budget: BudgetResult;
@@ -103,7 +105,9 @@ export function BudgetView({
   onReorderGroup?: (id: number, sort: number) => void;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
   lastMonthAssignments?: Map<number, number>;
+  spentLastMonthByCategory?: Map<number, number>;
   avgSpentByCategory?: Map<number, number>;
+  avgBudgetedByCategory?: Map<number, number>;
   underfundedByCategory?: Map<number, number>;
 }) {
   const showMulti = monthCount > 1;
@@ -156,9 +160,20 @@ export function BudgetView({
   );
   const hiddenGroup = visibleGroups.find((g) => isHiddenGroup(g.group.name));
 
-  const quickFill = lastMonthAssignments || avgSpentByCategory || underfundedByCategory
-    ? { lastMonthAssignments, avgSpentByCategory, underfundedByCategory }
-    : undefined;
+  const quickFill =
+    lastMonthAssignments ||
+    spentLastMonthByCategory ||
+    avgSpentByCategory ||
+    avgBudgetedByCategory ||
+    underfundedByCategory
+      ? {
+          lastMonthAssignments,
+          spentLastMonthByCategory,
+          avgSpentByCategory,
+          avgBudgetedByCategory,
+          underfundedByCategory,
+        }
+      : undefined;
 
   // For each visible month, find the matching GroupRow by id.
   const groupsByMonth = useMemo(() => {
@@ -548,7 +563,7 @@ function GroupBlock({
   onDragOver?: () => void;
   onDragLeave?: () => void;
   onDrop?: () => void;
-  quickFill?: { lastMonthAssignments?: Map<number, number>; avgSpentByCategory?: Map<number, number>; underfundedByCategory?: Map<number, number> };
+  quickFill?: CategoryMonthCellProps["quickFill"];
 }) {
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
@@ -732,6 +747,7 @@ function GroupBlock({
                         onAssign={(val) => onAssign(r.category.id, val, currentMonth)}
                         quickFill={quickFill}
                         categoryId={r.category.id}
+                        available={r.available}
                       />
                     </td>
                     <td
@@ -807,7 +823,13 @@ function MonthCells({
         {isOtherMonth || !onAssign ? (
           <span className="y-num">{fmt(row.assigned)}</span>
         ) : (
-          <CategoryMonthCell value={row.assigned} onAssign={onAssign} quickFill={quickFill} categoryId={categoryId} />
+          <CategoryMonthCell
+            value={row.assigned}
+            onAssign={onAssign}
+            quickFill={quickFill}
+            categoryId={categoryId}
+            available={row.available}
+          />
         )}
       </td>
       <td
@@ -832,10 +854,13 @@ type CategoryMonthCellProps = {
   onAssign: (v: number) => void;
   quickFill?: {
     lastMonthAssignments?: Map<number, number>;
+    spentLastMonthByCategory?: Map<number, number>;
     avgSpentByCategory?: Map<number, number>;
+    avgBudgetedByCategory?: Map<number, number>;
     underfundedByCategory?: Map<number, number>;
   };
   categoryId?: number;
+  available?: number;
 };
 
 function CategoryMonthCell({
@@ -843,6 +868,7 @@ function CategoryMonthCell({
   onAssign,
   quickFill,
   categoryId,
+  available,
 }: CategoryMonthCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -877,9 +903,13 @@ function CategoryMonthCell({
   const hasQuickFill =
     quickFill &&
     categoryId != null &&
-    ((quickFill.lastMonthAssignments?.has(categoryId)) ||
-      (quickFill.avgSpentByCategory?.has(categoryId)) ||
-      (quickFill.underfundedByCategory?.has(categoryId)));
+    (Boolean(quickFill.lastMonthAssignments?.has(categoryId)) ||
+      Boolean(quickFill.spentLastMonthByCategory?.has(categoryId)) ||
+      Boolean(quickFill.avgSpentByCategory?.has(categoryId)) ||
+      Boolean(quickFill.avgBudgetedByCategory?.has(categoryId)) ||
+      Boolean(quickFill.underfundedByCategory?.has(categoryId)) ||
+      value !== 0 ||
+      (available !== undefined && available < 0));
 
   if (editing) {
     return (
@@ -936,7 +966,7 @@ function CategoryMonthCell({
           </button>
           {showQuickFill && (
             <div
-              className="absolute right-0 top-[18px] z-30 min-w-[160px] overflow-hidden"
+              className="absolute right-0 top-[18px] z-30 min-w-[170px] overflow-hidden"
               style={{
                 background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
                 border: "1px solid var(--y-chrome-line)",
@@ -956,6 +986,34 @@ function CategoryMonthCell({
                   <span className="flex-1">Budgeted Last Month</span>
                   <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
                     {fmt(quickFill.lastMonthAssignments!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+              {quickFill?.spentLastMonthByCategory?.has(categoryId!) && (
+                <button
+                  onClick={() => {
+                    onAssign(quickFill.spentLastMonthByCategory!.get(categoryId!)!);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Spent Last Month</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(quickFill.spentLastMonthByCategory!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+              {quickFill?.avgBudgetedByCategory?.has(categoryId!) && (
+                <button
+                  onClick={() => {
+                    onAssign(quickFill.avgBudgetedByCategory!.get(categoryId!)!);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Average Budgeted</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(quickFill.avgBudgetedByCategory!.get(categoryId!)!)}
                   </span>
                 </button>
               )}
@@ -984,6 +1042,34 @@ function CategoryMonthCell({
                   <span className="flex-1">Underfunded</span>
                   <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
                     {fmt(quickFill.underfundedByCategory!.get(categoryId!)!)}
+                  </span>
+                </button>
+              )}
+              {available !== undefined && available < 0 && (
+                <button
+                  onClick={() => {
+                    onAssign(value + Math.max(0, -available));
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Balance to Zero</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    {fmt(value + Math.max(0, -available))}
+                  </span>
+                </button>
+              )}
+              {value !== 0 && (
+                <button
+                  onClick={() => {
+                    onAssign(0);
+                    setShowQuickFill(false);
+                  }}
+                  className="y-menu-item text-left"
+                >
+                  <span className="flex-1">Set to Zero</span>
+                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
+                    $0.00
                   </span>
                 </button>
               )}
