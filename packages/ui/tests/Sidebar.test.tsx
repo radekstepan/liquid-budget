@@ -254,4 +254,32 @@ describe("Sidebar", () => {
     expect(onEditAccount).toHaveBeenCalledWith(1);
     expect(onSelectAccount).not.toHaveBeenCalled();
   });
+
+  it("orders custom groups dynamically placing budget groups first (UNI-24)", () => {
+    const customAccounts: Account[] = [
+      { id: 10, name: "Brokerage", kind: "offbudget", groupLabel: "Investments", balance: "50000", onBudget: false, sort: 0 },
+      { id: 11, name: "Daily Checking", kind: "liquid", groupLabel: "Everyday Accounts", balance: "10000", onBudget: true, sort: 1 },
+      { id: 12, name: "Savings", kind: "liquid", groupLabel: "Emergency", balance: "20000", onBudget: true, sort: 2 },
+    ];
+
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={customAccounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+
+    const groupButtons = screen.getAllByRole("button").filter((b) =>
+      b.className.includes("y-side-head")
+    );
+    const groupTexts = groupButtons.map((b) => b.textContent);
+    // Everyday Accounts and Emergency (budget accounts) should come before Investments (off-budget)
+    expect(groupTexts[0]).toContain("Everyday Accounts");
+    expect(groupTexts[1]).toContain("Emergency");
+    expect(groupTexts[2]).toContain("Investments");
+  });
 });

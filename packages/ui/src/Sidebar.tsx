@@ -49,11 +49,21 @@ export function Sidebar({
   const activeAccounts = accounts.filter((a) => !a.archived);
   const archivedAccounts = accounts.filter((a) => !!a.archived);
 
-  const groupOrder = ["Liquid", "Credit Cards", "Retirement", "Budget Accounts"];
-  const seen = new Set(activeAccounts.map((a) => a.groupLabel));
-  const groups = [...groupOrder.filter((g) => seen.has(g)), ...seen].filter(
-    (g, i, arr) => arr.indexOf(g) === i
-  );
+  // Group ordering: discover all groupLabels, prioritizing budget accounts first, sorted by account sort indices
+  const seen = Array.from(new Set(activeAccounts.map((a) => a.groupLabel)));
+  const groupsWithSort = seen.map((groupLabel) => {
+    const groupAccs = activeAccounts.filter((a) => a.groupLabel === groupLabel);
+    const minSort = groupAccs.length > 0 ? Math.min(...groupAccs.map((a) => a.sort ?? 0)) : 0;
+    const isBudget = groupAccs.some((a) => a.onBudget);
+    return { groupLabel, minSort, isBudget };
+  });
+
+  groupsWithSort.sort((a, b) => {
+    if (a.isBudget !== b.isBudget) return a.isBudget ? -1 : 1;
+    return a.minSort - b.minSort;
+  });
+
+  const groups = groupsWithSort.map((g) => g.groupLabel);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     Retirement: true,
     "Archived Accounts": true,
@@ -171,7 +181,11 @@ export function Sidebar({
 
   const totalFor = (label: string) =>
     activeAccounts.filter((a) => a.groupLabel === label).reduce((s, a) => s + num(a.balance), 0);
-  const accountsFor = (label: string) => activeAccounts.filter((a) => a.groupLabel === label);
+  const accountsFor = (label: string) =>
+    activeAccounts
+      .filter((a) => a.groupLabel === label)
+      .slice()
+      .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id - b.id);
 
   return (
     <aside
