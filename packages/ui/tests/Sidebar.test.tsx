@@ -176,6 +176,7 @@ describe("Sidebar", () => {
 
     fireEvent.dragStart(cashRow!, { dataTransfer });
     fireEvent.dragOver(checkingRow!, { dataTransfer });
+    expect(checkingRow!.classList.contains("is-drop-target")).toBe(true);
     fireEvent.drop(checkingRow!, { dataTransfer });
 
     expect(onReorderAccount).toHaveBeenCalled();
@@ -229,5 +230,28 @@ describe("Sidebar", () => {
     // Selecting it fires onSelectAccount
     fireEvent.click(oldBankRow);
     expect(onSelectAccount).toHaveBeenCalledWith(99);
+  });
+
+  it("renders edit pencil for accounts and triggers onEditAccount when clicked", () => {
+    const onEditAccount = vi.fn();
+    const onSelectAccount = vi.fn();
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={onSelectAccount}
+        onAddAccount={() => {}}
+        onEditAccount={onEditAccount}
+      />
+    );
+
+    const editCashBtn = screen.getByRole("button", { name: "Edit account Cash" });
+    expect(editCashBtn).toBeInTheDocument();
+
+    fireEvent.click(editCashBtn);
+    expect(onEditAccount).toHaveBeenCalledWith(1);
+    expect(onSelectAccount).not.toHaveBeenCalled();
   });
 });

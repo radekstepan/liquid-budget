@@ -35,6 +35,14 @@ function isEmptyRow(r: CatRow): boolean {
   return r.assigned === 0 && r.outflow === 0 && r.available === 0;
 }
 
+export function isInternalGroup(name: string): boolean {
+  return name === "__Internal__" || name.toLowerCase() === "__internal__";
+}
+
+export function isHiddenGroup(name: string): boolean {
+  return name === "Hidden Categories" || name.toLowerCase() === "hidden categories";
+}
+
 const COL_A = "w-[120px]";
 const COL_O = "w-[120px]";
 const COL_V = "w-[120px]";
@@ -122,7 +130,9 @@ export function BudgetView({
   const handleGroupDrop = (targetId: number) => {
     const srcId = dragGroupId.current;
     if (srcId == null || srcId === targetId || !onReorderGroup) return;
-    const structureGroups = budget.groups.filter((g) => !g.group.isCreditCardPayments);
+    const structureGroups = budget.groups.filter(
+      (g) => !g.group.isCreditCardPayments && !isInternalGroup(g.group.name) && !isHiddenGroup(g.group.name)
+    );
     const srcIdx = structureGroups.findIndex((g) => g.group.id === srcId);
     const tgtIdx = structureGroups.findIndex((g) => g.group.id === targetId);
     if (srcIdx === -1 || tgtIdx === -1) return;
@@ -137,8 +147,14 @@ export function BudgetView({
     setGroupOverId(null);
   };
 
-  const structureGroups = budget.groups.filter((g) => !g.group.isCreditCardPayments);
-  const creditGroup = budget.groups.find((g) => g.group.isCreditCardPayments);
+  const visibleGroups = budget.groups.filter((g) => !isInternalGroup(g.group.name));
+  const structureGroups = visibleGroups.filter(
+    (g) => !g.group.isCreditCardPayments && !isHiddenGroup(g.group.name)
+  );
+  const creditGroup = visibleGroups.find(
+    (g) => g.group.isCreditCardPayments && !isHiddenGroup(g.group.name)
+  );
+  const hiddenGroup = visibleGroups.find((g) => isHiddenGroup(g.group.name));
 
   const quickFill = lastMonthAssignments || avgSpentByCategory || underfundedByCategory
     ? { lastMonthAssignments, avgSpentByCategory, underfundedByCategory }
@@ -277,7 +293,6 @@ export function BudgetView({
             {showMulti ? (
               <>
                 <tr>
-                  <th rowSpan={2} style={{ width: 26 }} />
                   <th rowSpan={2} className="y-table-td--sticky-cat">Category</th>
                     {resolvedVisibleMonths.map((m, idx) => (
                     <th
@@ -313,7 +328,6 @@ export function BudgetView({
               </>
             ) : (
               <tr>
-                <th style={{ width: 26 }} />
                 <th className="y-table-td--sticky-cat">Category</th>
                 <th className={`num ${COL_A}`}>Budgeted</th>
                 <th className={`num ${COL_O}`}>Outflows</th>
@@ -363,6 +377,28 @@ export function BudgetView({
                 onEditCategory={() => onEditCategory(creditGroup.group.id)}
                 onDeleteCategory={onDeleteCategory}
                 onEditGroup={() => onEditGroup(creditGroup.group.id)}
+                onDeleteGroup={onDeleteGroup}
+                onReorderCategory={onReorderCategory}
+              />
+            )}
+            {hiddenGroup && (
+              <GroupBlock
+                group={hiddenGroup}
+                collapsed={
+                  collapsed[hiddenGroup.group.id] !== undefined
+                    ? Boolean(collapsed[hiddenGroup.group.id])
+                    : true
+                }
+                onToggle={() => onToggleGroup(hiddenGroup.group.id)}
+                onAssign={onAssign}
+                currentMonth={currentMonth}
+                visibleMonths={resolvedVisibleMonths}
+                groupsByMonth={groupsByMonth}
+                showMulti={showMulti}
+                onAddCategory={() => onAddCategory(hiddenGroup.group.id)}
+                onEditCategory={() => onEditCategory(hiddenGroup.group.id)}
+                onDeleteCategory={onDeleteCategory}
+                onEditGroup={() => onEditGroup(hiddenGroup.group.id)}
                 onDeleteGroup={onDeleteGroup}
                 onReorderCategory={onReorderCategory}
               />
@@ -518,45 +554,34 @@ function GroupBlock({
   const [catOverId, setCatOverId] = useState<number | null>(null);
 
   const gRow = group;
+  const isSpecialGroup = group.group.isCreditCardPayments || isHiddenGroup(group.group.name);
 
   return (
     <>
       <tr
-        className="y-master"
-        draggable
-        style={{
-          outline: isDragOver ? "2px solid var(--y-blue)" : "none",
-          outlineOffset: "-2px",
-        }}
+        className={cx("y-master", isDragOver && !isSpecialGroup && "is-drop-target")}
+        draggable={!isSpecialGroup && Boolean(onDrop)}
         onDragStart={(e) => {
-          const target = e.target as HTMLElement;
-          if (target.closest("[data-cat-row]")) {
-            e.stopPropagation();
+          if (isSpecialGroup) {
+            e.preventDefault();
             return;
           }
           e.dataTransfer.effectAllowed = "move";
           onDragStart?.();
         }}
         onDragOver={(e) => {
+          if (isSpecialGroup) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
           onDragOver?.();
         }}
         onDragLeave={onDragLeave}
         onDrop={(e) => {
+          if (isSpecialGroup) return;
           e.preventDefault();
           onDrop?.();
         }}
       >
-        <td className="text-center" style={{ width: 26 }}>
-          <span
-            className="inline-block cursor-grab"
-            style={{ color: "var(--y-ink-faint)" }}
-            title="Drag to reorder"
-          >
-            <Icon name="grip" size={13} />
-          </span>
-        </td>
         <td className="y-table-td--sticky-cat">
           <div className="flex items-center gap-[7px]">
             <button onClick={onToggle} className="flex items-center gap-[6px]">
@@ -565,29 +590,30 @@ function GroupBlock({
                 role="button"
                 tabIndex={0}
                 onClick={(e) => {
+                  if (isSpecialGroup) return;
                   e.stopPropagation();
                   onEditGroup();
                 }}
-                className="cursor-text hover:underline"
+                className={cx("cursor-text", !isSpecialGroup && "hover:underline")}
                 style={{ color: "var(--y-ink)", fontSize: "12.5px" }}
                 onKeyDown={(e) => {
+                  if (isSpecialGroup) return;
                   if (e.key === "Enter" || e.key === " ") onEditGroup();
                 }}
               >
                 {group.group.name}
               </span>
             </button>
-            <button
-              onClick={() => onAddCategory()}
-              className="ml-1 grid h-[18px] w-[18px] place-items-center rounded"
-              style={{ color: "var(--y-ink-soft)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-master-hover)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              aria-label="Add category"
-              title="Add category"
-            >
-              <Icon name="plus" size={11} />
-            </button>
+            <span className="y-group-actions">
+              <button
+                onClick={() => onAddCategory()}
+                className="y-group-add-btn"
+                aria-label="Add category"
+                title="Add category"
+              >
+                <Icon name="plus" size={11} />
+              </button>
+            </span>
           </div>
         </td>
         {showMulti ? (
@@ -622,19 +648,28 @@ function GroupBlock({
       {!collapsed &&
         group.rows.map((r: CatRow, i: number) => {
           const empty = isEmptyRow(r);
+          const isCatDropTarget = catOverId === r.category.id;
           return (
             <tr
               key={r.category.id}
               data-cat-row
-              className={cx("y-row", i % 2 === 1 && "alt", empty && "is-empty")}
-              style={{
-                borderTop: catOverId === r.category.id ? "2px solid var(--y-blue)" : undefined,
+              className={cx(
+                "y-row",
+                i % 2 === 1 && "alt",
+                empty && "is-empty",
+                isCatDropTarget && "is-drop-target"
+              )}
+              draggable={Boolean(onReorderCategory)}
+              onDragStart={(e) => {
+                e.stopPropagation();
+                e.dataTransfer.effectAllowed = "move";
+                dragCatId.current = r.category.id;
               }}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 e.dataTransfer.dropEffect = "move";
-                setCatOverId(r.category.id);
+                if (catOverId !== r.category.id) setCatOverId(r.category.id);
               }}
               onDragLeave={(e) => {
                 e.stopPropagation();
@@ -658,31 +693,13 @@ function GroupBlock({
                 setCatOverId(null);
               }}
             >
-              <td className="text-center" style={{ width: 26 }}>
-                <span
-                  className="inline-block cursor-grab"
-                  style={{ color: "var(--y-ink-faint)" }}
-                  draggable
-                  onDragStart={(e) => {
-                    e.stopPropagation();
-                    e.dataTransfer.effectAllowed = "move";
-                    dragCatId.current = r.category.id;
-                  }}
-                  title="Drag to reorder"
-                >
-                  <Icon name="grip" size={13} />
-                </span>
-              </td>
-              <td className="y-table-td--sticky-cat pl-[26px]">
-                <div className="group/row flex items-center">
+              <td className="y-table-td--sticky-cat pl-[24px]">
+                <div className="flex items-center">
                   <span className="truncate">{r.category.name}</span>
-                  <span className="ml-2 flex items-center gap-1 opacity-60 transition-opacity hover:opacity-100">
+                  <span className="y-cat-actions">
                     <button
                       onClick={onEditCategory}
-                      className="grid h-[18px] w-[18px] place-items-center rounded"
-                      style={{ color: "var(--y-ink-soft)" }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--y-row-hover)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      className="y-cat-edit-btn"
                       aria-label={`Edit ${r.category.name}`}
                       title="Edit category"
                     >

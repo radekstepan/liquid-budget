@@ -120,8 +120,13 @@ export async function importYnab4(db: Db, ynabData: any) {
     let groupSort = 0;
 
     const nonTombstoneMC = yMasterCategories
-      .filter((mc: any) => !mc.isTombstone && mc.type === "OUTFLOW")
-      .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
+      .filter((mc: any) => !mc.isTombstone && mc.type === "OUTFLOW" && mc.name !== "__Internal__")
+      .sort((a: any, b: any) => {
+        const aHidden = a.name === "Hidden Categories" || a.name?.toLowerCase() === "hidden categories";
+        const bHidden = b.name === "Hidden Categories" || b.name?.toLowerCase() === "hidden categories";
+        if (aHidden !== bHidden) return aHidden ? 1 : -1;
+        return (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0);
+      });
 
     for (const mc of nonTombstoneMC) {
       const [gRow] = await db
