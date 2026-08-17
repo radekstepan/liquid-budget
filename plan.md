@@ -65,7 +65,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` | ✅ **Resolved** |
 | **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` | ✅ **Resolved** |
 | **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` | ✅ **Resolved** |
-| **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` |
+| **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` | ✅ **Resolved** |
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` |
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` |
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` |
@@ -423,6 +423,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/queries/reconcile.ts:138-143`, `reconcileAccount` did not validate whether `adjustmentCategoryId` existed in the database before attempting to insert an adjustment transaction.
 - **Actionable Solution:** Query the database for `adjustmentCategoryId` when `diff !== 0` and throw a 422 TransactionError if the category does not exist.
 - **Resolution (UNI-27):** Added database existence validation for `adjustmentCategoryId` in `packages/server/src/queries/reconcile.ts`, rejecting invalid category IDs with 422 `TransactionError("Invalid adjustment category", 422)`. Added unit test in `packages/server/tests/reconcile.test.ts`.
+
+---
+
+#### UNI-28 (BUG-11): Drizzle Migration Snapshot & Journal Synchronization
+- **Root Cause:** In `packages/server/src/migrations/meta/0000_snapshot.json`, snapshot metadata was out of sync with subsequent SQL migration scripts (0001 through 0004), causing Drizzle-kit to detect phantom diffs.
+- **Actionable Solution:** Synchronize `_journal.json` and meta snapshots with the actual migrations, add `drizzle.config.ts`, and provide `db:check` and `db:generate` scripts to ensure continuous schema-migration integrity.
+- **Resolution (UNI-28):** Created `packages/server/drizzle.config.ts`, synchronized the migration snapshot metadata (`0004_snapshot.json`), and added `db:check` and `db:generate` scripts to `packages/server/package.json`. Verified that `drizzle-kit check` and `drizzle-kit generate` report zero pending schema diffs.
 
 ---
 

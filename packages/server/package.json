@@ -24,6 +24,8 @@
     "db:reset": "yarn build && node dist/db-reset.js",
     "db:import": "yarn build && node dist/db-import.js",
     "db:migrate": "yarn build && node dist/migrate.js",
+    "db:check": "drizzle-kit check",
+    "db:generate": "drizzle-kit generate",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
