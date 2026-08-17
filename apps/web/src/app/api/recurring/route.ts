@@ -41,6 +41,12 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
   });
 }
 
+import {
+  formatZodError,
+  RecurringCreateSchema,
+  RecurringPatchSchema,
+} from "../schemas.js";
+
 function errorResponse(e: unknown): Response {
   if (e instanceof RecurringError) {
     return Response.json({ error: e.message }, { status: e.status });
@@ -73,55 +79,50 @@ export async function POST(req: Request) {
     }
   }
 
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
 
-  if (body?.action === "post") {
-    const id = Number(body.id);
+  if (typeof json === "object" && json !== null && (json as any).action === "post") {
+    const id = Number((json as any).id);
     if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
     try {
-      const res = await postRecurringTransaction(db, id, body.date ? String(body.date) : undefined);
+      const res = await postRecurringTransaction(db, id, (json as any).date ? String((json as any).date) : undefined);
       return Response.json(res);
     } catch (e) {
       return errorResponse(e);
     }
   }
 
-  if (body?.action === "autopost") {
+  if (typeof json === "object" && json !== null && (json as any).action === "autopost") {
     try {
-      const posted = await autoPostDueRecurringTransactions(db, body.asOfDate ? String(body.asOfDate) : undefined);
+      const posted = await autoPostDueRecurringTransactions(db, (json as any).asOfDate ? String((json as any).asOfDate) : undefined);
       return Response.json({ postedCount: posted.length, posted });
     } catch (e) {
       return errorResponse(e);
     }
   }
 
-  const accountId = Number(body.accountId);
-  const amount = Number(body.amount);
-  if (!accountId || Number.isNaN(amount)) {
-    return Response.json({ error: "invalid" }, { status: 400 });
+  const parseResult = RecurringCreateSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
-
-  let subTransactions: SubTxn[] | undefined;
-  if (Array.isArray(body.subTransactions)) {
-    try {
-      subTransactions = parseSubTransactions(body.subTransactions);
-    } catch (e) {
-      return errorResponse(e);
-    }
-  }
+  const body = parseResult.data;
 
   try {
     const row = await createRecurring(getDefaultDb(), {
-      accountId,
-      categoryId: body.categoryId ? Number(body.categoryId) : null,
-      payee: String(body.payee ?? ""),
-      amount,
-      frequency: String(body.frequency ?? "monthly"),
-      nextDate: String(body.nextDate),
-      active: body.active ?? true,
-      transferAccountId: body.transferAccountId ? Number(body.transferAccountId) : null,
-      subTransactions,
+      accountId: body.accountId,
+      categoryId: body.categoryId ?? null,
+      payee: body.payee,
+      amount: body.amount,
+      frequency: body.frequency,
+      nextDate: body.nextDate,
+      transferAccountId: body.transferAccountId ?? null,
+      subTransactions: body.subTransactions?.map((c) => ({
+        categoryId: c.categoryId ?? null,
+        transferAccountId: c.transferAccountId ?? null,
+        amount: c.amount,
+        memo: c.memo,
+      })),
     });
     return Response.json(row);
   } catch (e) {
@@ -130,41 +131,30 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  const id = Number(body.id);
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-
-  let subTransactions: SubTxn[] | undefined;
-  if (Array.isArray(body.subTransactions)) {
-    try {
-      subTransactions = parseSubTransactions(body.subTransactions);
-    } catch (e) {
-      return errorResponse(e);
-    }
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  const parseResult = RecurringPatchSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
+  const body = parseResult.data;
 
   try {
-    const row = await updateRecurring(getDefaultDb(), id, {
-      accountId: body.accountId != null ? Number(body.accountId) : undefined,
-      categoryId:
-        "categoryId" in body
-          ? body.categoryId
-            ? Number(body.categoryId)
-            : null
-          : undefined,
+    const row = await updateRecurring(getDefaultDb(), body.id, {
+      accountId: body.accountId,
+      categoryId: body.categoryId !== undefined ? body.categoryId : undefined,
       payee: body.payee,
-      amount: body.amount != null ? Number(body.amount) : undefined,
+      amount: body.amount,
       frequency: body.frequency,
       nextDate: body.nextDate,
       active: body.active,
-      transferAccountId:
-        "transferAccountId" in body
-          ? body.transferAccountId
-            ? Number(body.transferAccountId)
-            : null
-          : undefined,
-      subTransactions,
+      transferAccountId: body.transferAccountId !== undefined ? body.transferAccountId : undefined,
+      subTransactions: body.subTransactions?.map((c) => ({
+        categoryId: c.categoryId ?? null,
+        transferAccountId: c.transferAccountId ?? null,
+        amount: c.amount,
+        memo: c.memo,
+      })),
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);

@@ -52,6 +52,14 @@ function parseStatus(raw: unknown, fallback: ClearedStatus = "c"): ClearedStatus
   return fallback;
 }
 
+import {
+  formatZodError,
+  TransactionBulkDeleteSchema,
+  TransactionBulkUpdateSchema,
+  TransactionCreateSchema,
+  TransactionPatchSchema,
+} from "../schemas.js";
+
 function errorResponse(e: unknown): Response {
   if (e instanceof TransactionError) {
     return Response.json({ error: e.message }, { status: e.status });
@@ -60,52 +68,62 @@ function errorResponse(e: unknown): Response {
 }
 
 export async function POST(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const { searchParams } = new URL(req.url);
   const action = searchParams.get("action");
   const db = getDefaultDb();
 
-  if (action === "bulk-delete" || (Array.isArray(body?.ids) && body?.action === "delete")) {
-    const ids: number[] = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+  if (action === "bulk-delete" || (typeof json === "object" && json !== null && "action" in json && (json as any).action === "delete")) {
+    const parseResult = TransactionBulkDeleteSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+    }
     try {
-      const deleted = await bulkDeleteTransactions(db, ids);
+      const deleted = await bulkDeleteTransactions(db, parseResult.data.ids);
       return Response.json({ ok: true, count: deleted.length, deleted });
     } catch (e) {
       return errorResponse(e);
     }
   }
 
-  if (action === "bulk-update" || (Array.isArray(body?.ids) && body?.patch)) {
-    const ids: number[] = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+  if (action === "bulk-update" || (typeof json === "object" && json !== null && "patch" in json)) {
+    const parseResult = TransactionBulkUpdateSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+    }
     try {
-      const updated = await bulkUpdateTransactions(db, ids, body.patch);
+      const updated = await bulkUpdateTransactions(db, parseResult.data.ids, parseResult.data.patch);
       return Response.json({ ok: true, count: updated.length, updated });
     } catch (e) {
       return errorResponse(e);
     }
   }
 
-  const accountId = Number(body.accountId);
-  const amount = Number(body.amount);
-  if (!accountId || Number.isNaN(amount)) {
-    return Response.json({ error: "invalid" }, { status: 400 });
+  const parseResult = TransactionCreateSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
+  const body = parseResult.data;
 
-  if (Array.isArray(body.subTransactions)) {
+  if (body.subTransactions && body.subTransactions.length > 0) {
     try {
-      const children = parseSubTransactions(body.subTransactions);
       const result = await createSplitWithChildren(
         db,
         {
-          accountId,
-          date: String(body.date),
-          payee: String(body.payee ?? ""),
-          memo: String(body.memo ?? ""),
-          amount,
-          status: parseStatus(body.status ?? body.cleared, "c"),
+          accountId: body.accountId,
+          date: body.date,
+          payee: body.payee,
+          memo: body.memo,
+          amount: body.amount,
+          status: body.status,
         },
-        children
+        body.subTransactions.map((c) => ({
+          categoryId: c.categoryId ?? null,
+          transferAccountId: c.transferAccountId ?? null,
+          amount: c.amount,
+          memo: c.memo,
+        }))
       );
       return Response.json(result);
     } catch (e) {
@@ -115,17 +133,17 @@ export async function POST(req: Request) {
 
   try {
     const row = await createTransaction(db, {
-      accountId,
-      categoryId: body.categoryId ? Number(body.categoryId) : null,
-      date: String(body.date),
-      payee: String(body.payee ?? ""),
-      memo: String(body.memo ?? ""),
-      amount,
-      status: parseStatus(body.status ?? body.cleared, "c"),
-      transferAccountId: body.transferAccountId ? Number(body.transferAccountId) : null,
-      parentId: body.parentId ? Number(body.parentId) : null,
-      skipBalance: !!body.skipBalance,
-      incomeMonth: body.incomeMonth !== undefined ? (body.incomeMonth ? String(body.incomeMonth) : null) : undefined,
+      accountId: body.accountId,
+      categoryId: body.categoryId ?? null,
+      date: body.date,
+      payee: body.payee,
+      memo: body.memo,
+      amount: body.amount,
+      status: body.status,
+      transferAccountId: body.transferAccountId ?? null,
+      parentId: body.parentId ?? null,
+      skipBalance: body.skipBalance,
+      incomeMonth: body.incomeMonth,
     });
     return Response.json(row);
   } catch (e) {
@@ -134,39 +152,46 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const db = getDefaultDb();
 
-  if (Array.isArray(body.ids)) {
+  if (typeof json === "object" && json !== null && "ids" in json) {
+    const parseResult = TransactionBulkUpdateSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+    }
     try {
-      const ids = body.ids.map(Number);
-      const updated = await bulkUpdateTransactions(db, ids, body.patch ?? {});
+      const updated = await bulkUpdateTransactions(db, parseResult.data.ids, parseResult.data.patch);
       return Response.json({ ok: true, count: updated.length, updated });
     } catch (e) {
       return errorResponse(e);
     }
   }
 
-  const id = Number(body.id);
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
+  const parseResult = TransactionPatchSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+  }
+  const body = parseResult.data;
 
-  if (Array.isArray(body.subTransactions)) {
+  if (body.subTransactions && body.subTransactions.length > 0) {
     try {
-      const children = parseSubTransactions(body.subTransactions);
       const result = await updateSplit(
         db,
-        id,
+        body.id,
         {
           date: body.date,
           payee: body.payee,
-          memo: body.memo,
-          status:
-            "status" in body || "cleared" in body
-              ? parseStatus(body.status ?? body.cleared, "c")
-              : undefined,
+          memo: body.memo ?? undefined,
+          status: body.status,
         },
-        children
+        body.subTransactions.map((c) => ({
+          categoryId: c.categoryId ?? null,
+          transferAccountId: c.transferAccountId ?? null,
+          amount: c.amount,
+          memo: c.memo,
+        }))
       );
       return Response.json(result);
     } catch (e) {
@@ -175,20 +200,15 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const row = await updateTransaction(db, id, {
-      accountId: body.accountId != null ? Number(body.accountId) : undefined,
-      categoryId:
-        "categoryId" in body ? (body.categoryId ? Number(body.categoryId) : null) : undefined,
+    const row = await updateTransaction(db, body.id, {
+      accountId: body.accountId,
+      categoryId: body.categoryId !== undefined ? body.categoryId : undefined,
       date: body.date,
       payee: body.payee,
-      memo: body.memo,
-      amount: body.amount != null ? Number(body.amount) : undefined,
-      status:
-        "status" in body || "cleared" in body
-          ? parseStatus(body.status ?? body.cleared, "c")
-          : undefined,
-      incomeMonth:
-        "incomeMonth" in body ? (body.incomeMonth ? String(body.incomeMonth) : null) : undefined,
+      memo: body.memo !== undefined ? (body.memo ?? undefined) : undefined,
+      amount: body.amount,
+      status: body.status,
+      incomeMonth: body.incomeMonth,
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);

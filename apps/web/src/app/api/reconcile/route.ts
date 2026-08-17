@@ -5,6 +5,12 @@ import {
   unreconcileAccount,
 } from "@ynab/server";
 
+import {
+  formatZodError,
+  ReconcileAccountSchema,
+  UnreconcileAccountSchema,
+} from "../schemas.js";
+
 export const dynamic = "force-dynamic";
 
 function errorResponse(e: unknown): Response {
@@ -15,36 +21,35 @@ function errorResponse(e: unknown): Response {
 }
 
 export async function POST(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  const action = String(body.action ?? "reconcile");
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const db = getDefaultDb();
 
-  try {
-    if (action === "unreconcile") {
-      const accountId = Number(body.accountId);
-      if (!accountId) {
-        return Response.json({ error: "accountId required" }, { status: 400 });
-      }
-      const result = await unreconcileAccount(db, accountId);
+  if (typeof json === "object" && json !== null && (json as any).action === "unreconcile") {
+    const parseResult = UnreconcileAccountSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+    }
+    try {
+      const result = await unreconcileAccount(db, parseResult.data.accountId);
       return Response.json({ action: "unreconcile", ...result });
+    } catch (e) {
+      return errorResponse(e);
     }
+  }
 
-    // Default: reconcile.
-    const accountId = Number(body.accountId);
-    const statementBalance = Number(body.statementBalance);
-    if (!accountId || Number.isNaN(statementBalance)) {
-      return Response.json(
-        { error: "accountId and statementBalance are required" },
-        { status: 400 }
-      );
-    }
+  const parseResult = ReconcileAccountSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+  }
+  const body = parseResult.data;
+
+  try {
     const result = await reconcileAccount(db, {
-      accountId,
-      statementBalance,
-      statementDate: body.statementDate ? String(body.statementDate) : undefined,
-      adjustmentCategoryId:
-        body.adjustmentCategoryId != null ? Number(body.adjustmentCategoryId) : null,
+      accountId: body.accountId,
+      statementBalance: body.statementBalance,
+      statementDate: body.statementDate,
+      adjustmentCategoryId: body.adjustmentCategoryId ?? null,
     });
     return Response.json({ action: "reconcile", ...result });
   } catch (e) {

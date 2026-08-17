@@ -13,33 +13,46 @@ export async function GET() {
   return Response.json(rows);
 }
 
+import {
+  AccountCreateSchema,
+  AccountPatchSchema,
+  formatZodError,
+} from "../schemas.js";
+
 export async function POST(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  if (!body.name) return Response.json({ error: "invalid" }, { status: 400 });
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  const parseResult = AccountCreateSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+  }
+  const body = parseResult.data;
   const row = await createAccount(getDefaultDb(), {
     name: body.name,
     kind: body.kind,
     groupLabel: body.groupLabel,
-    balance: body.balance != null ? Number(body.balance) : undefined,
+    balance: body.balance,
     onBudget: body.onBudget,
-    archived: body.archived != null ? Boolean(body.archived) : undefined,
+    archived: body.archived,
   });
   return Response.json(row);
 }
 
 export async function PATCH(req: Request) {
-  let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  const id = Number(body.id);
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-  const row = await updateAccount(getDefaultDb(), id, {
+  let json: unknown;
+  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  const parseResult = AccountPatchSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+  }
+  const body = parseResult.data;
+  const row = await updateAccount(getDefaultDb(), body.id, {
     name: body.name,
     kind: body.kind,
     groupLabel: body.groupLabel,
     onBudget: body.onBudget,
-    sort: body.sort != null ? Number(body.sort) : undefined,
-    archived: body.archived != null ? Boolean(body.archived) : undefined,
+    sort: body.sort,
+    archived: body.archived,
   });
   return Response.json(row);
 }
