@@ -73,7 +73,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` | ✅ **Resolved** |
 | **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` | ✅ **Resolved** |
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` | ✅ **Resolved** |
-| **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` |
+| **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` | ✅ **Resolved** |
 | **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` |
 | **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` |
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` |
@@ -479,6 +479,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/logic/src/reports.ts:289`, `computeMonthlyInsights` checked `if (amt >= 0) continue`, ignoring returns and refunds posted to budget categories and inflating reported spending.
 - **Actionable Solution:** In `computeMonthlyInsights`, accumulate `netOutflow = -num(t.amount)` for all non-income categorized transactions so that positive inflows/refunds offset spending.
 - **Resolution (UNI-35):** Updated transaction spending loop in `packages/logic/src/reports.ts` to accumulate `-num(t.amount)` for all categorized non-income transactions. Added unit test in `packages/logic/tests/cashflow-insights.test.ts`.
+
+---
+
+#### UNI-36 (F-17): Pre-Opening Account Net-Worth Balance Clamping
+- **Root Cause:** In `packages/logic/src/reports.ts`, `computeNetWorthReport` back-calculated initial base balances `currentBalance - totalDelta` and rendered non-zero balances across all past months prior to an account's creation date.
+- **Actionable Solution:** Identify the earliest transaction month per account, and clamp the account's balance to 0 for any report month preceding its opening activity.
+- **Resolution (UNI-36):** Updated `computeNetWorthReport` in `packages/logic/src/reports.ts` to clamp account balances to 0 for months prior to their earliest recorded transaction. Added unit test in `packages/logic/tests/reports.test.ts`.
 
 ---
 

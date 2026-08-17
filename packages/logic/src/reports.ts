@@ -65,8 +65,9 @@ export function computeNetWorthReport(
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
   const months = getMonthsBetween(actualStart, actualEnd);
 
-  // 1. Identify split parents
+  // 1. Identify split parents and earliest transaction month per account
   const splitParentIds = new Set<number>();
+  const earliestMonthByAccount = new Map<number, string>();
   for (const t of data.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
@@ -85,6 +86,12 @@ export function computeNetWorthReport(
     const amt = num(t.amount);
     const mk = t.date.slice(0, 7);
 
+    // Track earliest activity month for source account
+    const curEarliestSrc = earliestMonthByAccount.get(t.accountId);
+    if (!curEarliestSrc || mk < curEarliestSrc) {
+      earliestMonthByAccount.set(t.accountId, mk);
+    }
+
     // Source account delta
     totalDeltas.set(t.accountId, (totalDeltas.get(t.accountId) ?? 0) + amt);
     let srcMonthMap = deltasByMonth.get(mk);
@@ -96,6 +103,10 @@ export function computeNetWorthReport(
 
     // Transfer destination account delta
     if (t.transferAccountId != null) {
+      const curEarliestDest = earliestMonthByAccount.get(t.transferAccountId);
+      if (!curEarliestDest || mk < curEarliestDest) {
+        earliestMonthByAccount.set(t.transferAccountId, mk);
+      }
       totalDeltas.set(t.transferAccountId, (totalDeltas.get(t.transferAccountId) ?? 0) - amt);
       srcMonthMap.set(
         t.transferAccountId,
@@ -137,7 +148,12 @@ export function computeNetWorthReport(
 
     let assets = 0;
     let debts = 0;
-    for (const [, bal] of runningBalances.entries()) {
+    for (const [accId, bal] of runningBalances.entries()) {
+      // Clamp to 0 if the account has transactions but they only begin in a future month
+      const earliest = earliestMonthByAccount.get(accId);
+      if (earliest && m < earliest) {
+        continue;
+      }
       if (bal > 0) {
         assets = Math.round(assets + bal);
       } else if (bal < 0) {
