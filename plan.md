@@ -59,7 +59,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` | ✅ **Resolved** |
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` | ✅ **Resolved** |
-| **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` |
+| **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` | ✅ **Resolved** |
 | **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` |
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` |
 | **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` |
@@ -354,7 +354,7 @@ Despite strong foundations, the application has critical financial calculation d
 - **Actionable Solution:**
   1. Add React `ErrorBoundary` wrappers around `BudgetView`, `TransactionsView`, `ReportsView`, `RecurringView`, and `CalendarView`.
   2. Implement snapshot rollback and visual loading state indicators across all modals and mutation handlers in `BudgetAppShell.tsx`.
-- **Resolution (UNI-06):** Created `ErrorBoundary` component in `packages/ui/src/ErrorBoundary.tsx` with error recovery, retry handlers, and styled alerts. Wrapped each main view and Inspector in `BudgetApp.tsx` and top-level app in `BudgetAppShell.tsx`. Added unit tests in `packages/ui/tests/ErrorBoundary.test.tsx`.
+- **Resolution (UNI-06 & UNI-22):** Created `ErrorBoundary` component in `packages/ui/src/ErrorBoundary.tsx` with error recovery, retry handlers, and styled alerts. Wrapped each main view and Inspector in `BudgetApp.tsx` and top-level app in `BudgetAppShell.tsx`. Added unit tests in `packages/ui/tests/ErrorBoundary.test.tsx`. Implemented snapshot rollback and optimistic UI updates for `addTransaction`, `updateTransaction`, `deleteTransaction`, `bulkDeleteTransactions`, `bulkUpdateTransactions`, `updateRecurring`, `deleteRecurring`, `saveCategory`, `deleteCategory`, `updateAccount`, and `deleteAccount` along with a reactive background syncing spinner in `apps/web/src/components/BudgetAppShell.tsx`.
 
 #### UNI-09 (F-05): Auto-Posting Scheduled Transactions & Mixed-Sign Splits
 - **Root Cause:**
