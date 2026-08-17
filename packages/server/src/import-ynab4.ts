@@ -1,5 +1,6 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
+import { dollarsToCents } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
@@ -103,7 +104,10 @@ export async function importYnab4(db: Db, ynabData: any) {
           onBudget: !!acc.onBudget,
           sort: accountSort++,
           lastReconciledAt: acc.lastReconciledDate || null,
-          lastReconciledBalance: acc.lastReconciledBalance != null ? Number(acc.lastReconciledBalance) : null,
+          lastReconciledBalance:
+            acc.lastReconciledBalance != null
+              ? dollarsToCents(Number(acc.lastReconciledBalance))
+              : null,
           archived: isArchived,
         })
         .returning();
@@ -179,19 +183,20 @@ export async function importYnab4(db: Db, ynabData: any) {
       const month = mb.month.substring(0, 7); // Convert "2014-08-01" -> "2014-08"
 
       for (const msb of mb.monthlySubCategoryBudgets) {
-        if (msb.budgeted !== 0) {
+        if (msb.budgeted !== 0 && msb.budgeted != null) {
           const catId = categoryIdMap.get(msb.categoryId);
           if (catId) {
+            const amt = dollarsToCents(msb.budgeted);
             await db
               .insert(assignments)
               .values({
                 categoryId: catId,
                 month,
-                amount: msb.budgeted,
+                amount: amt,
               })
               .onConflictDoUpdate({
                 target: [assignments.categoryId, assignments.month],
-                set: { amount: msb.budgeted },
+                set: { amount: amt },
               });
           }
         }
@@ -240,7 +245,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             date: t.date,
             payee,
             memo: t.memo || "",
-            amount: t.amount || 0,
+            amount: dollarsToCents(t.amount),
             status:
               t.cleared === "Reconciled"
                 ? "r"
@@ -296,7 +301,7 @@ export async function importYnab4(db: Db, ynabData: any) {
               date: t.date,
               payee: subPayee,
               memo: st.memo || "",
-              amount: st.amount || 0,
+              amount: dollarsToCents(st.amount),
               status:
                 t.cleared === "Reconciled"
                   ? "r"
@@ -333,15 +338,15 @@ export async function importYnab4(db: Db, ynabData: any) {
 
           let sourceAccEntityId = t.accountId;
           let destAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);
-          let amount = t.amount || 0;
+          let rawAmount = t.amount || 0;
           let memo = t.memo || "";
           let cleared = t.cleared;
 
           // Normalize so source is outflow (negative amount) if counterpart exists and is negative
-          if (amount > 0 && partner && (partner.amount || 0) < 0) {
+          if (rawAmount > 0 && partner && (partner.amount || 0) < 0) {
             sourceAccEntityId = partner.accountId;
             destAccEntityId = t.accountId;
-            amount = partner.amount || 0;
+            rawAmount = partner.amount || 0;
             if (!memo && partner.memo) memo = partner.memo;
             cleared = partner.cleared;
           }
@@ -364,7 +369,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             date: t.date,
             payee,
             memo,
-            amount,
+            amount: dollarsToCents(rawAmount),
             status:
               cleared === "Reconciled"
                 ? "r"
@@ -410,7 +415,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             date: t.date,
             payee,
             memo: t.memo || "",
-            amount: t.amount || 0,
+            amount: dollarsToCents(t.amount),
             status:
               t.cleared === "Reconciled"
                 ? "r"
@@ -491,7 +496,7 @@ export async function importYnab4(db: Db, ynabData: any) {
           accountId: accId,
           categoryId: catId,
           payee,
-          amount: st.amount || 0,
+          amount: dollarsToCents(st.amount),
           frequency,
           nextDate: st.date,
           active: true,
@@ -515,7 +520,7 @@ export async function importYnab4(db: Db, ynabData: any) {
           await db.insert(recurringSubTransactions).values({
             recurringId: insertedR.id,
             categoryId: subCatId,
-            amount: sub.amount || 0,
+            amount: dollarsToCents(sub.amount),
             memo: sub.memo || "",
             sort: sort++,
           });

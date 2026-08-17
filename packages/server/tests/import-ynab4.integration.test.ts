@@ -230,19 +230,19 @@ describe("importYnab4 full import", () => {
     expect(transactions).toHaveLength(6);
 
     const regular = byPayee.get("Grocery Store");
-    expect(regular).toMatchObject({ amount: "-100", status: "c", date: "2026-06-01" });
+    expect(regular).toMatchObject({ amount: "-10000", status: "c", date: "2026-06-01" });
 
     const transfer = transactions.find((t) => t.payee.startsWith("Transfer :"));
     expect(transfer).toBeTruthy();
-    expect(Number(transfer!.amount)).toBe(-500);
+    expect(Number(transfer!.amount)).toBe(-50000);
 
     const income = byPayee.get("Employer");
-    expect(income).toMatchObject({ amount: "3000", status: "r", categoryId: null });
+    expect(income).toMatchObject({ amount: "300000", status: "r", categoryId: null });
 
     // Split parent + children are linked via parentId.
     const splitChildren = transactions.filter((t) => t.parentId != null);
     expect(splitChildren).toHaveLength(2);
-    const splitParent = transactions.find((t) => t.amount === "-150");
+    const splitParent = transactions.find((t) => t.amount === "-15000");
     expect(splitParent).toBeTruthy();
     for (const child of splitChildren) {
       expect(child.parentId).toBe(splitParent!.id);
@@ -255,7 +255,7 @@ describe("importYnab4 full import", () => {
     await importYnab4(db, ynabData);
     const { assignments } = await getBudgetData(db);
     expect(assignments).toHaveLength(1);
-    expect(assignments[0]).toMatchObject({ amount: "500", month: "2026-06" });
+    expect(assignments[0]).toMatchObject({ amount: "50000", month: "2026-06" });
   });
 
   it("normalizes scheduled frequencies, transfers, and split children", async () => {
@@ -278,7 +278,7 @@ describe("importYnab4 full import", () => {
     const splitR = recurring.find((r) => r.subTransactions.length > 0)!;
     expect(splitR.categoryId).toBeNull();
     expect(splitR.subTransactions).toHaveLength(1);
-    expect(Number(splitR.subTransactions[0]!.amount)).toBe(-300);
+    expect(Number(splitR.subTransactions[0]!.amount)).toBe(-30000);
   });
 
   it("recomputes balances correctly without double-counting transfers or split parents", async () => {
@@ -286,12 +286,12 @@ describe("importYnab4 full import", () => {
     const { accounts } = await getBudgetData(db);
     const byName = new Map(accounts.map((a) => [a.name, a]));
 
-    // Chequing: -100 (t1) - 500 (t2 transfer to Visa) + 3000 (t4) - 100 - 50 (t5 split children; parent excluded)
-    // = 2250.
-    // Visa: +500 (from incoming transfer of -500: 0 - (-500) = 500).
+    // Chequing: -10000 (t1) - 50000 (t2 transfer to Visa) + 300000 (t4) - 10000 - 5000 (t5 split children; parent excluded)
+    // = 225000 cents ($2,250.00).
+    // Visa: +50000 (from incoming transfer of -50000: 0 - (-50000) = 50000).
     // RRSP has no transactions = 0.
-    expect(Number(byName.get("Chequing")!.balance)).toBeCloseTo(2250);
-    expect(Number(byName.get("Visa")!.balance)).toBeCloseTo(500);
-    expect(Number(byName.get("RRSP")!.balance)).toBeCloseTo(0);
+    expect(Number(byName.get("Chequing")!.balance)).toBe(225000);
+    expect(Number(byName.get("Visa")!.balance)).toBe(50000);
+    expect(Number(byName.get("RRSP")!.balance)).toBe(0);
   });
 });
