@@ -530,13 +530,30 @@ export async function importYnab4(db: Db, ynabData: any) {
           ) {
             subCatId = null;
           }
-          if (!subCatId) continue;
+
+          let subTransferAccountId: number | null = sub.targetAccountId
+            ? accountIdMap.get(sub.targetAccountId) || null
+            : null;
+          if (sub.payeeId && sub.payeeId.startsWith("Payee/Transfer:")) {
+            const targetId = sub.payeeId.split(":")[1];
+            const foundTarget = targetId ? accountIdMap.get(targetId) : null;
+            if (foundTarget) {
+              subTransferAccountId = foundTarget;
+            }
+          }
+          if (subTransferAccountId != null) {
+            subCatId = null;
+          }
+
+          if (!subCatId && !subTransferAccountId) continue;
+
           await db.insert(recurringSubTransactions).values({
             recurringId: insertedR.id,
             categoryId: subCatId,
             amount: dollarsToCents(sub.amount),
             memo: sub.memo || "",
             sort: sort++,
+            transferAccountId: subTransferAccountId,
           });
         }
       }
