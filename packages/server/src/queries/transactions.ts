@@ -113,7 +113,7 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string }[]> {
+): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; status: ClearedStatus }[]> {
   return db
     .select({
       id: transactions.id,
@@ -122,6 +122,7 @@ async function getChildren(
       transferAccountId: transactions.transferAccountId,
       categoryId: transactions.categoryId,
       memo: transactions.memo,
+      status: transactions.status,
     })
     .from(transactions)
     .where(eq(transactions.parentId, parentId));
@@ -390,6 +391,16 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
+  if (existing.status === "r") {
+    const nonStatusKeys = Object.keys(patch).filter((k) => k !== "status");
+    if (nonStatusKeys.length > 0 || patch.status === "r") {
+      throw new TransactionError(
+        "Transaction is reconciled and locked. Unreconcile the transaction before editing.",
+        422
+      );
+    }
+  }
+
   if ("parentId" in (patch as Record<string, unknown>)) {
     throw new TransactionError("parentId cannot be changed via update");
   }
@@ -506,6 +517,9 @@ export async function updateSplit(
   if (!parent) {
     throw new TransactionError("split parent not found", 404);
   }
+  if (parent.status === "r") {
+    throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
+  }
   if (parent.parentId != null || parent.transferAccountId != null) {
     throw new TransactionError("target row is not a split parent");
   }
@@ -515,9 +529,13 @@ export async function updateSplit(
 
   assertSplitsBalanced(parent.amount, children);
 
+  const oldChildren = await getChildren(db, parentId);
+  if (oldChildren.some((c) => c.status === "r")) {
+    throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
+  }
+
   db.run(sql`BEGIN`);
   try {
-    const oldChildren = await getChildren(db, parentId);
     for (const c of oldChildren) {
       await applyBalance(db, parent.accountId, -Number(c.amount));
       if (c.transferAccountId != null) {
@@ -600,6 +618,13 @@ export async function deleteTransaction(db: Database, id: number) {
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
+  if (existing.status === "r") {
+    throw new TransactionError(
+      "Transaction is reconciled and locked. Unreconcile before deleting.",
+      422
+    );
+  }
+
   db.run(sql`BEGIN`);
   try {
     if (existing.parentId != null) {
@@ -627,6 +652,12 @@ export async function deleteTransaction(db: Database, id: number) {
       await db.delete(transactions).where(eq(transactions.id, id));
     } else {
       const children = await getChildren(db, id);
+      if (children.some((c) => c.status === "r")) {
+        throw new TransactionError(
+          "Reconciled split transaction cannot be deleted. Unreconcile before deleting.",
+          422
+        );
+      }
       if (children.length > 0) {
         for (const c of children) {
           await applyBalance(db, existing.accountId, -Number(c.amount));

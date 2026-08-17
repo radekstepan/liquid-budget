@@ -422,6 +422,18 @@ describe("transactions queries", () => {
         /split parent/
       );
     });
+
+    it("UNI-08 / F-08: rejects modifying a reconciled transaction with 422 error", async () => {
+      mock.respondWith("select:transactions", [
+        { id: 1, accountId: 1, amount: -5000, status: "r", payee: "Locked Payee", date: "2026-07-01" },
+      ]);
+
+      await expect(updateTransaction(mock.db, 1, { amount: -6000 })).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/,
+      });
+    });
   });
 
   describe("updateSplit", () => {
@@ -474,6 +486,28 @@ describe("transactions queries", () => {
         )
       ).rejects.toThrow(/no children/);
     });
+
+    it("UNI-08 / F-08: rejects modifying a reconciled split parent with 422 error", async () => {
+      mock.respondWith("select:transactions", [
+        { id: 1, accountId: 5, amount: -5000, payee: "X", categoryId: null, parentId: null, status: "r" },
+      ]);
+
+      await expect(
+        updateSplit(
+          mock.db,
+          1,
+          {},
+          [
+            { categoryId: 1, amount: -2500 },
+            { categoryId: 2, amount: -2500 },
+          ]
+        )
+      ).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /Reconciled split transaction cannot be modified/,
+      });
+    });
   });
 
   describe("deleteTransaction", () => {
@@ -481,6 +515,18 @@ describe("transactions queries", () => {
       mock.respondWith("select:transactions", []);
       const result = await deleteTransaction(mock.db, 99);
       expect(result).toBeNull();
+    });
+
+    it("UNI-08 / F-08: rejects deleting a reconciled transaction with 422 error", async () => {
+      mock.respondWith("select:transactions", [
+        { id: 1, accountId: 1, amount: -5000, status: "r" },
+      ]);
+
+      await expect(deleteTransaction(mock.db, 1)).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/,
+      });
     });
 
     it("deletes and reverses the balance (regular row)", async () => {
