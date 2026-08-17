@@ -983,13 +983,17 @@ describe("RecurringModal", () => {
     fireEvent.change(subAmounts[0]!, { target: { value: "-120" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-80" } });
 
+    const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+    fireEvent.change(memoInputs[0]!, { target: { value: "Weekly food" } });
+    fireEvent.change(memoInputs[1]!, { target: { value: "Supplies" } });
+
     const saveBtn = screen.getByRole("button", { name: /^save$/i });
     expect(saveBtn).not.toBeDisabled();
     fireEvent.click(saveBtn);
     expect(onSave).toHaveBeenCalledTimes(1);
     const payload = onSave.mock.calls[0]![0] as {
       amount: number;
-      subTransactions: { categoryId: number; amount: number }[];
+      subTransactions: { categoryId: number; amount: number; memo?: string }[];
       categoryId: number | null;
       payee: string;
     };
@@ -997,8 +1001,8 @@ describe("RecurringModal", () => {
     expect(payload.categoryId).toBeNull();
     expect(payload.payee).toBe("Costco");
     expect(payload.subTransactions).toHaveLength(2);
-    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -12000 });
-    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -8000 });
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -12000, memo: "Weekly food" });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -8000, memo: "Supplies" });
   });
 
   it("re-uses transferAccountId and subTransactions when editing", () => {
