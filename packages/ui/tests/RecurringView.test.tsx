@@ -159,10 +159,25 @@ describe("RecurringView", () => {
     expect(onDelete).toHaveBeenCalledWith(1);
   });
 
-  it("renders the empty state", () => {
+  it("renders human-readable frequency labels (UNI-23)", () => {
     renderView({
-      data: { ...makeData(), recurring: [] },
+      data: {
+        ...makeData(),
+        recurring: [
+          {
+            id: 101,
+            accountId: 1,
+            categoryId: 10,
+            payee: "Internet",
+            amount: "-6000",
+            frequency: "everyotherweek",
+            nextDate: "2026-07-01",
+            active: true,
+            subTransactions: [],
+          },
+        ],
+      },
     });
-    expect(screen.getByText("No recurring transactions yet.")).toBeInTheDocument();
+    expect(screen.getByText("Every Other Week")).toBeInTheDocument();
   });
 });

@@ -7,6 +7,7 @@ import {
   num,
   netMonthlyAmount,
   frequencyMonthlyMultiplier,
+  frequencyLabel,
   recurringFlavour,
 } from "@ynab/logic";
 import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
@@ -144,7 +145,7 @@ export function RecurringView({
                     tone="grey"
                     style={{ minWidth: 0, padding: "2px 8px", fontSize: 9.5, letterSpacing: "0.07em", textTransform: "uppercase" }}
                   >
-                    {r.frequency}
+                    {frequencyLabel(r.frequency)}
                   </Pill>
                   <span className="y-hint">
                     Next: <span className="y-num" style={{ color: "var(--y-ink-soft)" }}>{r.nextDate}</span>

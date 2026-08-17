@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -1019,11 +1019,11 @@ export function RecurringModal({
             onChange={(v) => setFrequency(v)}
             className="w-full"
           >
-            <option value="weekly">Weekly</option>
-            <option value="biweekly">Biweekly</option>
-            <option value="twiceamonth">Twice a month</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
+            {RECURRING_FREQUENCIES.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
           </Select>
         </Field>
       </div>
