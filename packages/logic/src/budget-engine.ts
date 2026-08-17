@@ -370,12 +370,20 @@ function buildCarryoverMap(
       const next = Math.round(prev + assigned + rawFlow + ccBuffer);
 
       // Clamp non-CC categories to 0 — cash overspending is deducted from
-      // next month's TBB, not carried within the category. CC payment
-      // categories are NOT clamped — credit overspending persists as debt.
+      // next month's TBB, not carried within the category, UNLESS "Red Arrow to the Right"
+      // (overspendCarriesOver === true) is enabled on the category.
+      // CC payment categories are NOT clamped — credit overspending persists as debt.
+      const carriesOver = Boolean(c.overspendCarriesOver);
       if (!ccGroupIds.has(c.groupId)) {
         if (next < 0) {
-          monthOverspent += -next;
-          nextBalance.set(c.id, 0);
+          if (carriesOver) {
+            // Negative balance rolls over to next month's starting available balance
+            // and is NOT deducted from next month's TBB.
+            nextBalance.set(c.id, next);
+          } else {
+            monthOverspent += -next;
+            nextBalance.set(c.id, 0);
+          }
         } else {
           nextBalance.set(c.id, next);
         }
@@ -428,6 +436,7 @@ function computeOverspentForMonth(
   let overspent = 0;
   for (const c of data.categories) {
     if (ccGroupIds.has(c.groupId)) continue;
+    if (c.overspendCarriesOver) continue; // Red Arrow: balance rolls over, does not deduct from TBB
 
     const prev = carryoverMap.get(c.id) ?? 0;
     const assigned = aMap.get(c.id) ?? 0;

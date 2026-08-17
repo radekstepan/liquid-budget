@@ -39,6 +39,7 @@ export const categories = sqliteTable("categories", {
   linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
     onDelete: "cascade",
   }),
+  overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
 });
 
 export const assignments = sqliteTable(

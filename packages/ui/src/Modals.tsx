@@ -590,7 +590,7 @@ export function CategoryModal({
   transactionCount?: number;
   otherCategories?: Category[];
   onClose: () => void;
-  onSave: (v: { name: string; goalTarget: number | null; carryover?: number }) => void;
+  onSave: (v: { name: string; goalTarget: number | null; carryover?: number; overspendCarriesOver?: boolean }) => void;
   onDelete?: (opts?: { moveToCategoryId?: number }) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
@@ -601,6 +601,9 @@ export function CategoryModal({
   const [hasCarryover, setHasCarryover] = useState(initCarryover !== 0);
   const [carryover, setCarryover] = useState(
     initCarryover !== 0 ? initCarryover.toFixed(2) : ""
+  );
+  const [overspendCarriesOver, setOverspendCarriesOver] = useState(
+    Boolean(initial?.overspendCarriesOver)
   );
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -662,6 +665,7 @@ export function CategoryModal({
                   name: name.trim(),
                   goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
                   carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
+                  overspendCarriesOver,
                 })
               }
             >
@@ -746,6 +750,13 @@ export function CategoryModal({
               <AmountPreview value={carryover} />
             </Field>
           )}
+          <div className="mb-2">
+            <Checkbox
+              checked={overspendCarriesOver}
+              onChange={setOverspendCarriesOver}
+              label="Red Arrow: Carry negative balance over to next month"
+            />
+          </div>
         </>
       )}
     </Modal>

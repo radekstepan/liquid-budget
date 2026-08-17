@@ -760,6 +760,15 @@ function GroupBlock({
                     </td>
                     <td className="num y-num" style={{ color: balanceColor(r.available) }}>
                       {fmt(r.available)}
+                      {r.available < 0 && r.category.overspendCarriesOver && (
+                        <span
+                          className="ml-1 text-red-600 font-bold"
+                          title="Red Arrow to the Right: Overspending carries over to next month"
+                          aria-label="Red arrow: carry over"
+                        >
+                          ➔
+                        </span>
+                      )}
                     </td>
                   </>
                 )}
@@ -842,6 +851,15 @@ function MonthCells({
       </td>
       <td className="num y-num" style={{ color: balanceColor(row.available) }}>
         {fmt(row.available)}
+        {row.available < 0 && row.category.overspendCarriesOver && (
+          <span
+            className="ml-1 text-red-600 font-bold"
+            title="Red Arrow to the Right: Overspending carries over to next month"
+            aria-label="Red arrow: carry over"
+          >
+            ➔
+          </span>
+        )}
       </td>
     </>
   );

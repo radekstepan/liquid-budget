@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     name: body.name,
     goalTarget: body.goalTarget != null ? Number(body.goalTarget) : null,
     carryover: body.carryover != null ? Number(body.carryover) : undefined,
+    overspendCarriesOver: body.overspendCarriesOver === true,
   });
   return Response.json(row);
 }
@@ -54,6 +55,7 @@ export async function PATCH(req: Request) {
     goalTarget: body.goalTarget === undefined ? undefined : body.goalTarget,
     carryover: body.carryover != null ? Number(body.carryover) : undefined,
     sort: body.sort != null ? Number(body.sort) : undefined,
+    overspendCarriesOver: body.overspendCarriesOver,
   });
   return Response.json(row);
 }
