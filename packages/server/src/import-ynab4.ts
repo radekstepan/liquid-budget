@@ -453,6 +453,32 @@ export async function importYnab4(db: Db, ynabData: any) {
     // 6. Compute real balances of accounts
     await recomputeAccountBalances(db);
 
+    // 6b. Initialize Credit Card Payment category carryover from card starting balance if present
+    for (const acc of creditAccounts) {
+      const [startingTx] = await db
+        .select()
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.accountId, acc.id),
+            sql`lower(${transactions.payee}) like '%starting balance%'`
+          )
+        )
+        .limit(1);
+
+      if (startingTx && Number(startingTx.amount) < 0) {
+        await db
+          .update(categories)
+          .set({ carryover: Math.abs(Number(startingTx.amount)) })
+          .where(
+            and(
+              eq(categories.groupId, ccGroup!.id),
+              eq(categories.linkedAccountId, acc.id)
+            )
+          );
+      }
+    }
+
     // 7. Insert Scheduled (Recurring) Transactions
     for (const st of yScheduled) {
       if (st.isTombstone) continue;
