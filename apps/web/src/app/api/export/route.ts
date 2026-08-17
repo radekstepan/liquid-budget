@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { getDefaultDb, getBudgetData } from "@ynab/server";
 import { num } from "@ynab/logic";
 
@@ -15,9 +16,32 @@ function csvLine(fields: (string | number)[]): string {
   return fields.map(csvEscape).join(",") + "\n";
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const format = req.nextUrl?.searchParams?.get("format")?.toLowerCase() ?? "csv";
     const db = getDefaultDb();
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (format === "json") {
+      const data = await getBudgetData(db);
+      return new Response(JSON.stringify(data, null, 2), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="liquid-budget-${today}.json"`,
+        },
+      });
+    }
+
+    if (format === "sqlite" || format === "db") {
+      const buffer = db.$client.serialize();
+      return new Response(buffer, {
+        headers: {
+          "Content-Type": "application/x-sqlite3",
+          "Content-Disposition": `attachment; filename="budget-${today}.db"`,
+        },
+      });
+    }
+
     const data = await getBudgetData(db);
 
     const lines: string[] = [];
@@ -77,7 +101,6 @@ export async function GET() {
     }
 
     const csv = lines.join("");
-    const today = new Date().toISOString().slice(0, 10);
 
     return new Response(csv, {
       headers: {

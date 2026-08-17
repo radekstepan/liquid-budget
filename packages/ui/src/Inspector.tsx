@@ -154,6 +154,24 @@ export function Inspector({
               >
                 <Icon name="export" size={12} /> Export as CSV
               </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.open("/api/export?format=json", "_blank");
+                }}
+                className="y-menu-item"
+              >
+                <Icon name="export" size={12} /> Export as JSON
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.open("/api/export?format=sqlite", "_blank");
+                }}
+                className="y-menu-item"
+              >
+                <Icon name="export" size={12} /> Backup SQLite DB
+              </button>
               {onResetDemo && (
                 <button
                   onClick={() => {
