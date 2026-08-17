@@ -118,3 +118,124 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
     editModal.locator('input[placeholder="e.g. Whole Foods"]')
   ).toHaveValue(payeeText!);
 });
+
+test("deletes a transaction via the modal after confirming", async ({ page }) => {
+  const uniquePayee = `PW Delete ${Date.now()}`;
+  await page.getByRole("button", { name: "Add Transaction" }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
+  await addModal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(addModal).toBeHidden();
+
+  const createdRow = page.getByRole("row").filter({ hasText: uniquePayee });
+  await expect(createdRow).toBeVisible();
+
+  // Click row to open edit modal
+  await createdRow.click();
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+
+  // Click Delete… button
+  await editModal.getByRole("button", { name: /^Delete/ }).click();
+  await expect(editModal.locator(".y-modal-head")).toContainText("Delete");
+
+  // Confirm delete
+  await editModal.getByRole("button", { name: "Yes, delete it" }).click();
+  await expect(editModal).toBeHidden();
+
+  // Verify row is removed
+  await expect(createdRow).toBeHidden();
+});
+
+test("deletes a transfer transaction via modal showing linked transfer warning", async ({ page }) => {
+  const stamp = Date.now().toString();
+  const transferPayee = `PW Transfer ${stamp}`;
+  await page.getByRole("button", { name: "Add Transaction" }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator('input[inputmode="decimal"]').first().fill("30.00");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(transferPayee);
+
+  // Select transfer in category dropdown
+  const catDropdown = addModal.locator(".y-select").nth(1);
+  await catDropdown.click();
+  await page.locator(".y-menu-item").filter({ hasText: /^Transfer :/ }).first().click();
+  await addModal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(addModal).toBeHidden();
+
+  const createdRow = page.getByRole("row").filter({ hasText: transferPayee });
+  await expect(createdRow).toBeVisible();
+
+  // Click row to open edit modal
+  await createdRow.click();
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+
+  // Click Delete… button
+  await editModal.getByRole("button", { name: /^Delete/ }).click();
+  await expect(editModal.getByText(/Linked transfer/i)).toBeVisible();
+  await expect(editModal.getByText(/also remove the corresponding transaction in the linked account/i)).toBeVisible();
+
+  // Confirm delete
+  await editModal.getByRole("button", { name: "Yes, delete it" }).click();
+  await expect(editModal).toBeHidden();
+
+  // Verify row is removed
+  await expect(createdRow).toBeHidden();
+});
+
+test("deletes a split transaction via modal showing split warning notice", async ({ page }) => {
+  const stamp = Date.now().toString();
+  const splitPayee = `PW Split ${stamp}`;
+  await page.getByRole("button", { name: "Add Transaction" }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(splitPayee);
+
+  // Switch to Split
+  const catDropdown = addModal.locator(".y-select").nth(1);
+  await catDropdown.click();
+  await page.locator(".y-menu-item").filter({ hasText: /Split Transaction/i }).first().click();
+
+  // Sub-row 1 amount
+  const subAmountInputs = addModal.locator('input[inputmode="decimal"]');
+  await subAmountInputs.nth(1).fill("30.00");
+
+  // Pick category for sub-row 1
+  const subCatDropdowns = addModal.locator(".y-select");
+  await subCatDropdowns.nth(1).click();
+  await page.locator(".y-menu-item").filter({ hasText: "Groceries" }).first().click();
+
+  // Pick category for sub-row 2
+  await subCatDropdowns.nth(2).click();
+  await page.locator(".y-menu-item").filter({ hasText: "Household" }).first().click();
+
+  await addModal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(addModal).toBeHidden();
+
+  // Find the split transaction row
+  await page.getByPlaceholder("Search register").fill(stamp);
+  const parentRow = page.getByRole("row").filter({ hasText: splitPayee }).first();
+  await expect(parentRow).toBeVisible();
+
+  // Click parent row to edit
+  await parentRow.click();
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+
+  // Click Delete…
+  await editModal.getByRole("button", { name: /^Delete/ }).click();
+  await expect(editModal.getByText(/Split transaction/i)).toBeVisible();
+  await expect(editModal.getByText(/also delete all of its 2 sub-transactions/i)).toBeVisible();
+
+  // Confirm delete
+  await editModal.getByRole("button", { name: "Yes, delete it" }).click();
+  await expect(editModal).toBeHidden();
+
+  // Clear search and verify row is gone
+  await page.getByPlaceholder("Search register").fill("");
+  await expect(page.getByRole("row").filter({ hasText: splitPayee })).toHaveCount(0);
+});

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import {
   assertSplitsBalanced,
   createSplitWithChildren,
@@ -499,6 +499,88 @@ describe("transactions queries", () => {
       await deleteTransaction(mock.db, 1);
       const ops = mock.calls.map((c) => c.op);
       expect(ops).toEqual(["select", "run", "update", "update", "delete", "run"]);
+    });
+
+    it("deleting a split parent with transfer sub-transactions reverses source balance and destination transfer balance", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -10000, categoryId: null, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 2, accountId: 1, amount: -6000, transferAccountId: null },
+        { id: 3, accountId: 1, amount: -4000, transferAccountId: 2 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+
+      await deleteTransaction(mock.db, 1);
+      const ops = mock.calls.map((c) => c.op);
+      expect(ops).toEqual(["select", "run", "select", "update", "update", "update", "delete", "run"]);
+      const updates = mock.calls.filter((c) => c.op === "update" && c.table === "accounts");
+      expect(updates).toHaveLength(3);
+    });
+
+    it("deleting a split child directly when > 2 children exist reverses child balance without deleting parent", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}]);
+
+      const result = await deleteTransaction(mock.db, 2);
+      expect(result).toMatchObject({ id: 2 });
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(1);
+    });
+
+    it("deleting a split child transfer when > 2 children exist reverses both source and destination balances", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: 2, categoryId: null },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+
+      await deleteTransaction(mock.db, 2);
+      const updates = mock.calls.filter((c) => c.op === "update" && c.table === "accounts");
+      expect(updates).toHaveLength(2);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(1);
+    });
+
+    it("deleting a split child when only 1 child remains cleans up remaining child and parent", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+      mock.respondWith("delete:transactions", [{}, {}, {}]);
+
+      await deleteTransaction(mock.db, 2);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(3);
+    });
+
+    it("rolls back transaction and rethrows when an error occurs during deletion", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWith("select:transactions", []);
+      mock.db.update = vi.fn().mockImplementation(() => {
+        throw new Error("DB write failed");
+      }) as unknown as typeof mock.db.update;
+
+      await expect(deleteTransaction(mock.db, 1)).rejects.toThrow("DB write failed");
+      const ops = mock.calls.map((c) => c.op);
+      expect(ops).toContain("run");
     });
   });
 });

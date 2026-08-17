@@ -182,6 +182,271 @@ describe("TransactionModal", () => {
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 99, payee: "IGA" });
   });
 
+  describe("deletion flow", () => {
+    it("does not render a delete button in add mode", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+    });
+
+    it("renders a delete button in edit mode when onDelete is provided", () => {
+      const initial: Transaction = {
+        id: 99,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-10",
+        payee: "IGA",
+        memo: "",
+        amount: "-1234",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+      expect(screen.getByRole("button", { name: /^delete/i })).toBeInTheDocument();
+    });
+
+    it("triggers two-step confirmation and calls onDelete when confirmed", async () => {
+      const onDelete = vi.fn();
+      const initial: Transaction = {
+        id: 99,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-10",
+        payee: "IGA",
+        memo: "",
+        amount: "-1234",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={onDelete}
+        />
+      );
+
+      // Step 1: click Delete… to enter confirmation
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText('Delete "IGA"?')).toBeInTheDocument();
+      expect(screen.getByText(/are you sure you want to delete this transaction/i)).toBeInTheDocument();
+
+      // Step 2: cancel returns to edit form without deleting
+      fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+      expect(onDelete).not.toHaveBeenCalled();
+      expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
+
+      // Re-enter confirmation and confirm
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+      });
+      expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows linked transfer notice when deleting a transfer transaction", () => {
+      const initial: Transaction = {
+        id: 101,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Transfer : Savings",
+        memo: "",
+        amount: "-5000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText(/linked transfer/i)).toBeInTheDocument();
+      expect(screen.getByText(/also remove the corresponding transaction in the linked account/i)).toBeInTheDocument();
+    });
+
+    it("shows split transaction notice when deleting a split parent", () => {
+      const parent: Transaction = {
+        id: 10,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Target",
+        memo: "",
+        amount: "-10000",
+        cleared: true,
+      };
+      const allTxns: Transaction[] = [
+        parent,
+        { id: 11, parentId: 10, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Target", amount: "-6000", cleared: true },
+        { id: 12, parentId: 10, accountId: 1, categoryId: 11, date: "2026-06-10", payee: "Target", amount: "-4000", cleared: true },
+      ];
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          allTransactions={allTxns}
+          initial={parent}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText(/split transaction/i)).toBeInTheDocument();
+      expect(screen.getByText(/also delete all of its 2 sub-transactions/i)).toBeInTheDocument();
+    });
+
+    it("handles deleting a split parent that includes transfer sub-transactions", async () => {
+      const onDelete = vi.fn();
+      const parent: Transaction = {
+        id: 20,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Payroll Split",
+        memo: "",
+        amount: "50000",
+        cleared: true,
+      };
+      const allTxns: Transaction[] = [
+        parent,
+        { id: 21, parentId: 20, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Payroll Split", amount: "40000", cleared: true },
+        { id: 22, parentId: 20, accountId: 1, categoryId: null, transferAccountId: 2, date: "2026-06-10", payee: "Transfer : Savings", amount: "10000", cleared: true },
+      ];
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          allTransactions={allTxns}
+          initial={parent}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={onDelete}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText('Delete "Payroll Split"?')).toBeInTheDocument();
+      expect(screen.getByText(/split transaction/i)).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+      });
+      expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders fallback title 'Delete Transaction?' when initial payee is empty", () => {
+      const initial: Transaction = {
+        id: 30,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-10",
+        payee: "   ",
+        memo: "",
+        amount: "-1000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText("Delete Transaction?")).toBeInTheDocument();
+    });
+
+    it("resets confirmingDelete state when initial transaction id changes", () => {
+      const t1: Transaction = {
+        id: 41,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-10",
+        payee: "Tx 1",
+        memo: "",
+        amount: "-1000",
+        cleared: true,
+      };
+      const t2: Transaction = {
+        id: 42,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-10",
+        payee: "Tx 2",
+        memo: "",
+        amount: "-2000",
+        cleared: true,
+      };
+
+      const { rerender } = render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={t1}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+      expect(screen.getByText('Delete "Tx 1"?')).toBeInTheDocument();
+
+      // Rerender with t2
+      rerender(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={t2}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={() => {}}
+        />
+      );
+      expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
+      expect(screen.queryByText('Delete "Tx 1"?')).not.toBeInTheDocument();
+    });
+  });
+
   describe("transfer mode", () => {
     it("hides the Category field and shows the destination account dropdown", () => {
       render(

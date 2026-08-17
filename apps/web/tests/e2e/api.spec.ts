@@ -532,3 +532,110 @@ test("DELETE /api/categories removes a created category and group", async () => 
   expect(missing.status()).toBe(200);
   await ctx.dispose();
 });
+
+test("DELETE /api/transactions deletes a transfer and fully reverses both accounts' balances", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const source = budget.accounts.find((a: { name: string }) => a.name === "Cash");
+  const dest = budget.accounts.find((a: { name: string }) => a.name === "Scotia e-Chequing");
+  expect(source?.id).toBeTruthy();
+  expect(dest?.id).toBeTruthy();
+
+  const sourceBalBefore = Number(source.balance);
+  const destBalBefore = Number(dest.balance);
+  const transferAmount = -75.5;
+
+  // Create transfer
+  const res = await ctx.post("/api/transactions", {
+    data: {
+      accountId: source.id,
+      categoryId: null,
+      date: "2099-07-01",
+      payee: "Transfer: Scotia e-Chequing",
+      memo: "E2E Transfer Delete Test",
+      amount: transferAmount,
+      transferAccountId: dest.id,
+    },
+  });
+  expect(res.status()).toBe(200);
+  const created = await res.json();
+
+  // Verify accounts after creation
+  const afterCreate = await (await ctx.get("/api/budget")).json();
+  const sourceAfter = afterCreate.accounts.find((a: { id: number }) => a.id === source.id);
+  const destAfter = afterCreate.accounts.find((a: { id: number }) => a.id === dest.id);
+  expect(Number(sourceAfter.balance)).toBeCloseTo(sourceBalBefore + transferAmount, 2);
+  expect(Number(destAfter.balance)).toBeCloseTo(destBalBefore - transferAmount, 2);
+
+  // Delete the transfer
+  const delRes = await ctx.delete(`/api/transactions?id=${created.id}`);
+  expect(delRes.status()).toBe(200);
+
+  // Verify both accounts reverted to starting balances
+  const afterDelete = await (await ctx.get("/api/budget")).json();
+  const sourceReverted = afterDelete.accounts.find((a: { id: number }) => a.id === source.id);
+  const destReverted = afterDelete.accounts.find((a: { id: number }) => a.id === dest.id);
+  expect(Number(sourceReverted.balance)).toBeCloseTo(sourceBalBefore, 2);
+  expect(Number(destReverted.balance)).toBeCloseTo(destBalBefore, 2);
+  expect(afterDelete.transactions.some((t: { id: number }) => t.id === created.id)).toBe(false);
+
+  await ctx.dispose();
+});
+
+test("DELETE /api/transactions deletes a split parent with transfer sub-transactions and reverses all balances", async () => {
+  const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
+  const budget = await (await ctx.get("/api/budget")).json();
+  const source = budget.accounts.find((a: { name: string }) => a.name === "Cash");
+  const dest = budget.accounts.find((a: { name: string }) => a.name === "Scotia e-Chequing");
+  const cat = budget.categories[0];
+  expect(source?.id).toBeTruthy();
+  expect(dest?.id).toBeTruthy();
+  expect(cat?.id).toBeTruthy();
+
+  const sourceBalBefore = Number(source.balance);
+  const destBalBefore = Number(dest.balance);
+
+  // Create split transaction: -$100 total (-$60 category expense, -$40 transfer to dest)
+  const res = await ctx.post("/api/transactions", {
+    data: {
+      accountId: source.id,
+      categoryId: null,
+      date: "2099-07-02",
+      payee: "Split with Transfer",
+      memo: "E2E Split Transfer Delete",
+      amount: -100,
+      subTransactions: [
+        { categoryId: cat.id, amount: -60 },
+        { categoryId: null, transferAccountId: dest.id, amount: -40 },
+      ],
+    },
+  });
+  expect(res.status()).toBe(200);
+  const created = await res.json();
+  expect(created.parent.id).toBeGreaterThan(0);
+  expect(created.children).toHaveLength(2);
+
+  // Verify accounts after split creation
+  const afterCreate = await (await ctx.get("/api/budget")).json();
+  const sourceAfter = afterCreate.accounts.find((a: { id: number }) => a.id === source.id);
+  const destAfter = afterCreate.accounts.find((a: { id: number }) => a.id === dest.id);
+  expect(Number(sourceAfter.balance)).toBeCloseTo(sourceBalBefore - 100, 2);
+  expect(Number(destAfter.balance)).toBeCloseTo(destBalBefore + 40, 2);
+
+  // Delete the split parent
+  const delRes = await ctx.delete(`/api/transactions?id=${created.parent.id}`);
+  expect(delRes.status()).toBe(200);
+
+  // Verify both accounts reverted to starting balances and all child rows were removed
+  const afterDelete = await (await ctx.get("/api/budget")).json();
+  const sourceReverted = afterDelete.accounts.find((a: { id: number }) => a.id === source.id);
+  const destReverted = afterDelete.accounts.find((a: { id: number }) => a.id === dest.id);
+  expect(Number(sourceReverted.balance)).toBeCloseTo(sourceBalBefore, 2);
+  expect(Number(destReverted.balance)).toBeCloseTo(destBalBefore, 2);
+  expect(afterDelete.transactions.some((t: { id: number }) => t.id === created.parent.id)).toBe(false);
+  for (const child of created.children) {
+    expect(afterDelete.transactions.some((t: { id: number }) => t.id === child.id)).toBe(false);
+  }
+
+  await ctx.dispose();
+});

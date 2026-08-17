@@ -720,4 +720,115 @@ describe("computeBudget", () => {
     expect(Number.isInteger(row?.carryoverIn)).toBe(true);
     expect(Number.isInteger(row?.available)).toBe(true);
   });
+
+  describe("transaction deletion impact on budget computations", () => {
+    it("restores available category amounts when a split transaction is deleted", () => {
+      const groups = [makeGroup({ id: 1, name: "Living" })];
+      const cats = [
+        makeCategory({ id: 10, groupId: 1, name: "Groceries" }),
+        makeCategory({ id: 11, groupId: 1, name: "Household" }),
+      ];
+      const accounts = [
+        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+      ];
+      const assignments = [
+        { month: "2026-06", categoryId: 10, amount: "20000" }, // $200 budgeted to Groceries
+        { month: "2026-06", categoryId: 11, amount: "10000" }, // $100 budgeted to Household
+      ];
+
+      // Split transaction: $150 parent (-$100 to Groceries, -$50 to Household)
+      const splitParent = {
+        id: 100,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-06-15",
+        payee: "Costco Split",
+        memo: "",
+        amount: "-15000",
+        status: "c" as const,
+      };
+      const splitChild1 = {
+        id: 101,
+        parentId: 100,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-06-15",
+        payee: "Costco Split",
+        memo: "",
+        amount: "-10000",
+        status: "c" as const,
+      };
+      const splitChild2 = {
+        id: 102,
+        parentId: 100,
+        accountId: 1,
+        categoryId: 11,
+        date: "2026-06-15",
+        payee: "Costco Split",
+        memo: "",
+        amount: "-5000",
+        status: "c" as const,
+      };
+
+      const dataWithSplit: BudgetData = {
+        accounts,
+        groups,
+        categories: cats,
+        assignments,
+        transactions: [splitParent, splitChild1, splitChild2],
+        recurring: [],
+      };
+
+      const withSplit = computeBudget(dataWithSplit, "2026-06");
+      const grocWith = withSplit.groups[0]?.rows.find((r) => r.category.id === 10);
+      const houseWith = withSplit.groups[0]?.rows.find((r) => r.category.id === 11);
+      expect(grocWith?.outflow).toBe(-10000);
+      expect(grocWith?.available).toBe(10000); // $200 - $100 = $100
+      expect(houseWith?.outflow).toBe(-5000);
+      expect(houseWith?.available).toBe(5000); // $100 - $50 = $50
+
+      // When the split parent and children are deleted:
+      const dataAfterDelete: BudgetData = {
+        ...dataWithSplit,
+        transactions: [],
+      };
+
+      const afterDelete = computeBudget(dataAfterDelete, "2026-06");
+      const grocAfter = afterDelete.groups[0]?.rows.find((r) => r.category.id === 10);
+      const houseAfter = afterDelete.groups[0]?.rows.find((r) => r.category.id === 11);
+      expect(grocAfter?.outflow).toBe(0);
+      expect(grocAfter?.available).toBe(20000); // Full $200 restored
+      expect(houseAfter?.outflow).toBe(0);
+      expect(houseAfter?.available).toBe(10000); // Full $100 restored
+    });
+
+    it("on-budget transfer deletion does not affect category activity but reverses account activity", () => {
+      const groups = [makeGroup({ id: 1, name: "Living" })];
+      const cats = [makeCategory({ id: 10, groupId: 1, name: "Groceries" })];
+      const accounts = [
+        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "50000", onBudget: true, sort: 0 },
+        { id: 2, name: "Savings", kind: "liquid" as const, groupLabel: "Budget", balance: "50000", onBudget: true, sort: 1 },
+      ];
+      const assignments = [{ id: 1, month: "2026-06", categoryId: 10, amount: "10000" }];
+
+      const transferTx = {
+        id: 200,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-06-15",
+        payee: "Transfer : Savings",
+        memo: "",
+        amount: "-20000",
+        status: "c" as const,
+      };
+
+      const withTransfer = computeBudget({ accounts, groups, categories: cats, assignments, transactions: [transferTx], recurring: [] }, "2026-06");
+      const withoutTransfer = computeBudget({ accounts, groups, categories: cats, assignments, transactions: [], recurring: [] }, "2026-06");
+
+      // On-budget transfers do not have categories, so category outflow is 0 in both
+      expect(withTransfer.groups[0]?.rows[0]?.outflow).toBe(0);
+      expect(withoutTransfer.groups[0]?.rows[0]?.outflow).toBe(0);
+    });
+  });
 });
