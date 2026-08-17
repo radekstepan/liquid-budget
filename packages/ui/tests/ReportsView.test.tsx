@@ -279,4 +279,22 @@ describe("ReportsView", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
     expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);
   });
+
+  it("renders previous and next navigation controls and calls handlers (UNI-41 / BUG-34)", () => {
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderView({ onPrev, onNext });
+
+    const prevBtn = screen.getByRole("button", { name: "Previous month" });
+    const nextBtn = screen.getByRole("button", { name: "Next month" });
+
+    expect(prevBtn).toBeInTheDocument();
+    expect(nextBtn).toBeInTheDocument();
+
+    fireEvent.click(prevBtn);
+    expect(onPrev).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(nextBtn);
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
 });
