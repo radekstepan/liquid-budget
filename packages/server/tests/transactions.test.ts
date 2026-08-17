@@ -167,6 +167,26 @@ describe("transactions queries", () => {
       });
     });
 
+    it("UNI-02 / F-01: saves income transaction with incomeMonth", async () => {
+      mock.respondWith("insert:transactions", [
+        { id: 99, accountId: 1, categoryId: null, date: "2026-06-25", amount: 500000, isIncome: true, incomeMonth: "2026-07" },
+      ]);
+      mock.respondWith("update:accounts", [{}]);
+      const row = await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        date: "2026-06-25",
+        payee: "Employer",
+        memo: "Deferred income",
+        amount: 500000,
+        incomeMonth: "2026-07",
+      });
+      expect(row).toMatchObject({
+        isIncome: true,
+        incomeMonth: "2026-07",
+      });
+    });
+
     it("rejects direct creation of a reconciled transaction", async () => {
       await expect(
         createTransaction(mock.db, {

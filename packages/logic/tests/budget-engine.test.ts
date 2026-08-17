@@ -868,5 +868,44 @@ describe("computeBudget", () => {
       expect(withTransfer.groups[0]?.rows[0]?.outflow).toBe(0);
       expect(withoutTransfer.groups[0]?.rows[0]?.outflow).toBe(0);
     });
+
+    it("UNI-02 / F-01: deferred income targets next month TBB without affecting current month TBB", () => {
+      const groups = [makeGroup({ id: 1, name: "Living" })];
+      const cats = [makeCategory({ id: 10, groupId: 1, name: "Groceries" })];
+      const accounts = [
+        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+      ];
+      const deferredIncomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2025-06-25",
+        payee: "Employer",
+        memo: "End of month salary",
+        amount: "500000",
+        status: "c" as const,
+        isIncome: true,
+        incomeMonth: "2025-07",
+      };
+
+      const data: BudgetData = {
+        accounts,
+        groups,
+        categories: cats,
+        assignments: [],
+        transactions: [deferredIncomeTx],
+        recurring: [],
+      };
+
+      // In June (transaction date month): income is 0, TBB is 0
+      const june = computeBudget(data, "2025-06");
+      expect(june.totalIncome).toBe(0);
+      expect(june.tbb).toBe(0);
+
+      // In July (targeted income month): income is 500000, TBB is 500000
+      const july = computeBudget(data, "2025-07");
+      expect(july.totalIncome).toBe(500000);
+      expect(july.tbb).toBe(500000);
+    });
   });
 });
