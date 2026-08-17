@@ -51,6 +51,7 @@ export function TransactionModal({
   initial,
   onClose,
   onSave,
+  onDelete,
 }: {
   accounts: Account[];
   categories: Category[];
@@ -61,6 +62,8 @@ export function TransactionModal({
   initial?: Transaction;
   onClose: () => void;
   onSave: (t: TransactionSavePayload) => void;
+  /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
+  onDelete?: () => Promise<void> | void;
 }) {
   const initialAmt = initial ? num(initial.amount) / 100 : 0;
 
@@ -77,6 +80,15 @@ export function TransactionModal({
     initial?.parentId == null &&
     !!initialChildren &&
     initialChildren.length > 0;
+
+  const isEdit = !!initial;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setConfirmingDelete(false);
+    setDeleting(false);
+  }, [initial?.id]);
 
   const [mode, setMode] = useState<"single" | "transfer" | "split">(
     isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
@@ -155,6 +167,16 @@ export function TransactionModal({
     }
   };
 
+  const confirmDelete = async () => {
+    if (!onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const save = () => {
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
@@ -229,267 +251,312 @@ export function TransactionModal({
 
   return (
     <Modal
-      wide={mode === "split"}
-      title={initial ? "Edit Transaction" : "Add Transaction"}
+      wide={!confirmingDelete && mode === "split"}
+      title={
+        confirmingDelete
+          ? initial?.payee?.trim()
+            ? `Delete "${initial.payee.trim()}"?`
+            : "Delete Transaction?"
+          : initial
+            ? "Edit Transaction"
+            : "Add Transaction"
+      }
       onClose={onClose}
       footer={
-        <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save} disabled={!canSave}>
-            {initial ? "Save Changes" : "Save Transaction"}
-          </Btn>
-        </>
+        confirmingDelete ? (
+          <>
+            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              Cancel
+            </Btn>
+            <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Yes, delete it"}
+            </Btn>
+          </>
+        ) : (
+          <>
+            <Btn onClick={onClose}>Cancel</Btn>
+            {isEdit && onDelete && (
+              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete…
+              </Btn>
+            )}
+            <Btn variant="primary" onClick={save} disabled={!canSave}>
+              {initial ? "Save Changes" : "Save Transaction"}
+            </Btn>
+          </>
+        )
       }
     >
-      <div className="y-seg mb-3 w-full">
-        {(["single", "transfer", "split"] as const).map((m) => (
-          <Button
-            key={m}
-            size="sm"
-            variant={mode === m ? "primary" : "default"}
-            active={mode === m}
-            onClick={() => switchingMode(m)}
-            className="flex-1 capitalize"
-            disabled={!!isInitialSplit && m === "single"}
-          >
-            {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
-          </Button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Date">
-          <TextField
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-        <Field label={mode === "split" ? "Total Amount" : "Amount"}>
-          <TextField
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-            autoFocus
-            className={inputClass}
-          />
-          <AmountPreview value={amount} />
-        </Field>
-      </div>
-
-      {mode !== "transfer" && (
-        <Field label="Payee">
-          <TextField
-            value={payee}
-            onChange={(e) => setPayee(e.target.value)}
-            placeholder="e.g. Superstore"
-            className={inputClass}
-          />
-        </Field>
-      )}
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Account">
-          <Select
-            value={accountId}
-            onChange={(v) => setAccountId(Number(v))}
-            className="w-full"
-            disabled={mode === "transfer"}
-          >
-            {availableAccounts.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </Select>
-        </Field>
-        {mode === "transfer" ? (
-          <Field label="Transfer to">
-            <Select
-              value={transferAccountId}
-              onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
-              className="w-full"
-              searchable
-            >
-              <option value="">Select account…</option>
-              {otherAccounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </Select>
-          </Field>
-        ) : mode === "split" ? null : (
-          <Field label="Category">
-            <Select
-              value={categoryId}
-              onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
-              className="w-full"
-            >
-              <option value="">Income (To be Budgeted)</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </Select>
-          </Field>
-        )}
-      </div>
-
-      {mode === "transfer" && (
-        <Field label="Payee (auto-generated, override optional)">
-          <TextField
-            value={
-              payee.startsWith("Transfer : ")
-                ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
-                : payee
-            }
-            onChange={(e) => setPayee(e.target.value)}
-            placeholder={
-              transferAccountId
-                ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
-                : "Transfer : <other account>"
-            }
-            className={inputClass}
-          />
-        </Field>
-      )}
-
-      {mode === "split" && (
-        <div className="mt-1">
-          <div className="y-label mb-1.5 block">Sub-transactions</div>
-          <div className="space-y-1.5">
-            {subRows.map((row, i) => {
-              const selectValue = row.transferAccountId
-                ? `transfer:${row.transferAccountId}`
-                : row.categoryId
-                  ? `category:${row.categoryId}`
-                  : "";
-              return (
-                <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
-                  <Select
-                    value={selectValue}
-                    onChange={(v) => {
-                      if (v.startsWith("transfer:")) {
-                        const nextAcc = Number(v.slice("transfer:".length));
-                        setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, transferAccountId: nextAcc, categoryId: null }
-                              : r
-                          )
-                        );
-                      } else if (v.startsWith("category:")) {
-                        const nextCat = Number(v.slice("category:".length));
-                        setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, categoryId: nextCat, transferAccountId: null }
-                              : r
-                          )
-                        );
-                      } else {
-                        setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, categoryId: null, transferAccountId: null }
-                              : r
-                          )
-                        );
-                      }
-                    }}
-                    className="w-full"
-                    searchable
-                  >
-                    <option value="">Category or Transfer…</option>
-                    <optgroup label="Categories">
-                      {categories.map((c) => (
-                        <option key={c.id} value={`category:${c.id}`}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Transfers">
-                      {otherAccounts.map((a) => (
-                        <option key={a.id} value={`transfer:${a.id}`}>
-                          Transfer : {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </Select>
-                  <TextField
-                    value={row.amount === 0 ? "" : String(row.amount)}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSubRows((rs) =>
-                        rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
-                      );
-                    }}
-                    placeholder="0.00"
-                    inputMode="decimal"
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    aria-label="Remove sub-transaction"
-                    className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
-                    onClick={() =>
-                      setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
-                    }
-                    disabled={subRows.length <= 2}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={() =>
-                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
-              }
-            >
-              + Add sub-transaction
-            </Button>
-            <span
-              className="ml-auto text-[11.5px] y-num"
-              style={{
-                color:
-                  Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
-                    ? "var(--y-green-dk)"
-                    : "var(--y-red)",
-                fontWeight: 700,
-              }}
-            >
-              Σ {subTotal.toFixed(2)} / {parentAmount.toFixed(2)}
-            </span>
-          </div>
-          {subValidation && (
-            <div
-              className="mt-1 text-[11px]"
-              style={{ color: "var(--y-red)" }}
-            >
-              {subValidation}
-            </div>
+      {confirmingDelete ? (
+        <div className="space-y-2 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
+          <p>
+            Are you sure you want to delete this transaction{initial?.payee ? <> (<strong>{initial.payee}</strong>)</> : null}?
+          </p>
+          {isInitialTransfer ? (
+            <Notice tone="warn" title="Linked transfer">
+              Deleting this transfer will also remove the corresponding transaction in the linked account.
+            </Notice>
+          ) : isInitialSplit ? (
+            <Notice tone="warn" title="Split transaction">
+              Deleting this transaction will also delete all of its {initialChildren?.length ?? 0} sub-transactions.
+            </Notice>
+          ) : (
+            <p className="y-hint text-[11.5px]">This transaction will be permanently removed.</p>
           )}
         </div>
+      ) : (
+        <>
+          <div className="y-seg mb-3 w-full">
+            {(["single", "transfer", "split"] as const).map((m) => (
+              <Button
+                key={m}
+                size="sm"
+                variant={mode === m ? "primary" : "default"}
+                active={mode === m}
+                onClick={() => switchingMode(m)}
+                className="flex-1 capitalize"
+                disabled={!!isInitialSplit && m === "single"}
+              >
+                {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
+              </Button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Date">
+              <TextField
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label={mode === "split" ? "Total Amount" : "Amount"}>
+              <TextField
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                inputMode="decimal"
+                autoFocus
+                className={inputClass}
+              />
+              <AmountPreview value={amount} />
+            </Field>
+          </div>
+
+          {mode !== "transfer" && (
+            <Field label="Payee">
+              <TextField
+                value={payee}
+                onChange={(e) => setPayee(e.target.value)}
+                placeholder="e.g. Superstore"
+                className={inputClass}
+              />
+            </Field>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Account">
+              <Select
+                value={accountId}
+                onChange={(v) => setAccountId(Number(v))}
+                className="w-full"
+                disabled={mode === "transfer"}
+              >
+                {availableAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </Select>
+            </Field>
+            {mode === "transfer" ? (
+              <Field label="Transfer to">
+                <Select
+                  value={transferAccountId}
+                  onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
+                  className="w-full"
+                  searchable
+                >
+                  <option value="">Select account…</option>
+                  {otherAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </Select>
+              </Field>
+            ) : mode === "split" ? null : (
+              <Field label="Category">
+                <Select
+                  value={categoryId}
+                  onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
+                  className="w-full"
+                >
+                  <option value="">Income (To be Budgeted)</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </div>
+
+          {mode === "transfer" && (
+            <Field label="Payee (auto-generated, override optional)">
+              <TextField
+                value={
+                  payee.startsWith("Transfer : ")
+                    ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                    : payee
+                }
+                onChange={(e) => setPayee(e.target.value)}
+                placeholder={
+                  transferAccountId
+                    ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                    : "Transfer : <other account>"
+                }
+                className={inputClass}
+              />
+            </Field>
+          )}
+
+          {mode === "split" && (
+            <div className="mt-1">
+              <div className="y-label mb-1.5 block">Sub-transactions</div>
+              <div className="space-y-1.5">
+                {subRows.map((row, i) => {
+                  const selectValue = row.transferAccountId
+                    ? `transfer:${row.transferAccountId}`
+                    : row.categoryId
+                      ? `category:${row.categoryId}`
+                      : "";
+                  return (
+                    <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
+                      <Select
+                        value={selectValue}
+                        onChange={(v) => {
+                          if (v.startsWith("transfer:")) {
+                            const nextAcc = Number(v.slice("transfer:".length));
+                            setSubRows((rs) =>
+                              rs.map((r, j) =>
+                                i === j
+                                  ? { ...r, transferAccountId: nextAcc, categoryId: null }
+                                  : r
+                              )
+                            );
+                          } else if (v.startsWith("category:")) {
+                            const nextCat = Number(v.slice("category:".length));
+                            setSubRows((rs) =>
+                              rs.map((r, j) =>
+                                i === j
+                                  ? { ...r, categoryId: nextCat, transferAccountId: null }
+                                  : r
+                              )
+                            );
+                          } else {
+                            setSubRows((rs) =>
+                              rs.map((r, j) =>
+                                i === j
+                                  ? { ...r, categoryId: null, transferAccountId: null }
+                                  : r
+                              )
+                            );
+                          }
+                        }}
+                        className="w-full"
+                        searchable
+                      >
+                        <option value="">Category or Transfer…</option>
+                        <optgroup label="Categories">
+                          {categories.map((c) => (
+                            <option key={c.id} value={`category:${c.id}`}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Transfers">
+                          {otherAccounts.map((a) => (
+                            <option key={a.id} value={`transfer:${a.id}`}>
+                              Transfer : {a.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </Select>
+                      <TextField
+                        value={row.amount === 0 ? "" : String(row.amount)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSubRows((rs) =>
+                            rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
+                          );
+                        }}
+                        placeholder="0.00"
+                        inputMode="decimal"
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Remove sub-transaction"
+                        className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                        onClick={() =>
+                          setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
+                        }
+                        disabled={subRows.length <= 2}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex items-center gap-3">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
+                  }
+                >
+                  + Add sub-transaction
+                </Button>
+                <span
+                  className="ml-auto text-[11.5px] y-num"
+                  style={{
+                    color:
+                      Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
+                        ? "var(--y-green-dk)"
+                        : "var(--y-red)",
+                    fontWeight: 700,
+                  }}
+                >
+                  Σ {subTotal.toFixed(2)} / {parentAmount.toFixed(2)}
+                </span>
+              </div>
+              {subValidation && (
+                <div
+                  className="mt-1 text-[11px]"
+                  style={{ color: "var(--y-red)" }}
+                >
+                  {subValidation}
+                </div>
+              )}
+            </div>
+          )}
+
+          <Field label="Memo">
+            <TextField
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              placeholder="Optional notes"
+              className={inputClass}
+            />
+          </Field>
+
+          <div className="pt-1">
+            <Checkbox
+              checked={cleared}
+              onChange={setCleared}
+              label="Cleared (bank has processed this)"
+            />
+          </div>
+        </>
       )}
-
-      <Field label="Memo">
-        <TextField
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          placeholder="Optional notes"
-          className={inputClass}
-        />
-      </Field>
-
-      <div className="pt-1">
-        <Checkbox
-          checked={cleared}
-          onChange={setCleared}
-          label="Cleared (bank has processed this)"
-        />
-      </div>
     </Modal>
   );
 }

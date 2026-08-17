@@ -546,6 +546,10 @@ export function BudgetApp({
             if (id) await api.updateTransaction(id, rest);
             setModal({ kind: "none" });
           }}
+          onDelete={async () => {
+            await api.deleteTransaction(editingTransaction.id);
+            setModal({ kind: "none" });
+          }}
         />
       )}
       {modal.kind === "recurring" && (

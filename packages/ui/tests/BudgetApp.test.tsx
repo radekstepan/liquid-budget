@@ -171,6 +171,145 @@ describe("BudgetApp", () => {
     expect(calls.some((c) => c.method === "deleteAccount" && c.args[0] === 1)).toBe(true);
   });
 
+  it("calls api.deleteTransaction from the edit transaction modal after confirmation", async () => {
+    const { api, calls } = makeApi();
+    const seed = makeSeedBudgetData();
+    render(<BudgetApp data={seed} api={api} />);
+
+    // Navigate to All Transactions
+    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+
+    // Click on the first transaction row in the register to open edit modal
+    const tableRows = screen.getAllByRole("row");
+    const firstRow = tableRows[1]!;
+    fireEvent.click(firstRow);
+
+    expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
+
+    // Step 1: Click Delete…
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+    expect(screen.getByText(/^Delete /)).toBeInTheDocument();
+
+    // Step 2: Confirm deletion
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    const deleteCall = calls.find((c) => c.method === "deleteTransaction");
+    expect(deleteCall).toBeDefined();
+    expect(typeof deleteCall?.args[0]).toBe("number");
+    expect(screen.queryByText("Edit Transaction")).not.toBeInTheDocument();
+  });
+
+  it("calls api.deleteTransaction when deleting a transfer transaction from edit modal", async () => {
+    const { api, calls } = makeApi();
+    const seed = makeSeedBudgetData();
+    const transferTxn: Transaction = {
+      id: 8888,
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: null,
+      date: "2026-06-29",
+      payee: "Transfer: Unique Savings",
+      memo: "Transfer test",
+      amount: "-25000",
+      status: "c",
+    };
+    const dataWithTransfer: BudgetData = {
+      ...seed,
+      transactions: [transferTxn, ...seed.transactions],
+    };
+    render(<BudgetApp data={dataWithTransfer} api={api} />);
+
+    // Navigate to All Transactions
+    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+
+    // Find and click the transfer transaction row
+    const transferCells = screen.getAllByText("Transfer: Unique Savings");
+    const row = transferCells[0]!.closest("tr")!;
+    fireEvent.click(row);
+
+    expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
+
+    // Click Delete…
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+    expect(screen.getByText(/linked transfer/i)).toBeInTheDocument();
+
+    // Confirm deletion
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    const deleteCall = calls.find((c) => c.method === "deleteTransaction");
+    expect(deleteCall).toBeDefined();
+    expect(deleteCall?.args[0]).toBe(8888);
+  });
+
+  it("calls api.deleteTransaction when deleting a split transaction from edit modal", async () => {
+    const { api, calls } = makeApi();
+    const seed = makeSeedBudgetData();
+    const splitParent: Transaction = {
+      id: 9990,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-06-28",
+      payee: "Split Grocery & Home",
+      memo: "Split test",
+      amount: "-15000",
+      status: "c",
+    };
+    const splitChild1: Transaction = {
+      id: 9991,
+      parentId: 9990,
+      accountId: 1,
+      categoryId: 10,
+      date: "2026-06-28",
+      payee: "Split Grocery & Home",
+      memo: "",
+      amount: "-10000",
+      status: "c",
+    };
+    const splitChild2: Transaction = {
+      id: 9992,
+      parentId: 9990,
+      accountId: 1,
+      categoryId: 11,
+      date: "2026-06-28",
+      payee: "Split Grocery & Home",
+      memo: "",
+      amount: "-5000",
+      status: "c",
+    };
+    const dataWithSplit: BudgetData = {
+      ...seed,
+      transactions: [splitParent, splitChild1, splitChild2, ...seed.transactions],
+    };
+    render(<BudgetApp data={dataWithSplit} api={api} />);
+
+    // Navigate to All Transactions
+    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+
+    const splitCells = screen.getAllByText("Split Grocery & Home");
+    const row = splitCells[0]!.closest("tr")!;
+    fireEvent.click(row);
+
+    expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
+
+    // Click Delete…
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+    expect(screen.getByText(/split transaction/i)).toBeInTheDocument();
+    expect(screen.getByText(/also delete all of its 2 sub-transactions/i)).toBeInTheDocument();
+
+    // Confirm deletion
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    const deleteCall = calls.find((c) => c.method === "deleteTransaction");
+    expect(deleteCall).toBeDefined();
+    expect(deleteCall?.args[0]).toBe(9990);
+  });
+
   it("does not highlight 'Accounts' when an account is selected", () => {
     const { api } = makeApi();
     const seed = makeSeedBudgetData();

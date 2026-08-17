@@ -177,4 +177,37 @@ describe("computeRunningBalances", () => {
     const out = computeRunningBalances([a], balances, 2);
     expect(byId(out, a.id).runningBalance).toBe(100000);
   });
+
+  it("correctly recomputes running balances when a transfer transaction is deleted", () => {
+    const olderRow = t({ accountId: 1, date: "2026-06-15", amount: -2000 });
+    const olderAcc2 = t({ accountId: 2, date: "2026-06-10", amount: 10000 });
+
+    // After deleting a -$50 transfer between Acc 1 and Acc 2:
+    // Acc 1 balance restored from 48000 to 98000 (before olderRow: 100000)
+    // Acc 2 balance restored from 60000 to 10000
+    const restoredBalances = new Map([
+      [1, 98000],
+      [2, 10000],
+    ]);
+    const out = computeRunningBalances([olderRow, olderAcc2], restoredBalances);
+    expect(byId(out, olderRow.id).runningBalance).toBe(98000);
+    expect(byId(out, olderAcc2.id).runningBalance).toBe(10000);
+  });
+
+  it("correctly recomputes running balances when a split transaction (with transfer child) is deleted", () => {
+    const olderRow = t({ accountId: 1, date: "2026-06-15", amount: -5000 });
+    const olderAcc2 = t({ accountId: 2, date: "2026-06-10", amount: 20000 });
+
+    // Split had $100 parent: $60 category expense + $40 transfer to Account 2
+    // After deletion:
+    // Account 1 balance restored from 75000 to 95000
+    // Account 2 balance restored from 60000 to 20000
+    const restoredBalances = new Map([
+      [1, 95000],
+      [2, 20000],
+    ]);
+    const out = computeRunningBalances([olderRow, olderAcc2], restoredBalances);
+    expect(byId(out, olderRow.id).runningBalance).toBe(95000);
+    expect(byId(out, olderAcc2.id).runningBalance).toBe(20000);
+  });
 });
