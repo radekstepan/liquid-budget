@@ -410,3 +410,65 @@ export function nextDateFor(frequency: string, iso: string): string {
   }
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * YNAB4 Date Keyboard Shortcuts:
+ *   `+` or `=`: +1 day
+ *   `-` or `_`: -1 day
+ *   `t` or `T`: today
+ *   `m` or `M`: +1 month
+ *   `y` or `Y`: +1 year
+ */
+export function adjustDateShortcut(dateStr: string, key: string): string | null {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    if (key.toLowerCase() === "t") return todayISO();
+    return null;
+  }
+
+  const [yStr, mStr, dStr] = dateStr.split("-");
+  const y = parseInt(yStr!, 10);
+  const m = parseInt(mStr!, 10) - 1;
+  const d = parseInt(dStr!, 10);
+
+  const date = new Date(Date.UTC(y, m, d));
+  if (Number.isNaN(date.getTime())) return null;
+
+  switch (key) {
+    case "+":
+    case "=": {
+      date.setUTCDate(date.getUTCDate() + 1);
+      break;
+    }
+    case "-":
+    case "_": {
+      date.setUTCDate(date.getUTCDate() - 1);
+      break;
+    }
+    case "t":
+    case "T": {
+      return todayISO();
+    }
+    case "m":
+    case "M": {
+      const originalDay = date.getUTCDate();
+      date.setUTCDate(1);
+      date.setUTCMonth(date.getUTCMonth() + 1);
+      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+      date.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    case "y":
+    case "Y": {
+      const originalDay = date.getUTCDate();
+      date.setUTCDate(1);
+      date.setUTCFullYear(date.getUTCFullYear() + 1);
+      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+      date.setUTCDate(Math.min(originalDay, lastDay));
+      break;
+    }
+    default:
+      return null;
+  }
+
+  return date.toISOString().slice(0, 10);
+}

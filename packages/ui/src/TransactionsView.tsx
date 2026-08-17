@@ -29,6 +29,7 @@ export function TransactionsView({
 }) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -177,6 +178,37 @@ export function TransactionsView({
   const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
   const visibleRows = filtered.slice(startIndex, endIndex);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (filtered.length === 0) return;
+      const currentIndex = selectedId != null ? filtered.findIndex((r) => r.id === selectedId) : -1;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIndex = currentIndex < filtered.length - 1 ? currentIndex + 1 : 0;
+        const nextRow = filtered[nextIndex];
+        if (nextRow) setSelectedId(nextRow.id);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : filtered.length - 1;
+        const prevRow = filtered[prevIndex];
+        if (prevRow) setSelectedId(prevRow.id);
+      } else if (e.key === "Enter" && selectedId != null) {
+        e.preventDefault();
+        const row = filtered.find((r) => r.id === selectedId);
+        if (row) onEdit(row.parentId ?? row.id);
+      } else if ((e.key === "c" || e.key === "C" || e.key === " ") && selectedId != null) {
+        e.preventDefault();
+        const row = filtered.find((r) => r.id === selectedId);
+        if (row && row.status !== "r") onCycleStatus(row.id);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId != null) {
+        e.preventDefault();
+        onDelete(selectedId);
+      }
+    },
+    [filtered, selectedId, onEdit, onCycleStatus, onDelete]
+  );
+
   return (
     <div className="flex h-full flex-col">
       <Toolbar>
@@ -241,7 +273,9 @@ export function TransactionsView({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-auto y-scroll"
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        className="flex-1 min-h-0 overflow-auto y-scroll focus:outline-none"
       >
         <table className="y-table">
           <thead className="y-thead y-thead--sticky">
@@ -281,6 +315,7 @@ export function TransactionsView({
                 )}
                 {visibleRows.map((t, idx) => {
                   const globalIndex = startIndex + idx;
+                  const isSelected = t.id === selectedId;
                   const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
                   const effAmt = isIncoming ? -t.amount : t.amount;
                   const outflow = effAmt < 0 ? -effAmt : 0;
@@ -297,8 +332,11 @@ export function TransactionsView({
                   return (
                     <tr
                       key={t.id}
-                      className={`group y-row ${globalIndex % 2 === 1 ? "alt" : ""}`}
-                      onClick={() => onEdit(t.parentId ?? t.id)}
+                      className={`group y-row ${isSelected ? "y-row--selected bg-[#eff6ff] dark:bg-[#1e293b]" : globalIndex % 2 === 1 ? "alt" : ""}`}
+                      onClick={() => {
+                        setSelectedId(t.id);
+                        onEdit(t.parentId ?? t.id);
+                      }}
                       style={{ cursor: "pointer" }}
                     >
                       <td className="y-num">{t.date}</td>

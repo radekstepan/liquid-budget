@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -337,6 +337,13 @@ export function TransactionModal({
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
+                onKeyDown={(e) => {
+                  const adjusted = adjustDateShortcut(date, e.key);
+                  if (adjusted) {
+                    e.preventDefault();
+                    setDate(adjusted);
+                  }
+                }}
                 className={inputClass}
               />
             </Field>
@@ -1207,6 +1214,13 @@ export function RecurringModal({
             type="date"
             value={nextDate}
             onChange={(e) => setNextDate(e.target.value)}
+            onKeyDown={(e) => {
+              const adjusted = adjustDateShortcut(nextDate, e.key);
+              if (adjusted) {
+                e.preventDefault();
+                setNextDate(adjusted);
+              }
+            }}
             className={inputClass}
           />
         </Field>
