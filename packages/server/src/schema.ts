@@ -145,6 +145,8 @@ export const recurring = sqliteTable(
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
   },
   (t) => ({
+    accountIdx: index("recurring_account_id_idx").on(t.accountId),
+    nextDateIdx: index("recurring_next_date_idx").on(t.nextDate),
     amountCheck: check("recurring_amount_check", sql`${t.amount} != 0`),
   })
 );
@@ -165,6 +167,7 @@ export const recurringSubTransactions = sqliteTable(
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
   },
   (t) => ({
+    recurringIdIdx: index("recurring_sub_transactions_recurring_id_idx").on(t.recurringId),
     amountCheck: check("recurring_sub_amount_check", sql`${t.amount} != 0`),
   })
 );

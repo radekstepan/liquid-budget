@@ -68,7 +68,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` | ✅ **Resolved** |
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` |
+| **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` |
 | **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` |
 | **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` |
@@ -444,6 +444,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/schema.ts`, `category_groups` and `categories` tables had no database-level UNIQUE constraints, allowing duplicate group names or duplicate category names within the same group.
 - **Actionable Solution:** Add UNIQUE index `category_groups_name_uniq` on `category_groups(name)` and UNIQUE index `categories_group_name_uniq` on `categories(group_id, name)`.
 - **Resolution (UNI-30):** Added `category_groups_name_uniq` unique index on `categoryGroups.name` and `categories_group_name_uniq` unique index on `categories.groupId, categories.name` in `packages/server/src/schema.ts` and generated migration `0006_chilly_bug.sql`. Added unit tests in `packages/server/tests/migrate.test.ts`.
+
+---
+
+#### UNI-31 (BUG-14): Database Indexes on Recurring Transactions
+- **Root Cause:** In `packages/server/src/schema.ts`, `recurring` and `recurring_sub_transactions` tables lacked indexes on frequently queried foreign keys and date filtering columns (`accountId`, `nextDate`, `recurringId`).
+- **Actionable Solution:** Add index `recurring_account_id_idx` on `recurring.accountId`, `recurring_next_date_idx` on `recurring.nextDate`, and `recurring_sub_transactions_recurring_id_idx` on `recurring_sub_transactions.recurringId`.
+- **Resolution (UNI-31):** Added `recurring_account_id_idx`, `recurring_next_date_idx`, and `recurring_sub_transactions_recurring_id_idx` in `packages/server/src/schema.ts` and generated migration `0007_mean_zodiak.sql`. Added unit test in `packages/server/tests/migrate.test.ts`.
 
 ---
 

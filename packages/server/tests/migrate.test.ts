@@ -65,12 +65,16 @@ describe("Drizzle migrations", () => {
     expect(tableNames).toContain("__drizzle_migrations");
   });
 
-  it("creates the assignments unique index", () => {
+  it("creates indexes on assignments and recurring tables (UNI-31 / BUG-14)", () => {
     migrate(ctx.db, { migrationsFolder: MIGRATIONS_FOLDER });
     const indexes = ctx.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='assignments'")
+      .prepare("SELECT name FROM sqlite_master WHERE type='index'")
       .all() as Array<{ name: string }>;
-    expect(indexes.map((i) => i.name)).toContain("assignments_cat_month_uniq");
+    const indexNames = indexes.map((i) => i.name);
+    expect(indexNames).toContain("assignments_cat_month_uniq");
+    expect(indexNames).toContain("recurring_account_id_idx");
+    expect(indexNames).toContain("recurring_next_date_idx");
+    expect(indexNames).toContain("recurring_sub_transactions_recurring_id_idx");
   });
 
   it("includes every column that the legacy ALTER blocks used to add", () => {
