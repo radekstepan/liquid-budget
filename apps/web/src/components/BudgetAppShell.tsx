@@ -249,7 +249,7 @@ export function BudgetAppShell() {
       } else {
         await jsonReq("/api/categories", {
           method: "POST",
-          body: JSON.stringify({ groupId, name: v.name, goalTarget: v.goalTarget }),
+          body: JSON.stringify({ groupId, name: v.name, goalTarget: v.goalTarget, carryover: v.carryover }),
         });
       }
       await reload();
