@@ -54,7 +54,7 @@ export async function importYnab4(db: Db, ynabData: any) {
   db.run(sql`BEGIN`);
   try {
     // 1. Wipe current data
-    await resetDatabase(db);
+    await resetDatabase(db, true);
 
     const yAccounts = ynabData.accounts || [];
     const yPayees = ynabData.payees || [];
