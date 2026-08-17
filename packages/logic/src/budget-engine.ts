@@ -398,9 +398,8 @@ function buildCarryoverMap(
 }
 
 /**
- * Compute the overspent amount for a specific month by walking prior months
- * to determine the carryover state, then calculating which non-CC categories
- * went negative.
+ * Compute the overspent amount for a specific month by utilizing the memoized
+ * carryover map, then calculating which non-CC categories went negative.
  */
 function computeOverspentForMonth(
   data: BudgetData,
@@ -410,47 +409,18 @@ function computeOverspentForMonth(
   ccGroupIds: Set<number>,
   orderedMonths: string[]
 ): number {
-  // Walk months up to (but not including) targetMonth to get carryover state
-  let currentBalance = new Map<number, number>(
-    data.categories.map((c) => [c.id, num(c.carryover)])
+  const cached = index.overspentByMonth.get(targetMonth);
+  if (cached !== undefined) return cached;
+
+  const { carryoverMap } = buildCarryoverMap(
+    data,
+    index,
+    orderedMonths,
+    targetMonth,
+    ccPayCatToAccount,
+    ccGroupIds
   );
 
-  const priorMonths = orderedMonths.filter((m) => m < targetMonth);
-
-  for (const month of priorMonths) {
-    const monthCached = index.carryoverByMonth.get(month);
-    if (monthCached) {
-      currentBalance = new Map(monthCached);
-    }
-
-    const aMap = index.assignedByMonth.get(month) ?? new Map<number, number>();
-    const oMap = index.outflowByMonth.get(month) ?? new Map<number, number>();
-    const spendByAcc = index.spendByAccountMonth.get(month) ?? new Map<number, number>();
-
-    const nextBalance = new Map<number, number>();
-    for (const c of data.categories) {
-      const prev = currentBalance.get(c.id) ?? 0;
-      const assigned = aMap.get(c.id) ?? 0;
-      const rawFlow = oMap.get(c.id) ?? 0;
-
-      let ccBuffer = 0;
-      const linkedAcc = ccPayCatToAccount.get(c.id);
-      if (linkedAcc != null) {
-        ccBuffer = spendByAcc.get(linkedAcc) ?? 0;
-      }
-
-      const next = Math.round(prev + assigned + rawFlow + ccBuffer);
-
-      if (!ccGroupIds.has(c.groupId)) {
-        nextBalance.set(c.id, Math.max(0, next));
-      } else {
-        nextBalance.set(c.id, next);
-      }
-    }
-    currentBalance = nextBalance;
-  }
-
-  // Now compute the available for targetMonth
   const aMap = index.assignedByMonth.get(targetMonth) ?? new Map<number, number>();
   const oMap = index.outflowByMonth.get(targetMonth) ?? new Map<number, number>();
   const spendByAcc = index.spendByAccountMonth.get(targetMonth) ?? new Map<number, number>();
@@ -459,7 +429,7 @@ function computeOverspentForMonth(
   for (const c of data.categories) {
     if (ccGroupIds.has(c.groupId)) continue;
 
-    const prev = currentBalance.get(c.id) ?? 0;
+    const prev = carryoverMap.get(c.id) ?? 0;
     const assigned = aMap.get(c.id) ?? 0;
     const rawFlow = oMap.get(c.id) ?? 0;
 
@@ -475,6 +445,7 @@ function computeOverspentForMonth(
     }
   }
 
+  index.overspentByMonth.set(targetMonth, overspent);
   return overspent;
 }
 

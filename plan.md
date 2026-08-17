@@ -51,7 +51,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-11** | F-06, BUG-20 | API / Importer | **High (P1)** | Recurring API rejects transfer sub-rows that UI sends; importer silently drops recurring transfer children | `apps/web/src/app/api/recurring/route.ts`, `packages/server/src/import-ynab4.ts` | ✅ **Resolved** |
 | **UNI-12** | BUG-05, BUG-06, F-09 | Concurrency | **High (P1)** | `createAccount` sort calc and `upsertAssignment` select-then-insert are not transaction-wrapped (race condition / 500 error) | `packages/server/src/queries/accounts.ts`, `packages/server/src/queries/assignments.ts` | ✅ **Resolved** |
 | **UNI-13** | BUG-08 | Build | **High (P1)** | Stale `dist/compute.js` artifact references non-existent exports (`computeGroups`, `summarize`) | `packages/logic/dist/compute.js` | ✅ **Resolved** |
-| **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` |
+| **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` | ✅ **Resolved** |
 | **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` |
 | **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` |
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` |
@@ -385,6 +385,7 @@ Despite strong foundations, the application has critical financial calculation d
 
 #### UNI-14 (BUG-09): DRY Refactor of Carryover Walk
 - Unify duplicated month-walking logic across `buildCarryoverMap` and `computeOverspentForMonth` in `packages/logic/src/budget-engine.ts`. Maintain intermediate month balance caches to avoid redundant iterations.
+- **Resolution (UNI-14):** Refactored `computeOverspentForMonth` in `packages/logic/src/budget-engine.ts` to directly reuse the memoized `buildCarryoverMap` cache instead of re-iterating over all prior months. Verified with logic test suite.
 
 #### UNI-38 (F-19): Payees Entity Table & Management
 - Create `payees` table (`id`, `name`, `auto_category_id`, `created_at`).
