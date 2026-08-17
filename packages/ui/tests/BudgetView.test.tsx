@@ -554,5 +554,15 @@ describe("BudgetView", () => {
       );
       expect(masterHeaders[masterHeaders.length - 1]).toContain("Hidden Categories");
     });
+
+    it("UNI-04 / BUG-01: clicking category edit button calls onEditCategory with category id instead of group id", () => {
+      const onEditCategory = vi.fn();
+      renderView({ onEditCategory });
+      const editBtn = screen.getByRole("button", { name: /edit groceries/i });
+      fireEvent.click(editBtn);
+      // Category Groceries has id: 10, group Everyday has id: 1
+      expect(onEditCategory).toHaveBeenCalledTimes(1);
+      expect(onEditCategory).toHaveBeenCalledWith(10);
+    });
   });
 });

@@ -41,7 +41,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-01** | F-02 | Financial Math | **Critical (P0)** | Rolling TBB surplus walk ignores overspending in intermediate months $\to$ phantom budgetable money; breaks integrity invariant | `packages/logic/src/budget-engine.ts`, `packages/server/src/queries/diagnostics.ts` | ✅ **Resolved** |
 | **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
-| **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | Pending |
+| **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | ✅ **Resolved** |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` |
 | **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` |
 | **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` |
@@ -328,6 +328,7 @@ Despite strong foundations, the application has critical financial calculation d
 - **Actionable Solution:**
   1. Fix row callback: `onEditCategory={() => onEditCategory(row.category.id)}`.
   2. Include `carryover: v.carryover ?? 0` in `saveCategory` payload.
+- **Resolution (UNI-04):** Fixed `BudgetView.tsx` so `GroupBlock` receives and executes `onEditCategory(r.category.id)` on the row edit button click instead of group ID. Added unit test in `packages/ui/tests/BudgetView.test.tsx`.
 
 #### UNI-06 & UNI-22 (BUG-04, BUG-16, BUG-17, BUG-18): Error Boundaries & Optimistic UI
 - **Root Cause:** Missing top-level and view-level Error Boundaries. Lack of busy spinners and optimistic updates across account creation, transaction creation, and recurring operations.
