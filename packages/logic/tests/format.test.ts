@@ -132,8 +132,10 @@ describe("format", () => {
       expect(nextDateFor("every4weeks", "2026-07-01")).toBe("2026-07-29");
     });
 
-    it("falls back to monthly for unknown frequencies", () => {
-      expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
+    it("returns input unchanged for unknown frequencies (UNI-46 / BUG-39)", () => {
+      expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-07-01");
+      expect(nextDateFor("invalid_freq", "2026-10-15")).toBe("2026-10-15");
+      expect(nextDateFor("", "2026-10-15")).toBe("2026-10-15");
     });
 
     it("returns input unchanged for invalid date", () => {
