@@ -78,6 +78,7 @@ type IndexedBudgetData = {
   spendByAccountMonth: Map<string, Map<number, number>>;
   incomeByMonth: Map<string, number>;
   carryoverByMonth: Map<string, Map<number, number>>;
+  overspentByMonth: Map<string, number>;
   surplusByMonth: Map<string, number>;
 };
 
@@ -165,6 +166,7 @@ function getOrBuildIndex(
     spendByAccountMonth,
     incomeByMonth,
     carryoverByMonth: new Map(),
+    overspentByMonth: new Map(),
     surplusByMonth: new Map(),
   };
 
@@ -270,11 +272,11 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
 
   // 7. Compute cumulative TBB.
   // Prior months' surplus TBB carries forward into this month's available pool.
-  // Cash overspending from the previous month is deducted from TBB (YNAB4 Rule 3).
+  // Cash overspending from prior months is factored directly into priorSurplus.
   const priorSurplus = computePriorTBBSurplus(index, months, month);
   const totalIncome = index.incomeByMonth.get(month) ?? 0;
   const totalAssigned = Math.round(groups.reduce((s, g) => s + g.assigned, 0));
-  const tbb = Math.round(totalIncome - totalAssigned + priorSurplus - overspentPrevious);
+  const tbb = Math.round(totalIncome - totalAssigned + priorSurplus);
 
   return {
     groups,
@@ -323,19 +325,10 @@ function buildCarryoverMap(
 ): { carryoverMap: Map<number, number>; overspentPrevious: number } {
   const cached = index.carryoverByMonth.get(targetMonth);
   if (cached) {
-    // The cached value is the carryover map; overspent is not cached
-    // because it's derived from the last prior month's computation.
-    // Recompute it from the cached surplus.
     const priorMonths = orderedMonths.filter((m) => m < targetMonth);
     const mostRecentPrior = priorMonths.length > 0 ? priorMonths[priorMonths.length - 1] : null;
-    if (mostRecentPrior) {
-      // Need to compute overspent for the most recent prior month
-      const overspent = computeOverspentForMonth(
-        data, index, mostRecentPrior, ccPayCatToAccount, ccGroupIds, orderedMonths
-      );
-      return { carryoverMap: cached, overspentPrevious: overspent };
-    }
-    return { carryoverMap: cached, overspentPrevious: 0 };
+    const overspentPrevious = mostRecentPrior ? (index.overspentByMonth.get(mostRecentPrior) ?? 0) : 0;
+    return { carryoverMap: cached, overspentPrevious };
   }
 
   // Seed: every category starts with its manual carryover value.
@@ -386,6 +379,8 @@ function buildCarryoverMap(
         nextBalance.set(c.id, next);
       }
     }
+
+    index.overspentByMonth.set(month, monthOverspent);
 
     if (month === mostRecentPrior) {
       overspentPrevious = monthOverspent;
@@ -520,9 +515,10 @@ function computePriorTBBSurplus(
   for (const m of priorMonths) {
     const income = index.incomeByMonth.get(m) ?? 0;
     const assigned = index.assignedTotalByMonth.get(m) ?? 0;
-    const tbb = Math.round(income - assigned + surplus);
-    // Only positive TBB carries forward; deficit stays in its own month.
-    surplus = Math.max(0, tbb);
+    const overspent = index.overspentByMonth.get(m) ?? 0;
+    const tbb = Math.round(income - assigned + surplus - overspent);
+    // Cumulative surplus carries forward (or deficit if overspent/over-assigned)
+    surplus = tbb;
   }
 
   index.surplusByMonth.set(targetMonth, surplus);

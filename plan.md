@@ -36,12 +36,12 @@ Despite strong foundations, the application has critical financial calculation d
 
 ## 2. Unified Forensic Findings Matrix
 
-| Unified ID | Source IDs | Area | Severity | Summary | Target Files |
-|---|---|---|---|---|---|
-| **UNI-01** | F-02 | Financial Math | **Critical (P0)** | Rolling TBB surplus walk ignores overspending in intermediate months $\to$ phantom budgetable money; breaks integrity invariant | `packages/logic/src/budget-engine.ts`, `packages/server/src/queries/diagnostics.ts` |
-| **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` |
-| **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` |
-| **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` |
+| Unified ID | Source IDs | Area | Severity | Summary | Target Files | Status |
+|---|---|---|---|---|---|---|
+| **UNI-01** | F-02 | Financial Math | **Critical (P0)** | Rolling TBB surplus walk ignores overspending in intermediate months $\to$ phantom budgetable money; breaks integrity invariant | `packages/logic/src/budget-engine.ts`, `packages/server/src/queries/diagnostics.ts` | ✅ **Resolved** |
+| **UNI-02** | F-01 | YNAB4 Parity / Math | **Critical (P0)** | No deferred income ("Income for [Next Month]"); importer collapses `__DeferredIncome__` to current month | `packages/server/src/import-ynab4.ts`, `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | Pending |
+| **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | Pending |
+| **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | Pending |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` |
 | **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` |
 | **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` |
@@ -95,6 +95,8 @@ Despite strong foundations, the application has critical financial calculation d
 ### 3.1 Financial Engine & Mathematical Invariants
 
 #### UNI-01 (F-02): Rolling TBB Surplus Walk Ignores Overspending in Intermediate Months
+> **Status: Resolved.** Implemented in `@ynab/logic` by recording `overspentByMonth` during the carryover walk and subtracting prior cash overspending in `computePriorTBBSurplus()`. Verified with unit and empty-gap invariant regression tests.
+
 - **Root Cause:** In `packages/logic/src/budget-engine.ts`, `computePriorTBBSurplus()` steps through previous months calculating:
   $$\text{surplus}_{m} = \max(0, \text{surplus}_{m-1} + \text{income}_m - \text{assigned}_m)$$
   It never subtracts cash overspending that occurred in month $m$. Cash overspending is only subtracted for the immediate prior month via `overspentPrevious`. If a user overspends by $\$2,000$ in June, assigns nothing in July, and views August:
