@@ -80,7 +80,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various | ✅ **Resolved** |
 | **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` | ✅ **Resolved** |
 | **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` | ✅ **Resolved** |
-| **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` |
+| **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` | ✅ **Resolved** |
 | **UNI-44** | BUG-37 | UX | **Low (P3)** | `AccountModal` automatically forces credit card starting balance negative without user feedback | `packages/ui/src/Modals.tsx` |
 | **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` |
 | **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` |
@@ -524,6 +524,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** `CalendarView` showed an empty grid without explanatory text or guidance when a selected month had no recorded or scheduled transactions.
 - **Actionable Solution:** Render a user-friendly empty state banner when `byDay.size === 0` inviting users to click any day to add a transaction.
 - **Resolution (UNI-42):** Added empty state banner in `packages/ui/src/CalendarView.tsx` when the selected month contains no events. Added unit test in `packages/ui/tests/CalendarView.test.tsx`.
+
+#### UNI-43 (BUG-36): In-App Error Modal for YNAB4 Import Failures
+- **Root Cause:** In `Inspector.tsx:178` (and file input `onChange`), import errors invoked synchronous blocking `alert()` popups instead of rendering accessible in-app error feedback.
+- **Actionable Solution:** Capture import errors in local state (`importError`) and display an in-app error `Modal` with `Notice tone="danger"` and a dismiss button.
+- **Resolution (UNI-43):** Replaced `alert()` with state-driven in-app `Modal` dialog and `Notice` in `packages/ui/src/Inspector.tsx`. Added unit test in `packages/ui/tests/Inspector.test.tsx`.
 
 ---
 

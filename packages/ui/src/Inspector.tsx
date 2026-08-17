@@ -47,6 +47,7 @@ export function Inspector({
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<{ month: string; net: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -191,9 +192,15 @@ export function Inspector({
               type="file"
               accept=".y4backup,.zip"
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (f) onImportYnab4(f).catch((err) => alert(String(err)));
+                if (f) {
+                  try {
+                    await onImportYnab4(f);
+                  } catch (err: any) {
+                    setImportError(err?.message ? String(err.message) : String(err));
+                  }
+                }
                 e.target.value = "";
               }}
             />
@@ -493,6 +500,22 @@ export function Inspector({
           <Notice tone="danger" title="This cannot be undone">
             Resetting will permanently wipe all your changes (budgets,
             transactions, accounts) and restore the demo dataset.
+          </Notice>
+        </Modal>
+      )}
+
+      {importError && (
+        <Modal
+          title="Import Failed"
+          onClose={() => setImportError(null)}
+          footer={
+            <Btn variant="primary" onClick={() => setImportError(null)}>
+              Dismiss
+            </Btn>
+          }
+        >
+          <Notice tone="danger" title="Unable to import YNAB4 data">
+            {importError}
           </Notice>
         </Modal>
       )}

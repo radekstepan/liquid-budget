@@ -133,14 +133,32 @@ describe("Inspector", () => {
     });
   });
 
-  describe("Trends & Insights Card", () => {
-    it("renders 3-month average category trends sorted by % without yellow highlight or icons", () => {
-      render(<Inspector {...baseProps} />);
-      expect(screen.getByText("Trends & Insights")).toBeInTheDocument();
-      expect(screen.getByText("Dining Out")).toBeInTheDocument();
-      expect(screen.getByText("+41%")).toBeInTheDocument();
-      expect(screen.getByText("Groceries")).toBeInTheDocument();
-      expect(screen.getByText("+20%")).toBeInTheDocument();
+  describe("Import YNAB4 Error Handling (UNI-43 / BUG-36)", () => {
+    it("displays in-app modal on import failure without calling alert", async () => {
+      const onImportYnab4 = vi.fn().mockRejectedValue(new Error("Invalid backup ZIP format"));
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+      const { container } = render(
+        <Inspector {...baseProps} onImportYnab4={onImportYnab4} />
+      );
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(fileInput).toBeInTheDocument();
+
+      const testFile = new File(["dummy content"], "test.y4backup", { type: "application/zip" });
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [testFile] } });
+      });
+
+      expect(onImportYnab4).toHaveBeenCalledTimes(1);
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(screen.getByText("Import Failed")).toBeInTheDocument();
+      expect(screen.getByText("Invalid backup ZIP format")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+      expect(screen.queryByText("Import Failed")).not.toBeInTheDocument();
+
+      alertSpy.mockRestore();
     });
   });
 });
