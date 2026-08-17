@@ -1448,6 +1448,11 @@ export function AccountModal({
                 disabled={isEdit}
               />
               {!isEdit && <AmountPreview value={balance} />}
+              {!isEdit && kind === "credit" && (
+                <div className="y-hint text-[11px] pt-1">
+                  Credit card balance represents debt owed (stored as a negative starting balance).
+                </div>
+              )}
             </Field>
           </div>
           {isEdit && (
