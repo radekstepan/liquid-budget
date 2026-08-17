@@ -67,7 +67,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` | ✅ **Resolved** |
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` | ✅ **Resolved** |
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` |
+| **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` |
 | **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` |
 | **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` |
@@ -437,6 +437,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/schema.ts`, tables lacked SQLite `CHECK` constraints, allowing invalid account kinds, transaction statuses, or 0-amount transactions to bypass API-level validation.
 - **Actionable Solution:** Add `CHECK` constraints for `accounts.kind IN ('liquid', 'credit', 'offbudget')`, `transactions.status IN ('u', 'c', 'r')`, `transactions.amount != 0`, `recurring.amount != 0`, and `recurring_sub_transactions.amount != 0`.
 - **Resolution (UNI-29):** Added table-level `CHECK` constraints across `accounts`, `transactions`, `recurring`, and `recurringSubTransactions` in `packages/server/src/schema.ts` and generated migration `0005_closed_dazzler.sql`. Added unit tests in `packages/server/tests/migrate.test.ts`.
+
+---
+
+#### UNI-30 (BUG-13): Category and Group Unique Name Constraints
+- **Root Cause:** In `packages/server/src/schema.ts`, `category_groups` and `categories` tables had no database-level UNIQUE constraints, allowing duplicate group names or duplicate category names within the same group.
+- **Actionable Solution:** Add UNIQUE index `category_groups_name_uniq` on `category_groups(name)` and UNIQUE index `categories_group_name_uniq` on `categories(group_id, name)`.
+- **Resolution (UNI-30):** Added `category_groups_name_uniq` unique index on `categoryGroups.name` and `categories_group_name_uniq` unique index on `categories.groupId, categories.name` in `packages/server/src/schema.ts` and generated migration `0006_chilly_bug.sql`. Added unit tests in `packages/server/tests/migrate.test.ts`.
 
 ---
 

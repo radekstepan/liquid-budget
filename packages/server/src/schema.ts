@@ -28,27 +28,39 @@ export const accounts = sqliteTable(
   })
 );
 
-export const categoryGroups = sqliteTable("category_groups", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  sort: integer("sort").notNull().default(0),
-  isCreditCardPayments: integer("is_credit_card_payments", { mode: "boolean" }).notNull().default(false),
-});
+export const categoryGroups = sqliteTable(
+  "category_groups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    sort: integer("sort").notNull().default(0),
+    isCreditCardPayments: integer("is_credit_card_payments", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    nameUniq: uniqueIndex("category_groups_name_uniq").on(t.name),
+  })
+);
 
-export const categories = sqliteTable("categories", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  groupId: integer("group_id")
-    .notNull()
-    .references(() => categoryGroups.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  sort: integer("sort").notNull().default(0),
-  carryover: integer("carryover").notNull().default(0),
-  goalTarget: integer("goal_target"),
-  linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
-    onDelete: "cascade",
-  }),
-  overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
-});
+export const categories = sqliteTable(
+  "categories",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    groupId: integer("group_id")
+      .notNull()
+      .references(() => categoryGroups.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sort: integer("sort").notNull().default(0),
+    carryover: integer("carryover").notNull().default(0),
+    goalTarget: integer("goal_target"),
+    linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
+      onDelete: "cascade",
+    }),
+    overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    groupNameUniq: uniqueIndex("categories_group_name_uniq").on(t.groupId, t.name),
+  })
+);
 
 export const assignments = sqliteTable(
   "assignments",
