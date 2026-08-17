@@ -91,6 +91,19 @@ export function CalendarView({
         </span>
       </Toolbar>
 
+      {byDay.size === 0 && (
+        <div
+          className="mx-3 mt-2 rounded px-3 py-2 text-center text-[12px]"
+          style={{
+            background: "var(--y-row)",
+            border: "1px dashed var(--y-line)",
+            color: "var(--y-ink-soft)",
+          }}
+        >
+          No transactions or scheduled events for this month. Click any day to add a transaction.
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-3 y-scroll">
         <div className="grid grid-cols-7 gap-1">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
