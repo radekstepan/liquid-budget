@@ -77,11 +77,30 @@ export const transactions = sqliteTable(
     isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
     incomeMonth: text("income_month"),
     reconciledAt: text("reconciled_at"),
+    reconciliationId: integer("reconciliation_id"),
   },
   (t) => ({
     accountDateIdx: index("transactions_account_date_idx").on(t.accountId, t.date),
     dateIdx: index("transactions_date_idx").on(t.date),
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
+    reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),
+  })
+);
+
+export const reconciliations = sqliteTable(
+  "reconciliations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    reconciledAt: text("reconciled_at").notNull(),
+    statementDate: text("statement_date").notNull(),
+    statementBalance: integer("statement_balance").notNull(),
+    adjustmentTransactionId: integer("adjustment_transaction_id"),
+  },
+  (t) => ({
+    accountIdx: index("reconciliations_account_idx").on(t.accountId),
   })
 );
 
@@ -120,5 +139,6 @@ export type CategoryGroup = typeof categoryGroups.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Assignment = typeof assignments.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
+export type Reconciliation = typeof reconciliations.$inferSelect;
 export type Recurring = typeof recurring.$inferSelect;
 export type RecurringSubTransaction = typeof recurringSubTransactions.$inferSelect;

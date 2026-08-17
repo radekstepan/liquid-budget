@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     const result = await reconcileAccount(db, {
       accountId,
       statementBalance,
+      statementDate: body.statementDate ? String(body.statementDate) : undefined,
       adjustmentCategoryId:
         body.adjustmentCategoryId != null ? Number(body.adjustmentCategoryId) : null,
     });
