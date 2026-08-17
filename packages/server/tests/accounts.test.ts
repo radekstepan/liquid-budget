@@ -98,10 +98,38 @@ describe("accounts queries", () => {
   });
 
   describe("deleteAccount", () => {
-    it("issues a delete on the accounts table", async () => {
-      await deleteAccount(mock.db, 5);
-      const deleteCall = mock.calls.find((c) => c.op === "delete");
-      expect(deleteCall?.table).toBe("accounts");
+    it("UNI-07 / F-04: cleans up transfer counterparties, recurring links, and linked categories atomically", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ id: 5, name: "Checking" }]);
+      mock.respondWith("select:transactions", [
+        { id: 101, accountId: 2, amount: -5000, parentId: null },
+      ]);
+
+      const result = await deleteAccount(mock.db, 5);
+      expect(result).toMatchObject({ id: 5, name: "Checking" });
+
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+
+      // Balance of remaining counterparty account (accountId: 2) was updated
+      const updateCalls = mock.calls.filter((c) => c.op === "update");
+      expect(updateCalls.find((c) => c.table === "accounts")).toBeDefined();
+
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls.map((c) => c.table)).toEqual([
+        "transactions",
+        "recurring",
+        "recurring_sub_transactions",
+        "categories",
+        "accounts",
+      ]);
+    });
+
+    it("returns null if the account does not exist", async () => {
+      mock.respondWith("select:accounts", []);
+      const result = await deleteAccount(mock.db, 999);
+      expect(result).toBeNull();
     });
   });
 

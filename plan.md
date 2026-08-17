@@ -44,7 +44,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | ✅ **Resolved** |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` | ✅ **Resolved** |
 | **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
-| **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` |
+| **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` | ✅ **Resolved** |
 | **UNI-08** | F-08 | Data Integrity | **High (P1)** | Reconciled transactions (`status: "r"`) are editable/deletable via API without guard | `packages/server/src/queries/transactions.ts` |
 | **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` |
 | **UNI-10** | F-07, BUG-32, BUG-33 | Reconciliation | **High (P1)** | Reconciliation lacks round tracking (`reconciliation_id`), leaks future-dated rows into working balance, and flips adjustment row to 'r' | `packages/server/src/queries/reconcile.ts`, `packages/server/src/schema.ts` |
@@ -218,6 +218,7 @@ Despite strong foundations, the application has critical financial calculation d
   2. For all counterparty transfers (`transferAccountId === id`):
      - Prompt user: Delete both sides of the transfer OR convert counterparty to an unlinked, categorized transaction.
   3. Delete account and cascade cleanly.
+- **Resolution (UNI-07):** Updated `deleteAccount` in `packages/server/src/queries/accounts.ts` to wrap deletion in an explicit transaction (`BEGIN`/`COMMIT`). It finds and deletes all transfer counterparty transactions pointing to the deleted account (reversing their balances in the counterparty account), deletes recurring rules and splits with `transferAccountId === id`, and cleans up linked categories before removing the account. Added unit tests in `packages/server/tests/accounts.test.ts`.
 
 ---
 
