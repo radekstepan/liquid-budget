@@ -44,6 +44,28 @@ describe("budget queries", () => {
     expect(data.groups).toHaveLength(1);
   });
 
+  it("getBudgetData correctly associates recurring sub-transactions (UNI-48 / BUG-41)", async () => {
+    mock.respondWith("select:accounts", []);
+    mock.respondWith("select:category_groups", []);
+    mock.respondWith("select:categories", []);
+    mock.respondWith("select:assignments", []);
+    mock.respondWith("select:transactions", []);
+    mock.respondWith("select:recurring", [
+      { id: 10, accountId: 1, categoryId: null, payee: "Costco", amount: -20000, frequency: "monthly", nextDate: "2026-08-01", active: true, transferAccountId: null },
+    ]);
+    mock.respondWith("select:recurring_sub_transactions", [
+      { id: 1, recurringId: 10, categoryId: 5, transferAccountId: null, amount: -15000, memo: "Food", sort: 0 },
+      { id: 2, recurringId: 10, categoryId: 6, transferAccountId: null, amount: -5000, memo: "Gas", sort: 1 },
+      { id: 3, recurringId: 99, categoryId: 7, transferAccountId: null, amount: -1000, memo: "Other", sort: 0 },
+    ]);
+
+    const data = await getBudgetData(mock.db);
+    expect(data.recurring).toHaveLength(1);
+    expect(data.recurring[0]!.subTransactions).toHaveLength(2);
+    expect(data.recurring[0]!.subTransactions[0]!.amount).toBe("-15000");
+    expect(data.recurring[0]!.subTransactions[1]!.amount).toBe("-5000");
+  });
+
   it("isSeeded issues a select count query", async () => {
     const result = await isSeeded(mock.db);
     expect(result).toBe(false);

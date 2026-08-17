@@ -85,7 +85,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
 | **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` | ✅ **Resolved** |
 | **UNI-47** | BUG-40 | Logic | **Low (P3)** | `num()` parser silently returns 0 for formatted currency strings containing currency symbols | `packages/logic/src/format.ts` | ✅ **Resolved** |
-| **UNI-48** | BUG-41 | Performance | **Low (P3)** | `getBudgetData` performs full unpaginated table scan | `packages/server/src/queries/budget.ts` |
+| **UNI-48** | BUG-41 | Performance | **Low (P3)** | `getBudgetData` performs full unpaginated table scan | `packages/server/src/queries/budget.ts` | ✅ **Resolved** |
 | **UNI-49** | BUG-42 | Performance | **Low (P3)** | `Modal` component reinstantiates `keydown` event listener on every render cycle | `packages/ui/src/ui.tsx` |
 
 ---
@@ -549,6 +549,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/logic/src/format.ts`, `num()` passed formatted strings with currency symbols (`$`, `€`, `£`, `¥`) and commas straight to `parseInt()`, which resulted in `NaN` -> `0` or truncated values.
 - **Actionable Solution:** Strip currency symbols, thousand separators, and whitespace, and properly handle parenthesized negative notation `(500)` and leading/trailing sign indicators.
 - **Resolution (UNI-47):** Updated `num()` in `packages/logic/src/format.ts` to sanitize currency symbols, delimiters, and negative wrappers before integer conversion. Added unit tests in `packages/logic/tests/format.test.ts`.
+
+#### UNI-48 (BUG-41): Query Optimization and Sub-Transaction Grouping in getBudgetData
+- **Root Cause:** In `packages/server/src/queries/budget.ts`, `getBudgetData` performed nested $O(N \times M)$ filtering to link sub-transactions to recurring rules and lacked support for transaction query bounds.
+- **Actionable Solution:** Group recurring sub-transactions in $O(M)$ time using a Map index, and support optional `limitTransactions` bounds.
+- **Resolution (UNI-48):** Replaced nested filtering with $O(M)$ Map grouping and added `options.limitTransactions` support in `packages/server/src/queries/budget.ts`. Added unit tests in `packages/server/tests/budget.test.ts`.
 
 ---
 
