@@ -36,6 +36,13 @@
       "when": 1786003100000,
       "tag": "0004_add_overspend_carries_over_to_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786983745864,
+      "tag": "0005_closed_dazzler",
+      "breakpoints": true
     }
   ]
 }
