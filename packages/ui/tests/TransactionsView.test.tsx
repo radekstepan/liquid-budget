@@ -228,4 +228,41 @@ describe("TransactionsView", () => {
     fireEvent.keyDown(scrollContainer, { key: "Delete" });
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
+
+  it("supports multi-selection and bulk actions", async () => {
+    const data = makeSeedBudgetData();
+    const onBulkDelete = vi.fn();
+    const onBulkUpdate = vi.fn();
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onBulkDelete={onBulkDelete}
+        onBulkUpdate={onBulkUpdate}
+      />
+    );
+
+    const rowCheckboxes = screen.getAllByRole("checkbox");
+    const firstRowCheckbox = rowCheckboxes[1]!;
+    fireEvent.click(firstRowCheckbox);
+
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /mark cleared/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /mark uncleared/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete \(1\)/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /mark cleared/i }));
+    expect(onBulkUpdate).toHaveBeenCalledWith(expect.any(Array), { status: "c" });
+
+    fireEvent.click(firstRowCheckbox);
+    expect(screen.getByRole("button", { name: /delete \(1\)/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /delete \(1\)/i }));
+    expect(onBulkDelete).toHaveBeenCalledWith(expect.any(Array));
+  });
 });

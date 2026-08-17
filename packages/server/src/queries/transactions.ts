@@ -678,3 +678,110 @@ export async function deleteTransaction(db: Database, id: number) {
     throw err;
   }
 }
+
+/**
+ * Bulk delete transactions in an atomic transaction.
+ * Reconciled transactions ("r") are rejected with TransactionError (422).
+ */
+export async function bulkDeleteTransactions(db: Database, ids: number[]) {
+  if (!ids || ids.length === 0) return [];
+  const deleted: any[] = [];
+  db.run(sql`BEGIN`);
+  try {
+    for (const id of ids) {
+      const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
+      if (!existing) continue;
+      if (existing.status === "r") {
+        throw new TransactionError(
+          `Transaction ${id} is reconciled and locked. Unreconcile before deleting.`,
+          422
+        );
+      }
+      if (existing.parentId != null) {
+        await applyBalance(db, existing.accountId, -Number(existing.amount));
+        if (existing.transferAccountId != null) {
+          await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+        }
+        await db.delete(transactions).where(eq(transactions.id, id));
+        deleted.push(existing);
+      } else {
+        const children = await getChildren(db, id);
+        if (children.some((c) => c.status === "r")) {
+          throw new TransactionError(
+            `Reconciled split transaction ${id} cannot be deleted. Unreconcile before deleting.`,
+            422
+          );
+        }
+        if (children.length > 0) {
+          for (const c of children) {
+            await applyBalance(db, existing.accountId, -Number(c.amount));
+            if (c.transferAccountId != null) {
+              await applyBalance(db, c.transferAccountId, Number(c.amount));
+            }
+          }
+          await db.delete(transactions).where(eq(transactions.parentId, id));
+        } else {
+          await applyBalance(db, existing.accountId, -Number(existing.amount));
+          if (existing.transferAccountId != null) {
+            await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+          }
+        }
+        await db.delete(transactions).where(eq(transactions.id, id));
+        deleted.push(existing);
+      }
+    }
+    db.run(sql`COMMIT`);
+    return deleted;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
+}
+
+export type BulkUpdateTransactionPatch = {
+  status?: "u" | "c" | "r";
+  categoryId?: number | null;
+};
+
+/**
+ * Bulk update transactions in an atomic transaction.
+ */
+export async function bulkUpdateTransactions(
+  db: Database,
+  ids: number[],
+  patch: BulkUpdateTransactionPatch
+) {
+  if (!ids || ids.length === 0) return [];
+  const updated: any[] = [];
+  db.run(sql`BEGIN`);
+  try {
+    for (const id of ids) {
+      const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
+      if (!existing) continue;
+      if (existing.status === "r" && patch.status !== "c" && patch.status !== "u") {
+        throw new TransactionError(
+          `Transaction ${id} is reconciled and locked.`,
+          422
+        );
+      }
+      const setFields: Record<string, unknown> = {};
+      if (patch.status !== undefined) setFields.status = patch.status;
+      if (patch.categoryId !== undefined && existing.transferAccountId == null) {
+        setFields.categoryId = patch.categoryId;
+      }
+      if (Object.keys(setFields).length > 0) {
+        const [row] = await db
+          .update(transactions)
+          .set(setFields)
+          .where(eq(transactions.id, id))
+          .returning();
+        if (row) updated.push(row);
+      }
+    }
+    db.run(sql`COMMIT`);
+    return updated;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
+}

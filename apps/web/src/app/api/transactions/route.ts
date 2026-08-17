@@ -1,4 +1,6 @@
 import {
+  bulkDeleteTransactions,
+  bulkUpdateTransactions,
   createSplitWithChildren,
   createTransaction,
   deleteTransaction,
@@ -45,10 +47,6 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
 
 function parseStatus(raw: unknown, fallback: ClearedStatus = "c"): ClearedStatus {
   if (raw === "u" || raw === "c" || raw === "r") return raw;
-  // Backwards-compat: older clients sent `cleared: boolean`. Map to
-  // the equivalent tri-state value. Reconciled ("r") is not
-  // accepted from a direct PATCH/POST — only from the reconcile
-  // flow.
   if (raw === false) return "u";
   if (raw === true) return fallback;
   return fallback;
@@ -64,13 +62,35 @@ function errorResponse(e: unknown): Response {
 export async function POST(req: Request) {
   let body: any;
   try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  const { searchParams } = new URL(req.url);
+  const action = searchParams.get("action");
+  const db = getDefaultDb();
+
+  if (action === "bulk-delete" || (Array.isArray(body?.ids) && body?.action === "delete")) {
+    const ids: number[] = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+    try {
+      const deleted = await bulkDeleteTransactions(db, ids);
+      return Response.json({ ok: true, count: deleted.length, deleted });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
+  if (action === "bulk-update" || (Array.isArray(body?.ids) && body?.patch)) {
+    const ids: number[] = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+    try {
+      const updated = await bulkUpdateTransactions(db, ids, body.patch);
+      return Response.json({ ok: true, count: updated.length, updated });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   const accountId = Number(body.accountId);
   const amount = Number(body.amount);
   if (!accountId || Number.isNaN(amount)) {
     return Response.json({ error: "invalid" }, { status: 400 });
   }
-
-  const db = getDefaultDb();
 
   if (Array.isArray(body.subTransactions)) {
     try {
@@ -116,10 +136,20 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   let body: any;
   try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  const db = getDefaultDb();
+
+  if (Array.isArray(body.ids)) {
+    try {
+      const ids = body.ids.map(Number);
+      const updated = await bulkUpdateTransactions(db, ids, body.patch ?? {});
+      return Response.json({ ok: true, count: updated.length, updated });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   const id = Number(body.id);
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-
-  const db = getDefaultDb();
 
   if (Array.isArray(body.subTransactions)) {
     try {
@@ -169,6 +199,17 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
+  const idsParam = searchParams.get("ids");
+  if (idsParam) {
+    const ids = idsParam.split(",").map(Number).filter(Boolean);
+    try {
+      const deleted = await bulkDeleteTransactions(getDefaultDb(), ids);
+      return Response.json({ ok: true, count: deleted.length, deleted });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   const id = Number(searchParams.get("id"));
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
   try {

@@ -83,6 +83,11 @@ export type BudgetAppApi = {
     }
   ) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
+  bulkDeleteTransactions?: (ids: number[]) => Promise<void>;
+  bulkUpdateTransactions?: (
+    ids: number[],
+    patch: { status?: "u" | "c" | "r"; categoryId?: number | null }
+  ) => Promise<void>;
   addRecurring: (v: {
     accountId: number;
     categoryId: number | null;
@@ -474,6 +479,8 @@ export function BudgetApp({
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
               onCycleStatus={cycleStatus}
+              onBulkDelete={api.bulkDeleteTransactions}
+              onBulkUpdate={api.bulkUpdateTransactions}
             />
           )}
           {view === "recurring" && (
