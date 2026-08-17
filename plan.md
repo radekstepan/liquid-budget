@@ -52,7 +52,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-12** | BUG-05, BUG-06, F-09 | Concurrency | **High (P1)** | `createAccount` sort calc and `upsertAssignment` select-then-insert are not transaction-wrapped (race condition / 500 error) | `packages/server/src/queries/accounts.ts`, `packages/server/src/queries/assignments.ts` | ✅ **Resolved** |
 | **UNI-13** | BUG-08 | Build | **High (P1)** | Stale `dist/compute.js` artifact references non-existent exports (`computeGroups`, `summarize`) | `packages/logic/dist/compute.js` | ✅ **Resolved** |
 | **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` | ✅ **Resolved** |
-| **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` |
+| **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` | ✅ **Resolved** |
 | **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` |
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` |
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` |
@@ -256,6 +256,10 @@ Despite strong foundations, the application has critical financial calculation d
       });
     ```
 - **Resolution (UNI-12):** Wrapped `createAccount` in `packages/server/src/queries/accounts.ts` in an explicit database transaction (`BEGIN`/`COMMIT`). Converted `upsertAssignment` in `packages/server/src/queries/assignments.ts` to execute an atomic `onConflictDoUpdate` UPSERT query inside a database transaction (`BEGIN`/`COMMIT`). Updated unit tests in `packages/server/tests/assignments.test.ts`.
+
+#### UNI-15 (BUG-10): Transaction Wrapping on Reset and Seed
+- **Root Cause:** `resetDatabase` and `seedDatabase` executed sequential `delete` and `insert` statements without a wrapping `BEGIN`/`COMMIT` transaction, risking partial state corruption on failure.
+- **Resolution (UNI-15):** Wrapped `resetDatabase` and `seedDatabase` in `packages/server/src/seed.ts` in explicit database transactions (`BEGIN`/`COMMIT`/`ROLLBACK`), with `isNested` awareness for outer transaction contexts like `importYnab4`.
 
 ---
 

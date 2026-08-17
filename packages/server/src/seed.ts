@@ -13,24 +13,33 @@ export { DEMO_MONTH };
  * don't fire, then reset the autoincrement sequences.
  * The next call to seedDatabase() will re-populate from scratch.
  */
-export async function resetDatabase(db: Db): Promise<void> {
-  await db.delete(recurringSubTransactions);
-  await db.delete(recurring);
-  await db.delete(transactions);
-  await db.delete(assignments);
-  await db.delete(categories);
-  await db.delete(categoryGroups);
-  await db.delete(accounts);
-  // Reset sqlite_sequence so IDs restart from 1 on the next insert.
-  await db.run(sql`DELETE FROM sqlite_sequence`);
+export async function resetDatabase(db: Db, isNested = false): Promise<void> {
+  if (!isNested) db.run(sql`BEGIN`);
+  try {
+    await db.delete(recurringSubTransactions);
+    await db.delete(recurring);
+    await db.delete(transactions);
+    await db.delete(assignments);
+    await db.delete(categories);
+    await db.delete(categoryGroups);
+    await db.delete(accounts);
+    // Reset sqlite_sequence so IDs restart from 1 on the next insert.
+    await db.run(sql`DELETE FROM sqlite_sequence`);
+    if (!isNested) db.run(sql`COMMIT`);
+  } catch (err) {
+    if (!isNested) db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 export async function seedDatabase(db: Db) {
   if (await isSeeded(db)) return;
 
-  // ---------------------------------------------------------------------------
-  // ACCOUNTS (amounts in cents)
-  // ---------------------------------------------------------------------------
+  db.run(sql`BEGIN`);
+  try {
+    // ---------------------------------------------------------------------------
+    // ACCOUNTS (amounts in cents)
+    // ---------------------------------------------------------------------------
   const acc = await db
     .insert(accounts)
     .values([
@@ -342,4 +351,9 @@ export async function seedDatabase(db: Db) {
     // Jericho sailing — annual (next year)
     { accountId: a("TD Unlimited Chequing"), categoryId: byName("Lessons (Sailing, Guitar)"), payee: "Jericho Sailing Centre", amount: -71860, frequency: "yearly", nextDate: "2027-05-01", active: true },
   ]);
+  db.run(sql`COMMIT`);
+} catch (err) {
+  db.run(sql`ROLLBACK`);
+  throw err;
+}
 }
