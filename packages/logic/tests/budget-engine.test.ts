@@ -191,8 +191,8 @@ describe("computeBudget", () => {
     expect(row.available).toBe(50000);
     // Overspent from previous month is 20000
     expect(result.overspentPrevious).toBe(20000);
-    // TBB = 0 - 50000 + 0 - 20000 = -70000
-    expect(result.tbb).toBe(-70000);
+    // TBB = 0 - 50000 + (-30000 priorSurplus from June: -10000 assigned - 20000 overspent) = -80000
+    expect(result.tbb).toBe(-80000);
   });
 
   it("cash overspending reduces TBB but not available in next month", () => {
@@ -281,7 +281,8 @@ describe("computeBudget", () => {
     const august = computeBudget(data, "2025-08");
     // Month 3: July had no overspent (available = 0 + 50000 = 50000, positive)
     expect(august.overspentPrevious).toBe(0);
-    expect(august.tbb).toBe(0);
+    // Total deficit of -70000 persists (-20000 June overspend + -50000 July assignment)
+    expect(august.tbb).toBe(-70000);
   });
 
   it("credit card overspending does NOT get clamped and does NOT affect TBB", () => {
@@ -327,10 +328,9 @@ describe("computeBudget", () => {
     expect(ccRowJuly.carryoverIn).toBe(50000);
     // Overspent from June: groceries was -40000, clamped to 0, overspent = 40000
     expect(july.overspentPrevious).toBe(40000);
-    // TBB = 0 - 0 + 400000 - 40000 = 360000 (note: priorSurplus carries forward from June)
-    // June: income 500000 - assigned 10000 = 490000, surplus = 490000
-    // July: 0 - 0 + 490000 - 40000 = 450000
-    expect(july.priorSurplus).toBe(490000);
+    // June: income 500000 - assigned 10000 - overspent 40000 = 450000 priorSurplus
+    // July: 0 income - 0 assigned + 450000 priorSurplus = 450000
+    expect(july.priorSurplus).toBe(450000);
     expect(july.tbb).toBe(450000);
   });
 
@@ -598,7 +598,45 @@ describe("computeBudget", () => {
     const result = computeBudget(data, DEMO_MONTH);
     expect(result.groups).toHaveLength(data.groups.length);
     expect(result.totalIncome).toBeGreaterThan(0);
-    expect(result.tbb).toBe(result.totalIncome + result.priorSurplus - result.totalAssigned - result.overspentPrevious);
+    expect(result.tbb).toBe(result.totalIncome + result.priorSurplus - result.totalAssigned);
+  });
+
+  it("UNI-01 / F-02: empty intervening month preserves cash overspend deduction and budget integrity invariant", () => {
+    // June: income 5000, assign 1000, spend 3000 (overspend 2000)
+    // July: empty
+    // August: empty
+    const data: BudgetData = {
+      ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "200000", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1, carryover: "0" })],
+      assignments: [
+        { id: 1, categoryId: 1, month: "2025-06", amount: "100000" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Payroll", memo: "", amount: "500000", status: "c", isIncome: true },
+        { id: 2, accountId: 1, categoryId: 1, date: "2025-06-15", payee: "Store", memo: "", amount: "-300000", status: "c" },
+      ],
+    };
+
+    const june = computeBudget(data, "2025-06");
+    expect(june.tbb).toBe(400000); // 5000 - 1000
+
+    const july = computeBudget(data, "2025-07");
+    expect(july.priorSurplus).toBe(200000); // 4000 surplus - 2000 overspend
+    expect(july.tbb).toBe(200000);
+
+    const august = computeBudget(data, "2025-08");
+    // In August, the $2000 cash overspent in June must NOT re-emerge as phantom TBB!
+    expect(august.priorSurplus).toBe(200000);
+    expect(august.tbb).toBe(200000);
+
+    // Verify budget integrity invariant: onBudgetAccountBalance - categoryAvailable - tbb === 0
+    const totalOnBudget = 200000;
+    const totalCatAvailable = august.groups.reduce((s, g) => s + g.available, 0); // 0
+    expect(totalOnBudget - totalCatAvailable - august.tbb).toBe(0);
   });
 
   it("computes 5 years (60 months) with 1000 transactions in < 100ms", () => {
