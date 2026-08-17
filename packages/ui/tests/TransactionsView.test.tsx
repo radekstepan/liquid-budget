@@ -192,4 +192,40 @@ describe("TransactionsView", () => {
     fireEvent.click(screen.getByText("Transfer : TD Unlimited Chequing"));
     expect(onEdit).toHaveBeenCalledWith(9100);
   });
+
+  it("supports keyboard navigation (ArrowDown/Up, Enter, 'c', Delete)", () => {
+    const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    const onCycleStatus = vi.fn();
+    const onDelete = vi.fn();
+
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onReconcile={() => {}}
+        onCycleStatus={onCycleStatus}
+      />
+    );
+
+    const scrollContainer = container.querySelector(".y-scroll")!;
+    expect(scrollContainer).toBeInTheDocument();
+
+    // Arrow down selects the first row
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
+    // Press 'c' to cycle status of selected row
+    fireEvent.keyDown(scrollContainer, { key: "c" });
+    expect(onCycleStatus).toHaveBeenCalledTimes(1);
+
+    // Press Enter to edit selected row
+    fireEvent.keyDown(scrollContainer, { key: "Enter" });
+    expect(onEdit).toHaveBeenCalledTimes(1);
+
+    // Press Delete to delete selected row
+    fireEvent.keyDown(scrollContainer, { key: "Delete" });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
 });

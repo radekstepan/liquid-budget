@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO, adjustDateShortcut } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers and formats cents as dollars", () => {
@@ -223,6 +223,32 @@ describe("format", () => {
     it("returns null on integer overflow beyond MAX_SAFE_INTEGER", () => {
       expect(evalAmount("99999999999999999999999999999999")).toBeNull();
       expect(evalAmount("1e20 * 1e20")).toBeNull();
+    });
+  });
+
+  describe("adjustDateShortcut", () => {
+    it("handles +/- day shortcuts", () => {
+      expect(adjustDateShortcut("2026-06-15", "+")).toBe("2026-06-16");
+      expect(adjustDateShortcut("2026-06-15", "=")).toBe("2026-06-16");
+      expect(adjustDateShortcut("2026-06-15", "-")).toBe("2026-06-14");
+      expect(adjustDateShortcut("2026-06-15", "_")).toBe("2026-06-14");
+    });
+
+    it("handles month and year advance shortcuts", () => {
+      expect(adjustDateShortcut("2026-06-15", "m")).toBe("2026-07-15");
+      expect(adjustDateShortcut("2026-06-15", "M")).toBe("2026-07-15");
+      expect(adjustDateShortcut("2026-06-15", "y")).toBe("2027-06-15");
+      expect(adjustDateShortcut("2026-06-15", "Y")).toBe("2027-06-15");
+    });
+
+    it("handles today shortcut", () => {
+      expect(adjustDateShortcut("2026-06-15", "t")).toBe(todayISO());
+      expect(adjustDateShortcut("2026-06-15", "T")).toBe(todayISO());
+    });
+
+    it("returns null for unsupported keys or invalid dates", () => {
+      expect(adjustDateShortcut("2026-06-15", "x")).toBeNull();
+      expect(adjustDateShortcut("invalid", "+")).toBeNull();
     });
   });
 });

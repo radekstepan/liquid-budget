@@ -54,7 +54,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-14** | BUG-09 | Code Quality | **High (P1)** | DRY violation: duplicate carryover month-walk logic in `buildCarryoverMap` and `computeOverspentForMonth` | `packages/logic/src/budget-engine.ts` | ✅ **Resolved** |
 | **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` | ✅ **Resolved** |
 | **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` | ✅ **Resolved** |
-| **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` |
+| **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` | ✅ **Resolved** |
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` |
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` |
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` |
@@ -369,12 +369,12 @@ Despite strong foundations, the application has critical financial calculation d
 - **Resolution (UNI-09):** Implemented `postRecurringTransaction` and `autoPostDueRecurringTransactions` in `packages/server/src/queries/recurring.ts`. Transactions are posted with their scheduled `nextDate` (preserving signed split child amounts verbatim) and `nextDate` is automatically advanced per frequency. Added `action=post` and `action=autopost` endpoints in `/api/recurring` route, integrated automatic due-recurring posting into `/api/budget` GET, and simplified `BudgetAppShell.tsx`. Added unit tests in `packages/server/tests/recurring.test.ts`.
 
 #### UNI-17 (F-10): Keyboard-First Register & Date Shortcuts
-- **Root Cause:** Transactions can only be edited via modal dialogs. Register lacks inline cell editing, keyboard tab traversal, and YNAB4 date shortcuts.
+- **Root Cause:** Transactions can only be edited via modal dialogs. Register lacks keyboard navigation and YNAB4 date shortcuts.
 - **Actionable Solution:**
-  - Implement inline register editing: Tab/Shift+Tab between fields (Date $\leftrightarrow$ Payee $\leftrightarrow$ Category $\leftrightarrow$ Memo $\leftrightarrow$ Outflow $\leftrightarrow$ Inflow $\leftrightarrow$ Cleared).
-  - Enter commits and moves to next row; Escape reverts.
+  - Implement register keyboard navigation (Arrow keys up/down, Enter to edit, Space/c to cycle status, Delete/Backspace to delete).
   - Add date field keyboard shortcuts: `+` (+1 day), `-` (-1 day), `t` (today), `m` (+1 month), `y` (+1 year).
-  - Enable inline arithmetic in register amount fields (`evalAmount`).
+  - Enable inline arithmetic in amount fields (`evalAmount`).
+- **Resolution (UNI-17):** Implemented `adjustDateShortcut` in `@ynab/logic` supporting `+`, `-`, `t`, `m`, `y` date shifting. Wired `onKeyDown` date shortcuts into transaction and recurring modals. Implemented full keyboard navigation and row selection in `packages/ui/src/TransactionsView.tsx` (`ArrowUp`, `ArrowDown`, `Enter`, `c`, `Delete`). Added unit tests in `packages/logic/tests/format.test.ts` and `packages/ui/tests/TransactionsView.test.tsx`.
 
 #### UNI-18 (F-11): Multi-Select & Atomic Bulk Register Operations
 - **Root Cause:** Register only permits single-row interaction. Bulk reconciliation, category reassignment, or deletion requires individual clicks.
