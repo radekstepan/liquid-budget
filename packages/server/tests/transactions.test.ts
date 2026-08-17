@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import {
   assertSplitsBalanced,
+  bulkDeleteTransactions,
+  bulkUpdateTransactions,
   createSplitWithChildren,
   createTransaction,
   createTransfer,
@@ -647,6 +649,49 @@ describe("transactions queries", () => {
       await expect(deleteTransaction(mock.db, 1)).rejects.toThrow("DB write failed");
       const ops = mock.calls.map((c) => c.op);
       expect(ops).toContain("run");
+    });
+  });
+
+  describe("bulkDeleteTransactions", () => {
+    it("deletes multiple transactions atomically", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -1000, categoryId: 2, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // children of 1
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 2, accountId: 1, amount: -2000, categoryId: 2, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 4, []); // children of 2
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}, {}]);
+
+      const res = await bulkDeleteTransactions(mock.db, [1, 2]);
+      expect(res).toHaveLength(2);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(2);
+    });
+
+    it("rejects bulk delete if any transaction is reconciled", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, status: "r" },
+      ]);
+
+      await expect(bulkDeleteTransactions(mock.db, [1])).rejects.toThrow(TransactionError);
+    });
+  });
+
+  describe("bulkUpdateTransactions", () => {
+    it("updates status and category on multiple transactions atomically", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, status: "u", categoryId: 1, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 2, status: "u", categoryId: 1, transferAccountId: null },
+      ]);
+      mock.respondWith("update:transactions", [{ id: 1, status: "c" }, { id: 2, status: "c" }]);
+
+      const res = await bulkUpdateTransactions(mock.db, [1, 2], { status: "c" });
+      expect(res).toHaveLength(2);
     });
   });
 });

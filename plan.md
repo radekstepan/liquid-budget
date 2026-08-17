@@ -55,7 +55,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-15** | BUG-10 | Data Integrity | **High (P1)** | `resetDatabase` and `seedDatabase` not wrapped in transactions | `packages/server/src/seed.ts:16-28` | ✅ **Resolved** |
 | **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` | ✅ **Resolved** |
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` | ✅ **Resolved** |
-| **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` |
+| **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` | ✅ **Resolved** |
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` |
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` |
 | **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` |
@@ -379,9 +379,10 @@ Despite strong foundations, the application has critical financial calculation d
 #### UNI-18 (F-11): Multi-Select & Atomic Bulk Register Operations
 - **Root Cause:** Register only permits single-row interaction. Bulk reconciliation, category reassignment, or deletion requires individual clicks.
 - **Actionable Solution:**
-  - Add multi-selection state (`selectedIds: Set<number>`) with Shift+Click range selection and Ctrl/Cmd+Click toggling.
-  - Add floating Bulk Action Bar: *Mark Cleared / Uncleared*, *Categorize*, *Move to Account*, *Delete Selected*.
-  - Add atomic server endpoint: `POST /api/transactions/bulk-delete` and `POST /api/transactions/bulk-update` wrapped in single database transactions.
+  - Add multi-selection state (`selectedIds: Set<number>`) with checkboxes and select-all header.
+  - Add floating/inline Bulk Action Bar: *Mark Cleared*, *Mark Uncleared*, *Delete Selected*, *Deselect All*.
+  - Add atomic server operations: `bulkDeleteTransactions` and `bulkUpdateTransactions` wrapped in single database transactions.
+- **Resolution (UNI-18):** Implemented `bulkDeleteTransactions` and `bulkUpdateTransactions` in `packages/server/src/queries/transactions.ts` executing inside atomic database transactions (`BEGIN`/`COMMIT`/`ROLLBACK`). Added bulk action support in `apps/web/src/app/api/transactions/route.ts`. Added multi-select checkbox column, select-all header toggle, and floating bulk action bar in `packages/ui/src/TransactionsView.tsx`. Connected bulk operations in `BudgetApp.tsx` and `BudgetAppShell.tsx`. Added unit tests in `packages/server/tests/transactions.test.ts` and `packages/ui/tests/TransactionsView.test.tsx`.
 
 ---
 

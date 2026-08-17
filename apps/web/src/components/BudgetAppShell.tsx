@@ -148,6 +148,60 @@ export function BudgetAppShell() {
         throw e;
       }
     },
+    bulkDeleteTransactions: async (ids: number[]) => {
+      let snapshot: BudgetData | null = null;
+      setData((prev) => {
+        if (!prev) return prev;
+        snapshot = prev;
+        const idSet = new Set(ids);
+        const transactions = prev.transactions.filter(
+          (x) => !idSet.has(x.id) && (x.parentId == null || !idSet.has(x.parentId))
+        );
+        return { ...prev, transactions };
+      });
+      try {
+        await jsonReq("/api/transactions?action=bulk-delete", {
+          method: "POST",
+          body: JSON.stringify({ ids }),
+        });
+        await reload();
+      } catch (e) {
+        if (snapshot) setData(snapshot);
+        await reload().catch(() => {});
+        throw e;
+      }
+    },
+    bulkUpdateTransactions: async (
+      ids: number[],
+      patch: { status?: "u" | "c" | "r"; categoryId?: number | null }
+    ) => {
+      let snapshot: BudgetData | null = null;
+      setData((prev) => {
+        if (!prev) return prev;
+        snapshot = prev;
+        const idSet = new Set(ids);
+        const transactions = prev.transactions.map((x) => {
+          if (!idSet.has(x.id)) return x;
+          return {
+            ...x,
+            ...(patch.status !== undefined ? { status: patch.status } : {}),
+            ...(patch.categoryId !== undefined ? { categoryId: patch.categoryId } : {}),
+          };
+        });
+        return { ...prev, transactions };
+      });
+      try {
+        await jsonReq("/api/transactions?action=bulk-update", {
+          method: "POST",
+          body: JSON.stringify({ ids, patch }),
+        });
+        await reload();
+      } catch (e) {
+        if (snapshot) setData(snapshot);
+        await reload().catch(() => {});
+        throw e;
+      }
+    },
     addRecurring: async (v) => {
       await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });
       await reload();

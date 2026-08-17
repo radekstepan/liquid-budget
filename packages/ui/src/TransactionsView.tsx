@@ -18,6 +18,8 @@ export function TransactionsView({
   onDelete,
   onReconcile,
   onCycleStatus,
+  onBulkDelete,
+  onBulkUpdate,
 }: {
   data: BudgetData;
   accountFilter: number | null;
@@ -26,10 +28,13 @@ export function TransactionsView({
   onDelete: (id: number) => void;
   onReconcile: (accountId: number) => void;
   onCycleStatus: (id: number) => void;
+  onBulkDelete?: (ids: number[]) => Promise<void> | void;
+  onBulkUpdate?: (ids: number[], patch: { status?: "u" | "c" | "r"; categoryId?: number | null }) => Promise<void> | void;
 }) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -161,7 +166,7 @@ export function TransactionsView({
   }, [filtered, accountFilter]);
 
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
-  const colCount = accountFilter ? 8 : 9;
+  const colCount = (accountFilter ? 8 : 9) + 1;
 
   // Virtualization window calculations
   const totalCount = filtered.length;
@@ -177,6 +182,35 @@ export function TransactionsView({
   const topHeight = startIndex * ROW_HEIGHT;
   const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
   const visibleRows = filtered.slice(startIndex, endIndex);
+
+  const allVisibleSelected =
+    visibleRows.length > 0 && visibleRows.every((r) => selectedIds.has(r.id));
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const allSelected = visibleRows.length > 0 && visibleRows.every((r) => prev.has(r.id));
+      if (allSelected) {
+        return new Set();
+      } else {
+        const next = new Set(prev);
+        for (const r of visibleRows) next.add(r.id);
+        return next;
+      }
+    });
+  };
+
+  const toggleRowSelect = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -254,6 +288,59 @@ export function TransactionsView({
         </Button>
       </Toolbar>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-800 text-[12px]">
+          <span className="font-semibold text-blue-900 dark:text-blue-200">
+            {selectedIds.size} selected
+          </span>
+          <div className="h-4 w-px bg-blue-300 dark:bg-blue-700 mx-1" />
+          <Button
+            variant="default"
+            size="sm"
+            onClick={async () => {
+              const ids = Array.from(selectedIds);
+              setSelectedIds(new Set());
+              if (onBulkUpdate) await onBulkUpdate(ids, { status: "c" });
+              else for (const id of ids) onCycleStatus(id);
+            }}
+          >
+            Mark Cleared
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={async () => {
+              const ids = Array.from(selectedIds);
+              setSelectedIds(new Set());
+              if (onBulkUpdate) await onBulkUpdate(ids, { status: "u" });
+              else for (const id of ids) onCycleStatus(id);
+            }}
+          >
+            Mark Uncleared
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={async () => {
+              const ids = Array.from(selectedIds);
+              setSelectedIds(new Set());
+              if (onBulkDelete) await onBulkDelete(ids);
+              else for (const id of ids) onDelete(id);
+            }}
+          >
+            Delete ({selectedIds.size})
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Deselect All
+          </Button>
+        </div>
+      )}
+
       <div className="y-subbar flex items-center gap-3 px-3 py-1.5 text-[11px]">
         <span className="y-caps">{totals.count} transactions</span>
         <span className="y-num font-bold" style={{ color: "var(--y-ink)" }}>
@@ -280,6 +367,15 @@ export function TransactionsView({
         <table className="y-table">
           <thead className="y-thead y-thead--sticky">
             <tr>
+              <th style={{ width: 28 }} className="text-center">
+                <input
+                  type="checkbox"
+                  aria-label="Select all transactions"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAll}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+              </th>
               <th style={{ width: 92 }}>Date</th>
               {!accountFilter && <th style={{ width: 130 }}>Account</th>}
               <th>Payee</th>
@@ -315,7 +411,8 @@ export function TransactionsView({
                 )}
                 {visibleRows.map((t, idx) => {
                   const globalIndex = startIndex + idx;
-                  const isSelected = t.id === selectedId;
+                  const isSelected = t.id === selectedId || selectedIds.has(t.id);
+                  const isChecked = selectedIds.has(t.id);
                   const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
                   const effAmt = isIncoming ? -t.amount : t.amount;
                   const outflow = effAmt < 0 ? -effAmt : 0;
@@ -339,6 +436,16 @@ export function TransactionsView({
                       }}
                       style={{ cursor: "pointer" }}
                     >
+                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select transaction ${t.payee || t.id}`}
+                          checked={isChecked}
+                          onChange={() => {}}
+                          onClick={(e) => toggleRowSelect(t.id, e)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                      </td>
                       <td className="y-num">{t.date}</td>
                       {!accountFilter && (
                         <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
