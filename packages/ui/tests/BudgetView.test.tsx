@@ -318,8 +318,9 @@ describe("BudgetView", () => {
       const rent = catRows.find((r) => within(r).queryByText("Rent"))!;
       const dt = { effectAllowed: "", dropEffect: "" };
 
-      const grip = groceries.querySelector('[draggable="true"]')!;
-      fireEvent.dragStart(grip, { dataTransfer: dt });
+      fireEvent.dragStart(groceries, { dataTransfer: dt });
+      fireEvent.dragOver(rent, { dataTransfer: dt });
+      expect(rent.classList.contains("is-drop-target")).toBe(true);
       fireEvent.drop(rent, { dataTransfer: dt });
 
       expect(onReorderCategory).toHaveBeenCalledWith(11, 0);
@@ -336,8 +337,7 @@ describe("BudgetView", () => {
       const rent = catRows.find((r) => within(r).queryByText("Rent"))!;
       const dt = { effectAllowed: "", dropEffect: "" };
 
-      const grip = groceries.querySelector('[draggable="true"]')!;
-      fireEvent.dragStart(grip, { dataTransfer: dt });
+      fireEvent.dragStart(groceries, { dataTransfer: dt });
       fireEvent.drop(rent, { dataTransfer: dt });
       expect(onReorderCategory).not.toHaveBeenCalled();
     });
@@ -484,6 +484,75 @@ describe("BudgetView", () => {
       // And it must NOT also be flagged as a chrome divider (that's the
       // inter-month separator reserved for month 2+).
       expect(firstRow2Cell!.classList.contains("y-table-colgroup-divider")).toBe(false);
+    });
+  });
+
+  describe("Hidden Categories and __Internal__ group handling", () => {
+    it("does not render __Internal__ master category", () => {
+      const budgetWithInternal = makeBudget({
+        groups: [
+          ...makeBudget().groups,
+          {
+            group: { id: 99, name: "__Internal__", sort: 0, isCreditCardPayments: false },
+            assigned: 0,
+            outflow: 0,
+            available: 0,
+            rows: [
+              {
+                category: { id: 990, groupId: 99, name: "Uncategorized", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+                carryoverIn: 0,
+                assigned: 0,
+                outflow: 0,
+                ccBuffer: 0,
+                available: 0,
+                fundedPct: 0,
+              },
+            ],
+          },
+        ],
+      });
+      renderView({ budget: budgetWithInternal, budgets: [budgetWithInternal] });
+      expect(screen.queryByText("__Internal__")).not.toBeInTheDocument();
+      expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
+    });
+
+    it("renders Hidden Categories at the very bottom and collapsed by default", () => {
+      const budgetWithHidden = makeBudget({
+        groups: [
+          {
+            group: { id: 50, name: "Hidden Categories", sort: 0, isCreditCardPayments: false },
+            assigned: 0,
+            outflow: 0,
+            available: 0,
+            rows: [
+              {
+                category: { id: 500, groupId: 50, name: "Old Gym", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+                carryoverIn: 0,
+                assigned: 0,
+                outflow: 0,
+                ccBuffer: 0,
+                available: 0,
+                fundedPct: 0,
+              },
+            ],
+          },
+          ...makeBudget().groups,
+        ],
+      });
+
+      renderView({ budget: budgetWithHidden, budgets: [budgetWithHidden], collapsed: {} });
+
+      // Group header is rendered
+      expect(screen.getByText("Hidden Categories")).toBeInTheDocument();
+
+      // Because it is collapsed by default, "Old Gym" is hidden
+      expect(screen.queryByText("Old Gym")).not.toBeInTheDocument();
+
+      // Check group order in DOM table body
+      const masterHeaders = Array.from(document.querySelectorAll("table.y-table tbody tr.y-master")).map(
+        (tr) => tr.textContent
+      );
+      expect(masterHeaders[masterHeaders.length - 1]).toContain("Hidden Categories");
     });
   });
 });

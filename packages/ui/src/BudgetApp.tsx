@@ -157,8 +157,14 @@ export function BudgetApp({
   const [month, setMonth] = useState(DEMO_MONTH);
   const [monthCount, setMonthCount] = useState<number>(3);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
+    const init: Record<number, boolean> = {};
     const cc = data.groups.find((g) => g.isCreditCardPayments);
-    return cc ? { [cc.id]: true } : {};
+    if (cc) init[cc.id] = true;
+    const hidden = data.groups.find(
+      (g) => g.name === "Hidden Categories" || g.name.toLowerCase() === "hidden categories"
+    );
+    if (hidden) init[hidden.id] = true;
+    return init;
   });
   const [accountFilter, setAccountFilter] = useState<number | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
@@ -647,7 +653,9 @@ export function BudgetApp({
         <ReconcileModal
           state={reconcileState}
           categories={data.categories}
-          groups={data.groups}
+          groups={data.groups.filter(
+            (g) => g.name !== "__Internal__" && g.name.toLowerCase() !== "__internal__"
+          )}
           onClose={() => setModal({ kind: "none" })}
           onReconcile={async (input) => {
             await api.reconcileAccount(input);
