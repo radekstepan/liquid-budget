@@ -28,22 +28,29 @@ export type UpdateAccountInput = {
 };
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
-  const [maxRow] = await db
-    .select({ max: sql<number>`coalesce(max(${accounts.sort}), -1)` })
-    .from(accounts);
-  const [row] = await db
-    .insert(accounts)
-    .values({
-      name: String(input.name),
-      kind: String(input.kind ?? "liquid"),
-      groupLabel: String(input.groupLabel ?? "Liquid"),
-      balance: Number(input.balance) || 0,
-      onBudget: input.onBudget ?? true,
-      sort: Number(maxRow?.max ?? -1) + 1,
-      archived: input.archived ?? false,
-    })
-    .returning();
-  return row;
+  db.run(sql`BEGIN`);
+  try {
+    const [maxRow] = await db
+      .select({ max: sql<number>`coalesce(max(${accounts.sort}), -1)` })
+      .from(accounts);
+    const [row] = await db
+      .insert(accounts)
+      .values({
+        name: String(input.name),
+        kind: String(input.kind ?? "liquid"),
+        groupLabel: String(input.groupLabel ?? "Liquid"),
+        balance: Number(input.balance) || 0,
+        onBudget: input.onBudget ?? true,
+        sort: Number(maxRow?.max ?? -1) + 1,
+        archived: input.archived ?? false,
+      })
+      .returning();
+    db.run(sql`COMMIT`);
+    return row;
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 export async function getAccount(db: Database, id: number) {
