@@ -308,28 +308,28 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
     const data = await getBudgetData(db);
     const byName = new Map(data.accounts.map((a) => [a.name, a]));
 
-    // 4. Verify Account Balances
+    // 4. Verify Account Balances (in cents)
     // Checking native sum:
     // +5000 (salary) - 1500 (rent) - 300 (transfer to CC) - 150 (groceries split) - 50 (old car split) - 800 (savings transfer split) - 200 (util split)
-    // = 5000 - 1500 - 300 - 150 - 50 - 800 - 200 = 2000.00
-    expect(Number(byName.get("Main Chequing")!.balance)).toBeCloseTo(2000.0, 2);
+    // = 5000 - 1500 - 300 - 150 - 50 - 800 - 200 = $2000.00 -> 200000 cents
+    expect(Number(byName.get("Main Chequing")!.balance)).toBe(200000);
 
     // Savings native sum:
-    // +800 (from split transfer) = 800.00
-    expect(Number(byName.get("High Interest Savings")!.balance)).toBeCloseTo(800.0, 2);
+    // +800 (from split transfer) = $800.00 -> 80000 cents
+    expect(Number(byName.get("High Interest Savings")!.balance)).toBe(80000);
 
     // Credit Card native sum:
-    // +300 (bill payment from Checking) - 120 (groceries charge) = 180.00
-    expect(Number(byName.get("Rewards Visa")!.balance)).toBeCloseTo(180.0, 2);
+    // +300 (bill payment from Checking) - 120 (groceries charge) = $180.00 -> 18000 cents
+    expect(Number(byName.get("Rewards Visa")!.balance)).toBe(18000);
 
-    // Investment (no tx) = 0.00
-    expect(Number(byName.get("Index Fund TFSA")!.balance)).toBeCloseTo(0.0, 2);
+    // Investment (no tx) = 0 cents
+    expect(Number(byName.get("Index Fund TFSA")!.balance)).toBe(0);
 
     // 5. Verify Metadata and Sort Order
     const checkingAcc = byName.get("Main Chequing")!;
     expect(checkingAcc.sort).toBe(0); // lowest sortableIndex (-1000)
     expect(checkingAcc.lastReconciledAt).toBe("2026-01-15");
-    expect(Number(checkingAcc.lastReconciledBalance)).toBeCloseTo(5000.5, 2);
+    expect(Number(checkingAcc.lastReconciledBalance)).toBe(500050);
 
     // 6. Verify Transfer De-duplication in DB
     // Regular transfer (tx-transfer-cc-source & tx-transfer-cc-dest) should only produce 1 row
@@ -337,13 +337,13 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
       (t) => t.payee === "Transfer : Rewards Visa"
     );
     expect(ccTransfers).toHaveLength(1);
-    expect(Number(ccTransfers[0]!.amount)).toBe(-300);
+    expect(Number(ccTransfers[0]!.amount)).toBe(-30000);
 
     const savingsTransfer = data.transactions.filter(
       (t) => t.payee === "Transfer : High Interest Savings"
     );
     expect(savingsTransfer).toHaveLength(1);
-    expect(Number(savingsTransfer[0]!.amount)).toBe(-800);
+    expect(Number(savingsTransfer[0]!.amount)).toBe(-80000);
     expect(savingsTransfer[0]!.transferAccountId).toBe(byName.get("High Interest Savings")!.id);
 
     // 7. Verify Hidden Categories Mapping
@@ -353,7 +353,7 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
     // Verify split transaction child linked to hidden category
     const carTx = data.transactions.find((t) => t.categoryId === hiddenCarCat!.id);
     expect(carTx).toBeDefined();
-    expect(Number(carTx!.amount)).toBe(-50);
+    expect(Number(carTx!.amount)).toBe(-5000);
 
     // 8. Verify Scheduled Transaction Frequencies
     const frequencies = data.recurring.map((r) => r.frequency);

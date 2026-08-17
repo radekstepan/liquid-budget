@@ -110,7 +110,7 @@ test("POST /api/import replaces the budget with the backup contents", async ({ r
   ).toBe(true);
   expect(
     budget.transactions.find((t: { payee: string }) => t.payee === IMPORTED_PAYEE)?.amount
-  ).toBe("-42.5");
+  ).toBe("-4250");
   expect(budget.recurring.some((r: { payee: string }) => r.payee === IMPORTED_PAYEE)).toBe(true);
   // The imported assignment is present.
   expect(budget.assignments.some((a: { month: string }) => a.month === "2026-08")).toBe(true);

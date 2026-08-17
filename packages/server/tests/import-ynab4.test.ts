@@ -184,7 +184,7 @@ describe("importYnab4 transaction wrapping", () => {
     mock.respondWith("insert:transactions", [{ id: 1 }]);
     // recomputeAccountBalances: select accounts, then per-account select/update.
     mock.respondWith("select:accounts#3", [{ id: 1, name: "Chequing" }]);
-    mock.respondWith("select:transactions#1", [{ sum: -100 }]);
+    mock.respondWith("select:transactions#1", [{ sum: -10000 }]);
     mock.respondWith("select:transactions#2", [{ sum: 0 }]);
     mock.respondWith("update:accounts#1", [{}]);
 
