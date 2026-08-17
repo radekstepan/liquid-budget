@@ -1,7 +1,9 @@
 import {
+  autoPostDueRecurringTransactions,
   createRecurring,
   deleteRecurring,
   getDefaultDb,
+  postRecurringTransaction,
   RecurringError,
   updateRecurring,
 } from "@ynab/server";
@@ -40,8 +42,53 @@ function errorResponse(e: unknown): Response {
 }
 
 export async function POST(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const action = searchParams.get("action");
+  const db = getDefaultDb();
+
+  if (action === "post") {
+    const id = Number(searchParams.get("id"));
+    if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+    try {
+      const res = await postRecurringTransaction(db, id);
+      return Response.json(res);
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
+  if (action === "autopost") {
+    try {
+      const posted = await autoPostDueRecurringTransactions(db);
+      return Response.json({ postedCount: posted.length, posted });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   let body: any;
   try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  if (body?.action === "post") {
+    const id = Number(body.id);
+    if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+    try {
+      const res = await postRecurringTransaction(db, id, body.date ? String(body.date) : undefined);
+      return Response.json(res);
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
+  if (body?.action === "autopost") {
+    try {
+      const posted = await autoPostDueRecurringTransactions(db, body.asOfDate ? String(body.asOfDate) : undefined);
+      return Response.json({ postedCount: posted.length, posted });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   const accountId = Number(body.accountId);
   const amount = Number(body.amount);
   if (!accountId || Number.isNaN(amount)) {

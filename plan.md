@@ -46,7 +46,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
 | **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` | ✅ **Resolved** |
 | **UNI-08** | F-08 | Data Integrity | **High (P1)** | Reconciled transactions (`status: "r"`) are editable/deletable via API without guard | `packages/server/src/queries/transactions.ts` | ✅ **Resolved** |
-| **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` |
+| **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-10** | F-07, BUG-32, BUG-33 | Reconciliation | **High (P1)** | Reconciliation lacks round tracking (`reconciliation_id`), leaks future-dated rows into working balance, and flips adjustment row to 'r' | `packages/server/src/queries/reconcile.ts`, `packages/server/src/schema.ts` |
 | **UNI-11** | F-06, BUG-20 | API / Importer | **High (P1)** | Recurring API rejects transfer sub-rows that UI sends; importer silently drops recurring transfer children | `apps/web/src/app/api/recurring/route.ts`, `packages/server/src/import-ynab4.ts` |
 | **UNI-12** | BUG-05, BUG-06, F-09 | Concurrency | **High (P1)** | `createAccount` sort calc and `upsertAssignment` select-then-insert are not transaction-wrapped (race condition / 500 error) | `packages/server/src/queries/accounts.ts`, `packages/server/src/queries/assignments.ts` |
@@ -350,11 +350,12 @@ Despite strong foundations, the application has critical financial calculation d
   2. Execute automatic due-transaction materialization upon app load:
      ```ts
      const due = data.recurring.filter(r => r.active && r.nextDate <= todayISO());
-     for (const r of due) {
-       await postRecurringTransaction(r, r.nextDate);
-     }
-     ```
+      for (const r of due) {
+        await postRecurringTransaction(r, r.nextDate);
+      }
+      ```
   3. Post split children verbatim without sign mangling. Advance `nextDate` according to frequency rule.
+- **Resolution (UNI-09):** Implemented `postRecurringTransaction` and `autoPostDueRecurringTransactions` in `packages/server/src/queries/recurring.ts`. Transactions are posted with their scheduled `nextDate` (preserving signed split child amounts verbatim) and `nextDate` is automatically advanced per frequency. Added `action=post` and `action=autopost` endpoints in `/api/recurring` route, integrated automatic due-recurring posting into `/api/budget` GET, and simplified `BudgetAppShell.tsx`. Added unit tests in `packages/server/tests/recurring.test.ts`.
 
 #### UNI-17 (F-10): Keyboard-First Register & Date Shortcuts
 - **Root Cause:** Transactions can only be edited via modal dialogs. Register lacks inline cell editing, keyboard tab traversal, and YNAB4 date shortcuts.

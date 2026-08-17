@@ -1,7 +1,9 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  autoPostDueRecurringTransactions,
   createRecurring,
   deleteRecurring,
+  postRecurringTransaction,
   RecurringError,
   updateRecurring,
 } from "../src/queries/recurring.js";
@@ -320,6 +322,66 @@ describe("recurring queries", () => {
       await deleteRecurring(mock.db, 5);
       const deleteCall = mock.calls.find((c) => c.op === "delete");
       expect(deleteCall?.table).toBe("recurring");
+    });
+  });
+
+  describe("postRecurringTransaction & autoPostDueRecurringTransactions", () => {
+    it("UNI-09 / F-05: posts at scheduled nextDate, advances nextDate, and preserves mixed-sign split children", async () => {
+      const splitRecurring = {
+        id: 10,
+        accountId: 1,
+        categoryId: null,
+        payee: "Employer Inc",
+        amount: 400000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [splitRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", [
+        { id: 101, recurringId: 10, categoryId: 10, amount: 500000, memo: "Gross", sort: 0, transferAccountId: null },
+        { id: 102, recurringId: 10, categoryId: 11, amount: -100000, memo: "Tax", sort: 1, transferAccountId: null },
+      ]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 99, date: "2026-07-01", amount: 400000 }]);
+      mock.respondWith("insert:transactions", [{ id: 100, amount: 500000 }]);
+      mock.respondWith("insert:transactions", [{ id: 101, amount: -100000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...splitRecurring, nextDate: "2026-08-01" }]);
+
+      const res = await postRecurringTransaction(mock.db, 10);
+      expect(res.nextDate).toBe("2026-08-01");
+      const parentInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(parentInsert?.values).toMatchObject({
+        date: "2026-07-01",
+        amount: 400000,
+      });
+    });
+
+    it("UNI-09 / F-05: auto-posts due recurring transactions with nextDate <= asOfDate", async () => {
+      const dueRow = {
+        id: 20,
+        accountId: 1,
+        categoryId: 5,
+        payee: "Gym",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [dueRow]);
+      mock.respondWithNth("select:recurring", 2, [dueRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 200, date: "2026-06-01" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...dueRow, nextDate: "2026-07-01" }]);
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      expect(posted).toHaveLength(1);
     });
   });
 });

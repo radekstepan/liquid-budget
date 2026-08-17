@@ -1,4 +1,4 @@
-import { getBudgetData, getDefaultDb, isSeeded, seedDatabase } from "@ynab/server";
+import { autoPostDueRecurringTransactions, getBudgetData, getDefaultDb, isSeeded, seedDatabase } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +9,7 @@ export async function GET() {
   if (!seeded) {
     await seedDatabase(db);
   }
+  await autoPostDueRecurringTransactions(db);
   const data = await getBudgetData(db);
   return Response.json(data);
 }
