@@ -77,6 +77,21 @@ export const assignments = sqliteTable(
   })
 );
 
+export const payees = sqliteTable(
+  "payees",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    autoCategoryId: integer("auto_category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(""),
+  },
+  (t) => ({
+    nameUniq: uniqueIndex("payees_name_uniq").on(t.name),
+  })
+);
+
 export const transactions = sqliteTable(
   "transactions",
   {
@@ -89,6 +104,7 @@ export const transactions = sqliteTable(
     }),
     date: text("date").notNull(),
     payee: text("payee").notNull().default(""),
+    payeeId: integer("payee_id").references(() => payees.id, { onDelete: "set null" }),
     memo: text("memo").notNull().default(""),
     amount: integer("amount").notNull().default(0),
     status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
@@ -138,6 +154,7 @@ export const recurring = sqliteTable(
       onDelete: "set null",
     }),
     payee: text("payee").notNull().default(""),
+    payeeId: integer("payee_id").references(() => payees.id, { onDelete: "set null" }),
     amount: integer("amount").notNull().default(0),
     frequency: text("frequency").notNull().default("monthly"),
     nextDate: text("next_date").notNull(),

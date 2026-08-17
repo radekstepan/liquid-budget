@@ -75,7 +75,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` | ✅ **Resolved** |
 | **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` | ✅ **Resolved** |
 | **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` | ✅ **Resolved** |
-| **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` |
+| **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` |
 | **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various |
 | **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` |
@@ -501,9 +501,9 @@ Despite strong foundations, the application has critical financial calculation d
 - **Resolution (UNI-14):** Refactored `computeOverspentForMonth` in `packages/logic/src/budget-engine.ts` to directly reuse the memoized `buildCarryoverMap` cache instead of re-iterating over all prior months. Verified with logic test suite.
 
 #### UNI-38 (F-19): Payees Entity Table & Management
-- Create `payees` table (`id`, `name`, `auto_category_id`, `created_at`).
-- Add foreign key `transactions.payee_id`.
-- Build Payee Management view supporting payee renaming (propagating across all past transactions), merging duplicate payees, and category auto-fill rules.
+- **Root Cause:** System lacked a dedicated `payees` database entity, preventing global payee renaming, merging, category auto-fill rules, and autocomplete.
+- **Actionable Solution:** Create `payees` table with unique constraint on `name`, add foreign key `payee_id` on `transactions` and `recurring`, and build query and management functions.
+- **Resolution (UNI-38):** Created `payees` table in `packages/server/src/schema.ts`, added `payee_id` foreign keys on `transactions` and `recurring`, generated migration `0008_dear_daredevil.sql`, and implemented `packages/server/src/queries/payees.ts` (`findOrCreatePayee`, `updatePayee` with renaming cascade, `deletePayee`). Added unit tests in `packages/server/tests/payees.test.ts`.
 
 ---
 
