@@ -1,7 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
+import { nextDateFor, todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
-import type { SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
+import { createSplitWithChildren, createTransaction, type SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
 
 export type CreateRecurringInput = {
   accountId: number;
@@ -289,4 +290,87 @@ export async function deleteRecurring(db: Database, id: number) {
     db.run(sql`ROLLBACK`);
     throw err;
   }
+}
+
+/**
+ * Materialize a recurring transaction into a real transaction row with full
+ * split and transfer integrity, using the scheduled nextDate (or specified postDate),
+ * and advance the scheduled nextDate according to its frequency.
+ */
+export async function postRecurringTransaction(
+  db: Database,
+  recurringId: number,
+  postDate?: string
+) {
+  const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
+  if (!r) throw new RecurringError("Recurring transaction not found", 404);
+
+  const dateToUse = postDate || r.nextDate;
+  const children = await db
+    .select()
+    .from(recurringSubTransactions)
+    .where(eq(recurringSubTransactions.recurringId, r.id))
+    .orderBy(recurringSubTransactions.sort);
+
+  let postedTxn;
+  if (children.length > 0) {
+    postedTxn = await createSplitWithChildren(
+      db,
+      {
+        accountId: r.accountId,
+        date: dateToUse,
+        payee: r.payee,
+        memo: "Recurring",
+        amount: Number(r.amount),
+        status: "c",
+      },
+      children.map((c) => ({
+        categoryId: c.categoryId,
+        amount: Number(c.amount),
+        memo: c.memo || undefined,
+        transferAccountId: c.transferAccountId,
+      }))
+    );
+  } else {
+    postedTxn = await createTransaction(db, {
+      accountId: r.accountId,
+      categoryId: r.categoryId,
+      date: dateToUse,
+      payee: r.payee,
+      memo: "Recurring",
+      amount: Number(r.amount),
+      status: "c",
+      transferAccountId: r.transferAccountId,
+    });
+  }
+
+  const next = nextDateFor(r.frequency, r.nextDate);
+  await db.update(recurring).set({ nextDate: next }).where(eq(recurring.id, r.id));
+
+  return { transaction: postedTxn, nextDate: next };
+}
+
+/**
+ * Automatically materialize all active recurring transactions whose nextDate <= asOfDate.
+ */
+export async function autoPostDueRecurringTransactions(
+  db: Database,
+  asOfDate: string = todayISO()
+) {
+  const due = await db
+    .select()
+    .from(recurring)
+    .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${asOfDate}`));
+
+  const posted = [];
+  for (const r of due) {
+    let currentNextDate = r.nextDate;
+    while (currentNextDate <= asOfDate) {
+      const res = await postRecurringTransaction(db, r.id, currentNextDate);
+      posted.push(res.transaction);
+      if (res.nextDate <= currentNextDate) break;
+      currentNextDate = res.nextDate;
+    }
+  }
+  return posted;
 }
