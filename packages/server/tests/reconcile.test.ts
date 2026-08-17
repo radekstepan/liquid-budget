@@ -23,13 +23,15 @@ describe("reconcile queries", () => {
         {
           unclearedSum: 10000,
           unclearedCount: 2,
+          clearedSum: 50000,
           clearedCount: 3,
+          reconciledSum: 10000,
           reconciledCount: 1,
         },
       ]);
 
       const state = await getReconcileState(mock.db, 1);
-      // workingBalance = current balance (70000) − sum(uncleared) (10000) = 60000
+      // workingBalance = clearedSum (50000) + reconciledSum (10000) = 60000
       expect(state).toMatchObject({
         accountId: 1,
         accountName: "Chequing",
@@ -59,10 +61,13 @@ describe("reconcile queries", () => {
         {
           unclearedSum: 0,
           unclearedCount: 0,
+          clearedSum: 50000,
           clearedCount: 7,
+          reconciledSum: 0,
           reconciledCount: 0,
         },
       ]);
+      mock.respondWith("insert:reconciliations", [{ id: 10 }]);
       mock.respondWithNth("update:transactions", 1, [
         { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }, { id: 7 },
       ]);
@@ -82,7 +87,7 @@ describe("reconcile queries", () => {
       const flipCall = mock.calls.find(
         (c) => c.op === "update" && c.table === "transactions"
       );
-      expect(flipCall?.set).toMatchObject({ status: "r" });
+      expect(flipCall?.set).toMatchObject({ status: "r", reconciliationId: 10 });
     });
 
     it("throws 422 when statement balance does not match and no adjustment category is provided", async () => {
@@ -93,7 +98,9 @@ describe("reconcile queries", () => {
         {
           unclearedSum: 0,
           unclearedCount: 0,
+          clearedSum: 50000,
           clearedCount: 3,
+          reconciledSum: 0,
           reconciledCount: 0,
         },
       ]);
@@ -106,7 +113,7 @@ describe("reconcile queries", () => {
       });
     });
 
-    it("posts an adjustment transaction and flips C → R when the diff is non-zero", async () => {
+    it("UNI-10 / BUG-32, BUG-33: posts adjustment with status 'r' and reconciliation_id when diff is non-zero", async () => {
       mock.respondWithNth("select:accounts", 1, [
         { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },
       ]);
@@ -114,12 +121,17 @@ describe("reconcile queries", () => {
         {
           unclearedSum: 0,
           unclearedCount: 0,
+          clearedSum: 50000,
           clearedCount: 2,
+          reconciledSum: 0,
           reconciledCount: 0,
         },
       ]);
+      mock.respondWith("select:categories", [{ id: 42, name: "Adjustments" }]);
+      mock.respondWith("insert:reconciliations", [{ id: 10 }]);
       mock.respondWithNth("insert:transactions", 1, [{ id: 999 }]);
       mock.respondWithNth("update:accounts", 1, [{}]);
+      mock.respondWith("update:reconciliations", [{}]);
       mock.respondWithNth("update:transactions", 1, [{ id: 1 }, { id: 2 }]);
       mock.respondWithNth("update:accounts", 2, [{}]);
 
@@ -131,7 +143,7 @@ describe("reconcile queries", () => {
 
       // diff = working(50000) − statement(48765) = 1235; adjustment amount = -1235
       expect(result).toMatchObject({
-        reconciledCount: 2,
+        reconciledCount: 3,
         adjustmentTransactionId: 999,
         finalDiff: 0,
       });
@@ -145,14 +157,15 @@ describe("reconcile queries", () => {
         memo: RECONCILE_ADJUSTMENT_MEMO,
         payee: RECONCILE_ADJUSTMENT_MEMO,
         amount: -1235,
-        status: "c",
+        status: "r",
+        reconciliationId: 10,
         reconciledAt: expect.any(String),
       });
     });
   });
 
   describe("unreconcileAccount", () => {
-    it("flips the most recent batch of R back to C and clears lastReconciledAt", async () => {
+    it("UNI-10 / F-07: flips the precise reconciliation round back to C using reconciliation_id", async () => {
       mock.respondWithNth("select:accounts", 1, [
         {
           id: 1,
@@ -162,10 +175,14 @@ describe("reconcile queries", () => {
           lastReconciledBalance: 50000,
         },
       ]);
+      mock.respondWithNth("select:reconciliations", 1, [
+        { id: 15, accountId: 1, reconciledAt: "2026-04-10", statementBalance: 50000, adjustmentTransactionId: null },
+      ]);
       mock.respondWithNth("update:transactions", 1, [
         { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 },
       ]);
-      mock.respondWithNth("select:transactions", 1, []);
+      mock.respondWith("delete:reconciliations", [{}]);
+      mock.respondWithNth("select:reconciliations", 1, []);
       mock.respondWithNth("update:accounts", 1, [{}]);
 
       const result = await unreconcileAccount(mock.db, 1);
@@ -190,12 +207,17 @@ describe("reconcile queries", () => {
           lastReconciledBalance: 48765,
         },
       ]);
+      mock.respondWithNth("select:reconciliations", 1, [
+        { id: 15, accountId: 1, reconciledAt: "2026-04-10", statementBalance: 48765, adjustmentTransactionId: 999 },
+      ]);
       mock.respondWithNth("update:transactions", 1, [{ id: 1 }]);
       mock.respondWithNth("select:transactions", 1, [
         { id: 999, amount: 1235 },
       ]);
       mock.respondWithNth("update:accounts", 1, [{}]);
       mock.respondWith("delete:transactions", []);
+      mock.respondWith("delete:reconciliations", [{}]);
+      mock.respondWithNth("select:reconciliations", 1, []);
       mock.respondWithNth("update:accounts", 2, [{}]);
 
       const result = await unreconcileAccount(mock.db, 1);

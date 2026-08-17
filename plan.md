@@ -47,7 +47,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` | ✅ **Resolved** |
 | **UNI-08** | F-08 | Data Integrity | **High (P1)** | Reconciled transactions (`status: "r"`) are editable/deletable via API without guard | `packages/server/src/queries/transactions.ts` | ✅ **Resolved** |
 | **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
-| **UNI-10** | F-07, BUG-32, BUG-33 | Reconciliation | **High (P1)** | Reconciliation lacks round tracking (`reconciliation_id`), leaks future-dated rows into working balance, and flips adjustment row to 'r' | `packages/server/src/queries/reconcile.ts`, `packages/server/src/schema.ts` |
+| **UNI-10** | F-07, BUG-32, BUG-33 | Reconciliation | **High (P1)** | Reconciliation lacks round tracking (`reconciliation_id`), leaks future-dated rows into working balance, and flips adjustment row to 'r' | `packages/server/src/queries/reconcile.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-11** | F-06, BUG-20 | API / Importer | **High (P1)** | Recurring API rejects transfer sub-rows that UI sends; importer silently drops recurring transfer children | `apps/web/src/app/api/recurring/route.ts`, `packages/server/src/import-ynab4.ts` |
 | **UNI-12** | BUG-05, BUG-06, F-09 | Concurrency | **High (P1)** | `createAccount` sort calc and `upsertAssignment` select-then-insert are not transaction-wrapped (race condition / 500 error) | `packages/server/src/queries/accounts.ts`, `packages/server/src/queries/assignments.ts` |
 | **UNI-13** | BUG-08 | Build | **High (P1)** | Stale `dist/compute.js` artifact references non-existent exports (`computeGroups`, `summarize`) | `packages/logic/dist/compute.js` |
@@ -273,6 +273,7 @@ Despite strong foundations, the application has critical financial calculation d
   4. Perform atomic batch update setting `status = "r"` and `reconciliation_id = roundId` ONLY on rows where `status = "c"` AND `reconciliation_id IS NULL`.
   5. Insert the adjustment transaction with `reconciliation_id = roundId` and `status = "r"`, properly validating `adjustmentCategoryId`.
   6. `unreconcileAccount` precisely targets `WHERE reconciliation_id = lastRoundId`, flipping transactions back to `status = "c"` and removing the adjustment transaction atomically.
+- **Resolution (UNI-10):** Added `reconciliation_id` column to `transactions` and created `reconciliations` table in schema (`0003_add_reconciliations_table.sql`). Updated `getReconcileState` to strictly bound balance and count aggregations to `date <= statementDate`. Updated `reconcileAccount` to validate adjustment category, record reconciliation session rounds, create adjustment with `status: "r"`, and stamp `reconciliation_id`. Updated `unreconcileAccount` to precisely revert the last round's transactions and adjustment row. Added unit tests in `packages/server/tests/reconcile.test.ts`.
 
 ---
 
