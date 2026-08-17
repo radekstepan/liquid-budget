@@ -32,6 +32,17 @@ describe("format", () => {
     expect(num("-0")).toBe(0);
   });
 
+  it("num handles formatted currency strings with symbols and commas (UNI-47 / BUG-40)", () => {
+    expect(num("$1,234")).toBe(1234);
+    expect(num("-$500")).toBe(-500);
+    expect(num("$-500")).toBe(-500);
+    expect(num("$ 3,456")).toBe(3456);
+    expect(num("€100")).toBe(100);
+    expect(num("£2,500")).toBe(2500);
+    expect(num("(750)")).toBe(-750);
+    expect(num("+ $1,000")).toBe(1000);
+  });
+
   it("num throws RangeError on integer overflow beyond MAX_SAFE_INTEGER", () => {
     expect(() => num("9007199254740992")).toThrow(RangeError);
     expect(() => num(Number.MAX_SAFE_INTEGER + 100)).toThrow(RangeError);
