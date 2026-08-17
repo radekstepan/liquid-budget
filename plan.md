@@ -56,7 +56,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-16** | BUG-07 | Financial Math | **High (P1)** | `computeBudget` docstring states "non-CC groups" but code sums all groups | `packages/logic/src/budget-engine.ts:182` | ✅ **Resolved** |
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` | ✅ **Resolved** |
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` | ✅ **Resolved** |
-| **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` |
+| **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` | ✅ **Resolved** |
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` |
 | **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` |
 | **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` |
@@ -157,7 +157,7 @@ Despite strong foundations, the application has critical financial calculation d
        if (t.amount > 0 || isSplitParent(t)) continue;
        const catId = t.categoryId;
        if (catId == null || !isInWindow(t.date)) continue;
-       avgSpent.set(catId, (avgSpent.get(catId) ?? 0) + Math.abs(t.amount));
+       avgSpent.set(catId, (avgSpent.get(catId) ?? 0));
      }
      ```
   2. Implement complete quick-budget calculation matrix:
@@ -167,6 +167,7 @@ Despite strong foundations, the application has critical financial calculation d
      - `averageSpent`: Mean outflows over previous 12 months.
      - `setToZero`: Sets assignment to $0$.
      - `balanceToZero`: Sets assignment to $\max(0, -\text{available})$.
+- **Resolution (UNI-19):** Fixed split child aggregation in `avgSpentByCategory` in `packages/ui/src/BudgetApp.tsx` (skipping split parents while retaining split child spending). Added `spentLastMonthByCategory` and `avgBudgetedByCategory` calculations. Enhanced `CategoryMonthCell` in `packages/ui/src/BudgetView.tsx` with complete quick-budget menu options: *Budgeted Last Month*, *Spent Last Month*, *Average Budgeted*, *Average Spent*, *Underfunded*, *Balance to Zero*, and *Set to Zero*. Added unit test coverage in `packages/ui/tests/BudgetView.test.tsx`.
 
 ---
 

@@ -220,10 +220,34 @@ export function BudgetApp({
     return map;
   }, [data, month]);
 
+  // Quick-fill: spent last month (outflows in M-1) per category
+  const spentLastMonthByCategory = useMemo(() => {
+    const prevMonth = previousMonthKey(month);
+    const map = new Map<number, number>();
+    const parentSet = new Set<number>();
+    for (const t of data.transactions) {
+      if (t.parentId != null) parentSet.add(t.parentId);
+    }
+    for (const t of data.transactions) {
+      if (t.date.slice(0, 7) !== prevMonth) continue;
+      if (t.categoryId == null) continue;
+      if (parentSet.has(t.id)) continue;
+      const amt = num(t.amount);
+      if (amt < 0) {
+        map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
+      }
+    }
+    return map;
+  }, [data, month]);
+
   // Quick-fill: average spent (outflow) over last 3 months per category
   const avgSpentByCategory = useMemo(() => {
     const { year: y, month0 } = parseMonthKey(month);
     const map = new Map<number, { sum: number; count: number }>();
+    const parentSet = new Set<number>();
+    for (const t of data.transactions) {
+      if (t.parentId != null) parentSet.add(t.parentId);
+    }
     for (let i = 1; i <= 3; i++) {
       const mm = ((month0 - i) % 12 + 12) % 12;
       const yy = y + Math.floor((month0 - i) / 12);
@@ -231,7 +255,8 @@ export function BudgetApp({
       for (const t of data.transactions) {
         if (t.date.slice(0, 7) !== key) continue;
         if (t.categoryId == null) continue;
-        if (t.parentId != null) continue;
+        // Skip split parents so we do not double-count, but include split children!
+        if (parentSet.has(t.id)) continue;
         const amt = num(t.amount);
         if (amt >= 0) continue; // only outflows
         const entry = map.get(t.categoryId) ?? { sum: 0, count: 0 };
@@ -243,6 +268,30 @@ export function BudgetApp({
     const result = new Map<number, number>();
     for (const [catId, { sum, count }] of map) {
       result.set(catId, Math.round(sum / count));
+    }
+    return result;
+  }, [data, month]);
+
+  // Quick-fill: average budgeted over last 3 months per category
+  const avgBudgetedByCategory = useMemo(() => {
+    const { year: y, month0 } = parseMonthKey(month);
+    const map = new Map<number, { sum: number; count: number }>();
+    for (let i = 1; i <= 3; i++) {
+      const mm = ((month0 - i) % 12 + 12) % 12;
+      const yy = y + Math.floor((month0 - i) / 12);
+      const key = monthKey(yy, mm);
+      for (const a of data.assignments) {
+        if (a.month !== key) continue;
+        const amt = num(a.amount);
+        const entry = map.get(a.categoryId) ?? { sum: 0, count: 0 };
+        entry.sum += amt;
+        entry.count++;
+        map.set(a.categoryId, entry);
+      }
+    }
+    const result = new Map<number, number>();
+    for (const [catId, { sum, count }] of map) {
+      if (count > 0) result.set(catId, Math.round(sum / count));
     }
     return result;
   }, [data, month]);
@@ -466,7 +515,9 @@ export function BudgetApp({
               onReorderGroup={api.reorderGroup}
               onClearOverdraft={clearOverdraft}
               lastMonthAssignments={lastMonthAssignments}
+              spentLastMonthByCategory={spentLastMonthByCategory}
               avgSpentByCategory={avgSpentByCategory}
+              avgBudgetedByCategory={avgBudgetedByCategory}
               underfundedByCategory={underfundedByCategory}
             />
           )}
