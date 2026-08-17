@@ -21,3 +21,4 @@ export {
 export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";
 export { Modal, Field, Btn, inputCls } from "./ui.js";
 export { AmountPreview } from "./AmountInput.js";
+export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.js";

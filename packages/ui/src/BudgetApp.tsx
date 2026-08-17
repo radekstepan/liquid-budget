@@ -29,6 +29,7 @@ import {
   AccountModal,
 } from "./Modals.js";
 import { ReconcileModal } from "./ReconcileModal.js";
+import { ErrorBoundary } from "./ErrorBoundary.js";
 
 type ModalState =
   | { kind: "none" }
@@ -432,91 +433,95 @@ export function BudgetApp({
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
-        {view === "budget" && (
-          <BudgetView
-            budget={budget}
-            budgets={budgets}
-            visibleMonths={visibleMonths}
-            monthCount={monthCount}
-            onSetMonthCount={setMonthCount}
-            currentMonth={month}
-            collapsed={collapsed}
-            onToggleGroup={toggleGroup}
-            onAssign={assign}
-            onShiftMonth={shiftMonth}
-            onSetMonth={setMonth}
-            minYear={minYear}
-            maxYear={maxYear}
-            onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
-            onAddGroup={() => setModal({ kind: "addGroup" })}
-            onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
-            onDeleteCategory={api.deleteCategory}
-            onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
-            onDeleteGroup={api.deleteGroup}
-            onCollapseAll={collapseAll}
-            onExpandAll={expandAll}
-            onReorderCategory={api.reorderCategory}
-            onReorderGroup={api.reorderGroup}
-            onClearOverdraft={clearOverdraft}
-            lastMonthAssignments={lastMonthAssignments}
-            avgSpentByCategory={avgSpentByCategory}
-            underfundedByCategory={underfundedByCategory}
-          />
-        )}
-        {view === "transactions" && (
-          <TransactionsView
-            data={data}
-            accountFilter={accountFilter}
-            onAdd={() => setModal({ kind: "addTransaction" })}
-            onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
-            onDelete={api.deleteTransaction}
-            onReconcile={openReconcile}
-            onCycleStatus={cycleStatus}
-          />
-        )}
-        {view === "recurring" && (
-          <RecurringView
-            data={data}
-            onAdd={() => setModal({ kind: "recurring" })}
-            onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
-            onDelete={api.deleteRecurring}
-            onPost={api.postRecurring}
-            onToggleActive={(id, active) => api.updateRecurring(id, { active })}
-          />
-        )}
-        {view === "reports" && <ReportsView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />}
-        {view === "calendar" && (
-          <CalendarView
-            data={data}
-            month={month}
-            onPrev={() => shiftMonth(-1)}
-            onNext={() => shiftMonth(1)}
-            onSetMonth={setMonth}
-            minYear={minYear}
-            maxYear={maxYear}
-            onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
-          />
-        )}
-        {view === "projections" && <ProjectionsView data={data} month={month} />}
+        <ErrorBoundary name={`${view.charAt(0).toUpperCase() + view.slice(1)} View`}>
+          {view === "budget" && (
+            <BudgetView
+              budget={budget}
+              budgets={budgets}
+              visibleMonths={visibleMonths}
+              monthCount={monthCount}
+              onSetMonthCount={setMonthCount}
+              currentMonth={month}
+              collapsed={collapsed}
+              onToggleGroup={toggleGroup}
+              onAssign={assign}
+              onShiftMonth={shiftMonth}
+              onSetMonth={setMonth}
+              minYear={minYear}
+              maxYear={maxYear}
+              onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
+              onAddGroup={() => setModal({ kind: "addGroup" })}
+              onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
+              onDeleteCategory={api.deleteCategory}
+              onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
+              onDeleteGroup={api.deleteGroup}
+              onCollapseAll={collapseAll}
+              onExpandAll={expandAll}
+              onReorderCategory={api.reorderCategory}
+              onReorderGroup={api.reorderGroup}
+              onClearOverdraft={clearOverdraft}
+              lastMonthAssignments={lastMonthAssignments}
+              avgSpentByCategory={avgSpentByCategory}
+              underfundedByCategory={underfundedByCategory}
+            />
+          )}
+          {view === "transactions" && (
+            <TransactionsView
+              data={data}
+              accountFilter={accountFilter}
+              onAdd={() => setModal({ kind: "addTransaction" })}
+              onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
+              onDelete={api.deleteTransaction}
+              onReconcile={openReconcile}
+              onCycleStatus={cycleStatus}
+            />
+          )}
+          {view === "recurring" && (
+            <RecurringView
+              data={data}
+              onAdd={() => setModal({ kind: "recurring" })}
+              onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
+              onDelete={api.deleteRecurring}
+              onPost={api.postRecurring}
+              onToggleActive={(id, active) => api.updateRecurring(id, { active })}
+            />
+          )}
+          {view === "reports" && <ReportsView data={data} month={month} onPrev={() => shiftMonth(-1)} onNext={() => shiftMonth(1)} />}
+          {view === "calendar" && (
+            <CalendarView
+              data={data}
+              month={month}
+              onPrev={() => shiftMonth(-1)}
+              onNext={() => shiftMonth(1)}
+              onSetMonth={setMonth}
+              minYear={minYear}
+              maxYear={maxYear}
+              onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
+            />
+          )}
+          {view === "projections" && <ProjectionsView data={data} month={month} />}
+        </ErrorBoundary>
       </main>
 
-      <Inspector
-        groups={groups}
-        summary={summary}
-        month={month}
-        history={history}
-        avg={avg}
-        tbb={budget.tbb}
-        overBudgeted={budget.overBudgeted}
-        priorSurplus={budget.priorSurplus}
-        cashFlow={cashFlow}
-        trailingNetWorth={trailingNetWorth}
-        insights={insights}
-        onSelectMonth={setMonth}
-        onResetDemo={api.resetDemo}
-        onImportYnab4={api.importYnab4}
-        onClearOverdraft={clearOverdraft}
-      />
+      <ErrorBoundary name="Inspector">
+        <Inspector
+          groups={groups}
+          summary={summary}
+          month={month}
+          history={history}
+          avg={avg}
+          tbb={budget.tbb}
+          overBudgeted={budget.overBudgeted}
+          priorSurplus={budget.priorSurplus}
+          cashFlow={cashFlow}
+          trailingNetWorth={trailingNetWorth}
+          insights={insights}
+          onSelectMonth={setMonth}
+          onResetDemo={api.resetDemo}
+          onImportYnab4={api.importYnab4}
+          onClearOverdraft={clearOverdraft}
+        />
+      </ErrorBoundary>
 
       {modal.kind === "addTransaction" && (
         <TransactionModal
