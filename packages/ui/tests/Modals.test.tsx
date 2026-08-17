@@ -66,6 +66,53 @@ describe("CategoryModal", () => {
     expect(screen.getByDisplayValue("Rent")).toBeInTheDocument();
     expect(screen.getByDisplayValue("1500.00")).toBeInTheDocument();
   });
+
+  it("UNI-03 / F-03: renders Delete button when initial and onDelete provided, requires reassignment when transactionCount > 0", async () => {
+    const onDelete = vi.fn();
+    render(
+      <CategoryModal
+        initial={categories[0]!}
+        transactionCount={5}
+        otherCategories={[categories[1]!]}
+        onClose={() => {}}
+        onSave={() => {}}
+        onDelete={onDelete}
+      />
+    );
+
+    // Click delete
+    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    expect(screen.getByText(/Delete "Groceries"\?/i)).toBeInTheDocument();
+    expect(screen.getByText(/This category is referenced by 5 transaction\(s\)/i)).toBeInTheDocument();
+
+    // Confirm deletion with reassignment
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+    expect(onDelete).toHaveBeenCalledWith({ moveToCategoryId: 11 });
+  });
+
+  it("UNI-03 / F-03: allows direct deletion when category has 0 transactions", async () => {
+    const onDelete = vi.fn();
+    render(
+      <CategoryModal
+        initial={categories[0]!}
+        transactionCount={0}
+        otherCategories={[categories[1]!]}
+        onClose={() => {}}
+        onSave={() => {}}
+        onDelete={onDelete}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    expect(screen.getByText(/This category has no transactions and will be removed/i)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+    expect(onDelete).toHaveBeenCalledWith(undefined);
+  });
 });
 
 describe("TransactionModal", () => {

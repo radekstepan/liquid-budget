@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  CategoryError,
   createCategory,
   createCategoryGroup,
   deleteCategory,
@@ -89,29 +90,66 @@ describe("categories queries", () => {
   });
 
   describe("deleteCategory / deleteCategoryGroup", () => {
-    it("deleteCategory targets the categories table", async () => {
+    it("deleteCategory deletes unreferenced category and assignments", async () => {
+      mock.respondWith("select:categories", [{ id: 1, name: "Dining" }]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_subtransactions", []);
+
       await deleteCategory(mock.db, 1);
-      expect(mock.calls.find((c) => c.op === "delete")?.table).toBe("categories");
-    });
-
-    it("deleteCategoryGroup targets the category_groups table", async () => {
-      await deleteCategoryGroup(mock.db, 1);
-      expect(mock.calls.find((c) => c.op === "delete")?.table).toBe("category_groups");
-    });
-
-    it("deleteCategory does not pre-check children (FK handles cascade at the DB layer)", async () => {
-      // Schema fix: `recurring_sub_transactions.categoryId` is nullable
-      // with ON DELETE SET NULL (matching `transactions.categoryId`), so
-      // deleting a category that is referenced by a recurring split no
-      // longer crashes with a FK constraint violation. The recurring
-      // sub-rows simply become uncategorised. The query helper just
-      // emits a single DELETE — no extra lookup is needed.
-      await deleteCategory(mock.db, 42);
       const deleteCalls = mock.calls.filter((c) => c.op === "delete");
-      expect(deleteCalls).toHaveLength(1);
-      expect(deleteCalls[0]?.table).toBe("categories");
-      const setCalls = mock.calls.filter((c) => c.op === "update");
-      expect(setCalls).toHaveLength(0);
+      expect(deleteCalls.map((c) => c.table)).toEqual(["assignments", "categories"]);
+    });
+
+    it("UNI-03 / F-03: throws 422 CategoryError if category has transactions and no moveToCategoryId", async () => {
+      mock.respondWith("select:categories", [{ id: 1, name: "Dining" }]);
+      mock.respondWith("select:transactions", [{ id: 10 }]);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_subtransactions", []);
+
+      await expect(deleteCategory(mock.db, 1)).rejects.toMatchObject({
+        status: 422,
+        name: "CategoryError",
+        message: /Category has 1 transaction\(s\)/,
+      });
+    });
+
+    it("UNI-03 / F-03: rejects reassigning to self", async () => {
+      mock.respondWith("select:categories", [{ id: 1, name: "Dining" }]);
+      mock.respondWith("select:transactions", [{ id: 10 }]);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_subtransactions", []);
+
+      await expect(deleteCategory(mock.db, 1, { moveToCategoryId: 1 })).rejects.toMatchObject({
+        status: 400,
+        name: "CategoryError",
+        message: /Cannot reassign transactions to the category being deleted/,
+      });
+    });
+
+    it("UNI-03 / F-03: reassigns transactions and recurring splits to moveToCategoryId", async () => {
+      mock.respondWithNth("select:categories", 1, [{ id: 1, name: "Dining" }]);
+      mock.respondWith("select:transactions", [{ id: 10 }]);
+      mock.respondWith("select:recurring", [{ id: 20 }]);
+      mock.respondWith("select:recurring_sub_transactions", [{ id: 30 }]);
+      mock.respondWithNth("select:categories", 2, [{ id: 2, name: "Groceries" }]);
+
+      await deleteCategory(mock.db, 1, { moveToCategoryId: 2 });
+      const updateCalls = mock.calls.filter((c) => c.op === "update");
+      expect(updateCalls.map((c) => c.table)).toEqual([
+        "transactions",
+        "recurring",
+        "recurring_sub_transactions",
+      ]);
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls.map((c) => c.table)).toEqual(["assignments", "categories"]);
+    });
+
+    it("deleteCategoryGroup deletes all categories within the group", async () => {
+      mock.respondWith("select:categories", []);
+      mock.respondWith("delete:category_groups", [{}]);
+      await deleteCategoryGroup(mock.db, 1);
+      expect(mock.calls.find((c) => c.op === "delete" && c.table === "category_groups")).toBeDefined();
     });
   });
 

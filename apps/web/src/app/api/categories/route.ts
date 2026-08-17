@@ -1,4 +1,5 @@
 import {
+  CategoryError,
   createCategory,
   createCategoryGroup,
   deleteCategory,
@@ -60,13 +61,23 @@ export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
   const type = searchParams.get("type");
+  const moveToCategoryId = searchParams.get("moveToCategoryId")
+    ? Number(searchParams.get("moveToCategoryId"))
+    : undefined;
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
   const db = getDefaultDb();
 
-  if (type === "group") {
-    await deleteCategoryGroup(db, id);
-  } else {
-    await deleteCategory(db, id);
+  try {
+    if (type === "group") {
+      await deleteCategoryGroup(db, id);
+    } else {
+      await deleteCategory(db, id, { moveToCategoryId });
+    }
+    return Response.json({ ok: true });
+  } catch (e: any) {
+    if (e instanceof CategoryError) {
+      return Response.json({ error: e.message }, { status: e.status });
+    }
+    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
-  return Response.json({ ok: true });
 }

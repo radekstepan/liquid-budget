@@ -254,8 +254,11 @@ export function BudgetAppShell() {
       }
       await reload();
     },
-    deleteCategory: async (id) => {
-      await jsonReq(`/api/categories?id=${id}`, { method: "DELETE" });
+    deleteCategory: async (id, opts) => {
+      const url = opts?.moveToCategoryId
+        ? `/api/categories?id=${id}&moveToCategoryId=${opts.moveToCategoryId}`
+        : `/api/categories?id=${id}`;
+      await jsonReq(url, { method: "DELETE" });
       await reload();
     },
     reorderCategory: async (id, sort) => {
