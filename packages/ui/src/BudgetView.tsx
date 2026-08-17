@@ -348,7 +348,7 @@ export function BudgetView({
                 groupsByMonth={groupsByMonth}
                 showMulti={showMulti}
                 onAddCategory={() => onAddCategory(g.group.id)}
-                onEditCategory={() => onEditCategory(g.group.id)}
+                onEditCategory={onEditCategory}
                 onDeleteCategory={onDeleteCategory}
                 onEditGroup={() => onEditGroup(g.group.id)}
                 onDeleteGroup={onDeleteGroup}
@@ -374,7 +374,7 @@ export function BudgetView({
                 groupsByMonth={groupsByMonth}
                 showMulti={showMulti}
                 onAddCategory={() => onAddCategory(creditGroup.group.id)}
-                onEditCategory={() => onEditCategory(creditGroup.group.id)}
+                onEditCategory={onEditCategory}
                 onDeleteCategory={onDeleteCategory}
                 onEditGroup={() => onEditGroup(creditGroup.group.id)}
                 onDeleteGroup={onDeleteGroup}
@@ -396,7 +396,7 @@ export function BudgetView({
                 groupsByMonth={groupsByMonth}
                 showMulti={showMulti}
                 onAddCategory={() => onAddCategory(hiddenGroup.group.id)}
-                onEditCategory={() => onEditCategory(hiddenGroup.group.id)}
+                onEditCategory={onEditCategory}
                 onDeleteCategory={onDeleteCategory}
                 onEditGroup={() => onEditGroup(hiddenGroup.group.id)}
                 onDeleteGroup={onDeleteGroup}
@@ -538,7 +538,7 @@ function GroupBlock({
   groupsByMonth: Map<number, GroupRow>[];
   showMulti: boolean;
   onAddCategory: () => void;
-  onEditCategory: () => void;
+  onEditCategory: (catId: number) => void;
   onDeleteCategory: (catId: number) => void;
   onEditGroup: () => void;
   onDeleteGroup: (groupId: number) => void;
@@ -698,7 +698,7 @@ function GroupBlock({
                   <span className="truncate">{r.category.name}</span>
                   <span className="y-cat-actions">
                     <button
-                      onClick={onEditCategory}
+                      onClick={() => onEditCategory(r.category.id)}
                       className="y-cat-edit-btn"
                       aria-label={`Edit ${r.category.name}`}
                       title="Edit category"
