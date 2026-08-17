@@ -10,6 +10,8 @@ import {
   num,
   parseMonthKey,
   monthKey,
+  previousMonthKey,
+  round2,
   todayISO,
   DEMO_MONTH,
 } from "@ynab/logic";
@@ -738,18 +740,6 @@ export function BudgetApp({
       )}
     </div>
   );
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-function previousMonthKey(monthKeyStr: string): string {
-  const { year, month0 } = parseMonthKey(monthKeyStr);
-  const idx = year * 12 + month0 - 1;
-  const yy = Math.floor(idx / 12);
-  const mm = idx - yy * 12;
-  return monthKey(yy, mm);
 }
 
 export const __demoConstants = { DEMO_MONTH, todayISO };

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
-import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
+import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, previousMonthKey, todayISO } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -1097,14 +1097,4 @@ function CategoryMonthCell({
       )}
     </div>
   );
-}
-
-/* ------------------------------------------------------------ */
-
-function previousMonthKey(monthKeyStr: string): string {
-  const { year, month0 } = parseMonthKey(monthKeyStr);
-  const idx = year * 12 + month0 - 1;
-  const yy = Math.floor(idx / 12);
-  const mm = idx - yy * 12;
-  return monthKey(yy, mm);
 }
