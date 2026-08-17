@@ -29,6 +29,13 @@
       "when": 1786003000000,
       "tag": "0003_add_reconciliations_table",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786003100000,
+      "tag": "0004_add_overspend_carries_over_to_categories",
+      "breakpoints": true
     }
   ]
 }

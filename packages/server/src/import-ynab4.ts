@@ -144,6 +144,9 @@ export async function importYnab4(db: Db, ynabData: any) {
         .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
       for (const sc of nonTombstoneSC) {
+        const overspendCarriesOver =
+          sc.overspendingHandling === "OverspendCarriedForward" ||
+          sc.entityVersion?.overspendingHandling === "OverspendCarriedForward";
         const [cRow] = await db
           .insert(categories)
           .values({
@@ -152,6 +155,7 @@ export async function importYnab4(db: Db, ynabData: any) {
             sort: catSort++,
             carryover: 0,
             goalTarget: null,
+            overspendCarriesOver: overspendCarriesOver || false,
           })
           .returning();
 

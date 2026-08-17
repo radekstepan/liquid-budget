@@ -33,7 +33,7 @@ describe("CategoryModal", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "  Coffee  " } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({ name: "Coffee", goalTarget: null });
+    expect(onSave).toHaveBeenCalledWith({ name: "Coffee", goalTarget: null, overspendCarriesOver: false });
   });
 
   it("does not call onSave when name is empty", () => {
@@ -51,7 +51,16 @@ describe("CategoryModal", () => {
     const goalInput = screen.getByPlaceholderText("1000.00");
     fireEvent.change(goalInput, { target: { value: "2000" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 200000 });
+    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 200000, overspendCarriesOver: false });
+  });
+
+  it("UNI-20 / F-16: toggles overspendCarriesOver (Red Arrow)", () => {
+    const onSave = vi.fn();
+    render(<CategoryModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Reimbursements" } });
+    fireEvent.click(screen.getByLabelText(/red arrow: carry negative balance over to next month/i));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({ name: "Reimbursements", goalTarget: null, overspendCarriesOver: true });
   });
 
   it("pre-fills the name and goal when editing an existing category", () => {

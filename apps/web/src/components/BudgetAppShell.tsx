@@ -225,12 +225,24 @@ export function BudgetAppShell() {
       if (categoryId) {
         await jsonReq("/api/categories", {
           method: "PATCH",
-          body: JSON.stringify({ id: categoryId, name: v.name, goalTarget: v.goalTarget, carryover: v.carryover }),
+          body: JSON.stringify({
+            id: categoryId,
+            name: v.name,
+            goalTarget: v.goalTarget,
+            carryover: v.carryover,
+            overspendCarriesOver: v.overspendCarriesOver,
+          }),
         });
       } else {
         await jsonReq("/api/categories", {
           method: "POST",
-          body: JSON.stringify({ groupId, name: v.name, goalTarget: v.goalTarget, carryover: v.carryover }),
+          body: JSON.stringify({
+            groupId,
+            name: v.name,
+            goalTarget: v.goalTarget,
+            carryover: v.carryover,
+            overspendCarriesOver: v.overspendCarriesOver,
+          }),
         });
       }
       await reload();

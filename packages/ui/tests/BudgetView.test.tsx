@@ -599,5 +599,41 @@ describe("BudgetView", () => {
       fireEvent.click(screen.getByRole("button", { name: /spent last month/i }));
       expect(onAssign).toHaveBeenCalledWith(10, 8500, "2026-06");
     });
+
+    it("renders Red Arrow indicator when negative category available carries over (UNI-20)", () => {
+      const budgetWithRedArrow = makeBudget({
+        groups: [
+          {
+            group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            assigned: 0,
+            outflow: -5000,
+            available: -5000,
+            rows: [
+              {
+                category: {
+                  id: 10,
+                  groupId: 1,
+                  name: "Groceries",
+                  sort: 0,
+                  carryover: "0",
+                  goalTarget: null,
+                  linkedAccountId: null,
+                  overspendCarriesOver: true,
+                },
+                carryoverIn: 0,
+                assigned: 0,
+                outflow: -5000,
+                ccBuffer: 0,
+                available: -5000,
+                fundedPct: 0,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderView({ budget: budgetWithRedArrow, budgets: [budgetWithRedArrow] });
+      expect(screen.getByLabelText("Red arrow: carry over")).toBeInTheDocument();
+    });
   });
 });

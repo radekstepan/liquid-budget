@@ -30,6 +30,12 @@ export type Category = {
   carryover: string;
   goalTarget: string | null;
   linkedAccountId: number | null;
+  /**
+   * YNAB4 "Red Arrow to the Right": when true, negative available balance
+   * carries over into the next month as a negative starting balance, rather
+   * than deducting from next month's TBB.
+   */
+  overspendCarriesOver?: boolean | null;
 };
 
 export type Assignment = {

@@ -117,7 +117,7 @@ export type BudgetAppApi = {
   saveCategory: (
     groupId: number | null,
     categoryId: number | null,
-    v: { name: string; goalTarget: number | null; carryover?: number }
+    v: { name: string; goalTarget: number | null; carryover?: number; overspendCarriesOver?: boolean }
   ) => Promise<void>;
   deleteCategory: (id: number, opts?: { moveToCategoryId?: number }) => Promise<void>;
   reorderCategory: (id: number, sort: number) => Promise<void>;

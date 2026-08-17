@@ -10,7 +10,13 @@ export class CategoryError extends Error {
 }
 
 export type CreateCategoryGroupInput = { name: string };
-export type CreateCategoryInput = { groupId: number; name: string; goalTarget?: number | null; carryover?: number | null };
+export type CreateCategoryInput = {
+  groupId: number;
+  name: string;
+  goalTarget?: number | null;
+  carryover?: number | null;
+  overspendCarriesOver?: boolean | null;
+};
 
 /**
  * Insert a new category group at sort = max(existing sort) + 1.
@@ -64,6 +70,7 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
         sort: Number(maxRow?.max ?? -1) + 1,
         goalTarget: input.goalTarget != null ? Number(input.goalTarget) : null,
         carryover: input.carryover != null ? Number(input.carryover) : 0,
+        overspendCarriesOver: input.overspendCarriesOver === true,
       })
       .returning();
     db.run(sql`COMMIT`);
@@ -86,7 +93,13 @@ export async function renameCategoryGroup(db: Database, id: number, name: string
 export async function updateCategory(
   db: Database,
   id: number,
-  patch: { name?: string; goalTarget?: number | null; carryover?: number; sort?: number }
+  patch: {
+    name?: string;
+    goalTarget?: number | null;
+    carryover?: number;
+    sort?: number;
+    overspendCarriesOver?: boolean | null;
+  }
 ) {
   const p: Record<string, unknown> = {};
   if (patch.name != null) p.name = String(patch.name);
@@ -95,6 +108,9 @@ export async function updateCategory(
   }
   if (patch.carryover != null) p.carryover = Number(patch.carryover);
   if (patch.sort != null) p.sort = Number(patch.sort);
+  if ("overspendCarriesOver" in patch) {
+    p.overspendCarriesOver = patch.overspendCarriesOver === true;
+  }
   const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
   return row;
 }

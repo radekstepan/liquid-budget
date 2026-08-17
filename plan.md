@@ -57,7 +57,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-17** | F-10 | UX / Parity | **Medium (P1)** | Register lacks keyboard navigation (modal-only editing, no Tab/Enter/arrows, no date shortcut keys `+`, `-`, `t`, `m`, `y`) | `packages/ui/src/TransactionsView.tsx` | ✅ **Resolved** |
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` | ✅ **Resolved** |
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` | ✅ **Resolved** |
-| **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` |
+| **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` |
 | **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` |
 | **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` |
@@ -178,6 +178,7 @@ Despite strong foundations, the application has critical financial calculation d
   2. In `buildCarryoverMap()`, if `category.overspendCarriesOver === true`, bypass the $\max(0, \text{balance})$ clamp and exclude this negative balance from `monthOverspent` (preventing double-deduction from TBB).
   3. Map the flag from YNAB4 archive `entityVersion` metadata during import.
   4. Render the clickable red arrow affordance on negative category available pills in `BudgetView.tsx`.
+- **Resolution (UNI-20):** Added `overspendCarriesOver` boolean field to `Category` type (`@ynab/logic`), database table `categories` with migration `0004_add_overspend_carries_over_to_categories.sql` (`@ynab/server`), and API route. Implemented Red Arrow to the Right logic in `buildCarryoverMap` and `computeOverspentForMonth` in `packages/logic/src/budget-engine.ts`. Updated `CategoryModal` with toggle checkbox, updated `importYnab4` to map overspending settings, and rendered the Red Arrow indicator on overspent category rows in `BudgetView.tsx`. Added unit tests in `budget-engine.test.ts`, `categories.test.ts`, `Modals.test.tsx`, and `BudgetView.test.tsx`.
 
 ---
 

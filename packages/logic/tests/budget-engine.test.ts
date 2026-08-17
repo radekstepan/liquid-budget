@@ -907,5 +907,71 @@ describe("computeBudget", () => {
       expect(july.totalIncome).toBe(500000);
       expect(july.tbb).toBe(500000);
     });
+
+    it("UNI-20 / F-16: Red Arrow to the Right carries negative category balance into next month instead of deducting from TBB", () => {
+      const groups = [makeGroup({ id: 1, name: "Living" })];
+      const accounts = [
+        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+      ];
+
+      // Case A: Default (overspendCarriesOver: false) -> Deducts from next month's TBB, category resets to 0
+      const catDefault = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: false });
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Income",
+        memo: "",
+        amount: "50000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      const spendTx = {
+        id: 2,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-20000",
+        status: "c" as const,
+      };
+
+      const dataDefault: BudgetData = {
+        accounts,
+        groups,
+        categories: [catDefault],
+        assignments: [{ id: 1, categoryId: 10, month: "2026-01", amount: "5000" }], // assigned $50, spent $200 -> -$150 overspent
+        transactions: [incomeTx, spendTx],
+        recurring: [],
+      };
+
+      const janDefault = computeBudget(dataDefault, "2026-01");
+      expect(janDefault.groups[0]?.rows[0]?.available).toBe(-15000);
+
+      const febDefault = computeBudget(dataDefault, "2026-02");
+      // Available resets to 0 (clamped)
+      expect(febDefault.groups[0]?.rows[0]?.available).toBe(0);
+      // TBB is reduced by the $150 cash overspent from Jan
+      expect(febDefault.tbb).toBe(45000 - 15000); // 30000
+
+      // Case B: Red Arrow enabled (overspendCarriesOver: true) -> Category starts negative in Feb, NOT deducted from TBB
+      const catRedArrow = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+      const dataRedArrow: BudgetData = {
+        ...dataDefault,
+        categories: [catRedArrow],
+      };
+
+      const janRedArrow = computeBudget(dataRedArrow, "2026-01");
+      expect(janRedArrow.groups[0]?.rows[0]?.available).toBe(-15000);
+
+      const febRedArrow = computeBudget(dataRedArrow, "2026-02");
+      // Available carries over negative (-$150)
+      expect(febRedArrow.groups[0]?.rows[0]?.carryoverIn).toBe(-15000);
+      expect(febRedArrow.groups[0]?.rows[0]?.available).toBe(-15000);
+      // TBB is NOT deducted by $150
+      expect(febRedArrow.tbb).toBe(45000);
+    });
   });
 });

@@ -90,6 +90,13 @@ describe("categories queries", () => {
       const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
       expect(set).toEqual({ goalTarget: null });
     });
+
+    it("UNI-20 / F-16: supports updating overspendCarriesOver flag", async () => {
+      mock.respondWith("update:categories", [{ id: 1, overspendCarriesOver: true }]);
+      await updateCategory(mock.db, 1, { overspendCarriesOver: true });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ overspendCarriesOver: true });
+    });
   });
 
   describe("updateCategoryGroupSort", () => {
