@@ -5,9 +5,38 @@ import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 
+export interface Ynab4Settings {
+  currencySymbol?: string;
+  currencyISOSymbol?: string;
+  decimalSeparator?: string;
+  groupSeparator?: string;
+  dateFormat?: string;
+  budgetName?: string;
+}
+
 export interface ExtractedYnab4Data {
   ynabData: any;
   settingsXml?: string;
+  settings?: Ynab4Settings;
+}
+
+export function parseYnab4SettingsXml(xmlStr?: string): Ynab4Settings {
+  const settings: Ynab4Settings = {};
+  if (!xmlStr) return settings;
+
+  const matchTag = (tag: string) => {
+    const match = xmlStr.match(new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`, "i"));
+    return match ? match[1]?.trim() : undefined;
+  };
+
+  settings.currencySymbol = matchTag("currencySymbol");
+  settings.currencyISOSymbol = matchTag("currencyISOSymbol") || matchTag("currencyISO");
+  settings.decimalSeparator = matchTag("decimalSeparator") || matchTag("currencyDecimalSeparator");
+  settings.groupSeparator = matchTag("groupSeparator") || matchTag("currencyGroupSeparator");
+  settings.dateFormat = matchTag("dateFormat") || matchTag("shortDateFormat");
+  settings.budgetName = matchTag("budgetName") || matchTag("budgetTitle");
+
+  return settings;
 }
 
 /**
@@ -34,10 +63,11 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
   }
 
   const ynabData = JSON.parse(ynab4JsonStr);
-  return { ynabData, settingsXml };
+  const settings = settingsXml ? parseYnab4SettingsXml(settingsXml) : undefined;
+  return { ynabData, settingsXml, settings };
 }
 
-export async function importYnab4(db: Db, ynabData: any) {
+export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: string | Ynab4Settings) {
   // CRITICAL: Wrap the entire wipe-and-import in a SQLite transaction.
   // Without this, an unhandled exception halfway through (missing map
   // key, FK violation, OOM on huge imports) leaves the user's database
@@ -589,11 +619,17 @@ export async function importYnab4(db: Db, ynabData: any) {
       }
     }
 
+    const settings =
+      typeof settingsXmlOrObj === "string"
+        ? parseYnab4SettingsXml(settingsXmlOrObj)
+        : settingsXmlOrObj;
+
     const result = {
       accounts: accountIdMap.size,
       categoryGroups: groupSort,
       categories: categoryIdMap.size,
       transactions: totalImportedTxCount,
+      settings,
     };
     db.run(sql`COMMIT`);
     return result;
