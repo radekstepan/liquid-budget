@@ -69,7 +69,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` |
+| **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` |
 | **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` |
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` |
@@ -451,6 +451,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/schema.ts`, `recurring` and `recurring_sub_transactions` tables lacked indexes on frequently queried foreign keys and date filtering columns (`accountId`, `nextDate`, `recurringId`).
 - **Actionable Solution:** Add index `recurring_account_id_idx` on `recurring.accountId`, `recurring_next_date_idx` on `recurring.nextDate`, and `recurring_sub_transactions_recurring_id_idx` on `recurring_sub_transactions.recurringId`.
 - **Resolution (UNI-31):** Added `recurring_account_id_idx`, `recurring_next_date_idx`, and `recurring_sub_transactions_recurring_id_idx` in `packages/server/src/schema.ts` and generated migration `0007_mean_zodiak.sql`. Added unit test in `packages/server/tests/migrate.test.ts`.
+
+---
+
+#### UNI-32 (BUG-15): Recurring Delete Two-Step Confirmation Modal
+- **Root Cause:** In `packages/ui/src/RecurringView.tsx`, clicking the delete trash icon immediately invoked `onDelete(id)` with no confirmation prompt.
+- **Actionable Solution:** Implement two-step delete confirmation modal preventing accidental deletion of recurring rules.
+- **Resolution (UNI-32):** Added `deletingId` state and a confirmation modal to `packages/ui/src/RecurringView.tsx` with "Cancel" and "Delete Recurring Rule" action buttons. Updated unit test in `packages/ui/tests/RecurringView.test.tsx`.
 
 ---
 
