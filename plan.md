@@ -43,7 +43,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-03** | F-03 | Data Integrity | **Critical (P0)** | Category deletion sets `categoryId` to NULL $\to$ historical spending vanishes, inflows reclassified as income | `packages/server/src/schema.ts`, `packages/server/src/queries/categories.ts`, `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
 | **UNI-04** | BUG-01 | UX / Logic | **Critical (P0)** | Category edit modal passes group ID instead of category ID; cannot edit category properties | `packages/ui/src/BudgetView.tsx:351`, `packages/ui/src/BudgetApp.tsx:237` | ✅ **Resolved** |
 | **UNI-05** | BUG-02 | Data Integrity | **Critical (P0)** | `saveCategory` POST drops `carryover` field on category creation | `apps/web/src/components/BudgetAppShell.tsx` | ✅ **Resolved** |
-| **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` |
+| **UNI-06** | BUG-04 | Stability | **Critical (P0)** | No React Error Boundaries anywhere; component crash brings down entire SPA | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
 | **UNI-07** | F-04 | Data Integrity | **High (P1)** | Deleting transfer counterparty account leaves half-transfers (null category) $\to$ phantom income or lost outflows | `packages/server/src/schema.ts`, `packages/server/src/queries/accounts.ts` |
 | **UNI-08** | F-08 | Data Integrity | **High (P1)** | Reconciled transactions (`status: "r"`) are editable/deletable via API without guard | `packages/server/src/queries/transactions.ts` |
 | **UNI-09** | F-05 | Recurring / UX | **High (P1)** | Scheduled transactions never auto-post; "Post Now" posts at `today` instead of `nextDate` and destroys mixed-sign splits | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/RecurringView.tsx` |
@@ -336,6 +336,7 @@ Despite strong foundations, the application has critical financial calculation d
 - **Actionable Solution:**
   1. Add React `ErrorBoundary` wrappers around `BudgetView`, `TransactionsView`, `ReportsView`, `RecurringView`, and `CalendarView`.
   2. Implement snapshot rollback and visual loading state indicators across all modals and mutation handlers in `BudgetAppShell.tsx`.
+- **Resolution (UNI-06):** Created `ErrorBoundary` component in `packages/ui/src/ErrorBoundary.tsx` with error recovery, retry handlers, and styled alerts. Wrapped each main view and Inspector in `BudgetApp.tsx` and top-level app in `BudgetAppShell.tsx`. Added unit tests in `packages/ui/tests/ErrorBoundary.test.tsx`.
 
 #### UNI-09 (F-05): Auto-Posting Scheduled Transactions & Mixed-Sign Splits
 - **Root Cause:**

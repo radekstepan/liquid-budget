@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BudgetApp, type BudgetAppApi } from "@ynab/ui";
+import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { BudgetData } from "@ynab/logic";
 import { todayISO, num, nextDateFor } from "@ynab/logic";
@@ -381,9 +381,9 @@ export function BudgetAppShell() {
   }
 
   return (
-    <>
+    <ErrorBoundary name="Budget Application">
       <BudgetApp data={data} api={api} />
       <Toast items={toasts} onDismiss={dismissToast} />
-    </>
+    </ErrorBoundary>
   );
 }
