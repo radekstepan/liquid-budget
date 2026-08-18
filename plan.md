@@ -82,7 +82,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` | ✅ **Resolved** |
 | **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` | ✅ **Resolved** |
 | **UNI-44** | BUG-37 | UX | **Low (P3)** | `AccountModal` automatically forces credit card starting balance negative without user feedback | `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
-| **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` |
+| **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
 | **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` |
 | **UNI-47** | BUG-40 | Logic | **Low (P3)** | `num()` parser silently returns 0 for formatted currency strings containing currency symbols | `packages/logic/src/format.ts` |
 | **UNI-48** | BUG-41 | Performance | **Low (P3)** | `getBudgetData` performs full unpaginated table scan | `packages/server/src/queries/budget.ts` |
@@ -534,6 +534,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** `AccountModal` automatically inverted credit card starting balances into negative liabilities without informing the user.
 - **Actionable Solution:** Render a clear contextual explanation when `kind === "credit"` clarifying that credit card balances represent debt owed and will be stored as negative starting balances.
 - **Resolution (UNI-44):** Added contextual debt hint to starting balance field when `kind === "credit"` in `packages/ui/src/Modals.tsx`. Added unit test in `packages/ui/tests/Modals.test.tsx`.
+
+#### UNI-45 (BUG-38): Split Sub-Transactions Memo Field in RecurringModal
+- **Root Cause:** In `RecurringModal.tsx`, split sub-transactions had no input field for `memo`, preventing users from annotating individual split allocations.
+- **Actionable Solution:** Add `TextField` for `memo` to each split sub-transaction row in `RecurringModal` (and `TransactionModal`).
+- **Resolution (UNI-45):** Added individual `memo` inputs for split sub-transaction rows in `RecurringModal` and `TransactionModal` in `packages/ui/src/Modals.tsx`. Updated tests in `packages/ui/tests/Modals.test.tsx`.
 
 ---
 

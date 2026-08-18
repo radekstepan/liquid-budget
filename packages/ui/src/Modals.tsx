@@ -445,7 +445,7 @@ export function TransactionModal({
                       ? `category:${row.categoryId}`
                       : "";
                   return (
-                    <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
+                    <div key={i} className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
                       <Select
                         value={selectValue}
                         onChange={(v) => {
@@ -497,6 +497,18 @@ export function TransactionModal({
                         </optgroup>
                       </Select>
                       <TextField
+                        value={row.memo ?? ""}
+                        onChange={(e) => {
+                          const memoVal = e.target.value;
+                          setSubRows((rs) =>
+                            rs.map((r, j) => (i === j ? { ...r, memo: memoVal } : r))
+                          );
+                        }}
+                        placeholder="Memo"
+                        className={inputClass}
+                        aria-label={`Sub-transaction ${i + 1} memo`}
+                      />
+                      <TextField
                         value={row.amount === 0 ? "" : String(row.amount)}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -507,6 +519,7 @@ export function TransactionModal({
                         placeholder="0.00"
                         inputMode="decimal"
                         className={inputClass}
+                        aria-label={`Sub-transaction ${i + 1} amount`}
                       />
                       <button
                         type="button"
@@ -1108,81 +1121,94 @@ export function RecurringModal({
                   ? `category:${row.categoryId}`
                   : "";
               return (
-                <div key={i} className="grid grid-cols-[1fr_92px_28px] gap-2 items-start">
-                  <Select
-                    value={selectValue}
-                    onChange={(v) => {
-                      if (v.startsWith("transfer:")) {
-                        const nextAcc = Number(v.slice("transfer:".length));
+                  <div key={i} className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
+                    <Select
+                      value={selectValue}
+                      onChange={(v) => {
+                        if (v.startsWith("transfer:")) {
+                          const nextAcc = Number(v.slice("transfer:".length));
+                          setSubRows((rs) =>
+                            rs.map((r, j) =>
+                              i === j
+                                ? { ...r, transferAccountId: nextAcc, categoryId: null }
+                                : r
+                            )
+                          );
+                        } else if (v.startsWith("category:")) {
+                          const nextCat = Number(v.slice("category:".length));
+                          setSubRows((rs) =>
+                            rs.map((r, j) =>
+                              i === j
+                                ? { ...r, categoryId: nextCat, transferAccountId: null }
+                                : r
+                            )
+                          );
+                        } else {
+                          setSubRows((rs) =>
+                            rs.map((r, j) =>
+                              i === j
+                                ? { ...r, categoryId: null, transferAccountId: null }
+                                : r
+                            )
+                          );
+                        }
+                      }}
+                      className="w-full"
+                      searchable
+                    >
+                      <option value="">Category or Transfer…</option>
+                      <optgroup label="Categories">
+                        {categories.map((c) => (
+                          <option key={c.id} value={`category:${c.id}`}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Transfers">
+                        {otherAccounts.map((a) => (
+                          <option key={a.id} value={`transfer:${a.id}`}>
+                            Transfer : {a.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </Select>
+                    <TextField
+                      value={row.memo ?? ""}
+                      onChange={(e) => {
+                        const memoVal = e.target.value;
                         setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, transferAccountId: nextAcc, categoryId: null }
-                              : r
-                          )
+                          rs.map((r, j) => (i === j ? { ...r, memo: memoVal } : r))
                         );
-                      } else if (v.startsWith("category:")) {
-                        const nextCat = Number(v.slice("category:".length));
+                      }}
+                      placeholder="Memo"
+                      className={inputClass}
+                      aria-label={`Sub-transaction ${i + 1} memo`}
+                    />
+                    <TextField
+                      value={row.amount === 0 ? "" : String(row.amount)}
+                      onChange={(e) => {
+                        const val = e.target.value;
                         setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, categoryId: nextCat, transferAccountId: null }
-                              : r
-                          )
+                          rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
                         );
-                      } else {
-                        setSubRows((rs) =>
-                          rs.map((r, j) =>
-                            i === j
-                              ? { ...r, categoryId: null, transferAccountId: null }
-                              : r
-                          )
-                        );
+                      }}
+                      placeholder="0.00"
+                      inputMode="decimal"
+                      className={inputClass}
+                      aria-label={`Sub-transaction ${i + 1} amount`}
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove sub-transaction"
+                      className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                      onClick={() =>
+                        setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
                       }
-                    }}
-                    className="w-full"
-                    searchable
-                  >
-                    <option value="">Category or Transfer…</option>
-                    <optgroup label="Categories">
-                      {categories.map((c) => (
-                        <option key={c.id} value={`category:${c.id}`}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Transfers">
-                      {otherAccounts.map((a) => (
-                        <option key={a.id} value={`transfer:${a.id}`}>
-                          Transfer : {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </Select>
-                  <TextField
-                    value={row.amount === 0 ? "" : String(row.amount)}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSubRows((rs) =>
-                        rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
-                      );
-                    }}
-                    placeholder="0.00"
-                    inputMode="decimal"
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    aria-label="Remove sub-transaction"
-                    className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
-                    onClick={() =>
-                      setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
-                    }
-                    disabled={subRows.length <= 2}
-                  >
-                    ×
-                  </button>
-                </div>
+                      disabled={subRows.length <= 2}
+                    >
+                      ×
+                    </button>
+                  </div>
               );
             })}
           </div>
