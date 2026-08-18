@@ -58,7 +58,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-18** | F-11 | UX / Parity | **Medium (P1)** | No multi-select or atomic bulk actions (bulk edit, delete, clear, move) in register | `packages/ui/src/TransactionsView.tsx`, `apps/web/src/app/api/transactions/route.ts` | ✅ **Resolved** |
 | **UNI-19** | F-12 | Financial Math / UX | **Medium (P1)** | Quick-fill "Average Spent" skips split children (`t.parentId != null continue`); missing Spent Last Month, Average Budgeted, Set/Balance to Zero | `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx` | ✅ **Resolved** |
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
-| **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` |
+| **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` | ✅ **Resolved** |
 | **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` |
 | **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` |
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` |
@@ -305,6 +305,9 @@ Despite strong foundations, the application has critical financial calculation d
     incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional()
   }).strict();
   ```
+- **Resolution (UNI-21):** Created centralized runtime validation module `apps/web/src/app/api/schemas.ts` using Zod for all mutation and query endpoints (`transactions`, `accounts`, `categories`, `assignments`, `recurring`, `reconcile`). Replaced loose `any` body castings across route handlers with strict schema parsing and structured error messages. Added comprehensive schema unit tests in `apps/web/tests/schemas.test.ts`.
+
+---
 
 #### UNI-11 (F-06, BUG-20, BUG-21): Sub-Transaction Validation & Parser Unification
 - **Root Cause:** `apps/web/src/app/api/recurring/route.ts` contains a custom parser that mandates `categoryId` on every split row, rejecting valid transfer splits. `packages/server/src/queries/recurring.ts` correctly validates category-XOR-transfer.
