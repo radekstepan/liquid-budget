@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, parseMonthKey } from "@ynab/logic";
 import { Icon, Toolbar, ToolbarSep, MonthNav } from "@ynab/theme";
 
-export function CalendarView({
+export const CalendarView = memo(function CalendarView({
   data,
   month,
   onPrev,
@@ -208,4 +208,4 @@ export function CalendarView({
       </div>
     </div>
   );
-}
+});

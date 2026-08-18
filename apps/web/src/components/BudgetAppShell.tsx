@@ -81,7 +81,7 @@ export function BudgetAppShell() {
               ...prev.assignments,
               { id: -Date.now(), categoryId, month, amount: amount.toFixed(2) },
             ];
-        return { ...prev, assignments };
+        return { ...prev, assignments, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -115,7 +115,7 @@ export function BudgetAppShell() {
           transferAccountId: t.transferAccountId ?? null,
           parentId: t.parentId ?? null,
         };
-        return { ...prev, transactions: [newTx, ...prev.transactions] };
+        return { ...prev, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -147,7 +147,7 @@ export function BudgetAppShell() {
             ...(t.status !== undefined ? { status: t.status } : {}),
           };
         });
-        return { ...prev, transactions };
+        return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -174,7 +174,7 @@ export function BudgetAppShell() {
         const transactions = prev.transactions.filter(
           (x) => x.id !== id && x.parentId !== id
         );
-        return { ...prev, transactions };
+        return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -197,7 +197,7 @@ export function BudgetAppShell() {
         const transactions = prev.transactions.filter(
           (x) => !idSet.has(x.id) && (x.parentId == null || !idSet.has(x.parentId))
         );
-        return { ...prev, transactions };
+        return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -231,7 +231,7 @@ export function BudgetAppShell() {
             ...(patch.categoryId !== undefined ? { categoryId: patch.categoryId } : {}),
           };
         });
-        return { ...prev, transactions };
+        return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -284,7 +284,7 @@ export function BudgetAppShell() {
                 : r.subTransactions,
           };
         });
-        return { ...prev, recurring };
+        return { ...prev, recurring, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -306,7 +306,7 @@ export function BudgetAppShell() {
         if (!prev) return prev;
         snapshot = prev;
         const recurring = prev.recurring.filter((r) => r.id !== id);
-        return { ...prev, recurring };
+        return { ...prev, recurring, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -347,7 +347,7 @@ export function BudgetAppShell() {
                 }
               : c
           );
-          return { ...prev, categories };
+          return { ...prev, categories, budgetIndex: undefined };
         });
       }
       return withSync(async () => {
@@ -389,7 +389,7 @@ export function BudgetAppShell() {
         if (!prev) return prev;
         snapshot = prev;
         const categories = prev.categories.filter((c) => c.id !== id);
-        return { ...prev, categories };
+        return { ...prev, categories, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -462,7 +462,7 @@ export function BudgetAppShell() {
         if (!prev) return prev;
         snapshot = prev;
         const accounts = prev.accounts.filter((a) => a.id !== id);
-        return { ...prev, accounts };
+        return { ...prev, accounts, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {
@@ -481,7 +481,7 @@ export function BudgetAppShell() {
         if (!prev) return prev;
         snapshot = prev;
         const accounts = prev.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a));
-        return { ...prev, accounts };
+        return { ...prev, accounts, budgetIndex: undefined };
       });
       return withSync(async () => {
         try {

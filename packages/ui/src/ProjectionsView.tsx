@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import type { BudgetData } from "@ynab/logic";
 import {
   fmt,
@@ -13,7 +13,7 @@ import {
 import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
 import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
-export function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
+export const ProjectionsView = memo(function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
   const { year, month0 } = parseMonthKey(month);
   const activeAccounts = data.accounts.filter((a) => !a.archived);
   const liquidNow = activeAccounts
@@ -228,4 +228,4 @@ export function ProjectionsView({ data, month }: { data: BudgetData; month: stri
       </div>
     </div>
   );
-}
+});

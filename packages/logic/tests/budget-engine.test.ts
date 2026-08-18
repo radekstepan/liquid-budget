@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeBudget,
+  buildBudgetIndex,
   getMonthsWithData,
 } from "../src/budget-engine.js";
 import { makeSeedBudgetData, DEMO_MONTH } from "../src/seed-fixture.js";
@@ -972,6 +973,46 @@ describe("computeBudget", () => {
       expect(febRedArrow.groups[0]?.rows[0]?.available).toBe(-15000);
       // TBB is NOT deducted by $150
       expect(febRedArrow.tbb).toBe(45000);
+    });
+  });
+
+  describe("buildBudgetIndex & pre-indexing", () => {
+    it("produces identical computeBudget results with pre-indexed data", () => {
+      const seed = makeSeedBudgetData();
+      const rawBudget = computeBudget(seed, DEMO_MONTH);
+
+      const budgetIndex = buildBudgetIndex(seed);
+      const indexedData: BudgetData = {
+        ...seed,
+        budgetIndex,
+      };
+
+      const fastBudget = computeBudget(indexedData, DEMO_MONTH);
+      expect(fastBudget).toEqual(rawBudget);
+    });
+
+    it("correctly pre-computes multi-month carryovers and TBB across history", () => {
+      const seed = makeSeedBudgetData();
+      const months = getMonthsWithData(seed);
+      const budgetIndex = buildBudgetIndex(seed);
+      const indexedData: BudgetData = {
+        ...seed,
+        budgetIndex,
+      };
+
+      for (const m of months) {
+        const standard = computeBudget(seed, m);
+        const fast = computeBudget(indexedData, m);
+        expect(fast.tbb).toBe(standard.tbb);
+        expect(fast.priorSurplus).toBe(standard.priorSurplus);
+        expect(fast.overspentPrevious).toBe(standard.overspentPrevious);
+        expect(fast.groups.length).toBe(standard.groups.length);
+        for (let g = 0; g < standard.groups.length; g++) {
+          expect(fast.groups[g]?.available).toBe(standard.groups[g]?.available);
+          expect(fast.groups[g]?.outflow).toBe(standard.groups[g]?.outflow);
+          expect(fast.groups[g]?.assigned).toBe(standard.groups[g]?.assigned);
+        }
+      }
     });
   });
 });

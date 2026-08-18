@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import type {
   GroupRow,
   CashFlowSummary,
@@ -11,7 +11,7 @@ import { MONTHS, parseMonthKey } from "@ynab/logic";
 import { Icon, Button, Panel, Notice, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
 
-export function Inspector({
+export const Inspector = memo(function Inspector({
   groups,
   summary,
   month,
@@ -521,7 +521,7 @@ export function Inspector({
       )}
     </aside>
   );
-}
+});
 
 function formatShortMonth(key: string): string {
   const { year: y, month0 } = parseMonthKey(key);

@@ -39,7 +39,15 @@
  *    refunds/credits in a category don't show as positive outflow.
  */
 
-import type { Account, BudgetData, BudgetResult, CatRow, GroupRow, Transaction } from "./types.js";
+import type {
+  Account,
+  BudgetData,
+  BudgetResult,
+  CatRow,
+  GroupRow,
+  SerializedBudgetIndex,
+  Transaction,
+} from "./types.js";
 import { num } from "./format.js";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +92,195 @@ type IndexedBudgetData = {
 
 const budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
 
+function hydrateBudgetIndex(idx: SerializedBudgetIndex): IndexedBudgetData {
+  const assignedByMonth = new Map<string, Map<number, number>>();
+  for (const [m, catMap] of Object.entries(idx.assignedByMonth)) {
+    const inner = new Map<number, number>();
+    for (const [catId, val] of Object.entries(catMap)) {
+      inner.set(Number(catId), val);
+    }
+    assignedByMonth.set(m, inner);
+  }
+  const assignedTotalByMonth = new Map<string, number>(
+    Object.entries(idx.assignedTotalByMonth).map(([k, v]) => [k, Number(v)])
+  );
+  const outflowByMonth = new Map<string, Map<number, number>>();
+  for (const [m, catMap] of Object.entries(idx.outflowByMonth)) {
+    const inner = new Map<number, number>();
+    for (const [catId, val] of Object.entries(catMap)) {
+      inner.set(Number(catId), val);
+    }
+    outflowByMonth.set(m, inner);
+  }
+  const spendByAccountMonth = new Map<string, Map<number, number>>();
+  for (const [m, accMap] of Object.entries(idx.spendByAccountMonth)) {
+    const inner = new Map<number, number>();
+    for (const [accId, val] of Object.entries(accMap)) {
+      inner.set(Number(accId), val);
+    }
+    spendByAccountMonth.set(m, inner);
+  }
+  const incomeByMonth = new Map<string, number>(
+    Object.entries(idx.incomeByMonth).map(([k, v]) => [k, Number(v)])
+  );
+  const carryoverByMonth = new Map<string, Map<number, number>>();
+  for (const [m, catMap] of Object.entries(idx.carryoverByMonth)) {
+    const inner = new Map<number, number>();
+    for (const [catId, val] of Object.entries(catMap)) {
+      inner.set(Number(catId), val);
+    }
+    carryoverByMonth.set(m, inner);
+  }
+  const overspentByMonth = new Map<string, number>(
+    Object.entries(idx.overspentByMonth).map(([k, v]) => [k, Number(v)])
+  );
+  const surplusByMonth = new Map<string, number>(
+    Object.entries(idx.surplusByMonth).map(([k, v]) => [k, Number(v)])
+  );
+
+  return {
+    assignedByMonth,
+    assignedTotalByMonth,
+    outflowByMonth,
+    spendByAccountMonth,
+    incomeByMonth,
+    carryoverByMonth,
+    overspentByMonth,
+    surplusByMonth,
+  };
+}
+
+export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+  const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
+
+  const assignedByMonth = new Map<string, Map<number, number>>();
+  const assignedTotalByMonth = new Map<string, number>();
+
+  for (const a of data.assignments) {
+    const amt = num(a.amount);
+    let m = assignedByMonth.get(a.month);
+    if (!m) {
+      m = new Map();
+      assignedByMonth.set(a.month, m);
+    }
+    m.set(a.categoryId, Math.round((m.get(a.categoryId) ?? 0) + amt));
+    assignedTotalByMonth.set(
+      a.month,
+      Math.round((assignedTotalByMonth.get(a.month) ?? 0) + amt)
+    );
+  }
+
+  const outflowByMonth = new Map<string, Map<number, number>>();
+  const spendByAccountMonth = new Map<string, Map<number, number>>();
+  const incomeByMonth = new Map<string, number>();
+
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    const mk = t.date.slice(0, 7);
+    const amt = num(t.amount);
+
+    if (t.categoryId != null) {
+      let m = outflowByMonth.get(mk);
+      if (!m) {
+        m = new Map();
+        outflowByMonth.set(mk, m);
+      }
+      m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + amt));
+    }
+
+    if (isIncomeTransaction(t, accountMap)) {
+      const incMonth = t.incomeMonth || mk;
+      incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + amt));
+    }
+
+    // 1. Categorised spending/refunds on credit card accounts
+    if (t.categoryId != null) {
+      let s = spendByAccountMonth.get(mk);
+      if (!s) {
+        s = new Map();
+        spendByAccountMonth.set(mk, s);
+      }
+      s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) + -amt));
+    }
+
+    // 2. Payments to credit cards
+    if (t.transferAccountId != null) {
+      let s = spendByAccountMonth.get(mk);
+      if (!s) {
+        s = new Map();
+        spendByAccountMonth.set(mk, s);
+      }
+      const paymentAmount = Math.abs(amt);
+      s.set(
+        t.transferAccountId,
+        Math.round((s.get(t.transferAccountId) ?? 0) - paymentAmount)
+      );
+      if (amt > 0) {
+        s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) - amt));
+      }
+    }
+  }
+
+  const index: IndexedBudgetData = {
+    assignedByMonth,
+    assignedTotalByMonth,
+    outflowByMonth,
+    spendByAccountMonth,
+    incomeByMonth,
+    carryoverByMonth: new Map(),
+    overspentByMonth: new Map(),
+    surplusByMonth: new Map(),
+  };
+
+  const months = getMonthsWithData(data);
+  const ccGroupIds = new Set(
+    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
+  );
+  const ccPayCatToAccount = new Map<number, number>();
+  for (const c of data.categories) {
+    if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
+      ccPayCatToAccount.set(c.id, c.linkedAccountId);
+    }
+  }
+
+  for (const m of months) {
+    buildCarryoverMap(data, index, months, m, ccPayCatToAccount, ccGroupIds);
+    computePriorTBBSurplus(index, months, m);
+  }
+
+  const serializedAssigned: Record<string, Record<string | number, number>> = {};
+  for (const [m, map] of index.assignedByMonth) {
+    serializedAssigned[m] = Object.fromEntries(map);
+  }
+  const serializedOutflow: Record<string, Record<string | number, number>> = {};
+  for (const [m, map] of index.outflowByMonth) {
+    serializedOutflow[m] = Object.fromEntries(map);
+  }
+  const serializedSpend: Record<string, Record<string | number, number>> = {};
+  for (const [m, map] of index.spendByAccountMonth) {
+    serializedSpend[m] = Object.fromEntries(map);
+  }
+  const serializedCarryover: Record<string, Record<string | number, number>> = {};
+  for (const [m, map] of index.carryoverByMonth) {
+    serializedCarryover[m] = Object.fromEntries(map);
+  }
+
+  return {
+    assignedByMonth: serializedAssigned,
+    assignedTotalByMonth: Object.fromEntries(index.assignedTotalByMonth),
+    outflowByMonth: serializedOutflow,
+    spendByAccountMonth: serializedSpend,
+    incomeByMonth: Object.fromEntries(index.incomeByMonth),
+    carryoverByMonth: serializedCarryover,
+    overspentByMonth: Object.fromEntries(index.overspentByMonth),
+    surplusByMonth: Object.fromEntries(index.surplusByMonth),
+  };
+}
+
 function getOrBuildIndex(
   data: BudgetData,
   splitParentIds: Set<number>,
@@ -91,6 +288,12 @@ function getOrBuildIndex(
 ): IndexedBudgetData {
   let cached = budgetDataIndexCache.get(data);
   if (cached) return cached;
+
+  if (data.budgetIndex) {
+    cached = hydrateBudgetIndex(data.budgetIndex);
+    budgetDataIndexCache.set(data, cached);
+    return cached;
+  }
 
   const assignedByMonth = new Map<string, Map<number, number>>();
   const assignedTotalByMonth = new Map<string, number>();
