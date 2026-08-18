@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeNetWorthReport, getMonthsBetween } from "../src/reports.js";
+import { computeNetWorthReport, computeTrailingNetWorth, getMonthsBetween } from "../src/reports.js";
 import type { BudgetData } from "../src/types.js";
 
 function makeBaseData(): BudgetData {
@@ -156,5 +156,69 @@ describe("computeNetWorthReport", () => {
     expect(pts).toHaveLength(3);
     expect(pts[0]?.month).toBe("2026-04");
     expect(pts[2]?.month).toBe("2026-06");
+  });
+});
+
+describe("computeTrailingNetWorth", () => {
+  it("calculates percentage delta correctly when startNet is positive (UNI-34 / BUG-27)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "150000", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Starting", memo: "", amount: "100000", status: "c" },
+        { id: 2, accountId: 1, categoryId: null, date: "2026-03-01", payee: "Bonus", memo: "", amount: "50000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const res = computeTrailingNetWorth(data, "2026-03", 3);
+    expect(res.startNet).toBe(100000);
+    expect(res.currentNet).toBe(150000);
+    expect(res.delta).toBe(50000);
+    expect(res.pctDelta).toBe(50); // 50%
+  });
+
+  it("returns null pctDelta when startNet === 0 and delta !== 0 (UNI-34 / BUG-27)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "50000", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-02-01", payee: "Deposit", memo: "", amount: "50000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const res = computeTrailingNetWorth(data, "2026-03", 3);
+    expect(res.startNet).toBe(0);
+    expect(res.currentNet).toBe(50000);
+    expect(res.delta).toBe(50000);
+    expect(res.pctDelta).toBeNull();
+  });
+
+  it("returns 0 pctDelta when startNet === 0 and delta === 0", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [],
+      recurring: [],
+    };
+
+    const res = computeTrailingNetWorth(data, "2026-03", 3);
+    expect(res.startNet).toBe(0);
+    expect(res.currentNet).toBe(0);
+    expect(res.delta).toBe(0);
+    expect(res.pctDelta).toBe(0);
   });
 });

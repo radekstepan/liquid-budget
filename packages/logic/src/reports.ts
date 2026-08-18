@@ -205,7 +205,7 @@ export type TrailingNetWorthSummary = {
   currentNet: number;
   startNet: number;
   delta: number;
-  pctDelta: number;
+  pctDelta: number | null;
 };
 
 export function getOffsetMonth(month: string, offset: number): string {
@@ -232,7 +232,11 @@ export function computeTrailingNetWorth(
   const startNet = points[0]?.net ?? 0;
   const delta = currentNet - startNet;
   const pctDelta =
-    startNet !== 0 ? Math.round((delta / Math.abs(startNet)) * 1000) / 10 : 0;
+    startNet !== 0
+      ? Math.round((delta / Math.abs(startNet)) * 1000) / 10
+      : delta === 0
+        ? 0
+        : null;
 
   return {
     points,
