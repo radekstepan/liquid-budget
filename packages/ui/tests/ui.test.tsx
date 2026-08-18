@@ -62,6 +62,26 @@ describe("Modal", () => {
     expect(screen.getByText("Test")).toBeInTheDocument();
     expect(screen.getByText("body")).toBeInTheDocument();
   });
+
+  it("stably calls the latest onClose callback after re-rendering with new props (UNI-49 / BUG-42)", () => {
+    const onClose1 = vi.fn();
+    const onClose2 = vi.fn();
+    const { rerender } = render(
+      <Modal title="Test" onClose={onClose1}>
+        <div>body</div>
+      </Modal>
+    );
+
+    rerender(
+      <Modal title="Test Updated" onClose={onClose2}>
+        <div>body updated</div>
+      </Modal>
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose1).not.toHaveBeenCalled();
+    expect(onClose2).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Field", () => {

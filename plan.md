@@ -86,7 +86,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` | ✅ **Resolved** |
 | **UNI-47** | BUG-40 | Logic | **Low (P3)** | `num()` parser silently returns 0 for formatted currency strings containing currency symbols | `packages/logic/src/format.ts` | ✅ **Resolved** |
 | **UNI-48** | BUG-41 | Performance | **Low (P3)** | `getBudgetData` performs full unpaginated table scan | `packages/server/src/queries/budget.ts` | ✅ **Resolved** |
-| **UNI-49** | BUG-42 | Performance | **Low (P3)** | `Modal` component reinstantiates `keydown` event listener on every render cycle | `packages/ui/src/ui.tsx` |
+| **UNI-49** | BUG-42 | Performance | **Low (P3)** | `Modal` component reinstantiates `keydown` event listener on every render cycle | `packages/ui/src/ui.tsx` | ✅ **Resolved** |
 
 ---
 
@@ -554,6 +554,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/queries/budget.ts`, `getBudgetData` performed nested $O(N \times M)$ filtering to link sub-transactions to recurring rules and lacked support for transaction query bounds.
 - **Actionable Solution:** Group recurring sub-transactions in $O(M)$ time using a Map index, and support optional `limitTransactions` bounds.
 - **Resolution (UNI-48):** Replaced nested filtering with $O(M)$ Map grouping and added `options.limitTransactions` support in `packages/server/src/queries/budget.ts`. Added unit tests in `packages/server/tests/budget.test.ts`.
+
+#### UNI-49 (BUG-42): Keydown Event Listener Stabilization in Modal
+- **Root Cause:** In `packages/ui/src/ui.tsx`, `Modal` included `onClose` directly in `useEffect` dependency array, tearing down and re-binding `window.addEventListener("keydown")` on every parent re-render.
+- **Actionable Solution:** Use `useRef` to store the current `onClose` callback reference and bind the global `keydown` event listener once on component mount.
+- **Resolution (UNI-49):** Refactored `Modal` in `packages/ui/src/ui.tsx` to use `onCloseRef` with an empty dependency array mount effect. Added unit tests in `packages/ui/tests/ui.test.tsx`.
 
 ---
 
