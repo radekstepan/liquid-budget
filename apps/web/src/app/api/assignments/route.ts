@@ -1,5 +1,5 @@
 import { getDefaultDb, upsertAssignment } from "@ynab/server";
-import { AssignmentUpsertSchema, formatZodError } from "../schemas.js";
+import { AssignmentUpsertSchema, formatZodError } from "../schemas";
 
 export const dynamic = "force-dynamic";
 

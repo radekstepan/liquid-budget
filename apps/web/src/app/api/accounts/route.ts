@@ -17,7 +17,7 @@ import {
   AccountCreateSchema,
   AccountPatchSchema,
   formatZodError,
-} from "../schemas.js";
+} from "../schemas";
 
 export async function POST(req: Request) {
   let json: unknown;

@@ -45,7 +45,7 @@ import {
   formatZodError,
   RecurringCreateSchema,
   RecurringPatchSchema,
-} from "../schemas.js";
+} from "../schemas";
 
 function errorResponse(e: unknown): Response {
   if (e instanceof RecurringError) {

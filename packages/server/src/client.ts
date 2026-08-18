@@ -6,7 +6,9 @@ import { fileURLToPath } from "url";
 import path from "path";
 import { bootstrapMigrationJournal } from "./migrate-bootstrap.js";
 
-export type Db = BetterSQLite3Database<typeof schema>;
+export type Db = BetterSQLite3Database<typeof schema> & {
+  $client: Database.Database;
+};
 
 // Re-export as `Database` for backward compat with existing call sites.
 export type { Db as Database };

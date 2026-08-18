@@ -9,7 +9,7 @@ import {
   formatZodError,
   ReconcileAccountSchema,
   UnreconcileAccountSchema,
-} from "../schemas.js";
+} from "../schemas";
 
 export const dynamic = "force-dynamic";
 
