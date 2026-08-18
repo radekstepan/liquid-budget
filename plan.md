@@ -62,7 +62,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` | ✅ **Resolved** |
 | **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` | ✅ **Resolved** |
-| **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` |
+| **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` | ✅ **Resolved** |
 | **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` |
 | **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` |
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` |
@@ -402,6 +402,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** Sidebar account group ordering was hardcoded to `["Liquid", "Credit Cards", "Retirement", "Budget Accounts"]`, which misordered imported YNAB4 custom groups and forced hardcoded labels before others.
 - **Actionable Solution:** Dynamically discover all active account groups, placing on-budget account groups first ordered by minimum account sort order, followed by off-budget/tracking groups ordered by sort order, and sorting accounts within each group by sort index.
 - **Resolution (UNI-24):** Replaced hardcoded `groupOrder` in `packages/ui/src/Sidebar.tsx` with dynamic group discovery that groups on-budget accounts first, ordered by their accounts' `sort` index, followed by off-budget groups, and sorts accounts within each group by sort position. Added unit tests in `packages/ui/tests/Sidebar.test.tsx`.
+
+---
+
+#### UNI-25 (BUG-29): Credit Card Payment Category Initial Carryover on Import
+- **Root Cause:** In `packages/server/src/import-ynab4.ts:175-183`, credit card payment categories were always created with `carryover: 0` instead of accounting for pre-existing credit card starting balance debt.
+- **Actionable Solution:** Upon transaction import and account balance recomputation, look up starting balance transactions for linked credit card accounts and initialize the credit card payment category's `carryover` to the initial starting debt.
+- **Resolution (UNI-25):** Updated `importYnab4` in `packages/server/src/import-ynab4.ts` to inspect credit card starting balance transactions and initialize the corresponding Credit Card Payment category `carryover` with the starting balance debt. Added integration test in `packages/server/tests/import-ynab4.integration.test.ts`.
 
 ---
 

@@ -299,4 +299,31 @@ describe("importYnab4 full import", () => {
     expect(Number(byName.get("Visa")!.balance)).toBe(50000);
     expect(Number(byName.get("RRSP")!.balance)).toBe(0);
   });
+
+  it("initializes credit card payment category carryover from card starting balance (UNI-25 / BUG-29)", async () => {
+    const dataWithStartingBalance = {
+      ...ynabData,
+      transactions: [
+        ...ynabData.transactions,
+        {
+          entityId: "t_cc_start",
+          accountId: "acc2",
+          amount: -750, // -$750.00 starting debt on Visa
+          date: "2026-05-31",
+          payeeId: "p_start",
+          cleared: "Cleared",
+        },
+      ],
+      payees: [
+        ...ynabData.payees,
+        { entityId: "p_start", name: "Starting Balance" },
+      ],
+    };
+
+    await importYnab4(db, dataWithStartingBalance);
+    const { categories } = await getBudgetData(db);
+    const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
+    expect(visaPaymentCat).toBeTruthy();
+    expect(Number(visaPaymentCat.carryover)).toBe(75000); // 75000 cents ($750.00)
+  });
 });
