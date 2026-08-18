@@ -219,12 +219,57 @@ describe("ReportsView", () => {
     fireEvent.click(logBtn);
     expect(panel.querySelector("svg")).not.toBeNull();
     // Grid lines and decade ticks should render in log mode
-    expect(within(panel).getByText("$1M")).toBeInTheDocument();
-    expect(within(panel).getByText("-$1M")).toBeInTheDocument();
+    expect(within(panel).getByText("$100K")).toBeInTheDocument();
+    expect(within(panel).getByText("-$100K")).toBeInTheDocument();
 
     // Toggle back to Linear
     fireEvent.click(linearBtn);
     expect(panel.querySelector("svg")).not.toBeNull();
+  });
+
+  it("Net Worth bars stay within the chart vertical bounds (y >= 10)", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "9500000", onBudget: true, sort: 0 },
+      ],
+    };
+    renderView({ data });
+    clickTab("Net Worth");
+    const panel = findPanel("Net Worth")!;
+    const svg = panel.querySelector("svg")!;
+    const rects = Array.from(svg.querySelectorAll("rect"));
+    expect(rects.length).toBeGreaterThan(0);
+    for (const rect of rects) {
+      const yVal = parseFloat(rect.getAttribute("y") || "0");
+      // y must not be above the top padding (padT = 10)
+      expect(yVal).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it("Net Worth horizontal axis labels do not overlap adjacent months in 14-month view", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 0 },
+      ],
+    };
+    renderView({ data, selectedRange: "12m" });
+    clickTab("Net Worth");
+    const panel = findPanel("Net Worth")!;
+    const svg = panel.querySelector("svg")!;
+    // Horizontal axis labels match month text like "Jan 2026", "Feb 2026", etc.
+    const textEls = Array.from(svg.querySelectorAll("text")).filter(
+      (el) => /^[A-Z][a-z]{2} \d{4}$/.test(el.textContent?.trim() || "")
+    );
+    expect(textEls.length).toBeGreaterThan(1);
+    const xCoords = textEls
+      .map((el) => parseFloat(el.getAttribute("x") || "0"))
+      .sort((a, b) => a - b);
+    // Verify that consecutive X-axis label positions have adequate spacing
+    for (let i = 1; i < xCoords.length; i++) {
+      expect(xCoords[i]! - xCoords[i - 1]!).toBeGreaterThanOrEqual(30);
+    }
   });
 
   it("Expense Breakdown tab renders the donut SVG and legend", () => {

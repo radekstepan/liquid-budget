@@ -36,8 +36,8 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     const H = size.height;
     const padL = 64;
     const padR = 18;
-    const padT = 14;
-    const padB = 36;
+    const padT = 10;
+    const padB = 34;
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
@@ -51,19 +51,22 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     }
 
     const isLog = scaleMode === "log";
-    const ticks = isLog ? symlogTicks(minVal, maxVal) : niceTicks(minVal, maxVal);
-    const tMax = ticks[ticks.length - 1] ?? maxVal;
-    const tMin = ticks[0] ?? minVal;
+    const rawTicks = isLog ? symlogTicks(minVal, maxVal) : niceTicks(minVal, maxVal);
+    const ticks = rawTicks.filter((t) => t >= minVal && t <= maxVal);
+    if (!ticks.includes(0) && minVal <= 0 && maxVal >= 0) {
+      ticks.push(0);
+      ticks.sort((a, b) => a - b);
+    }
 
     const valToNorm = (v: number) => {
       if (isLog) {
-        const sMin = symlog(tMin);
-        const sMax = symlog(tMax);
+        const sMin = symlog(minVal);
+        const sMax = symlog(maxVal);
         const sRange = sMax - sMin || 1;
         return (symlog(v) - sMin) / sRange;
       }
-      const range = tMax - tMin || 1;
-      return (v - tMin) / range;
+      const range = maxVal - minVal || 1;
+      return (v - minVal) / range;
     };
 
     const y = (v: number) => padT + innerH * (1 - valToNorm(v));
@@ -90,7 +93,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
         " L " + xAt(0) + "," + zeroY + " Z";
     }
 
-    return { W, H, padL, padR, padT, padB, innerW, innerH, y, zeroY, ticks, tMin, tMax, linePath, areaPath, barW, n, xAt };
+    return { W, H, padL, padR, padT, padB, innerW, innerH, y, zeroY, ticks, linePath, areaPath, barW, n, xAt };
   }, [size, points, scaleMode]);
 
   const empty = points.length === 0;
@@ -310,12 +313,36 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
             )}
 
             {(() => {
-              const stride = chart.n <= 12 ? 1 : Math.ceil(chart.n / 12);
-              const tickEvery = (i: number) => i === 0 || i === chart.n - 1 || i % stride === 0;
+              if (chart.n === 0) return null;
+              const maxTicks = Math.max(2, Math.min(12, Math.floor(chart.innerW / 65)));
+              const stride = chart.n <= maxTicks ? 1 : Math.ceil((chart.n - 1) / (maxTicks - 1));
+              const tickIndices: number[] = [];
+              for (let i = 0; i < chart.n; i += stride) {
+                tickIndices.push(i);
+              }
+              const lastIdx = chart.n - 1;
+              const prevIdx = tickIndices[tickIndices.length - 1]!;
+              if (lastIdx !== prevIdx) {
+                if (lastIdx - prevIdx < Math.max(2, Math.round(stride * 0.75))) {
+                  tickIndices[tickIndices.length - 1] = lastIdx;
+                } else {
+                  tickIndices.push(lastIdx);
+                }
+              }
+              const tickSet = new Set(tickIndices);
+
               return points.map((p, i) => {
-                if (!tickEvery(i)) return null;
+                if (!tickSet.has(i)) return null;
                 const { month0, year } = parseMonthKey(p.month);
                 const label = `${MONTHS[month0] ?? ""} ${year}`;
+                const anchor =
+                  chart.n === 1
+                    ? "middle"
+                    : i === 0
+                    ? "start"
+                    : i === chart.n - 1
+                    ? "end"
+                    : "middle";
                 return (
                   <text
                     key={`lbl-${i}`}
@@ -323,7 +350,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                     y={chart.H - chart.padB + 18}
                     fill="var(--y-ink-soft)"
                     fontSize={10.5}
-                    textAnchor="middle"
+                    textAnchor={anchor}
                     className="y-num"
                   >
                     {label}
