@@ -19,7 +19,7 @@
  * wiped, corrupt database.
  */
 import { describe, expect, it, beforeEach } from "vitest";
-import { importYnab4, recomputeAccountBalances } from "../src/import-ynab4.js";
+import { importYnab4, parseYnab4SettingsXml, recomputeAccountBalances } from "../src/import-ynab4.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
 
 describe("recomputeAccountBalances (importer transfer-math fix)", () => {
@@ -282,6 +282,36 @@ describe("importYnab4 transaction wrapping", () => {
     expect(sqls[0]).toBe("BEGIN");
     expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
     expect(sqls).not.toContain("COMMIT");
+  });
+});
+
+describe("parseYnab4SettingsXml (UNI-26 / BUG-30)", () => {
+  it("parses settings XML with currency and date preferences", () => {
+    const xml = `
+      <budgetSettings>
+        <currencySymbol>$</currencySymbol>
+        <currencyISOSymbol>USD</currencyISOSymbol>
+        <decimalSeparator>.</decimalSeparator>
+        <groupSeparator>,</groupSeparator>
+        <dateFormat>YYYY-MM-DD</dateFormat>
+        <budgetName>Family Finances</budgetName>
+      </budgetSettings>
+    `;
+
+    const settings = parseYnab4SettingsXml(xml);
+    expect(settings).toEqual({
+      currencySymbol: "$",
+      currencyISOSymbol: "USD",
+      decimalSeparator: ".",
+      groupSeparator: ",",
+      dateFormat: "YYYY-MM-DD",
+      budgetName: "Family Finances",
+    });
+  });
+
+  it("handles empty or missing xml gracefully", () => {
+    expect(parseYnab4SettingsXml(undefined)).toEqual({});
+    expect(parseYnab4SettingsXml("")).toEqual({});
   });
 });
 

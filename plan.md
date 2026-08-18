@@ -63,7 +63,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` | ✅ **Resolved** |
 | **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` | ✅ **Resolved** |
-| **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` |
+| **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` | ✅ **Resolved** |
 | **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` |
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` |
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` |
@@ -409,6 +409,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/import-ynab4.ts:175-183`, credit card payment categories were always created with `carryover: 0` instead of accounting for pre-existing credit card starting balance debt.
 - **Actionable Solution:** Upon transaction import and account balance recomputation, look up starting balance transactions for linked credit card accounts and initialize the credit card payment category's `carryover` to the initial starting debt.
 - **Resolution (UNI-25):** Updated `importYnab4` in `packages/server/src/import-ynab4.ts` to inspect credit card starting balance transactions and initialize the corresponding Credit Card Payment category `carryover` with the starting balance debt. Added integration test in `packages/server/tests/import-ynab4.integration.test.ts`.
+
+---
+
+#### UNI-26 (BUG-30): Parsing and Applying YNAB4 `settingsXml`
+- **Root Cause:** In `packages/server/src/import-ynab4.ts:16-38`, `settingsXml` was extracted from `.ybsettings` files in zip archives but never parsed or returned.
+- **Actionable Solution:** Parse `settingsXml` to extract budget title, currency symbol, ISO code, decimal/group separators, and date formatting options, returning them as structured settings metadata.
+- **Resolution (UNI-26):** Implemented `parseYnab4SettingsXml` in `packages/server/src/import-ynab4.ts` to extract currency, separators, date format, and budget title from `.ybsettings` files. Updated `extractYnab4DataFromZip` and `importYnab4` to parse and include settings in the returned payload. Added unit tests in `packages/server/tests/import-ynab4.test.ts`.
 
 ---
 
