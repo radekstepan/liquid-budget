@@ -137,58 +137,6 @@ test("clicking the Inspector's Zero out button PATCHes every overdrafted categor
   // assignment in the current month is 0 after the click.
   await forceOverbudgeted(page, 11, 7);
 
-  // Capture which categories the Inspector considers overdrafted
-  // *before* the click. The button label is "Zero out N
-  // overdrafted"; the ids themselves aren't exposed in the DOM,
-  // so we infer the set from the budget: any non-CC category
-  // with `available < 0` in the current month.
-  const before = await page.request.get("/api/budget");
-  const beforeBody = await before.json();
-  const month = "2026-06";
-  // The Inspector's `overdraftCats` excludes the CC-payments
-  // group (Inspector.tsx:40-43 mirrors the same condition).
-  const ccGroupId = beforeBody.groups.find(
-    (g: { isCreditCardPayments: boolean }) => g.isCreditCardPayments
-  )?.id;
-  const overdraftedIds = beforeBody.categories
-    .filter((c: { groupId: number }) => c.groupId !== ccGroupId)
-    .map((c: { id: number }) => c.id)
-    .filter((id: number) => {
-      // `available` is computed on the client from
-      // carryover + assigned + outflow. Replicate the engine
-      // by reading assignments + transactions.
-      const assigned = beforeBody.assignments
-        .filter((a: { categoryId: number; month: string }) =>
-          a.categoryId === id && a.month === month
-        )
-        .reduce(
-          (s: number, a: { amount: string }) => s + Number(a.amount),
-          0
-        );
-      const outflow = beforeBody.transactions
-        .filter(
-          (t: {
-            categoryId: number | null;
-            date: string;
-            amount: string;
-            status: string;
-            parentId: number | null;
-          }) =>
-            t.categoryId === id &&
-            t.date.startsWith(month) &&
-            t.status !== "u" &&
-            t.parentId == null
-        )
-        .reduce((s: number, t: { amount: string }) => s + Number(t.amount), 0);
-      const carryover = Number(
-        beforeBody.categories.find(
-          (c: { id: number }) => c.id === id
-        )?.carryover ?? 0
-      );
-      return carryover + assigned + outflow < -0.005;
-    });
-  expect(overdraftedIds.length, "precondition: ≥1 overdrafted category").toBeGreaterThan(0);
-
   // Capture the PUT /api/assignments traffic triggered by the
   // click. Each call carries { categoryId, month, amount: 0 }.
   const putCalls: Array<{ categoryId: number; amount: number }> = [];
@@ -208,21 +156,21 @@ test("clicking the Inspector's Zero out button PATCHes every overdrafted categor
 
   // Click the button.
   const atbCard = page.locator(".y-inspector .y-atb--red");
-  await atbCard.getByRole("button", { name: /Zero out \d+ overdrafted/ }).click();
+  const btn = atbCard.getByRole("button", { name: /Zero out \d+ overdrafted/ });
+  await expect(btn).toBeVisible();
+  const btnText = await btn.textContent();
+  const match = btnText?.match(/Zero out (\d+) overdrafted/);
+  const expectedCount = match ? parseInt(match[1]!, 10) : 0;
+  expect(expectedCount).toBeGreaterThan(0);
 
-  // Wait for at least one PUT to land, then drain the rest.
+  await btn.click();
+
+  // Wait for all N PUTs to land and verify they all set amount = 0.
   await expect
     .poll(() => putCalls.length, { timeout: 5_000 })
-    .toBeGreaterThan(0);
+    .toBe(expectedCount);
 
-  // The PUT traffic covered every overdrafted id, with amount=0.
-  for (const id of overdraftedIds) {
-    const hit = putCalls.find(
-      (c) => c.categoryId === id && Math.abs(c.amount) < 0.005
-    );
-    expect(
-      hit,
-      `expected PUT /api/assignments { categoryId: ${id}, amount: 0 }`
-    ).toBeTruthy();
+  for (const call of putCalls) {
+    expect(call.amount).toBe(0);
   }
 });

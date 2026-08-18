@@ -61,7 +61,7 @@ test("POST + DELETE /api/transactions round-trips a row", async () => {
     date: "2026-06-15",
     payee: "PW API Contract",
     memo: "Created by api.spec.ts",
-    amount: -1.23,
+    amount: -123,
     cleared: true,
   };
   const created = await ctx.post("/api/transactions", { data: payload });
@@ -95,7 +95,7 @@ test("PUT /api/assignments upserts a row", async () => {
   // Use a far-future month so this never collides with seed data
   // and never surfaces in the default budget view.
   const month = "2099-12";
-  const amount = 12.34;
+  const amount = 1234;
 
   const put = await ctx.put("/api/assignments", {
     data: { categoryId, month, amount },
@@ -104,7 +104,7 @@ test("PUT /api/assignments upserts a row", async () => {
   const row = await put.json();
   expect(row.categoryId).toBe(categoryId);
   expect(row.month).toBe(month);
-  expect(Number(row.amount)).toBeCloseTo(amount, 2);
+  expect(Number(row.amount)).toBe(amount);
 
   // It should appear in the budget response.
   const after = await (await ctx.get("/api/budget")).json();
@@ -133,7 +133,7 @@ test("POST /api/transactions creates a transfer and updates both balances", asyn
 
   const sourceBalBefore = Number(source.balance);
   const destBalBefore = Number(dest.balance);
-  const amount = -123.45;
+  const amount = -12345;
   const date = "2099-06-15";
 
   const created = await ctx.post("/api/transactions", {
@@ -161,8 +161,8 @@ test("POST /api/transactions creates a transfer and updates both balances", asyn
   const destAfter = after.accounts.find(
     (a: { id: number }) => a.id === dest.id
   );
-  expect(Number(sourceAfter.balance)).toBeCloseTo(sourceBalBefore + amount, 2);
-  expect(Number(destAfter.balance)).toBeCloseTo(destBalBefore - amount, 2);
+  expect(Number(sourceAfter.balance)).toBe(sourceBalBefore + amount);
+  expect(Number(destAfter.balance)).toBe(destBalBefore - amount);
 
   // Clean up the transfer.
   await ctx.delete(`/api/transactions?id=${row.id}`);
@@ -293,7 +293,7 @@ test("POST /api/recurring creates and posts a recurring transfer", async () => {
       accountId: source.id,
       categoryId: null,
       payee: "Recurring AMEX Payment",
-      amount: -77.77,
+      amount: -7777,
       frequency: "monthly",
       nextDate: "2099-07-20",
       transferAccountId: dest.id,
@@ -543,7 +543,7 @@ test("DELETE /api/transactions deletes a transfer and fully reverses both accoun
 
   const sourceBalBefore = Number(source.balance);
   const destBalBefore = Number(dest.balance);
-  const transferAmount = -75.5;
+  const transferAmount = -7550;
 
   // Create transfer
   const res = await ctx.post("/api/transactions", {
@@ -564,8 +564,8 @@ test("DELETE /api/transactions deletes a transfer and fully reverses both accoun
   const afterCreate = await (await ctx.get("/api/budget")).json();
   const sourceAfter = afterCreate.accounts.find((a: { id: number }) => a.id === source.id);
   const destAfter = afterCreate.accounts.find((a: { id: number }) => a.id === dest.id);
-  expect(Number(sourceAfter.balance)).toBeCloseTo(sourceBalBefore + transferAmount, 2);
-  expect(Number(destAfter.balance)).toBeCloseTo(destBalBefore - transferAmount, 2);
+  expect(Number(sourceAfter.balance)).toBe(sourceBalBefore + transferAmount);
+  expect(Number(destAfter.balance)).toBe(destBalBefore - transferAmount);
 
   // Delete the transfer
   const delRes = await ctx.delete(`/api/transactions?id=${created.id}`);

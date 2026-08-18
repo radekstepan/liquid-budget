@@ -40,24 +40,34 @@ test("adds a new liquid account and renders it under Budget Accounts", async ({ 
   ).toBeVisible();
 });
 
-test("edits an existing account balance via the hover-revealed pencil", async ({ page }) => {
-  // The TD Unlimited Chequing account is the first seeded one (seed.ts:114).
+test("edits an existing account name via the hover-revealed pencil", async ({ page }) => {
+  const stamp = Date.now();
+  const name = `PW Acc ${stamp}`;
+  const renamed = `PW Renamed ${stamp}`;
+
+  // Add a fresh account
+  await page.getByRole("button", { name: "Add Account" }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator("input").first().fill(name);
+  await addModal.locator(".y-modal-foot").getByRole("button", { name: "Add Account" }).click();
+  await expect(addModal).toBeHidden();
+
   // The hover-revealed edit button uses aria-label "Edit account <name>".
-  const editBtn = page.getByRole("button", { name: "Edit account TD Unlimited Chequing" });
+  const editBtn = page.getByRole("button", { name: `Edit account ${name}` });
   await editBtn.click({ force: true });
 
   const modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("Edit Account");
 
-  // Overwrite the balance field.
-  const balance = modal.locator('input[inputmode="decimal"]').first();
-  await balance.fill("12345.67");
+  // Balance is locked after creation; rename the account
+  const nameInput = modal.locator('input[placeholder="e.g. TD Chequing"]').first();
+  await nameInput.fill(renamed);
   await modal.locator(".y-modal-foot").getByRole("button", { name: "Save Changes" }).click();
 
   await expect(modal).toBeHidden();
-  // The sidebar shows the new balance next to the account name.
+  // The sidebar shows the renamed account name
   await expect(
-    page.getByRole("button", { name: /TD Unlimited Chequing.*12,345/ }).first()
+    page.getByRole("button", { name: new RegExp(renamed) }).first()
   ).toBeVisible();
 });
 

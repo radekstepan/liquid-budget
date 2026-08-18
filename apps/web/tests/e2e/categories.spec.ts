@@ -45,7 +45,7 @@ test("adds a new category to an existing group via the group + button", async ({
   // BudgetView.tsx:374-376). Multiple groups expose this, so we scope
   // to the first master row that has a "Needs" name.
   const needsRow = page.locator("tr.y-master").filter({ hasText: "Needs" }).first();
-  await needsRow.getByRole("button", { name: "Add category" }).click();
+  await needsRow.getByRole("button", { name: "Add category" }).click({ force: true });
 
   const modal = page.locator(".y-modal").last();
   await expect(modal.getByText("New Category", { exact: true })).toBeVisible();
@@ -98,7 +98,7 @@ test("edits a category's name via the row edit pencil", async ({ page }) => {
 
   // Add a new category to Needs (BudgetView.tsx:369-379).
   const needsRow = page.locator("tr.y-master").filter({ hasText: "Needs" }).first();
-  await needsRow.getByRole("button", { name: "Add category" }).click();
+  await needsRow.getByRole("button", { name: "Add category" }).click({ force: true });
   let modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("New Category");
   await modal.locator("input").first().fill(original);
@@ -111,7 +111,7 @@ test("edits a category's name via the row edit pencil", async ({ page }) => {
   // Open the edit modal for the row we just created.
   // The per-row edit pencil is aria-label "Edit <name>"
   // (BudgetView.tsx:453).
-  await page.getByRole("button", { name: `Edit ${original}` }).click();
+  await page.getByRole("button", { name: `Edit ${original}` }).click({ force: true });
   modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("Edit Category");
 

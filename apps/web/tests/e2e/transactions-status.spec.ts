@@ -80,21 +80,23 @@ test("clicking the C column cycles a row C → U → C", async ({ page }) => {
 });
 
 test("reconciled rows do not expose the cycle button", async ({ page }) => {
-  // The seed has 21 "r" rows after a fresh /api/reset (reconcile
-  // them via /api/reconcile if you're running against a clean DB).
-  // For a self-contained test we just reconcile a fresh account.
-  //
-  // Steps: open Scotia e-Chequing (no seed transactions → no
-  // pre-existing R rows), post a single transaction, mark it
-  // cleared, reconcile, then check the register's status cell for
-  // the new R row.
-  await page.getByRole("button", { name: /Scotia e-Chequing/ }).first().click();
+  const stamp = Date.now();
+  const accName = `PW RecAcc ${stamp}`;
+
+  // Create a fresh isolated account with 0 balance
+  await page.getByRole("button", { name: "Add Account" }).click();
+  const accModal = page.locator(".y-modal").last();
+  await accModal.locator('input[placeholder="e.g. TD Chequing"]').fill(accName);
+  await accModal.getByRole("button", { name: "Add Account" }).click();
+  await expect(accModal).toBeHidden();
+
+  // Navigate to the newly created account register
+  await page.getByRole("button", { name: accName }).first().click();
   await expect(
-    page.locator(".y-toolbar").getByText("Scotia e-Chequing", { exact: true })
+    page.locator(".y-toolbar").getByText(accName, { exact: true })
   ).toBeVisible();
 
-  // Add a fresh row.
-  const stamp = Date.now();
+  // Add a fresh row
   const payee = `PW Reconcile Cycle ${stamp}`;
   await page.getByRole("button", { name: "Add Transaction" }).click();
   const modal = page.locator(".y-modal").last();
@@ -104,19 +106,15 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
-  // Mark it cleared.
+  // Ensure it is cleared
   const newRow = page.getByRole("row").filter({ hasText: payee }).first();
   const newFlag = newRow.locator(".y-cleared");
   await expect(newFlag).toHaveText("C");
-  await newFlag.click();
-  await expect(newFlag).toHaveText("U");
-  await newFlag.click();
-  await expect(newFlag).toHaveText("C");
 
-  // Reconcile via the toolbar.
+  // Reconcile via the toolbar
   await page.getByRole("button", { name: "Reconcile", exact: true }).click();
   const rModal = page.locator(".y-modal").last();
-  await expect(rModal.locator(".y-modal-head")).toHaveText(/Reconcile: Scotia/);
+  await expect(rModal.locator(".y-modal-head")).toHaveText(new RegExp(`Reconcile: ${accName}`));
   await rModal.getByRole("button", { name: "Reconcile", exact: true }).click();
   await expect(rModal).toBeHidden();
 

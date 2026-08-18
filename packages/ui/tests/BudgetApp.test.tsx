@@ -107,7 +107,7 @@ describe("BudgetApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
     fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
 
-    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Coffee" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
@@ -355,7 +355,7 @@ describe("BudgetApp", () => {
     });
     fireEvent.click(editBtn);
 
-    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
     });
@@ -388,7 +388,7 @@ describe("BudgetApp", () => {
 
     expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
     });
 
     expect(
