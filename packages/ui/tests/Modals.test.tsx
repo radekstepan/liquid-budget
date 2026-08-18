@@ -1172,6 +1172,9 @@ describe("AccountModal", () => {
       target: { value: "Visa" },
     });
     pickFromOpenDropdownByValue(/type/i, "credit");
+    expect(
+      screen.getByText("Credit card balance represents debt owed (stored as a negative starting balance).")
+    ).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-300" },
     });
