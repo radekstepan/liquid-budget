@@ -74,7 +74,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` | ✅ **Resolved** |
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` | ✅ **Resolved** |
 | **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` | ✅ **Resolved** |
-| **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` |
+| **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` | ✅ **Resolved** |
 | **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` |
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` |
 | **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various |
@@ -334,6 +334,7 @@ Despite strong foundations, the application has critical financial calculation d
   - `?format=csv`: Standard transaction spreadsheet export.
   - `?format=json`: Complete structured JSON export matching `getBudgetData` format.
   - `?format=sqlite`: Safe raw database backup generated via `better-sqlite3`'s `.backup()` API (consistent under WAL mode).
+- **Resolution (UNI-37):** Extended `GET /api/export` in `apps/web/src/app/api/export/route.ts` to support `?format=json` (structured BudgetData JSON) and `?format=sqlite` / `?format=db` (raw SQLite binary snapshot). Added menu actions to `Inspector.tsx` and automated tests in `apps/web/tests/export.test.ts`.
 
 ---
 
