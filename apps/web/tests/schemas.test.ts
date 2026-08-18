@@ -14,7 +14,7 @@ import {
   TransactionCreateSchema,
   TransactionPatchSchema,
   UnreconcileAccountSchema,
-} from "../src/app/api/schemas.js";
+} from "../src/app/api/schemas";
 
 describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
   describe("TransactionCreateSchema", () => {

@@ -264,7 +264,26 @@ export function BudgetAppShell() {
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
-        const recurring = prev.recurring.map((r) => (r.id === id ? { ...r, ...v, amount: v.amount !== undefined ? v.amount.toFixed(2) : r.amount } : r));
+        const recurring = prev.recurring.map((r) => {
+          if (r.id !== id) return r;
+          const { subTransactions, amount, ...rest } = v;
+          return {
+            ...r,
+            ...rest,
+            amount: amount !== undefined ? amount.toFixed(2) : r.amount,
+            subTransactions:
+              subTransactions !== undefined
+                ? subTransactions.map((st, i) => ({
+                    id: r.subTransactions?.[i]?.id ?? -(i + 1),
+                    recurringId: id,
+                    categoryId: st.categoryId,
+                    amount: st.amount.toFixed(2),
+                    memo: st.memo ?? "",
+                    sort: i,
+                  }))
+                : r.subTransactions,
+          };
+        });
         return { ...prev, recurring };
       });
       return withSync(async () => {

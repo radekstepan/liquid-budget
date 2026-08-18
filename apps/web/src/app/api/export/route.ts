@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     if (format === "sqlite" || format === "db") {
       const buffer = db.$client.serialize();
-      return new Response(buffer, {
+      return new Response(new Uint8Array(buffer), {
         headers: {
           "Content-Type": "application/x-sqlite3",
           "Content-Disposition": `attachment; filename="budget-${today}.db"`,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { NextRequest } from "next/server";
-import { GET } from "../src/app/api/export/route.js";
+import { GET } from "../src/app/api/export/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
