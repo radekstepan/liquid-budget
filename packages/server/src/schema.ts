@@ -122,7 +122,6 @@ export const transactions = sqliteTable(
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
     reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),
     statusCheck: check("transactions_status_check", sql`${t.status} IN ('u', 'c', 'r')`),
-    amountCheck: check("transactions_amount_check", sql`${t.amount} != 0`),
   })
 );
 
@@ -164,7 +163,6 @@ export const recurring = sqliteTable(
   (t) => ({
     accountIdx: index("recurring_account_id_idx").on(t.accountId),
     nextDateIdx: index("recurring_next_date_idx").on(t.nextDate),
-    amountCheck: check("recurring_amount_check", sql`${t.amount} != 0`),
   })
 );
 
@@ -185,7 +183,6 @@ export const recurringSubTransactions = sqliteTable(
   },
   (t) => ({
     recurringIdIdx: index("recurring_sub_transactions_recurring_id_idx").on(t.recurringId),
-    amountCheck: check("recurring_sub_amount_check", sql`${t.amount} != 0`),
   })
 );
 
