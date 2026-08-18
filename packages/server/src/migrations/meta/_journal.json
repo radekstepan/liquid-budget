@@ -57,6 +57,13 @@
       "when": 1786983993254,
       "tag": "0007_mean_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786984385375,
+      "tag": "0008_dear_daredevil",
+      "breakpoints": true
     }
   ]
 }

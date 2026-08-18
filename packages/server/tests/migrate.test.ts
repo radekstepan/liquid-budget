@@ -111,7 +111,7 @@ describe("Drizzle migrations", () => {
     // No duplicates. sqlite_sequence is excluded from the count.
     const systemTables = new Set(["__drizzle_migrations", "sqlite_sequence"]);
     const appTableCount = tableNames.filter((n) => !systemTables.has(n)).length;
-    expect(appTableCount).toBe(8);
+    expect(appTableCount).toBe(9);
   });
 
   it("enforces DB-level CHECK constraints (UNI-29 / BUG-12, F-19)", () => {
