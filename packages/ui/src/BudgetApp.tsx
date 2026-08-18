@@ -414,17 +414,11 @@ export function BudgetApp({
         if (y > maxY) maxY = y;
       }
     };
-    const txns = data.transactions;
-    if (txns.length > 0) {
-      consider(txns[0]?.date);
-      consider(txns[txns.length - 1]?.date);
-      if (txns.length <= 100) {
-        for (const t of txns) consider(t.date);
-      }
-    }
+    for (const t of data.transactions) consider(t.date);
     for (const a of data.assignments) consider(a.month);
+    for (const r of data.recurring) consider(r.nextDate);
     return { minYear: minY, maxYear: maxY };
-  }, [data.transactions, data.assignments]);
+  }, [data.transactions, data.assignments, data.recurring]);
 
   const editingCategory =
     modal.kind === "editCategory" ? data.categories.find((c) => c.id === modal.categoryId) : undefined;

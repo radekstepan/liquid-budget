@@ -397,4 +397,32 @@ describe("BudgetApp", () => {
       )
     ).toBe(true);
   });
+
+  it("considers all transactions regardless of list length for year range (UNI-39 / F-20)", () => {
+    const { api } = makeApi();
+    const seed = makeSeedBudgetData();
+    
+    // Create 150 transactions with one historical transaction from 2020 in the middle
+    const manyTxns = Array.from({ length: 150 }, (_, i) => ({
+      id: 1000 + i,
+      accountId: 1,
+      categoryId: 10,
+      date: i === 75 ? "2020-03-15" : "2026-06-01",
+      payee: `Payee ${i}`,
+      memo: "",
+      amount: "-1000",
+      status: "c" as const,
+    }));
+
+    const data: BudgetData = {
+      ...seed,
+      transactions: manyTxns,
+    };
+
+    render(<BudgetApp data={data} api={api} />);
+    const yearTrigger = screen.getByRole("button", { name: "Year" });
+    expect(yearTrigger).toBeInTheDocument();
+    fireEvent.click(yearTrigger);
+    expect(screen.getByRole("option", { name: "2020" })).toBeInTheDocument();
+  });
 });
