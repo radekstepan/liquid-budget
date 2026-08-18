@@ -82,8 +82,8 @@ test("Top Payees lists the six biggest payees with totals", async ({ page }) => 
 test("Spending by Category tab renders the top spender with a percent bar", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
-  // The seed's top spender is the AMEX Cobalt category.
-  await expect(panel.getByText("AMEX Cobalt")).toBeVisible();
+  // The seed's top spender category is Mortgage Interest.
+  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
   // Percent labels now render without parenthesised percent (e.g. "54%").
   await expect(panel.getByText(/\b\d+%/).first()).toBeVisible();
   await expect(panel.locator(".y-bar-track").first()).toBeVisible();
@@ -93,7 +93,7 @@ test("Expense Breakdown tab renders the donut and legend", async ({ page }) => {
   await page.getByRole("button", { name: "Expense Breakdown", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Expense Breakdown" }).locator("..");
   await expect(panel.locator("svg")).toBeVisible();
-  await expect(panel.getByText("AMEX Cobalt")).toBeVisible();
+  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

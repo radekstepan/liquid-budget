@@ -136,7 +136,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Whole Foods" },
     });
     // The only "0.00" placeholder in single mode is the amount field.
@@ -163,7 +163,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Payroll" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
@@ -614,7 +614,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
         target: { value: "Costco" },
       });
       // Type the parent total first.
@@ -644,7 +644,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
         target: { value: "Costco" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -691,7 +691,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
         target: { value: "Employer Inc." },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -730,7 +730,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
         target: { value: "X" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -760,7 +760,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Superstore"), {
+      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
         target: { value: "Split with Transfer" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -1152,14 +1152,14 @@ describe("AccountModal", () => {
   it("saves a liquid account with a positive balance", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    expect(screen.getByText("Add Account")).toBeInTheDocument();
+    expect(screen.getAllByText("Add Account")[0]).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: /name/i }), {
       target: { value: "Savings" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "250.75" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add account$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Savings",
       kind: "liquid",
@@ -1182,7 +1182,7 @@ describe("AccountModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-300" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add account$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Visa",
       kind: "credit",
@@ -1199,7 +1199,7 @@ describe("AccountModal", () => {
       target: { value: "RRSP" },
     });
     pickFromOpenDropdownByValue(/type/i, "offbudget");
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add account$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "RRSP",
       kind: "offbudget",
@@ -1212,7 +1212,7 @@ describe("AccountModal", () => {
   it("does not call onSave when the name is empty", () => {
     const onSave = vi.fn();
     render(<AccountModal onClose={() => {}} onSave={onSave} />);
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add account$/i }));
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -1228,7 +1228,7 @@ describe("AccountModal", () => {
     expect(screen.getByText("Edit Account")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Chequing")).toBeInTheDocument();
     expect(screen.getByDisplayValue("125.00")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
     expect(onSave).toHaveBeenCalledWith({
       name: "Chequing",
       kind: "liquid",
@@ -1256,7 +1256,7 @@ describe("AccountModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
     expect(screen.getByText(/archived accounts are hidden/i)).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
@@ -1277,7 +1277,7 @@ describe("AccountModal", () => {
 
     expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^unarchive$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
     });
     expect(onUnarchive).toHaveBeenCalledTimes(1);
   });

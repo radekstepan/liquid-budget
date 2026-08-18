@@ -107,7 +107,7 @@ test("selecting a sidebar account marks the row and scopes the register; Account
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {
   const rows = page.locator("tbody tr.y-row");
   const targetRow = rows.first();
-  const payeeText = (await targetRow.locator("td").nth(2).textContent())?.trim();
+  const payeeText = (await targetRow.locator("td").nth(3).textContent())?.trim();
   expect(payeeText).toBeTruthy();
 
   await targetRow.click();
@@ -154,22 +154,28 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   const transferPayee = `PW Transfer ${stamp}`;
   await page.getByRole("button", { name: "Add Transaction" }).click();
   const addModal = page.locator(".y-modal").last();
-  await addModal.locator('input[inputmode="decimal"]').first().fill("30.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
-  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(transferPayee);
 
-  // Select transfer in category dropdown
-  const catDropdown = addModal.locator(".y-select").nth(1);
-  await catDropdown.click();
-  await page.locator(".y-menu-item").filter({ hasText: /^Transfer :/ }).first().click();
+  // Switch to Transfer mode
+  await addModal.getByRole("button", { name: /^transfer$/i }).click();
+  await addModal.locator('input[placeholder^="Transfer"]').fill(transferPayee);
+  await addModal.locator('input[inputmode="decimal"]').first().fill("-30.00");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+
+  // Pick destination account
+  const destTrigger = addModal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
+  await destTrigger.click();
+  const options = page.locator('.y-dropdown button[role="option"]');
+  await expect(options.first()).toBeVisible();
+  await options.nth(1).click();
+
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
   const createdRow = page.getByRole("row").filter({ hasText: transferPayee });
-  await expect(createdRow).toBeVisible();
+  await expect(createdRow.first()).toBeVisible();
 
   // Click row to open edit modal
-  await createdRow.click();
+  await createdRow.first().click();
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
 
@@ -183,7 +189,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   await expect(editModal).toBeHidden();
 
   // Verify row is removed
-  await expect(createdRow).toBeHidden();
+  await expect(createdRow).toHaveCount(0);
 });
 
 test("deletes a split transaction via modal showing split warning notice", async ({ page }) => {
@@ -191,27 +197,26 @@ test("deletes a split transaction via modal showing split warning notice", async
   const splitPayee = `PW Split ${stamp}`;
   await page.getByRole("button", { name: "Add Transaction" }).click();
   const addModal = page.locator(".y-modal").last();
+
+  // Switch to Split mode
+  await addModal.getByRole("button", { name: /^split$/i }).click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
   await addModal.locator('input[type="date"]').first().fill("2026-06-15");
   await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(splitPayee);
 
-  // Switch to Split
-  const catDropdown = addModal.locator(".y-select").nth(1);
-  await catDropdown.click();
-  await page.locator(".y-menu-item").filter({ hasText: /Split Transaction/i }).first().click();
-
   // Sub-row 1 amount
   const subAmountInputs = addModal.locator('input[inputmode="decimal"]');
   await subAmountInputs.nth(1).fill("30.00");
+  await subAmountInputs.nth(2).fill("20.00");
 
   // Pick category for sub-row 1
-  const subCatDropdowns = addModal.locator(".y-select");
-  await subCatDropdowns.nth(1).click();
-  await page.locator(".y-menu-item").filter({ hasText: "Groceries" }).first().click();
+  const subCatTriggers = addModal.locator(".y-select-trigger");
+  await subCatTriggers.nth(1).click();
+  await page.getByRole("option", { name: "Groceries" }).click();
 
   // Pick category for sub-row 2
-  await subCatDropdowns.nth(2).click();
-  await page.locator(".y-menu-item").filter({ hasText: "Household" }).first().click();
+  await subCatTriggers.nth(2).click();
+  await page.getByRole("option", { name: "Household" }).click();
 
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();

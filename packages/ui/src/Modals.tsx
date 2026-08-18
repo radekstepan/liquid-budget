@@ -365,7 +365,7 @@ export function TransactionModal({
               <TextField
                 value={payee}
                 onChange={(e) => setPayee(e.target.value)}
-                placeholder="e.g. Superstore"
+                placeholder="e.g. Whole Foods"
                 className={inputClass}
               />
             </Field>
@@ -1396,20 +1396,20 @@ export function AccountModal({
           <>
             <Btn onClick={onClose}>Cancel</Btn>
             {isEdit && !isArchived && onArchive && (
-              <Btn onClick={() => setConfirmingArchive(true)}>Archive</Btn>
+              <Btn onClick={() => setConfirmingArchive(true)}>Archive account</Btn>
             )}
             {isEdit && isArchived && onUnarchive && (
               <Btn onClick={handleUnarchive} disabled={unarchiving}>
-                {unarchiving ? "Unarchiving…" : "Unarchive"}
+                {unarchiving ? "Unarchiving…" : "Unarchive account"}
               </Btn>
             )}
             {isEdit && onDelete && (
               <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete…
+                Delete account
               </Btn>
             )}
             <Btn variant="primary" onClick={save} disabled={!name.trim()}>
-              Save
+              {isEdit ? "Save Changes" : "Add Account"}
             </Btn>
           </>
         )

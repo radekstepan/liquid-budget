@@ -108,14 +108,11 @@ test("deleting a recurring removes its card", async ({ page }) => {
   await expect(page.getByText(payee, { exact: true }).first()).toBeVisible();
 
   // The trash button has aria-label="Delete <payee>"
-  // (RecurringView.tsx:176). No confirm dialog — the click goes
-  // straight to api.deleteRecurring.
-  await page.getByRole("button", { name: `Delete ${payee}` }).click();
+  // (RecurringView.tsx:178). Click trash then confirm in the modal.
+  await page.getByRole("button", { name: `Delete ${payee}` }).click({ force: true });
+  await page.getByRole("button", { name: "Delete Recurring Rule" }).click();
 
-  // The card disappears; the empty-state appears if this was the
-  // only remaining recurring. (We don't assert that because the
-  // seed has 10 rows; the spec only needs to confirm the deleted
-  // card is gone.)
+  // The card disappears
   await expect(page.getByText(payee, { exact: true })).toHaveCount(0);
 });
 

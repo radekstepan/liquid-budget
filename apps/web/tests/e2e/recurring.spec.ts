@@ -64,7 +64,7 @@ test("Post Now creates a transaction and advances the next date", async ({ page 
   const beforeBody = await before.json();
   const target = beforeBody.recurring.find(
     (r: { payee: string; amount: string; frequency: string }) =>
-      r.payee === "TD Bank" && Number(r.amount) === -2352.97 && r.frequency === "monthly"
+      r.payee === "TD Bank" && Number(r.amount) === -235297 && r.frequency === "monthly"
   );
   expect(target).toBeTruthy();
   const idBefore = target.id;

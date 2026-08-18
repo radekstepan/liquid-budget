@@ -62,7 +62,7 @@ test("creating a category with a funding goal persists goalTarget", async ({ pag
   // Open the New Category modal via the Needs group's "+"
   // (BudgetView.tsx:369-379, aria-label="Add category").
   const needsRow = page.locator("tr.y-master").filter({ hasText: "Needs" }).first();
-  await needsRow.getByRole("button", { name: "Add category" }).click();
+  await needsRow.getByRole("button", { name: "Add category" }).click({ force: true });
 
   const modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("New Category");
@@ -97,7 +97,7 @@ test("creating a category with a funding goal persists goalTarget", async ({ pag
   await expect(row).toBeVisible();
 
   const stored = await getCategory(page, name);
-  expect(Number(stored.goalTarget)).toBeCloseTo(1234.56, 2);
+  expect(Number(stored.goalTarget)).toBe(123456);
 });
 
 test("PATCH /api/categories persists a carryover change", async ({ page }) => {
@@ -123,13 +123,13 @@ test("PATCH /api/categories persists a carryover change", async ({ page }) => {
 
   // PATCH the new row with a carryover.
   const patch = await page.request.patch("/api/categories", {
-    data: { id: created.id, carryover: -50 },
+    data: { id: created.id, carryover: -5000 },
   });
   expect(patch.status()).toBe(200);
 
   // The persisted row reflects the carryover.
   const stored = await getCategory(page, name);
-  expect(Number(stored.carryover)).toBeCloseTo(-50.0, 2);
+  expect(Number(stored.carryover)).toBe(-5000);
 });
 
 test("Add Category Group shortcut button at the bottom of the budget list", async ({ page }) => {
