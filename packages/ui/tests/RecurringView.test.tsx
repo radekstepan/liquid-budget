@@ -149,11 +149,25 @@ describe("RecurringView", () => {
     expect(onToggleActive).toHaveBeenCalledWith(4, true);
   });
 
-  it("posts, edits, and deletes with the entry id", () => {
+  it("posts, edits, and deletes with two-step confirmation modal (UNI-32 / BUG-15)", () => {
     const { onPost, onEdit, onDelete } = renderView();
     fireEvent.click(screen.getAllByRole("button", { name: /^post now$/i })[0]!);
     fireEvent.click(screen.getByRole("button", { name: /edit rent/i }));
+    
+    // Click delete trash icon
     fireEvent.click(screen.getByRole("button", { name: /delete rent/i }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("Delete Recurring Transaction")).toBeInTheDocument();
+    expect(screen.getByText(/Are you sure you want to delete the scheduled recurring rule for/)).toBeInTheDocument();
+
+    // Cancel first
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByText("Delete Recurring Transaction")).not.toBeInTheDocument();
+
+    // Click delete again and confirm
+    fireEvent.click(screen.getByRole("button", { name: /delete rent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete recurring rule/i }));
     expect(onPost).toHaveBeenCalledWith(1);
     expect(onEdit).toHaveBeenCalledWith(1);
     expect(onDelete).toHaveBeenCalledWith(1);

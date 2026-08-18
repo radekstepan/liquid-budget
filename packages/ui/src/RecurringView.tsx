@@ -1,6 +1,4 @@
-"use client";
-
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import type { BudgetData } from "@ynab/logic";
 import {
   fmt,
@@ -11,6 +9,7 @@ import {
   recurringFlavour,
 } from "@ynab/logic";
 import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
+import { Modal, Btn } from "./ui.js";
 
 export function RecurringView({
   data,
@@ -27,6 +26,11 @@ export function RecurringView({
   onPost: (id: number) => void;
   onToggleActive: (id: number, active: boolean) => void;
 }) {
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const deletingRecurring = useMemo(
+    () => (deletingId != null ? data.recurring.find((r) => r.id === deletingId) ?? null : null),
+    [data.recurring, deletingId]
+  );
   const accMap = useMemo(() => new Map(data.accounts.map((a) => [a.id, a.name])), [data.accounts]);
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c.name])), [data.categories]);
 
@@ -169,7 +173,7 @@ export function RecurringView({
                     <Icon name="edit" size={12} />
                   </Button>
                   <Button
-                    onClick={() => onDelete(r.id)}
+                    onClick={() => setDeletingId(r.id)}
                     size="sm"
                     aria-label={`Delete ${r.payee}`}
                     title="Delete"
@@ -187,6 +191,33 @@ export function RecurringView({
           </div>
         )}
       </div>
+
+      {deletingRecurring && (
+        <Modal
+          title="Delete Recurring Transaction"
+          onClose={() => setDeletingId(null)}
+          footer={
+            <>
+              <Btn onClick={() => setDeletingId(null)}>Cancel</Btn>
+              <Btn
+                variant="danger"
+                onClick={() => {
+                  onDelete(deletingRecurring.id);
+                  setDeletingId(null);
+                }}
+              >
+                Delete Recurring Rule
+              </Btn>
+            </>
+          }
+        >
+          <div className="py-2 text-[13px] leading-relaxed" style={{ color: "var(--y-ink-soft)" }}>
+            Are you sure you want to delete the scheduled recurring rule for{" "}
+            <strong style={{ color: "var(--y-ink)" }}>{deletingRecurring.payee}</strong> ({fmt(num(deletingRecurring.amount))})?
+            Future automatic occurrences will no longer be generated.
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
