@@ -139,4 +139,42 @@ describe("Drizzle migrations", () => {
       ).run();
     }).toThrow(/CHECK constraint failed/i);
   });
+
+  it("enforces unique constraints on category groups and categories (UNI-30 / BUG-13)", () => {
+    migrate(ctx.db, { migrationsFolder: MIGRATIONS_FOLDER });
+
+    // Insert category group
+    ctx.raw.prepare(
+      "INSERT INTO category_groups (id, name, sort, is_credit_card_payments) VALUES (1, 'Immediate Obligations', 0, 0)"
+    ).run();
+
+    // Duplicate category group name should fail
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO category_groups (id, name, sort, is_credit_card_payments) VALUES (2, 'Immediate Obligations', 1, 0)"
+      ).run();
+    }).toThrow(/UNIQUE constraint failed/i);
+
+    // Insert category under group 1
+    ctx.raw.prepare(
+      "INSERT INTO categories (id, group_id, name, sort, carryover) VALUES (1, 1, 'Rent', 0, 0)"
+    ).run();
+
+    // Duplicate category name in same group should fail
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO categories (id, group_id, name, sort, carryover) VALUES (2, 1, 'Rent', 1, 0)"
+      ).run();
+    }).toThrow(/UNIQUE constraint failed/i);
+
+    // Same category name in different group should succeed
+    ctx.raw.prepare(
+      "INSERT INTO category_groups (id, name, sort, is_credit_card_payments) VALUES (3, 'Other Obligations', 2, 0)"
+    ).run();
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO categories (id, group_id, name, sort, carryover) VALUES (3, 3, 'Rent', 0, 0)"
+      ).run();
+    }).not.toThrow();
+  });
 });
