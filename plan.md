@@ -70,7 +70,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
-| **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` |
+| **UNI-33** | BUG-25 | Type Safety | **Medium (P2)** | `db` proxy cast to `any`, eliminating compile-time SQL safety | `packages/server/src/client.ts:71-77` | ✅ **Resolved** |
 | **UNI-34** | BUG-27 | Financial Math | **Medium (P2)** | `computeNetWorthReport` calculates 0% delta when `startNet === 0` (should be undefined/infinite) | `packages/logic/src/reports.ts:235` |
 | **UNI-35** | BUG-28 | Financial Math | **Medium (P2)** | `computeMonthlyInsights` ignores refunds (only sums negative outflows) | `packages/logic/src/reports.ts:285` |
 | **UNI-36** | F-17 | Reports | **Medium (P2)** | Net-worth report back-calculates and renders non-zero balances prior to account creation | `packages/logic/src/reports.ts` |
@@ -458,6 +458,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/ui/src/RecurringView.tsx`, clicking the delete trash icon immediately invoked `onDelete(id)` with no confirmation prompt.
 - **Actionable Solution:** Implement two-step delete confirmation modal preventing accidental deletion of recurring rules.
 - **Resolution (UNI-32):** Added `deletingId` state and a confirmation modal to `packages/ui/src/RecurringView.tsx` with "Cancel" and "Delete Recurring Rule" action buttons. Updated unit test in `packages/ui/tests/RecurringView.test.tsx`.
+
+---
+
+#### UNI-33 (BUG-25): Type Safety on Database Client Proxy
+- **Root Cause:** In `packages/server/src/client.ts:71-77`, `db` proxy cast internal references to `any`, bypassing compile-time SQL method inspection.
+- **Actionable Solution:** Add strict generic `ProxyHandler<Db>` with typed key parameters.
+- **Resolution (UNI-33):** Refactored `db` proxy in `packages/server/src/client.ts` to use strict generic typing `Proxy<Db>` with `get<K extends keyof Db>` property traps.
 
 ---
 

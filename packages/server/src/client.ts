@@ -68,10 +68,10 @@ export function getDefaultDb(): Db {
 
 // Kept for backward compat with db-reset.ts (was createPool / createDb).
 export { openDb as createDb };
-export const db: Db = new Proxy({} as Db, {
-  get(_target, prop) {
-    const real = getDefaultDb() as unknown as Record<PropertyKey, unknown>;
+export const db: Db = new Proxy<Db>({} as Db, {
+  get<K extends keyof Db>(_target: Db, prop: K) {
+    const real = getDefaultDb();
     const value = real[prop];
-    return typeof value === "function" ? (value as Function).bind(real) : value;
+    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(real) : value;
   },
 });
