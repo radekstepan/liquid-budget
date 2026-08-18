@@ -79,7 +79,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
 | **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various | ✅ **Resolved** |
 | **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` | ✅ **Resolved** |
-| **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` |
+| **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` | ✅ **Resolved** |
 | **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` |
 | **UNI-44** | BUG-37 | UX | **Low (P3)** | `AccountModal` automatically forces credit card starting balance negative without user feedback | `packages/ui/src/Modals.tsx` |
 | **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` |
@@ -519,6 +519,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** `ReportsView` accepted `onPrev` and `onNext` navigation callbacks but never rendered month navigation buttons in the toolbar.
 - **Actionable Solution:** Render `MonthNav` component in `ReportsView` toolbar when navigation props (`onPrev`, `onNext`, `onSetMonth`) are provided.
 - **Resolution (UNI-41):** Rendered `MonthNav` in `packages/ui/src/ReportsView.tsx` and wired `onSetMonth`, `minYear`, `maxYear` in `packages/ui/src/BudgetApp.tsx`. Added unit test in `packages/ui/tests/ReportsView.test.tsx`.
+
+#### UNI-42 (BUG-35): CalendarView Empty State
+- **Root Cause:** `CalendarView` showed an empty grid without explanatory text or guidance when a selected month had no recorded or scheduled transactions.
+- **Actionable Solution:** Render a user-friendly empty state banner when `byDay.size === 0` inviting users to click any day to add a transaction.
+- **Resolution (UNI-42):** Added empty state banner in `packages/ui/src/CalendarView.tsx` when the selected month contains no events. Added unit test in `packages/ui/tests/CalendarView.test.tsx`.
 
 ---
 

@@ -118,4 +118,11 @@ describe("CalendarView", () => {
     fireEvent.click(screen.getByRole("button", { name: /add transaction on 2026-06-20/i }));
     expect(onAdd).not.toHaveBeenCalled();
   });
+
+  it("shows empty-state banner when month has no transactions or events (UNI-42 / BUG-35)", () => {
+    renderView({ data: makeData([]) });
+    expect(
+      screen.getByText("No transactions or scheduled events for this month. Click any day to add a transaction.")
+    ).toBeInTheDocument();
+  });
 });
