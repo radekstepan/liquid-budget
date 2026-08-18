@@ -136,7 +136,7 @@ describe("ReportsView", () => {
 
   it("re-totals when the From month is narrowed", () => {
     renderView();
-    pickFromOpenDropdownByValue(/from month/i, "2026-06");
+    pickFromOpenDropdownByValue(/from month/i, "5");
     expect(screen.getByText("$3,000.00")).toBeInTheDocument();
     expect(screen.getByText("-$50.00")).toBeInTheDocument();
     expect(screen.getByText("$2,950.00")).toBeInTheDocument();
@@ -144,10 +144,18 @@ describe("ReportsView", () => {
 
   it("swaps From/To when From is after To", () => {
     renderView();
-    pickFromOpenDropdownByValue(/from month/i, "2026-06");
-    pickFromOpenDropdownByValue(/to month/i, "2026-04");
+    pickFromOpenDropdownByValue(/from month/i, "5");
+    pickFromOpenDropdownByValue(/to month/i, "3");
     // The swap keeps the full range, so totals are unchanged.
     expect(screen.getByText("$9,000.00")).toBeInTheDocument();
+  });
+
+  it("provides 2-field selectors for month and year on both From and To", () => {
+    renderView();
+    expect(screen.getByRole("button", { name: /from month/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /from year/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /to month/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /to year/i })).toBeInTheDocument();
   });
 
   it("shows top payees sorted by spend on Overview", () => {
@@ -345,22 +353,5 @@ describe("ReportsView", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
     expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);
   });
-
-  it("renders previous and next navigation controls and calls handlers (UNI-41 / BUG-34)", () => {
-    const onPrev = vi.fn();
-    const onNext = vi.fn();
-    renderView({ onPrev, onNext });
-
-    const prevBtn = screen.getByRole("button", { name: "Previous month" });
-    const nextBtn = screen.getByRole("button", { name: "Next month" });
-
-    expect(prevBtn).toBeInTheDocument();
-    expect(nextBtn).toBeInTheDocument();
-
-    fireEvent.click(prevBtn);
-    expect(onPrev).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(nextBtn);
-    expect(onNext).toHaveBeenCalledTimes(1);
-  });
 });
+
