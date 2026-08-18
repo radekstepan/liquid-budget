@@ -113,8 +113,8 @@ describe("ReportsView", () => {
   it("renders the toolbar, tabs, math strip, and Top Payees on Overview", () => {
     renderView();
     expect(screen.getByText("Reports")).toBeInTheDocument();
-    // Tabs include the three chart pages.
-    for (const tab of ["Overview", "Net Worth", "Spending by Category", "Expense Breakdown"]) {
+    // Tabs include the three report pages.
+    for (const tab of ["Overview", "Net Worth", "Spending by Category"]) {
       expect(screen.getByRole("button", { name: tab })).toBeInTheDocument();
     }
     // Math strip cells.
@@ -172,6 +172,35 @@ describe("ReportsView", () => {
     expect(names[1]).toBe("Rent");
     expect(scope.getByText("54%")).toBeInTheDocument();
     expect(scope.getByText("46%")).toBeInTheDocument();
+  });
+
+  it("Spending by Category tab toggles between Bars and Donut view modes", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    expect(panel).toBeTruthy();
+    expectPanelBodyIsFlexColumn(panel);
+
+    const barsBtn = within(panel).getByRole("button", { name: "Bars" });
+    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
+    expect(barsBtn).toBeInTheDocument();
+    expect(donutBtn).toBeInTheDocument();
+
+    // Default is Bars view with bar tracks
+    expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
+    expect(panel.querySelector("svg")).toBeNull();
+
+    // Toggle to Donut view
+    fireEvent.click(donutBtn);
+    expect(panel.querySelector("svg")).not.toBeNull();
+    expect(within(panel).getByText("TOTAL")).toBeInTheDocument();
+    expect(within(panel).getByText("Groceries")).toBeInTheDocument();
+    expect(within(panel).getByText("Rent")).toBeInTheDocument();
+
+    // Toggle back to Bars view
+    fireEvent.click(barsBtn);
+    expect(panel.querySelector("svg")).toBeNull();
+    expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -272,18 +301,7 @@ describe("ReportsView", () => {
     }
   });
 
-  it("Expense Breakdown tab renders the donut SVG and legend", () => {
-    renderView();
-    clickTab("Expense Breakdown");
-    const panel = findPanel("Expense Breakdown")!;
-    expect(panel).toBeTruthy();
-    expectPanelBodyIsFlexColumn(panel);
-    expect(panel.querySelector("svg")).not.toBeNull();
-    expect(within(panel).getByText("Groceries")).toBeInTheDocument();
-    expect(within(panel).getByText("Rent")).toBeInTheDocument();
-  });
-
-  it("Expense Breakdown draws slices as explicit arc paths so tiny slices cannot render a dash 'bow'", () => {
+  it("Spending by Category in Donut mode draws slices as explicit arc paths so tiny slices cannot render a dash 'bow'", () => {
     // "Fees" is a tiny share — the slice whose sub-pixel stroke-dasharray used
     // to rasterize as a ragged multi-colour sliver at the ring seam.
     const data = makeData();
@@ -298,8 +316,11 @@ describe("ReportsView", () => {
     });
     data.transactions.push(txn("2026-06", 20, "Stamps", -1, 12));
     renderView({ data });
-    clickTab("Expense Breakdown");
-    const panel = findPanel("Expense Breakdown")!;
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
+    fireEvent.click(donutBtn);
+
     const svg = panel.querySelector("svg")!;
     const circles = svg.querySelectorAll("circle");
     const paths = svg.querySelectorAll("path");

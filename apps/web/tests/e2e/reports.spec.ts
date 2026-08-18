@@ -5,9 +5,8 @@
 //     Top Payees panel (ReportsView.tsx:198-218).
 //   - The From / To selectors narrow the range and re-totals
 //     (ReportsView.tsx:161-183).
-//   - The three chart subpages (Net Worth, Spending by Category,
-//     Expense Breakdown) each render their full-screen chart via
-//     the matching tab.
+//   - The chart subpages (Net Worth, Spending by Category) each render
+//     their full-screen chart via the matching tab.
 import { test, expect, type Page } from "@playwright/test";
 
 async function waitForReady(page: Page) {
@@ -26,12 +25,12 @@ test("Overview renders the math strip, Top Payees panel, and all chart tabs", as
   await expect(page.getByText("Expenses", { exact: true })).toBeVisible();
   await expect(page.getByText("Net", { exact: true }).first()).toBeVisible();
 
-  // Top Payees panel only — the three charts moved to tabs.
+  // Top Payees panel only — the charts moved to tabs.
   await expect(
     page.locator(".y-panel-head").filter({ hasText: "Top Payees" })
   ).toBeVisible();
 
-  for (const tab of ["Net Worth", "Spending by Category", "Expense Breakdown"]) {
+  for (const tab of ["Net Worth", "Spending by Category"]) {
     await expect(page.getByRole("button", { name: tab, exact: true })).toBeVisible();
   }
 });
@@ -79,7 +78,7 @@ test("Top Payees lists the six biggest payees with totals", async ({ page }) => 
   await expect(firstRow.getByText("TD Bank")).toBeVisible();
 });
 
-test("Spending by Category tab renders the top spender with a percent bar", async ({ page }) => {
+test("Spending by Category tab renders the top spender with a percent bar and toggles Bars/Donut view", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
   // The seed's top spender category is Mortgage Interest.
@@ -87,13 +86,22 @@ test("Spending by Category tab renders the top spender with a percent bar", asyn
   // Percent labels now render without parenthesised percent (e.g. "54%").
   await expect(panel.getByText(/\b\d+%/).first()).toBeVisible();
   await expect(panel.locator(".y-bar-track").first()).toBeVisible();
-});
 
-test("Expense Breakdown tab renders the donut and legend", async ({ page }) => {
-  await page.getByRole("button", { name: "Expense Breakdown", exact: true }).click();
-  const panel = page.locator(".y-panel-head").filter({ hasText: "Expense Breakdown" }).locator("..");
+  // Toggle buttons
+  const barsBtn = panel.getByRole("button", { name: "Bars", exact: true });
+  const donutBtn = panel.getByRole("button", { name: "Donut", exact: true });
+  await expect(barsBtn).toBeVisible();
+  await expect(donutBtn).toBeVisible();
+
+  // Switch to Donut view
+  await donutBtn.click();
   await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.getByText("TOTAL")).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
+
+  // Switch back to Bars view
+  await barsBtn.click();
+  await expect(panel.locator(".y-bar-track").first()).toBeVisible();
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@ynab/logic";
 
 export const PALETTE = [
@@ -94,20 +94,27 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
 }
 
 export function useElementSize<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const roRef = useRef<ResizeObserver | null>(null);
 
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+  const ref = useCallback((node: T | null) => {
+    if (roRef.current) {
+      roRef.current.disconnect();
+      roRef.current = null;
+    }
+    if (!node) {
+      setSize({ width: 0, height: 0 });
+      return;
+    }
     const update = () => {
-      setSize({ width: el.clientWidth, height: el.clientHeight });
+      setSize({ width: node.clientWidth, height: node.clientHeight });
     };
     update();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(update);
+      ro.observe(node);
+      roRef.current = ro;
+    }
   }, []);
 
   return { ref, size };
