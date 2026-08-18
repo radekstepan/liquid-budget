@@ -83,7 +83,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` | ✅ **Resolved** |
 | **UNI-44** | BUG-37 | UX | **Low (P3)** | `AccountModal` automatically forces credit card starting balance negative without user feedback | `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
 | **UNI-45** | BUG-38 | UX | **Low (P3)** | `RecurringModal` split sub-transactions lack a `memo` field | `packages/ui/src/Modals.tsx` | ✅ **Resolved** |
-| **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` |
+| **UNI-46** | BUG-39 | Logic | **Low (P3)** | `nextDateFor` silently defaults to monthly on unknown frequency strings | `packages/logic/src/format.ts` | ✅ **Resolved** |
 | **UNI-47** | BUG-40 | Logic | **Low (P3)** | `num()` parser silently returns 0 for formatted currency strings containing currency symbols | `packages/logic/src/format.ts` |
 | **UNI-48** | BUG-41 | Performance | **Low (P3)** | `getBudgetData` performs full unpaginated table scan | `packages/server/src/queries/budget.ts` |
 | **UNI-49** | BUG-42 | Performance | **Low (P3)** | `Modal` component reinstantiates `keydown` event listener on every render cycle | `packages/ui/src/ui.tsx` |
@@ -539,6 +539,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `RecurringModal.tsx`, split sub-transactions had no input field for `memo`, preventing users from annotating individual split allocations.
 - **Actionable Solution:** Add `TextField` for `memo` to each split sub-transaction row in `RecurringModal` (and `TransactionModal`).
 - **Resolution (UNI-45):** Added individual `memo` inputs for split sub-transaction rows in `RecurringModal` and `TransactionModal` in `packages/ui/src/Modals.tsx`. Updated tests in `packages/ui/tests/Modals.test.tsx`.
+
+#### UNI-46 (BUG-39): Safe Fallback on Unknown Recurring Frequency in nextDateFor
+- **Root Cause:** In `packages/logic/src/format.ts`, `nextDateFor` defaulted unknown frequency strings directly into the `"monthly"` branch, causing silent corrupted advances.
+- **Actionable Solution:** Return the input `iso` string unchanged when the recurrence frequency is unrecognized or invalid.
+- **Resolution (UNI-46):** Updated `nextDateFor` in `packages/logic/src/format.ts` so `default:` safely returns `iso` unchanged. Updated unit tests in `packages/logic/tests/format.test.ts`.
 
 ---
 
