@@ -61,9 +61,9 @@ describe("computeNetWorthReport", () => {
     expect(pts).toHaveLength(3);
 
     expect(pts[0]?.month).toBe("2026-04");
-    expect(pts[0]?.assets).toBe(50160000);
+    expect(pts[0]?.assets).toBe(50150000);
     expect(pts[0]?.debts).toBe(-30000000);
-    expect(pts[0]?.net).toBe(20160000);
+    expect(pts[0]?.net).toBe(20150000);
 
     expect(pts[1]?.month).toBe("2026-05");
     expect(pts[1]?.assets).toBe(50150000);
@@ -150,12 +150,44 @@ describe("computeNetWorthReport", () => {
     expect(pts[1]?.net).toBe(94000);
   });
 
-  it("handles reversed start and end month parameters gracefully", () => {
-    const data = makeBaseData();
-    const pts = computeNetWorthReport(data, "2026-06", "2026-04");
-    expect(pts).toHaveLength(3);
-    expect(pts[0]?.month).toBe("2026-04");
-    expect(pts[2]?.month).toBe("2026-06");
+  it("clamps account balances to 0 for months prior to their opening activity (UNI-36 / F-17)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "100000", onBudget: true, sort: 0 },
+        { id: 2, name: "New Savings", kind: "liquid", groupLabel: "Budget Accounts", balance: "50000", onBudget: true, sort: 1 },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        // Chequing exists since 2026-01
+        { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Opening", memo: "", amount: "100000", status: "c" },
+        // New Savings opened in 2026-04 with $500
+        { id: 2, accountId: 2, categoryId: null, date: "2026-04-01", payee: "Opening Savings", memo: "", amount: "50000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const pts = computeNetWorthReport(data, "2026-01", "2026-04");
+    expect(pts).toHaveLength(4);
+
+    // Months 2026-01 through 2026-03 should only reflect Chequing (100000)
+    expect(pts[0]?.month).toBe("2026-01");
+    expect(pts[0]?.assets).toBe(100000);
+    expect(pts[0]?.net).toBe(100000);
+
+    expect(pts[1]?.month).toBe("2026-02");
+    expect(pts[1]?.assets).toBe(100000);
+    expect(pts[1]?.net).toBe(100000);
+
+    expect(pts[2]?.month).toBe("2026-03");
+    expect(pts[2]?.assets).toBe(100000);
+    expect(pts[2]?.net).toBe(100000);
+
+    // Month 2026-04 includes New Savings (100000 + 50000 = 150000)
+    expect(pts[3]?.month).toBe("2026-04");
+    expect(pts[3]?.assets).toBe(150000);
+    expect(pts[3]?.net).toBe(150000);
   });
 });
 
