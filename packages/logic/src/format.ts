@@ -290,6 +290,12 @@ export function prevMonthKey(key: string): string {
   return monthKey(year, month0 - 1);
 }
 
+export const previousMonthKey = prevMonthKey;
+
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function todayISO(): string {
   // Use the local timezone, not UTC. `toISOString()` always renders
   // in UTC, which would silently post-date a transaction entered late

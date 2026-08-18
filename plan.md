@@ -77,7 +77,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-37** | F-18 | Data Ownership | **Medium (P2)** | Export is CSV-only; missing full JSON export and raw SQLite database backup download | `apps/web/src/app/api/export/route.ts` | ✅ **Resolved** |
 | **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
-| **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various |
+| **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various | ✅ **Resolved** |
 | **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` |
 | **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` |
 | **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` |
@@ -509,6 +509,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `BudgetApp.tsx`, transaction date bounds for year picker were restricted to the first and last transaction if transaction count exceeded 100 (`if (txns.length <= 100)`), causing historical years to be omitted on large budgets.
 - **Actionable Solution:** Remove the `<= 100` length restriction and scan all transactions, assignments, and recurring rows to compute full year bounds.
 - **Resolution (UNI-39):** Removed the `<= 100` cap in `BudgetApp.tsx` and evaluated all `data.transactions`, `data.assignments`, and `data.recurring` to derive `minYear` and `maxYear`. Added unit test in `packages/ui/tests/BudgetApp.test.tsx`.
+
+#### UNI-40 (BUG-21, BUG-22, BUG-23, BUG-24): Redundant Helpers Consolidation
+- **Root Cause:** Common utility functions (`round2`, `previousMonthKey`, `assertValidAmount`) were duplicated across multiple files and packages (`BudgetApp.tsx`, `BudgetView.tsx`, `ReconcileModal.tsx`, `recurring.ts`).
+- **Actionable Solution:** Export canonical versions from `@ynab/logic` and `@ynab/server`, and eliminate all local duplicate implementations.
+- **Resolution (UNI-40):** Exported `round2` and `previousMonthKey` from `packages/logic/src/format.ts`. Removed duplicated private definitions in `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx`, and `packages/ui/src/ReconcileModal.tsx`. Replaced duplicate `assertValidAmount` in `packages/server/src/queries/recurring.ts` with canonical import from `transactions.ts`. Added unit tests in `packages/logic/tests/format.test.ts`.
 
 ---
 

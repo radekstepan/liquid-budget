@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, todayISO, adjustDateShortcut } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers and formats cents as dollars", () => {
@@ -249,6 +249,20 @@ describe("format", () => {
     it("returns null for unsupported keys or invalid dates", () => {
       expect(adjustDateShortcut("2026-06-15", "x")).toBeNull();
       expect(adjustDateShortcut("invalid", "+")).toBeNull();
+    });
+  });
+
+  describe("round2 and previousMonthKey (UNI-40 / BUG-21, BUG-22, BUG-23, BUG-24)", () => {
+    it("round2 rounds to 2 decimal places", () => {
+      expect(round2(12.3456)).toBe(12.35);
+      expect(round2(12.344)).toBe(12.34);
+      expect(round2(100)).toBe(100);
+    });
+
+    it("previousMonthKey calculates preceding month key across year boundaries", () => {
+      expect(previousMonthKey("2026-06")).toBe("2026-05");
+      expect(previousMonthKey("2026-01")).toBe("2025-12");
+      expect(prevMonthKey("2026-01")).toBe("2025-12");
     });
   });
 });

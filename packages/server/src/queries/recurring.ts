@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { nextDateFor, todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
-import { createSplitWithChildren, createTransaction, type SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
+import { createSplitWithChildren, createTransaction, assertValidAmount, type SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
 
 export type CreateRecurringInput = {
   accountId: number;
@@ -55,17 +55,6 @@ export class RecurringError extends Error {
     super(message);
     this.name = "RecurringError";
   }
-}
-
-function assertValidAmount(amount: unknown): number {
-  const n = Number(amount);
-  if (!Number.isFinite(n)) {
-    throw new RecurringError("Amount must be a valid number", 400);
-  }
-  if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n) > Number.MAX_SAFE_INTEGER) {
-    throw new RecurringError("Amount exceeds safe integer range", 400);
-  }
-  return Math.round(n);
 }
 
 /**
