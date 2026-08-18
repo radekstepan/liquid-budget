@@ -64,7 +64,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` | ✅ **Resolved** |
 | **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` | ✅ **Resolved** |
 | **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` | ✅ **Resolved** |
-| **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` |
+| **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` | ✅ **Resolved** |
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` |
 | **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` |
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` |
@@ -416,6 +416,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/import-ynab4.ts:16-38`, `settingsXml` was extracted from `.ybsettings` files in zip archives but never parsed or returned.
 - **Actionable Solution:** Parse `settingsXml` to extract budget title, currency symbol, ISO code, decimal/group separators, and date formatting options, returning them as structured settings metadata.
 - **Resolution (UNI-26):** Implemented `parseYnab4SettingsXml` in `packages/server/src/import-ynab4.ts` to extract currency, separators, date format, and budget title from `.ybsettings` files. Updated `extractYnab4DataFromZip` and `importYnab4` to parse and include settings in the returned payload. Added unit tests in `packages/server/tests/import-ynab4.test.ts`.
+
+---
+
+#### UNI-27 (BUG-31): Reconcile Category Validation
+- **Root Cause:** In `packages/server/src/queries/reconcile.ts:138-143`, `reconcileAccount` did not validate whether `adjustmentCategoryId` existed in the database before attempting to insert an adjustment transaction.
+- **Actionable Solution:** Query the database for `adjustmentCategoryId` when `diff !== 0` and throw a 422 TransactionError if the category does not exist.
+- **Resolution (UNI-27):** Added database existence validation for `adjustmentCategoryId` in `packages/server/src/queries/reconcile.ts`, rejecting invalid category IDs with 422 `TransactionError("Invalid adjustment category", 422)`. Added unit test in `packages/server/tests/reconcile.test.ts`.
 
 ---
 

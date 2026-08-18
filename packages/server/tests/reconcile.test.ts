@@ -162,6 +162,34 @@ describe("reconcile queries", () => {
         reconciledAt: expect.any(String),
       });
     });
+
+    it("UNI-27 / BUG-31: throws 422 when adjustmentCategoryId does not exist", async () => {
+      mock.respondWithNth("select:accounts", 1, [
+        { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },
+      ]);
+      mock.respondWithNth("select:transactions", 1, [
+        {
+          unclearedSum: 0,
+          unclearedCount: 0,
+          clearedSum: 50000,
+          clearedCount: 2,
+          reconciledSum: 0,
+          reconciledCount: 0,
+        },
+      ]);
+      mock.respondWith("select:categories", []); // Category not found
+
+      await expect(
+        reconcileAccount(mock.db, {
+          accountId: 1,
+          statementBalance: 48765,
+          adjustmentCategoryId: 99999,
+        })
+      ).rejects.toMatchObject({
+        status: 422,
+        message: "Invalid adjustment category",
+      });
+    });
   });
 
   describe("unreconcileAccount", () => {
