@@ -19,6 +19,63 @@ import { fmt, num } from "./format.js";
 
 export type RecurringFlavour = "single" | "transfer" | "split";
 
+export const RECURRING_FREQUENCIES: { value: string; label: string }[] = [
+  { value: "never", label: "Never" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "everyotherweek", label: "Every Other Week" },
+  { value: "twiceamonth", label: "Twice a Month" },
+  { value: "every4weeks", label: "Every 4 Weeks" },
+  { value: "monthly", label: "Monthly" },
+  { value: "everyothermonth", label: "Every Other Month" },
+  { value: "every3months", label: "Every 3 Months" },
+  { value: "every4months", label: "Every 4 Months" },
+  { value: "twiceayear", label: "Twice a Year" },
+  { value: "yearly", label: "Yearly" },
+  { value: "every2years", label: "Every 2 Years" },
+];
+
+export function frequencyLabel(freq: string): string {
+  const norm = (freq || "").toLowerCase().replace(/[\s_-]+/g, "");
+  switch (norm) {
+    case "never":
+    case "once":
+      return "Never";
+    case "daily":
+      return "Daily";
+    case "weekly":
+      return "Weekly";
+    case "biweekly":
+    case "everyotherweek":
+      return "Every Other Week";
+    case "twiceamonth":
+    case "semimonthly":
+      return "Twice a Month";
+    case "every4weeks":
+      return "Every 4 Weeks";
+    case "monthly":
+      return "Monthly";
+    case "everyothermonth":
+    case "bimonthly":
+      return "Every Other Month";
+    case "every3months":
+    case "quarterly":
+      return "Every 3 Months";
+    case "every4months":
+      return "Every 4 Months";
+    case "twiceayear":
+    case "semiannually":
+      return "Twice a Year";
+    case "yearly":
+    case "annually":
+      return "Yearly";
+    case "every2years":
+      return "Every 2 Years";
+    default:
+      return freq || "Monthly";
+  }
+}
+
 /**
  * Returns the average monthly multiplier for a given recurring frequency.
  * E.g. "twiceamonth" -> 2, "monthly" -> 1, "biweekly" -> 26/12 (~2.1667),
@@ -57,6 +114,7 @@ export function frequencyMonthlyMultiplier(frequency: string): number {
       return 1 / 12;
     case "every2years":
       return 1 / 24;
+    case "never":
     case "once":
       return 0;
     default:

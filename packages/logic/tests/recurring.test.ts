@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  frequencyLabel,
   frequencyMonthlyMultiplier,
   getRecurringChildren,
   netMonthlyAmount,
+  RECURRING_FREQUENCIES,
   recurringFlavour,
   validateRecurringSubTransactions,
 } from "../src/recurring.js";
@@ -215,5 +217,50 @@ describe("validateRecurringSubTransactions", () => {
         { categoryId: 2, amount: -100001 },
       ])
     ).toMatch(/sum to/);
+  });
+});
+
+describe("RECURRING_FREQUENCIES and frequencyLabel (UNI-23 / F-13 / BUG-19)", () => {
+  it("exposes all 13 standard frequencies", () => {
+    expect(RECURRING_FREQUENCIES).toHaveLength(13);
+    const values = RECURRING_FREQUENCIES.map((f) => f.value);
+    expect(values).toEqual([
+      "never",
+      "daily",
+      "weekly",
+      "everyotherweek",
+      "twiceamonth",
+      "every4weeks",
+      "monthly",
+      "everyothermonth",
+      "every3months",
+      "every4months",
+      "twiceayear",
+      "yearly",
+      "every2years",
+    ]);
+  });
+
+  it("formats human-readable labels for all frequencies and aliases", () => {
+    expect(frequencyLabel("never")).toBe("Never");
+    expect(frequencyLabel("daily")).toBe("Daily");
+    expect(frequencyLabel("weekly")).toBe("Weekly");
+    expect(frequencyLabel("everyotherweek")).toBe("Every Other Week");
+    expect(frequencyLabel("biweekly")).toBe("Every Other Week");
+    expect(frequencyLabel("twiceamonth")).toBe("Twice a Month");
+    expect(frequencyLabel("semimonthly")).toBe("Twice a Month");
+    expect(frequencyLabel("every4weeks")).toBe("Every 4 Weeks");
+    expect(frequencyLabel("monthly")).toBe("Monthly");
+    expect(frequencyLabel("everyothermonth")).toBe("Every Other Month");
+    expect(frequencyLabel("bimonthly")).toBe("Every Other Month");
+    expect(frequencyLabel("every3months")).toBe("Every 3 Months");
+    expect(frequencyLabel("quarterly")).toBe("Every 3 Months");
+    expect(frequencyLabel("every4months")).toBe("Every 4 Months");
+    expect(frequencyLabel("twiceayear")).toBe("Twice a Year");
+    expect(frequencyLabel("semiannually")).toBe("Twice a Year");
+    expect(frequencyLabel("yearly")).toBe("Yearly");
+    expect(frequencyLabel("annually")).toBe("Yearly");
+    expect(frequencyLabel("every2years")).toBe("Every 2 Years");
+    expect(frequencyLabel("unknown")).toBe("unknown");
   });
 });

@@ -60,7 +60,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-20** | F-16 | YNAB4 Parity | **Medium (P1)** | No "Red Arrow to the Right" (per-category overspend carryover toggle) | `packages/logic/src/budget-engine.ts`, `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-21** | F-15, BUG-26 | Validation | **Medium (P1)** | No runtime API validation (Zod schemas); mutation endpoints consume unvalidated `any` payloads | `apps/web/src/app/api/**/route.ts` | ✅ **Resolved** |
 | **UNI-22** | BUG-16, BUG-17, BUG-18 | UX | **Medium (P1)** | Missing loading spinners and optimistic updates for `addTransaction`, `recurring`, `accounts`, and `categories` | `apps/web/src/components/BudgetAppShell.tsx`, `packages/ui/src/` | ✅ **Resolved** |
-| **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` |
+| **UNI-23** | F-13, BUG-19 | UX | **Medium (P2)** | RecurringModal exposes only 5 of 13 frequencies and displays raw internal strings | `packages/ui/src/Modals.tsx`, `packages/ui/src/RecurringView.tsx` | ✅ **Resolved** |
 | **UNI-24** | F-14 | UX | **Medium (P2)** | Sidebar account group ordering is hardcoded (`["Liquid","Credit Cards","Retirement","Budget Accounts"]`); imported labels misordered | `packages/ui/src/Sidebar.tsx` |
 | **UNI-25** | BUG-29 | Importer | **Medium (P2)** | Credit card payment categories created with `carryover: 0` instead of initial card balance on import | `packages/server/src/import-ynab4.ts:175-183` |
 | **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` |
@@ -388,6 +388,13 @@ Despite strong foundations, the application has critical financial calculation d
   - Add floating/inline Bulk Action Bar: *Mark Cleared*, *Mark Uncleared*, *Delete Selected*, *Deselect All*.
   - Add atomic server operations: `bulkDeleteTransactions` and `bulkUpdateTransactions` wrapped in single database transactions.
 - **Resolution (UNI-18):** Implemented `bulkDeleteTransactions` and `bulkUpdateTransactions` in `packages/server/src/queries/transactions.ts` executing inside atomic database transactions (`BEGIN`/`COMMIT`/`ROLLBACK`). Added bulk action support in `apps/web/src/app/api/transactions/route.ts`. Added multi-select checkbox column, select-all header toggle, and floating bulk action bar in `packages/ui/src/TransactionsView.tsx`. Connected bulk operations in `BudgetApp.tsx` and `BudgetAppShell.tsx`. Added unit tests in `packages/server/tests/transactions.test.ts` and `packages/ui/tests/TransactionsView.test.tsx`.
+
+---
+
+#### UNI-23 (F-13, BUG-19): Recurrence Frequencies & Formatting
+- **Root Cause:** `RecurringModal` only displayed 5 of 13 frequencies in its dropdown (`weekly`, `biweekly`, `twiceamonth`, `monthly`, `yearly`). `RecurringView` displayed raw internal strings (e.g. `everyotherweek`, `twiceamonth`) instead of human-readable labels.
+- **Actionable Solution:** Expose all 13 standard frequencies in `@ynab/logic` (`RECURRING_FREQUENCIES`) and provide `frequencyLabel()` formatter for clean rendering across all views and modals.
+- **Resolution (UNI-23):** Added `RECURRING_FREQUENCIES` constant and `frequencyLabel` helper in `packages/logic/src/recurring.ts`. Updated `RecurringModal` in `packages/ui/src/Modals.tsx` to map over all 13 frequencies. Updated `RecurringView.tsx` to render human-readable frequency labels using `frequencyLabel(r.frequency)`. Added unit tests in `recurring.test.ts`, `RecurringView.test.tsx`, and `Modals.test.tsx`.
 
 ---
 

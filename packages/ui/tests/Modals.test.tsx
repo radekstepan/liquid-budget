@@ -849,7 +849,7 @@ describe("TransactionModal", () => {
 });
 
 describe("RecurringModal", () => {
-  it("renders biweekly as an available frequency option", () => {
+  it("renders all 13 frequencies as available options (UNI-23)", () => {
     render(
       <RecurringModal
         accounts={accounts}
@@ -863,11 +863,22 @@ describe("RecurringModal", () => {
     const list = screen.getByRole("listbox");
     const optionEls = within(list).getAllByRole("option") as HTMLButtonElement[];
     const values = optionEls.map((o) => o.getAttribute("data-value"));
-    expect(values).toContain("weekly");
-    expect(values).toContain("biweekly");
-    expect(values).toContain("twiceamonth");
-    expect(values).toContain("monthly");
-    expect(values).toContain("yearly");
+    expect(values).toHaveLength(13);
+    expect(values).toEqual([
+      "never",
+      "daily",
+      "weekly",
+      "everyotherweek",
+      "twiceamonth",
+      "every4weeks",
+      "monthly",
+      "everyothermonth",
+      "every3months",
+      "every4months",
+      "twiceayear",
+      "yearly",
+      "every2years",
+    ]);
   });
 
   it("calls onSave with a signed amount (no Outflow/Inflow toggle)", () => {
@@ -884,13 +895,13 @@ describe("RecurringModal", () => {
       target: { value: "Hydro" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-80" } });
-    pickFromOpenDropdownByValue(/frequency/i, "biweekly");
+    pickFromOpenDropdownByValue(/frequency/i, "everyotherweek");
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Hydro",
       amount: -8000,
-      frequency: "biweekly",
+      frequency: "everyotherweek",
     });
   });
 
