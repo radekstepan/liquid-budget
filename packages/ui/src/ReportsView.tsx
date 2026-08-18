@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, monthLabel, computeNetWorthReport, type NetWorthPoint } from "@ynab/logic";
-import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
+import { Icon, Toolbar, ToolbarSep, MonthNav, Select, Panel, MathCell, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 import { ExpenseBreakdownReport } from "./ExpenseBreakdownReport.js";
@@ -20,11 +20,19 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
 export function ReportsView({
   data,
   month,
+  onPrev,
+  onNext,
+  onSetMonth,
+  minYear,
+  maxYear,
 }: {
   data: BudgetData;
   month: string;
-  onPrev: () => void;
-  onNext: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  onSetMonth?: (m: string) => void;
+  minYear?: number;
+  maxYear?: number;
 }) {
   const allMonths = useMemo(() => {
     const s = new Set<string>();
@@ -119,6 +127,19 @@ export function ReportsView({
           <Icon name="chart" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Reports</span>
         </div>
+        {(onPrev || onNext || onSetMonth) && (
+          <>
+            <ToolbarSep />
+            <MonthNav
+              month={month}
+              onPrev={onPrev}
+              onNext={onNext}
+              onSetMonth={onSetMonth}
+              minYear={minYear}
+              maxYear={maxYear}
+            />
+          </>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <span className="y-caps">From</span>
           <Select

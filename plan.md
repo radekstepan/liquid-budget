@@ -78,7 +78,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-38** | F-19 | Schema / Entity | **Medium (P2)** | No dedicated Payees entity table (prevents payee renaming, merging, deduping, and global autocomplete) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-39** | F-20 | UX | **Low (P3)** | Month picker navigation restricted to current year unless $\le 100$ transactions | `packages/ui/src/BudgetApp.tsx` | ✅ **Resolved** |
 | **UNI-40** | BUG-21, BUG-22, BUG-23, BUG-24 | Code Quality | **Low (P3)** | Redundant helpers duplicated across packages (`assertValidAmount`, `round2`, `previousMonthKey`, balance queries) | Various | ✅ **Resolved** |
-| **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` |
+| **UNI-41** | BUG-34 | UX | **Low (P3)** | `ReportsView` accepts `onPrev`/`onNext` props but does not render navigation controls | `packages/ui/src/ReportsView.tsx` | ✅ **Resolved** |
 | **UNI-42** | BUG-35 | UX | **Low (P3)** | CalendarView has no empty-state message when months contain no scheduled events | `packages/ui/src/CalendarView.tsx` |
 | **UNI-43** | BUG-36 | UX | **Low (P3)** | `alert()` browser popup used for error handling in Inspector import flow | `packages/ui/src/Inspector.tsx:178` |
 | **UNI-44** | BUG-37 | UX | **Low (P3)** | `AccountModal` automatically forces credit card starting balance negative without user feedback | `packages/ui/src/Modals.tsx` |
@@ -514,6 +514,11 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** Common utility functions (`round2`, `previousMonthKey`, `assertValidAmount`) were duplicated across multiple files and packages (`BudgetApp.tsx`, `BudgetView.tsx`, `ReconcileModal.tsx`, `recurring.ts`).
 - **Actionable Solution:** Export canonical versions from `@ynab/logic` and `@ynab/server`, and eliminate all local duplicate implementations.
 - **Resolution (UNI-40):** Exported `round2` and `previousMonthKey` from `packages/logic/src/format.ts`. Removed duplicated private definitions in `packages/ui/src/BudgetApp.tsx`, `packages/ui/src/BudgetView.tsx`, and `packages/ui/src/ReconcileModal.tsx`. Replaced duplicate `assertValidAmount` in `packages/server/src/queries/recurring.ts` with canonical import from `transactions.ts`. Added unit tests in `packages/logic/tests/format.test.ts`.
+
+#### UNI-41 (BUG-34): ReportsView Month Navigation Controls
+- **Root Cause:** `ReportsView` accepted `onPrev` and `onNext` navigation callbacks but never rendered month navigation buttons in the toolbar.
+- **Actionable Solution:** Render `MonthNav` component in `ReportsView` toolbar when navigation props (`onPrev`, `onNext`, `onSetMonth`) are provided.
+- **Resolution (UNI-41):** Rendered `MonthNav` in `packages/ui/src/ReportsView.tsx` and wired `onSetMonth`, `minYear`, `maxYear` in `packages/ui/src/BudgetApp.tsx`. Added unit test in `packages/ui/tests/ReportsView.test.tsx`.
 
 ---
 
