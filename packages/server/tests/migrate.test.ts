@@ -109,4 +109,34 @@ describe("Drizzle migrations", () => {
     const appTableCount = tableNames.filter((n) => !systemTables.has(n)).length;
     expect(appTableCount).toBe(8);
   });
+
+  it("enforces DB-level CHECK constraints (UNI-29 / BUG-12, F-19)", () => {
+    migrate(ctx.db, { migrationsFolder: MIGRATIONS_FOLDER });
+
+    // accounts.kind CHECK constraint ('liquid', 'credit', 'offbudget')
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO accounts (name, kind, group_label, balance, on_budget, sort) VALUES ('Bad', 'invalid_kind', 'Group', 0, 1, 0)"
+      ).run();
+    }).toThrow(/CHECK constraint failed/i);
+
+    // Valid account
+    ctx.raw.prepare(
+      "INSERT INTO accounts (id, name, kind, group_label, balance, on_budget, sort) VALUES (1, 'Good', 'liquid', 'Liquid', 0, 1, 0)"
+    ).run();
+
+    // transactions.status CHECK constraint ('u', 'c', 'r')
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO transactions (account_id, date, payee, memo, amount, status) VALUES (1, '2026-06-01', 'P', '', 100, 'x')"
+      ).run();
+    }).toThrow(/CHECK constraint failed/i);
+
+    // transactions.amount != 0 CHECK constraint
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO transactions (account_id, date, payee, memo, amount, status) VALUES (1, '2026-06-01', 'P', '', 0, 'c')"
+      ).run();
+    }).toThrow(/CHECK constraint failed/i);
+  });
 });

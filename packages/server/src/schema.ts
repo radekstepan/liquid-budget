@@ -4,21 +4,29 @@ import {
   integer,
   uniqueIndex,
   index,
+  check,
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
-export const accounts = sqliteTable("accounts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  kind: text("kind").notNull(),
-  groupLabel: text("group_label").notNull(),
-  balance: integer("balance").notNull().default(0),
-  onBudget: integer("on_budget", { mode: "boolean" }).notNull().default(true),
-  sort: integer("sort").notNull().default(0),
-  lastReconciledAt: text("last_reconciled_at"),
-  lastReconciledBalance: integer("last_reconciled_balance"),
-  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
-});
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    groupLabel: text("group_label").notNull(),
+    balance: integer("balance").notNull().default(0),
+    onBudget: integer("on_budget", { mode: "boolean" }).notNull().default(true),
+    sort: integer("sort").notNull().default(0),
+    lastReconciledAt: text("last_reconciled_at"),
+    lastReconciledBalance: integer("last_reconciled_balance"),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    kindCheck: check("accounts_kind_check", sql`${t.kind} IN ('liquid', 'credit', 'offbudget')`),
+  })
+);
 
 export const categoryGroups = sqliteTable("category_groups", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -85,6 +93,8 @@ export const transactions = sqliteTable(
     dateIdx: index("transactions_date_idx").on(t.date),
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
     reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),
+    statusCheck: check("transactions_status_check", sql`${t.status} IN ('u', 'c', 'r')`),
+    amountCheck: check("transactions_amount_check", sql`${t.amount} != 0`),
   })
 );
 
@@ -105,35 +115,47 @@ export const reconciliations = sqliteTable(
   })
 );
 
-export const recurring = sqliteTable("recurring", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  accountId: integer("account_id")
-    .notNull()
-    .references(() => accounts.id, { onDelete: "cascade" }),
-  categoryId: integer("category_id").references(() => categories.id, {
-    onDelete: "set null",
-  }),
-  payee: text("payee").notNull().default(""),
-  amount: integer("amount").notNull().default(0),
-  frequency: text("frequency").notNull().default("monthly"),
-  nextDate: text("next_date").notNull(),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
-  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
-});
+export const recurring = sqliteTable(
+  "recurring",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    payee: text("payee").notNull().default(""),
+    amount: integer("amount").notNull().default(0),
+    frequency: text("frequency").notNull().default("monthly"),
+    nextDate: text("next_date").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    amountCheck: check("recurring_amount_check", sql`${t.amount} != 0`),
+  })
+);
 
-export const recurringSubTransactions = sqliteTable("recurring_sub_transactions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  recurringId: integer("recurring_id")
-    .notNull()
-    .references(() => recurring.id, { onDelete: "cascade" }),
-  categoryId: integer("category_id").references(() => categories.id, {
-    onDelete: "set null",
-  }),
-  amount: integer("amount").notNull().default(0),
-  memo: text("memo").notNull().default(""),
-  sort: integer("sort").notNull().default(0),
-  transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
-});
+export const recurringSubTransactions = sqliteTable(
+  "recurring_sub_transactions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recurringId: integer("recurring_id")
+      .notNull()
+      .references(() => recurring.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    amount: integer("amount").notNull().default(0),
+    memo: text("memo").notNull().default(""),
+    sort: integer("sort").notNull().default(0),
+    transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    amountCheck: check("recurring_sub_amount_check", sql`${t.amount} != 0`),
+  })
+);
 
 export type Account = typeof accounts.$inferSelect;
 export type CategoryGroup = typeof categoryGroups.$inferSelect;

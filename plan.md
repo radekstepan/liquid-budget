@@ -66,7 +66,7 @@ Despite strong foundations, the application has critical financial calculation d
 | **UNI-26** | BUG-30 | Importer | **Medium (P2)** | `settingsXml` extracted from backup archive but never parsed or applied | `packages/server/src/import-ynab4.ts:16-38` | ✅ **Resolved** |
 | **UNI-27** | BUG-31 | Reconcile | **Medium (P2)** | `reconcileAccount` does not validate `adjustmentCategoryId` | `packages/server/src/queries/reconcile.ts:138-143` | ✅ **Resolved** |
 | **UNI-28** | BUG-11 | Schema | **Medium (P2)** | Migration snapshot out of sync with SQL migration scripts | `packages/server/src/migrations/meta/0000_snapshot.json` | ✅ **Resolved** |
-| **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` |
+| **UNI-29** | BUG-12, F-19 | Schema | **Medium (P2)** | Missing DB-level CHECK constraints (`amount != 0`, `status IN ('u','c','r')`, `kind IN (...)`) | `packages/server/src/schema.ts` | ✅ **Resolved** |
 | **UNI-30** | BUG-13 | Schema | **Medium (P2)** | Missing unique constraints on category and group names within scope | `packages/server/src/schema.ts` |
 | **UNI-31** | BUG-14 | Schema | **Medium (P2)** | Missing database indexes on `recurring.nextDate` and `recurring.accountId` | `packages/server/src/schema.ts` |
 | **UNI-32** | BUG-15 | UX | **Medium (P2)** | `RecurringView` delete action lacks two-step confirmation modal | `packages/ui/src/RecurringView.tsx` |
@@ -430,6 +430,13 @@ Despite strong foundations, the application has critical financial calculation d
 - **Root Cause:** In `packages/server/src/migrations/meta/0000_snapshot.json`, snapshot metadata was out of sync with subsequent SQL migration scripts (0001 through 0004), causing Drizzle-kit to detect phantom diffs.
 - **Actionable Solution:** Synchronize `_journal.json` and meta snapshots with the actual migrations, add `drizzle.config.ts`, and provide `db:check` and `db:generate` scripts to ensure continuous schema-migration integrity.
 - **Resolution (UNI-28):** Created `packages/server/drizzle.config.ts`, synchronized the migration snapshot metadata (`0004_snapshot.json`), and added `db:check` and `db:generate` scripts to `packages/server/package.json`. Verified that `drizzle-kit check` and `drizzle-kit generate` report zero pending schema diffs.
+
+---
+
+#### UNI-29 (BUG-12, F-19): Database-Level CHECK Constraints
+- **Root Cause:** In `packages/server/src/schema.ts`, tables lacked SQLite `CHECK` constraints, allowing invalid account kinds, transaction statuses, or 0-amount transactions to bypass API-level validation.
+- **Actionable Solution:** Add `CHECK` constraints for `accounts.kind IN ('liquid', 'credit', 'offbudget')`, `transactions.status IN ('u', 'c', 'r')`, `transactions.amount != 0`, `recurring.amount != 0`, and `recurring_sub_transactions.amount != 0`.
+- **Resolution (UNI-29):** Added table-level `CHECK` constraints across `accounts`, `transactions`, `recurring`, and `recurringSubTransactions` in `packages/server/src/schema.ts` and generated migration `0005_closed_dazzler.sql`. Added unit tests in `packages/server/tests/migrate.test.ts`.
 
 ---
 
