@@ -44,12 +44,44 @@ export function fmtSigned(cents: number): string {
 
 export function num(s: string | number | null | undefined): number {
   if (s == null) return 0;
-  const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
-  if (Number.isNaN(n) || n === 0) return 0;
-  if (!Number.isSafeInteger(n)) {
-    throw new RangeError(`Amount ${n} exceeds safe integer range`);
+  if (typeof s === "number") {
+    if (Number.isNaN(s) || s === 0) return 0;
+    const rounded = Math.round(s);
+    if (!Number.isSafeInteger(rounded)) {
+      throw new RangeError(`Amount ${s} exceeds safe integer range`);
+    }
+    return rounded;
   }
-  return n;
+  let str = String(s).trim();
+  if (!str) return 0;
+
+  let sign = 1;
+  if (str.startsWith("(") && str.endsWith(")")) {
+    sign = -1;
+    str = str.slice(1, -1).trim();
+  } else if (str.startsWith("-")) {
+    sign = -1;
+    str = str.slice(1).trim();
+  } else if (str.startsWith("+")) {
+    str = str.slice(1).trim();
+  }
+
+  // Strip currency symbols, commas, spaces, underscores
+  str = str.replace(/[$€£¥,_ \t]/g, "");
+
+  // Handle minus sign after currency symbol e.g. "$-500"
+  if (str.startsWith("-")) {
+    sign = -1 * sign;
+    str = str.slice(1).trim();
+  }
+
+  const n = parseInt(str, 10);
+  if (Number.isNaN(n) || n === 0) return 0;
+  const finalVal = sign * n;
+  if (!Number.isSafeInteger(finalVal)) {
+    throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
+  }
+  return finalVal;
 }
 
 export function dollarsToCents(d: number | null | undefined): number {
