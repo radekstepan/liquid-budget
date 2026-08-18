@@ -131,6 +131,64 @@ describe("Inspector", () => {
       fireEvent.click(mayBtn);
       expect(onSelectMonth).toHaveBeenCalledWith("2026-05");
     });
+
+    it("snaps to closest month when moving across the SVG line chart and resets on leave", () => {
+      const onSelectMonth = vi.fn();
+      render(<Inspector {...baseProps} onSelectMonth={onSelectMonth} />);
+
+      const getRectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        right: 224,
+        bottom: 64,
+        width: 224,
+        height: 64,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      });
+
+      // Move to X=8 (padX), which corresponds to index 0: 2025-07, net: $10,000
+      fireEvent.mouseMove(screen.getByLabelText("12-Month Net Worth Sparkline"), { clientX: 8 });
+      expect(screen.getByText("$10,000.00")).toBeInTheDocument();
+      expect(screen.getByText("Jul 2025")).toBeInTheDocument();
+
+      // Move to X=216 (W - padX = 224 - 8 = 216), index 11: 2026-06, net: $16,000
+      fireEvent.mouseMove(screen.getByLabelText("12-Month Net Worth Sparkline"), { clientX: 216 });
+      expect(screen.getByText("$16,000.00")).toBeInTheDocument();
+      // Since Jun 2026 appears in the header too, check both exist
+      expect(screen.getAllByText("Jun 2026").length).toBeGreaterThanOrEqual(2);
+
+      // Mouse leave resets to Current Net Worth
+      fireEvent.mouseLeave(screen.getByLabelText("12-Month Net Worth Sparkline"));
+      expect(screen.getByText("Current Net Worth")).toBeInTheDocument();
+      expect(screen.getByText("$16,000.00")).toBeInTheDocument();
+
+      getRectSpy.mockRestore();
+    });
+
+    it("selects the closest month when clicking directly on the SVG line chart", () => {
+      const onSelectMonth = vi.fn();
+      render(<Inspector {...baseProps} onSelectMonth={onSelectMonth} />);
+
+      const getRectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        right: 224,
+        bottom: 64,
+        width: 224,
+        height: 64,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      });
+
+      // Click around X=8 (index 0: 2025-07)
+      fireEvent.click(screen.getByLabelText("12-Month Net Worth Sparkline"), { clientX: 8 });
+      expect(onSelectMonth).toHaveBeenCalledWith("2025-07");
+
+      getRectSpy.mockRestore();
+    });
   });
 
   describe("Import YNAB4 Error Handling (UNI-43 / BUG-36)", () => {
