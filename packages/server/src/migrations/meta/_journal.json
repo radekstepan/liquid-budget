@@ -64,6 +64,13 @@
       "when": 1786984385375,
       "tag": "0008_dear_daredevil",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1787030112486,
+      "tag": "0009_mean_vindicator",
+      "breakpoints": true
     }
   ]
 }

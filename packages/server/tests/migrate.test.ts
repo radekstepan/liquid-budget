@@ -135,13 +135,6 @@ describe("Drizzle migrations", () => {
         "INSERT INTO transactions (account_id, date, payee, memo, amount, status) VALUES (1, '2026-06-01', 'P', '', 100, 'x')"
       ).run();
     }).toThrow(/CHECK constraint failed/i);
-
-    // transactions.amount != 0 CHECK constraint
-    expect(() => {
-      ctx.raw.prepare(
-        "INSERT INTO transactions (account_id, date, payee, memo, amount, status) VALUES (1, '2026-06-01', 'P', '', 0, 'c')"
-      ).run();
-    }).toThrow(/CHECK constraint failed/i);
   });
 
   it("enforces unique constraints on category groups and categories (UNI-30 / BUG-13)", () => {
