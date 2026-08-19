@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { niceTicks, symlogTicks, symlog, fmtShort } from "../src/chartUtils.js";
+import { niceTicks, symlogTicks, symlog, fmtShort, colorAt } from "../src/chartUtils.js";
 
 describe("niceTicks", () => {
   it("always spans min and max (tMin <= min and tMax >= max)", () => {
@@ -78,5 +78,16 @@ describe("fmtShort", () => {
     expect(fmtShort(50_000_000)).toBe("$500K");
     expect(fmtShort(10_000_00)).toBe("$10K");
     expect(fmtShort(-100_000_000)).toBe("-$1M");
+  });
+});
+
+describe("colorAt", () => {
+  it("provides distinct contrasting colors for sequential categories", () => {
+    const top3 = [colorAt(0), colorAt(1), colorAt(2)];
+    // Ensure all 3 top categories have distinct colors (Blue, Green, Amber)
+    expect(new Set(top3).size).toBe(3);
+    expect(top3[0]).toBe("#2f7fb0"); // Steel Blue
+    expect(top3[1]).toBe("#5c8f2c"); // Forest Green
+    expect(top3[2]).toBe("#e8a33d"); // Amber/Gold
   });
 });
