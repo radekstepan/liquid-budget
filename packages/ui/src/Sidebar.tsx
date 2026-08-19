@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import type { Account } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
 import { Button, Icon, cx } from "@ynab/theme";
@@ -27,7 +27,7 @@ const MIN_WIDTH = 170;
 const MAX_WIDTH = 450;
 const STORAGE_KEY = "ynab_sidebar_width";
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   view,
   setView,
   accounts,
@@ -464,4 +464,4 @@ export function Sidebar({
       />
     </aside>
   );
-}
+});

@@ -125,6 +125,17 @@ export type RecurringSubTransaction = {
   transferAccountId?: number | null;
 };
 
+export type SerializedBudgetIndex = {
+  assignedByMonth: Record<string, Record<string | number, number>>;
+  assignedTotalByMonth: Record<string, number>;
+  outflowByMonth: Record<string, Record<string | number, number>>;
+  spendByAccountMonth: Record<string, Record<string | number, number>>;
+  incomeByMonth: Record<string, number>;
+  carryoverByMonth: Record<string, Record<string | number, number>>;
+  overspentByMonth: Record<string, number>;
+  surplusByMonth: Record<string, number>;
+};
+
 export type BudgetData = {
   accounts: Account[];
   groups: CategoryGroup[];
@@ -132,6 +143,7 @@ export type BudgetData = {
   assignments: Assignment[];
   transactions: Transaction[];
   recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[];
+  budgetIndex?: SerializedBudgetIndex;
 };
 
 export type CatRow = {

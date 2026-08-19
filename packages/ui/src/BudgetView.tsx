@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
 import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, previousMonthKey, todayISO } from "@ynab/logic";
 import {
@@ -49,7 +49,7 @@ const COL_V = "w-[120px]";
 
 /* ------------------------------------------------------------ props */
 
-export function BudgetView({
+export const BudgetView = memo(function BudgetView({
   budget,
   budgets,
   visibleMonths,
@@ -430,7 +430,7 @@ export function BudgetView({
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------ hero strip */
 

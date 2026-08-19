@@ -74,6 +74,7 @@ export const assignments = sqliteTable(
   },
   (t) => ({
     uniq: uniqueIndex("assignments_cat_month_uniq").on(t.categoryId, t.month),
+    monthCatIdx: index("assignments_month_cat_idx").on(t.month, t.categoryId),
   })
 );
 
@@ -118,6 +119,7 @@ export const transactions = sqliteTable(
   },
   (t) => ({
     accountDateIdx: index("transactions_account_date_idx").on(t.accountId, t.date),
+    accountDateIdIdx: index("transactions_account_date_id_idx").on(t.accountId, t.date, t.id),
     dateIdx: index("transactions_date_idx").on(t.date),
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
     reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),

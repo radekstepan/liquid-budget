@@ -46,7 +46,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `DATABASE_URL=../../budget.test.db yarn dev --port ${PORT}`,
+    command: `DATABASE_URL=../../budget.test.db yarn start --port ${PORT}`,
     url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,

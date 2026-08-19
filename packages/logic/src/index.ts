@@ -5,6 +5,7 @@ export * from "./recurring.js";
 // Full YNAB4 engine
 export {
   computeBudget,
+  buildBudgetIndex,
   isIncomeTransaction,
   getMonthsWithData,
 } from "./budget-engine.js";

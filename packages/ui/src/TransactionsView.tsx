@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { computeRunningBalances, num } from "@ynab/logic";
 import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money } from "@ynab/theme";
@@ -10,7 +10,7 @@ type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: numbe
 const ROW_HEIGHT = 27;
 const OVERSCAN = 15;
 
-export function TransactionsView({
+export const TransactionsView = memo(function TransactionsView({
   data,
   accountFilter,
   onAdd,
@@ -75,24 +75,45 @@ export function TransactionsView({
   );
 
   const rows = useMemo<Txn[]>(() => {
-    const filtered = data.transactions.filter((t) => {
-      if (accountFilter == null) return true;
-      if (t.accountId === accountFilter) return true;
-      if (t.transferAccountId != null && t.transferAccountId === accountFilter) return true;
-      return false;
-    });
-    const sorted = filtered
-      .map((t) => ({ ...t, amount: num(t.amount) }))
-      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-    return computeRunningBalances(sorted, accountBalances, accountFilter ?? undefined);
+    const filtered: (Omit<Transaction, "amount"> & { amount: number })[] = [];
+    const len = data.transactions.length;
+    for (let i = 0; i < len; i++) {
+      const t = data.transactions[i]!;
+      if (
+        accountFilter == null ||
+        t.accountId === accountFilter ||
+        (t.transferAccountId != null && t.transferAccountId === accountFilter)
+      ) {
+        filtered.push({ ...t, amount: num(t.amount) });
+      }
+    }
+    filtered.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
+    return computeRunningBalances(filtered, accountBalances, accountFilter ?? undefined);
   }, [data.transactions, accountFilter, accountBalances]);
 
   const splitParentIds = useMemo(() => {
     const set = new Set<number>();
-    for (const t of data.transactions) {
+    for (let i = 0; i < data.transactions.length; i++) {
+      const t = data.transactions[i]!;
       if (t.parentId != null) set.add(t.parentId);
     }
     return set;
+  }, [data.transactions]);
+
+  const childrenByParent = useMemo(() => {
+    const map = new Map<number, Transaction[]>();
+    for (let i = 0; i < data.transactions.length; i++) {
+      const t = data.transactions[i]!;
+      if (t.parentId != null) {
+        let list = map.get(t.parentId);
+        if (!list) {
+          list = [];
+          map.set(t.parentId, list);
+        }
+        list.push(t);
+      }
+    }
+    return map;
   }, [data.transactions]);
 
   const filtered = useMemo(() => {
@@ -108,18 +129,6 @@ export function TransactionsView({
     };
     const visibleRows = rows.filter(isRowVisible);
     if (!q) return visibleRows;
-
-    const childrenByParent = new Map<number, Transaction[]>();
-    for (const t of data.transactions) {
-      if (t.parentId != null) {
-        let list = childrenByParent.get(t.parentId);
-        if (!list) {
-          list = [];
-          childrenByParent.set(t.parentId, list);
-        }
-        list.push(t);
-      }
-    }
 
     return visibleRows.filter((r) => {
       const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
@@ -149,7 +158,7 @@ export function TransactionsView({
       }
       return false;
     });
-  }, [rows, deferredSearch, data.transactions, categoryById, accountFilter, accountById]);
+  }, [rows, deferredSearch, childrenByParent, categoryById, accountFilter, accountById]);
 
   const totals = useMemo(() => {
     let inflow = 0;
@@ -170,14 +179,15 @@ export function TransactionsView({
 
   // Virtualization window calculations
   const totalCount = filtered.length;
-  // If containerHeight is 0 (e.g. during test runs or initial mount), render all rows or reasonable batch
-  const isMeasured = containerHeight > 0;
-  const startIndex = isMeasured
-    ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
-    : 0;
-  const endIndex = isMeasured
-    ? Math.min(totalCount, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN)
-    : totalCount;
+  // Fall back to window height on initial render so huge datasets don't mount 50,000 unvirtualized rows on frame 1
+  const effectiveHeight =
+    containerHeight > 0
+      ? containerHeight
+      : typeof window !== "undefined" && window.innerHeight > 0
+        ? window.innerHeight
+        : 800;
+  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  const endIndex = Math.min(totalCount, Math.ceil((scrollTop + effectiveHeight) / ROW_HEIGHT) + OVERSCAN);
 
   const topHeight = startIndex * ROW_HEIGHT;
   const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
@@ -509,4 +519,4 @@ export function TransactionsView({
       </div>
     </div>
   );
-}
+});

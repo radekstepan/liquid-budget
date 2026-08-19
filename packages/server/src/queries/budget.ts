@@ -1,5 +1,6 @@
 import { asc, desc, sql } from "drizzle-orm";
 import type { BudgetData, ClearedStatus } from "@ynab/logic";
+import { buildBudgetIndex } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 
@@ -40,7 +41,7 @@ export async function getBudgetData(
     }
   }
 
-  return {
+  const data: BudgetData = {
     accounts: accts.map((a) => ({
       ...a,
       kind: a.kind as "liquid" | "credit" | "offbudget",
@@ -74,6 +75,9 @@ export async function getBudgetData(
       })),
     })),
   };
+
+  data.budgetIndex = buildBudgetIndex(data);
+  return data;
 }
 
 export async function isSeeded(db: Db): Promise<boolean> {

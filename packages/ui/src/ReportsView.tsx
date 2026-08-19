@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, monthLabel, computeNetWorthReport, type NetWorthPoint } from "@ynab/logic";
 import { Icon, Toolbar, ToolbarSep, MonthNav, Select, Panel, MathCell, Tabs } from "@ynab/theme";
@@ -17,7 +17,7 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "breakdown", label: "Expense Breakdown" },
 ];
 
-export function ReportsView({
+export const ReportsView = memo(function ReportsView({
   data,
   month,
   onPrev,
@@ -246,4 +246,4 @@ export function ReportsView({
       </div>
     </div>
   );
-}
+});

@@ -80,14 +80,13 @@ export function computeRunningBalances(
   anchorAccountId?: number
 ): RegisterRow[] {
   if (rows.length === 0) return [];
-
-  // Parse amounts up-front so we never re-parse during the walk.
-  const parsed: ParsedTxn[] = rows.map((t) => ({ ...t, amount: numSafe(t.amount) }));
+  const len = rows.length;
 
   // Identify split parents: rows referenced as `parentId` by another row.
   const parentIds = new Set<number>();
-  for (const r of parsed) {
-    if (r.parentId != null) parentIds.add(r.parentId);
+  for (let i = 0; i < len; i++) {
+    const pId = rows[i]!.parentId;
+    if (pId != null) parentIds.add(pId);
   }
 
   // Per-account (or single-anchor) backward walk.
@@ -95,18 +94,21 @@ export function computeRunningBalances(
 
   if (anchorAccountId != null) {
     let bal = accountBalances.get(anchorAccountId) ?? 0;
-    for (const r of parsed) {
+    for (let i = 0; i < len; i++) {
+      const r = rows[i]!;
       if (parentIds.has(r.id)) continue;
       const isSource = r.accountId === anchorAccountId;
       const isDest = r.transferAccountId === anchorAccountId;
       if (!isSource && !isDest) continue;
       runningBalanceById.set(r.id, bal);
-      const delta = isSource ? r.amount : -r.amount;
+      const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
+      const delta = isSource ? amt : -amt;
       bal -= delta;
     }
   } else {
-    const byAccount = new Map<number, ParsedTxn[]>();
-    for (const r of parsed) {
+    const byAccount = new Map<number, RegisterInputRow[]>();
+    for (let i = 0; i < len; i++) {
+      const r = rows[i]!;
       if (parentIds.has(r.id)) continue;
       let srcList = byAccount.get(r.accountId);
       if (!srcList) {
@@ -125,12 +127,14 @@ export function computeRunningBalances(
     }
     for (const [acctId, acctRows] of byAccount) {
       let bal = accountBalances.get(acctId) ?? 0;
-      for (const r of acctRows) {
+      for (let i = 0; i < acctRows.length; i++) {
+        const r = acctRows[i]!;
         const isSource = r.accountId === acctId;
         if (isSource) {
           runningBalanceById.set(r.id, bal);
         }
-        const delta = isSource ? r.amount : -r.amount;
+        const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
+        const delta = isSource ? amt : -amt;
         bal -= delta;
       }
     }
@@ -140,10 +144,10 @@ export function computeRunningBalances(
   // (date-descending) child — the chronologically-newest child, which
   // carries the "balance after the entire cluster" reading.
   const firstChildByParent = new Map<number, number>();
-  for (const r of parsed) {
-    if (r.parentId == null) continue;
-    if (!firstChildByParent.has(r.parentId)) {
-      // First occurrence in `parsed` is the first in the date-desc
+  for (let i = 0; i < len; i++) {
+    const r = rows[i]!;
+    if (r.parentId != null && !firstChildByParent.has(r.parentId)) {
+      // First occurrence in `rows` is the first in the date-desc
       // sort (sort is stable; same-date ties keep input order).
       firstChildByParent.set(r.parentId, r.id);
     }
@@ -156,11 +160,15 @@ export function computeRunningBalances(
   // Assemble output, falling back to the row's own account balance for
   // any row that didn't participate in a walk (e.g. a row on account X
   // passed in alongside an anchor on account Y, with no transfer link).
-  return parsed.map((r) => {
+  const result: RegisterRow[] = new Array(len);
+  for (let i = 0; i < len; i++) {
+    const r = rows[i]!;
+    const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
     const runningBalance =
       runningBalanceById.get(r.id) ?? accountBalances.get(r.accountId) ?? 0;
-    return { ...r, runningBalance };
-  });
+    result[i] = { ...r, amount: amt, runningBalance };
+  }
+  return result;
 }
 
 /* ---------------- internal helpers ---------------- */
