@@ -336,12 +336,70 @@ export const Inspector = memo(function Inspector({
 
             const areaD = `${pathD} L ${getX(pts.length - 1).toFixed(1)} ${H} L ${getX(0).toFixed(1)} ${H} Z`;
 
+            const findClosestPoint = (
+              e: React.PointerEvent<SVGSVGElement> | React.MouseEvent<SVGSVGElement>,
+              el: SVGSVGElement
+            ) => {
+              if (pts.length === 0) return null;
+              if (pts.length === 1) return pts[0]!;
+
+              const rect = el.getBoundingClientRect();
+              const clientX =
+                typeof e.clientX === "number" && !Number.isNaN(e.clientX)
+                  ? e.clientX
+                  : typeof (e.nativeEvent as any)?.clientX === "number"
+                  ? (e.nativeEvent as any).clientX
+                  : 0;
+
+              const rectWidth = rect.width > 0 ? rect.width : W;
+              const rectLeft = typeof rect.left === "number" ? rect.left : 0;
+              const relX = clientX - rectLeft;
+              const rawSvgX = (relX / rectWidth) * W;
+              const svgX = Number.isFinite(rawSvgX) ? rawSvgX : 0;
+
+              let closestIdx = 0;
+              let minDiff = Infinity;
+              for (let i = 0; i < pts.length; i++) {
+                const diff = Math.abs(getX(i) - svgX);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestIdx = i;
+                }
+              }
+              return pts[closestIdx]!;
+            };
+
+            const hoveredIdx = hoveredPoint
+              ? pts.findIndex((p) => p.month === hoveredPoint.month)
+              : -1;
+
             return (
               <div className="space-y-1">
                 <svg
                   viewBox={`0 0 ${W} ${H}`}
-                  className="w-full overflow-visible"
+                  className="w-full overflow-visible cursor-pointer select-none"
                   style={{ height: 64 }}
+                  onPointerMove={(e) => {
+                    const closest = findClosestPoint(e, e.currentTarget);
+                    if (closest) {
+                      setHoveredPoint({ month: closest.month, net: closest.net });
+                    }
+                  }}
+                  onMouseMove={(e) => {
+                    const closest = findClosestPoint(e, e.currentTarget);
+                    if (closest) {
+                      setHoveredPoint({ month: closest.month, net: closest.net });
+                    }
+                  }}
+                  onPointerLeave={() => setHoveredPoint(null)}
+                  onMouseLeave={() => setHoveredPoint(null)}
+                  onClick={(e) => {
+                    const closest = findClosestPoint(e, e.currentTarget);
+                    if (closest) {
+                      onSelectMonth(closest.month);
+                    }
+                  }}
+                  aria-label="12-Month Net Worth Sparkline"
                 >
                   <defs>
                     <linearGradient id="y-nw-grad" x1="0" y1="0" x2="0" y2="1">
@@ -350,8 +408,11 @@ export const Inspector = memo(function Inspector({
                     </linearGradient>
                   </defs>
 
+                  {/* Catch-all transparent backdrop for smooth event handling */}
+                  <rect x="0" y="0" width={W} height={H} fill="transparent" />
+
                   {/* Shaded Area */}
-                  <path d={areaD} fill="url(#y-nw-grad)" />
+                  <path d={areaD} fill="url(#y-nw-grad)" className="pointer-events-none" />
 
                   {/* Trend Line */}
                   <path
@@ -361,20 +422,36 @@ export const Inspector = memo(function Inspector({
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    className="pointer-events-none"
                   />
+
+                  {/* Active vertical guide line on hover */}
+                  {hoveredIdx >= 0 && (
+                    <line
+                      x1={getX(hoveredIdx)}
+                      y1={padY - 2}
+                      x2={getX(hoveredIdx)}
+                      y2={H - padY + 2}
+                      stroke="#2f7fb0"
+                      strokeWidth="1.5"
+                      strokeDasharray="2 2"
+                      opacity="0.5"
+                      className="pointer-events-none"
+                    />
+                  )}
 
                   {/* Data Nodes */}
                   {pts.map((p, i) => {
                     const cxCoord = getX(i);
                     const cyCoord = getY(p.net);
                     const isCurrent = p.month === month;
+                    const isHovered = hoveredPoint?.month === p.month;
                     const { month0: m0, year: y } = parseMonthKey(p.month);
-                    const label = `Jump to ${MONTHS[m0]} ${y}`;
 
                     return (
-                      <g key={p.month}>
-                        {/* Outer focus/active ring */}
-                        {isCurrent && (
+                      <g key={p.month} className="pointer-events-none">
+                        {/* Current month outer ring when not hovered */}
+                        {isCurrent && !isHovered && (
                           <circle
                             cx={cxCoord}
                             cy={cyCoord}
@@ -385,15 +462,25 @@ export const Inspector = memo(function Inspector({
                             opacity="0.8"
                           />
                         )}
+                        {/* Hover snap halo */}
+                        {isHovered && (
+                          <circle
+                            cx={cxCoord}
+                            cy={cyCoord}
+                            r="6.5"
+                            fill="#2f7fb0"
+                            fillOpacity="0.25"
+                          />
+                        )}
+                        {/* Node circle */}
                         <circle
                           cx={cxCoord}
                           cy={cyCoord}
-                          r={isCurrent ? "3.5" : "2.5"}
-                          fill={isCurrent ? "#1f5c85" : "#2f7fb0"}
-                          className="transition-all hover:r-[4.5px] cursor-pointer"
-                          onMouseEnter={() => setHoveredPoint({ month: p.month, net: p.net })}
-                          onMouseLeave={() => setHoveredPoint(null)}
-                          onClick={() => onSelectMonth(p.month)}
+                          r={isHovered ? 4.5 : isCurrent ? 3.5 : 2.5}
+                          fill={isHovered ? "#1f5c85" : isCurrent ? "#1f5c85" : "#2f7fb0"}
+                          stroke={isHovered ? "#ffffff" : "none"}
+                          strokeWidth={isHovered ? 1.5 : 0}
+                          opacity={hoveredPoint && !isHovered ? 0.45 : 1}
                         >
                           <title>{`${MONTHS[m0]} ${y}: ${money(p.net)}`}</title>
                         </circle>
@@ -407,6 +494,7 @@ export const Inspector = memo(function Inspector({
                   {pts.map((p) => {
                     const { month0: m0, year: y } = parseMonthKey(p.month);
                     const isCurrent = p.month === month;
+                    const isHovered = hoveredPoint?.month === p.month;
                     const shortLabel = `${MONTHS[m0]?.slice(0, 1)}`;
                     return (
                       <button
@@ -420,6 +508,8 @@ export const Inspector = memo(function Inspector({
                           "flex-1 text-[9px] py-0.5 rounded text-center transition-all",
                           isCurrent
                             ? "bg-[#2f7fb0] text-white font-bold"
+                            : isHovered
+                            ? "bg-[var(--y-hover)] text-[var(--y-ink)] font-semibold"
                             : "hover:bg-[var(--y-hover)] text-[var(--y-ink-soft)]"
                         )}
                       >
