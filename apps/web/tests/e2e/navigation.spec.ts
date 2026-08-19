@@ -21,10 +21,9 @@ const NAV_ITEMS: { label: string; viewToolbar: string | RegExp; match?: string |
   { label: "Reports", viewToolbar: "Reports" },
   { label: "Calendar", viewToolbar: "Calendar" },
   { label: "Projections", viewToolbar: "Projections" },
-  // The Accounts button's accessible name includes its running balance
+  // The Transactions button's accessible name includes its running balance
   // (Sidebar.tsx y-side-amt), so it needs a regex match.
-  { label: "Accounts", match: /^Accounts/, viewToolbar: "All Transactions" },
-  { label: "Recurring", viewToolbar: "Recurring Transactions" },
+  { label: "Transactions", match: /^Transactions/, viewToolbar: "All Transactions" },
 ];
 
 for (const { label, match, viewToolbar } of NAV_ITEMS) {
@@ -51,7 +50,7 @@ test("clicking a sidebar account deep-links to its transaction filter", async ({
 
   // The TransactionsView toolbar swaps its title from "All Transactions"
   // to the account name when filtered (TransactionsView.tsx:78-82). The
-  // sidebar "Accounts" nav keeps the view on transactions — so we
+  // sidebar "Transactions" nav keeps the view on transactions — so we
   // target the toolbar title (a <span> with the bold class).
   const toolbarTitle = page.locator(".y-toolbar span.text-\\[13px\\]").first();
   await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");

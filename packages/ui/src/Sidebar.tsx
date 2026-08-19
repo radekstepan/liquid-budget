@@ -223,7 +223,7 @@ export const Sidebar = memo(function Sidebar({
         })}
       </nav>
 
-      {/* Accounts row — highlighted when transactions view with no account filter */}
+      {/* Transactions row — highlighted when transactions view with no account filter */}
       <button
         onClick={() => setView("transactions")}
         className={cx(
@@ -231,8 +231,8 @@ export const Sidebar = memo(function Sidebar({
           view === "transactions" && selectedAccountId == null && "is-sel"
         )}
       >
-        <Icon name="bank" size={14} />
-        <span className="truncate flex-1">Accounts</span>
+        <Icon name="swap" size={14} />
+        <span className="truncate flex-1">Transactions</span>
         {dueBadgeCount > 0 && (
           <span
             className="y-badge mr-1"

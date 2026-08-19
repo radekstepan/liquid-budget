@@ -170,7 +170,7 @@ test("uploading a backup through the Settings menu reloads the app with imported
   await expect(page.getByText("TD Unlimited Chequing")).toHaveCount(0);
 
   // And the imported transaction shows up in the register.
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(page.getByText(IMPORTED_PAYEE)).toBeVisible();
 
   await resetToDemo(base);

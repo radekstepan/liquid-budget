@@ -121,7 +121,7 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /reconcile account cash/i })).not.toBeInTheDocument();
   });
 
-  it("does not highlight the 'Accounts' nav when an account is selected", () => {
+  it("does not highlight the 'Transactions' nav when an account is selected", () => {
     render(
       <Sidebar
         view="transactions"
@@ -132,12 +132,12 @@ describe("Sidebar", () => {
         onAddAccount={() => {}}
       />
     );
-    const navAll = screen.getByRole("button", { name: /accounts/i });
+    const navAll = screen.getByRole("button", { name: /transactions/i });
     expect(navAll.className).not.toMatch(/\bis-sel\b/);
     expect(screen.getByRole("button", { name: /cash/i })).toHaveClass(/is-sel/);
   });
 
-  it("highlights the 'Accounts' nav when view=transactions and no account is selected", () => {
+  it("highlights the 'Transactions' nav when view=transactions and no account is selected", () => {
     render(
       <Sidebar
         view="transactions"
@@ -148,7 +148,7 @@ describe("Sidebar", () => {
         onAddAccount={() => {}}
       />
     );
-    const navAll = screen.getByRole("button", { name: /accounts/i });
+    const navAll = screen.getByRole("button", { name: /transactions/i });
     expect(navAll.className).toMatch(/\bis-sel\b/);
   });
 
@@ -282,7 +282,7 @@ describe("Sidebar", () => {
     expect(groupTexts[2]).toContain("Investments");
   });
 
-  it("renders a numeric badge on the Accounts button when dueBadgeCount > 0 and on individual accounts", () => {
+  it("renders a numeric badge on the Transactions button when dueBadgeCount > 0 and on individual accounts", () => {
     const { rerender } = render(
       <Sidebar
         view="budget"
