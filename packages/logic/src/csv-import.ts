@@ -147,7 +147,7 @@ function parseAmount(input: string): number | null {
 
 export function swapPayeeMemo(rows: CsvImportRow[], swap?: boolean): CsvImportRow[] {
   if (!swap) return rows;
-  return rows.map((r) => (r.memo.trim() ? { ...r, payee: r.memo, memo: r.payee } : r));
+  return rows.map((r) => ({ ...r, payee: r.memo, memo: r.payee }));
 }
 
 export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImportResult {

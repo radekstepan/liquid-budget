@@ -802,7 +802,6 @@ export function BudgetApp({
       {modal.kind === "csvImport" && (
         <CsvImportModal
           accounts={data.accounts}
-          categories={data.categories}
           defaultAccountId={accountFilter}
           file={modal.file}
           onClose={() => setModal({ kind: "none" })}

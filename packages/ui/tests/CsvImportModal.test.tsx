@@ -1,15 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { CsvImportModal } from "../src/CsvImportModal.js";
-import type { Account, Category } from "@ynab/logic";
+import type { Account } from "@ynab/logic";
 
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
   { id: 2, name: "Credit", kind: "credit", groupLabel: "Cards", balance: "-5000", onBudget: true, sort: 1 },
-];
-
-const categories: Category[] = [
-  { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
 ];
 
 const validCsv = [
@@ -28,7 +24,6 @@ async function renderModal(csv: string, onImport = vi.fn().mockResolvedValue(und
   const view = render(
     <CsvImportModal
       accounts={accounts}
-      categories={categories}
       defaultAccountId={null}
       file={makeFile(csv)}
       onClose={() => {}}
@@ -61,6 +56,18 @@ describe("CsvImportModal", () => {
     const cells = within(first).getAllByRole("cell");
     await waitFor(() => expect(cells[1]!.textContent).toBe("Vancouver"));
     expect(cells[2]!.textContent).toBe("PHNOM PENH RESTAURANT");
+  });
+
+  it("swaps unconditionally and flags rows with an empty payee", async () => {
+    await renderModal("Date,Payee,Outflow\n13/08/2026,UBER TRIP,18.63\n");
+    fireEvent.click(screen.getByLabelText(/swap payee and memo/i));
+
+    const rows = screen.getAllByRole("row");
+    const first = rows[1]!;
+    expect(first).toHaveClass("y-row--warn");
+    const cells = within(first).getAllByRole("cell");
+    expect(cells[1]!.textContent).toBe("Uncategorized");
+    expect(cells[2]!.textContent).toBe("UBER TRIP");
   });
 
   it("imports a single-row file and defaults to the first account", async () => {

@@ -1,21 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Account, Category } from "@ynab/logic";
+import type { Account } from "@ynab/logic";
 import { parseCsvImport, swapPayeeMemo } from "@ynab/logic";
 import { Checkbox, Notice, Select, money, cx } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 
 export function CsvImportModal({
   accounts,
-  categories,
   defaultAccountId,
   file,
   onClose,
   onImport,
 }: {
   accounts: Account[];
-  categories: Category[];
   defaultAccountId: number | null;
   file: File;
   onClose: () => void;
@@ -54,18 +52,6 @@ export function CsvImportModal({
   );
   const validRows = useMemo(() => rows.filter((r) => !r.error), [rows]);
   const errorRows = useMemo(() => rows.filter((r) => r.error), [rows]);
-  const categoryByName = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of categories) {
-      const key = c.name.trim().toLowerCase();
-      if (!m.has(key)) m.set(key, c.id);
-    }
-    return m;
-  }, [categories]);
-  const categoryNameById = useMemo(
-    () => new Map(categories.map((c) => [c.id, c.name] as const)),
-    [categories]
-  );
 
   const canImport =
     validRows.length > 0 && errorRows.length === 0 && accountId > 0 && !importing;
@@ -165,35 +151,37 @@ export function CsvImportModal({
                 <th>Date</th>
                 <th>Payee</th>
                 <th>Memo</th>
-                <th>Category</th>
                 <th className="num">Amount</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const matched = r.category ? categoryByName.get(r.category.trim().toLowerCase()) : null;
-                return (
-                  <tr key={r.rowNumber} className={cx("y-row", r.error && "y-row--error")}>
-                    <td className="y-num whitespace-nowrap">{r.date ?? ""}</td>
-                    <td>{r.payee || <span className="y-hint">—</span>}</td>
-                    <td>{r.memo || <span className="y-hint">—</span>}</td>
-                    <td>
-                      {matched != null ? (
-                        categoryNameById.get(matched) ?? r.category
-                      ) : r.category ? (
-                        <span className="y-hint">{r.category}</span>
-                      ) : (
-                        <span className="y-hint">Uncategorized</span>
-                      )}
-                    </td>
-                    <td className="num y-num">
-                      {r.error ? <span className="y-hint">—</span> : money(r.amountCents ?? 0)}
-                    </td>
-                    <td>{r.error && <span className="text-[#c0483a]">{r.error}</span>}</td>
-                  </tr>
-                );
-              })}
+              {rows.map((r) => (
+                <tr
+                  key={r.rowNumber}
+                  className={cx(
+                    "y-row",
+                    r.error && "y-row--error",
+                    swap && !r.error && !r.payee && "y-row--warn"
+                  )}
+                >
+                  <td className="y-num whitespace-nowrap">{r.date ?? ""}</td>
+                  <td>
+                    {swap && !r.error && !r.payee ? (
+                      <span className="y-hint" style={{ color: "#7d5a12" }}>
+                        Uncategorized
+                      </span>
+                    ) : r.payee ? (
+                      r.payee
+                    ) : (
+                      <span className="y-hint">—</span>
+                    )}
+                  </td>
+                  <td>{r.memo || <span className="y-hint">—</span>}</td>
+                  <td className="num y-num">
+                    {r.error ? <span className="y-hint">—</span> : money(r.amountCents ?? 0)}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
