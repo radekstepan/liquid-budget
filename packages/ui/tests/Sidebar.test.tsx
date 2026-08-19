@@ -11,7 +11,7 @@ const accounts: Account[] = [
 ];
 
 describe("Sidebar", () => {
-  it("renders all 5 nav buttons", () => {
+  it("renders all 4 top nav buttons", () => {
     render(
       <Sidebar
         view="budget"
@@ -26,7 +26,6 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /calendar/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /recurring/i })).toBeInTheDocument();
   });
 
   it("calls setView when a nav button is clicked", () => {
@@ -282,4 +281,41 @@ describe("Sidebar", () => {
     expect(groupTexts[1]).toContain("Emergency");
     expect(groupTexts[2]).toContain("Investments");
   });
+
+  it("renders a numeric badge on the Accounts button when dueBadgeCount > 0 and on individual accounts", () => {
+    const { rerender } = render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        dueBadgeCount={3}
+        dueByAccount={{ 1: 2, 2: 1 }}
+      />
+    );
+
+    const totalBadge = screen.getByText("3");
+    expect(totalBadge).toBeInTheDocument();
+    expect(totalBadge).toHaveClass("y-badge");
+
+    const cashBadge = screen.getByText("2");
+    expect(cashBadge).toBeInTheDocument();
+
+    rerender(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        dueBadgeCount={0}
+      />
+    );
+
+    expect(screen.queryByText("3")).not.toBeInTheDocument();
+  });
 });
+

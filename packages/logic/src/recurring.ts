@@ -15,7 +15,7 @@
  */
 
 import type { Account, Recurring, RecurringSubTransaction } from "./types.js";
-import { fmt, num } from "./format.js";
+import { fmt, num, todayISO } from "./format.js";
 
 export type RecurringFlavour = "single" | "transfer" | "split";
 
@@ -267,4 +267,65 @@ export function validateRecurringSubTransactions(
     return `Sub-transactions sum to ${fmt(sum)} but parent is ${fmt(parentAmount)}.`;
   }
   return null;
+}
+
+/**
+ * Count active scheduled/recurring transactions that are due on or before `asOfDate`.
+ */
+export function countDueRecurring(
+  recurring: { active: boolean; nextDate: string }[],
+  asOfDate: string = todayISO()
+): number {
+  return recurring.filter((r) => r.active && r.nextDate <= asOfDate).length;
+}
+
+/**
+ * Returns an ISO date shifted by `days` days.
+ */
+export function addDaysISO(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export type RecurringTimelineGroups<T extends { active: boolean; nextDate: string }> = {
+  overdue: T[];
+  dueToday: T[];
+  thisWeek: T[];
+  later: T[];
+  paused: T[];
+};
+
+/**
+ * Partition recurring entries into timeline buckets for display.
+ */
+export function groupRecurringByTimeline<T extends { active: boolean; nextDate: string }>(
+  items: T[],
+  today: string = todayISO()
+): RecurringTimelineGroups<T> {
+  const weekCap = addDaysISO(today, 7);
+  const overdue: T[] = [];
+  const dueToday: T[] = [];
+  const thisWeek: T[] = [];
+  const later: T[] = [];
+  const paused: T[] = [];
+
+  const sorted = [...items].sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+
+  for (const item of sorted) {
+    if (!item.active) {
+      paused.push(item);
+    } else if (item.nextDate < today) {
+      overdue.push(item);
+    } else if (item.nextDate === today) {
+      dueToday.push(item);
+    } else if (item.nextDate <= weekCap) {
+      thisWeek.push(item);
+    } else {
+      later.push(item);
+    }
+  }
+
+  return { overdue, dueToday, thisWeek, later, paused };
 }

@@ -319,11 +319,15 @@ export function BudgetAppShell() {
         }
       });
     },
-    postRecurring: async (id) => {
+    postRecurring: async (id: number, date?: string) => {
       return withSync(async () => {
         try {
-          await jsonReq(`/api/recurring?action=post&id=${id}`, { method: "POST" });
+          const url = date
+            ? `/api/recurring?action=post&id=${id}&date=${encodeURIComponent(date)}`
+            : `/api/recurring?action=post&id=${id}`;
+          await jsonReq(url, { method: "POST" });
           await reload();
+          addToast("Scheduled transaction entered.", "ok");
         } catch (e) {
           addToast("Failed to post recurring transaction.", "danger");
           throw e;

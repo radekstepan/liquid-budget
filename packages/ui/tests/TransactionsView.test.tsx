@@ -265,4 +265,53 @@ describe("TransactionsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /delete \(1\)/i }));
     expect(onBulkDelete).toHaveBeenCalledWith(expect.any(Array));
   });
+
+  it("renders scheduled transactions drawer, toggles it, and handles schedule/post actions", () => {
+    const data = makeSeedBudgetData();
+    const onAddRecurring = vi.fn();
+    const onAddRecurringTransfer = vi.fn();
+    const onEditRecurring = vi.fn();
+    const onPostRecurring = vi.fn();
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onAddRecurring={onAddRecurring}
+        onAddRecurringTransfer={onAddRecurringTransfer}
+        onEditRecurring={onEditRecurring}
+        onPostRecurring={onPostRecurring}
+      />
+    );
+
+    // Scheduled Transactions toggle button exists
+    const drawerBtn = screen.getByRole("button", { name: /scheduled transactions/i });
+    expect(drawerBtn).toBeInTheDocument();
+
+    // Drawer is open by default
+    expect(screen.getByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /schedule a transfer/i })).toBeInTheDocument();
+
+    // Trigger schedule buttons
+    fireEvent.click(screen.getByRole("button", { name: /schedule a new transaction/i }));
+    expect(onAddRecurring).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /schedule a transfer/i }));
+    expect(onAddRecurringTransfer).toHaveBeenCalledTimes(1);
+
+    // Click toggle button to collapse drawer
+    fireEvent.click(drawerBtn);
+    expect(screen.queryByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).not.toBeInTheDocument();
+
+    // Click toggle button again to reopen
+    fireEvent.click(drawerBtn);
+    expect(screen.getByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).toBeInTheDocument();
+  });
 });
+

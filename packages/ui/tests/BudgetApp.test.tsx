@@ -87,18 +87,21 @@ describe("BudgetApp", () => {
   it("switches view when a sidebar nav item is clicked", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /recurring/i }));
-    expect(
-      screen.getByRole("button", { name: /add recurring/i })
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+    expect(screen.getByText("Spending by Category")).toBeInTheDocument();
   });
 
-  it("opens the Add Transaction modal when triggered from the Transactions view", () => {
+  it("opens the Add Transaction and Schedule Transaction modals from the Transactions view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /add a? ?new transaction/i })[0]!);
     expect(screen.getAllByText("Add Transaction").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    // Click schedule a new transaction from the bottom drawer
+    fireEvent.click(screen.getByRole("button", { name: /schedule a new transaction/i }));
+    expect(screen.getByText("Add Recurring Transaction")).toBeInTheDocument();
   });
 
   it("calls api.addTransaction with the form values when the modal is saved", async () => {

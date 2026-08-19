@@ -48,6 +48,7 @@ export function TransactionModal({
   categories,
   defaultAccountId,
   defaultDate,
+  initialMode,
   allTransactions,
   initial,
   onClose,
@@ -58,6 +59,7 @@ export function TransactionModal({
   categories: Category[];
   defaultAccountId: number | null;
   defaultDate?: string;
+  initialMode?: "single" | "transfer" | "split";
   /** All transactions in the budget, used to look up split children when editing. */
   allTransactions?: Transaction[];
   initial?: Transaction;
@@ -92,7 +94,7 @@ export function TransactionModal({
   }, [initial?.id]);
 
   const [mode, setMode] = useState<"single" | "transfer" | "split">(
-    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
+    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : (initialMode ?? "single")
   );
 
   const availableAccounts = useMemo(() => {
@@ -812,12 +814,16 @@ export function GroupModal({
 export function RecurringModal({
   accounts,
   categories,
+  defaultAccountId,
+  initialMode,
   initial,
   onClose,
   onSave,
 }: {
   accounts: Account[];
   categories: Category[];
+  defaultAccountId?: number | null;
+  initialMode?: "single" | "transfer" | "split";
   initial?: Recurring & { subTransactions?: RecurringSubTransaction[] };
   onClose: () => void;
   onSave: (v: {
@@ -840,7 +846,7 @@ export function RecurringModal({
   const isInitialSplit = !isInitialTransfer && initialChildren.length > 0;
 
   const [mode, setMode] = useState<"single" | "transfer" | "split">(
-    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : "single"
+    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : (initialMode ?? "single")
   );
 
   const availableAccounts = useMemo(() => {
@@ -848,7 +854,7 @@ export function RecurringModal({
   }, [accounts, initial?.accountId]);
 
   const [accountId, setAccountId] = useState(
-    initial?.accountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
+    initial?.accountId ?? defaultAccountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [payee, setPayee] = useState(initial?.payee ?? "");

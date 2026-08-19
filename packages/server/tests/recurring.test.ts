@@ -383,5 +383,31 @@ describe("recurring queries", () => {
       const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
       expect(posted).toHaveLength(1);
     });
+
+    it("auto-deactivates one-off (frequency=never) transactions when posted", async () => {
+      const oneOffRow = {
+        id: 30,
+        accountId: 1,
+        categoryId: 5,
+        payee: "One-off repair",
+        amount: -12000,
+        frequency: "never",
+        nextDate: "2026-06-15",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [oneOffRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 300, date: "2026-06-15" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...oneOffRow, active: false }]);
+
+      const res = await postRecurringTransaction(mock.db, 30);
+      expect(res.active).toBe(false);
+
+      const updateCall = mock.calls.find((c) => c.op === "update" && c.table === "recurring");
+      expect(updateCall?.set).toMatchObject({ active: false });
+    });
   });
 });
