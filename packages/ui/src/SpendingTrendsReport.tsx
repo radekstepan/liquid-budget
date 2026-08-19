@@ -17,6 +17,8 @@ import {
   colorAt,
   fmtShort,
   niceTicks,
+  symlog,
+  symlogTicks,
   TipLabel,
   useElementSize,
 } from "./chartUtils.js";
@@ -35,6 +37,9 @@ export function SpendingTrendsReport({
 }) {
   const gid = useId();
   const { ref: chartContainerRef, size } = useElementSize<HTMLDivElement>();
+
+  // Scale mode (linear vs logarithmic)
+  const [scaleMode, setScaleMode] = useState<"linear" | "log">("linear");
 
   // Drilldown hierarchy state
   const [drillGroupId, setDrillGroupId] = useState<number | null>(null);
@@ -137,13 +142,33 @@ export function SpendingTrendsReport({
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
-    const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
-    const rawTicks = niceTicks(0, maxVal, 4);
-    const ticks = rawTicks.filter((t) => t >= 0 && t <= maxVal * 1.05);
-    if (!ticks.includes(0)) ticks.unshift(0);
+    let ticks: number[];
+    let y: (v: number) => number;
+    let zeroY: number;
 
-    const y = (v: number) => padT + innerH * (1 - Math.min(1, Math.max(0, v / (ticks[ticks.length - 1] || maxVal))));
-    const zeroY = y(0);
+    if (scaleMode === "log") {
+      const maxVal = Math.max(1000, trends.maxMonthSpend);
+      const rawTicks = symlogTicks(0, maxVal);
+      ticks = rawTicks.filter((t) => t >= 0);
+      if (!ticks.includes(0)) ticks.unshift(0);
+
+      const maxLog = symlog(maxVal);
+      zeroY = padT + innerH;
+      y = (v: number) => {
+        if (v <= 0) return zeroY;
+        const norm = maxLog > 0 ? symlog(v) / maxLog : 0;
+        return padT + innerH * (1 - Math.min(1, Math.max(0, norm)));
+      };
+    } else {
+      const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
+      const rawTicks = niceTicks(0, maxVal, 4);
+      ticks = rawTicks.filter((t) => t >= 0 && t <= maxVal * 1.05);
+      if (!ticks.includes(0)) ticks.unshift(0);
+
+      const maxTick = ticks[ticks.length - 1] || maxVal;
+      y = (v: number) => padT + innerH * (1 - Math.min(1, Math.max(0, v / maxTick)));
+      zeroY = y(0);
+    }
 
     const n = trends.months.length;
     const colW = innerW / n;
@@ -172,7 +197,8 @@ export function SpendingTrendsReport({
 
       let currentBottom = zeroY;
       const renderedSegments = mPoint.segments.map((seg, sIdx) => {
-        const segHeight = Math.max(0, zeroY - y(seg.amount));
+        const segRatio = mPoint.total > 0 ? seg.amount / mPoint.total : 0;
+        const segHeight = Math.max(0, totalH * segRatio);
         const segY = currentBottom - segHeight;
         currentBottom = segY;
 
@@ -251,7 +277,7 @@ export function SpendingTrendsReport({
       avgY,
       tickSet,
     };
-  }, [size, trends, colorMap, hover, hoverConstituentId]);
+  }, [size, trends, colorMap, hover, hoverConstituentId, scaleMode]);
 
   // Breadcrumb navigation handlers
   const handleGoToAll = () => {
@@ -477,19 +503,53 @@ export function SpendingTrendsReport({
           </span>
         </div>
 
-        {/* Right side: Category Filter Popover Trigger - always neutral grey */}
-        {trends.drillLevel !== "category" && (
-          <div className="ml-auto relative" ref={filterRef}>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => setFilterOpen((o) => !o)}
-              className="flex items-center gap-1.5 text-[11px]"
-              title="Filter included categories"
+        {/* Right side: Scale Toggle (Linear / Log) + Category Filter */}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span
+              className="y-caps text-[10px]"
+              style={{ color: "var(--y-ink-faint)" }}
             >
-              <span>{filterButtonLabel}</span>
-              <Icon name="chevronDown" size={10} />
-            </Button>
+              Scale
+            </span>
+            <div className="y-seg">
+              <button
+                type="button"
+                className={
+                  "y-btn y-btn--sm " +
+                  (scaleMode === "linear" ? "y-btn--primary is-on" : "")
+                }
+                onClick={() => setScaleMode("linear")}
+                title="Linear scale"
+              >
+                Linear
+              </button>
+              <button
+                type="button"
+                className={
+                  "y-btn y-btn--sm " +
+                  (scaleMode === "log" ? "y-btn--primary is-on" : "")
+                }
+                onClick={() => setScaleMode("log")}
+                title="Logarithmic scale"
+              >
+                Log
+              </button>
+            </div>
+          </div>
+
+          {trends.drillLevel !== "category" && (
+            <div className="relative" ref={filterRef}>
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => setFilterOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-[11px]"
+                title="Filter included categories"
+              >
+                <span>{filterButtonLabel}</span>
+                <Icon name="chevronDown" size={10} />
+              </Button>
 
             {/* Category Filter Popover Menu */}
             {filterOpen && (
@@ -603,6 +663,7 @@ export function SpendingTrendsReport({
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* Main Body: Split between Chart (top) and Breakdown Table / Transaction Register (bottom) */}
