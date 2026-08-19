@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDaysISO,
+  countDueRecurring,
   frequencyLabel,
   frequencyMonthlyMultiplier,
   getRecurringChildren,
+  groupRecurringByTimeline,
   netMonthlyAmount,
   RECURRING_FREQUENCIES,
   recurringFlavour,
@@ -262,5 +265,49 @@ describe("RECURRING_FREQUENCIES and frequencyLabel (UNI-23 / F-13 / BUG-19)", ()
     expect(frequencyLabel("annually")).toBe("Yearly");
     expect(frequencyLabel("every2years")).toBe("Every 2 Years");
     expect(frequencyLabel("unknown")).toBe("unknown");
+  });
+});
+
+describe("countDueRecurring", () => {
+  it("counts only active items with nextDate <= asOfDate", () => {
+    const list = [
+      base({ nextDate: "2026-06-01", active: true }),
+      base({ nextDate: "2026-06-15", active: true }),
+      base({ nextDate: "2026-06-20", active: true }),
+      base({ nextDate: "2026-06-10", active: false }), // paused
+    ];
+    expect(countDueRecurring(list, "2026-06-15")).toBe(2);
+    expect(countDueRecurring(list, "2026-06-01")).toBe(1);
+    expect(countDueRecurring(list, "2026-05-31")).toBe(0);
+    expect(countDueRecurring(list, "2026-06-30")).toBe(3);
+  });
+});
+
+describe("addDaysISO", () => {
+  it("adds days correctly across months and leap years", () => {
+    expect(addDaysISO("2026-06-15", 7)).toBe("2026-06-22");
+    expect(addDaysISO("2026-06-28", 5)).toBe("2026-07-03");
+    expect(addDaysISO("2024-02-27", 3)).toBe("2024-03-01");
+  });
+});
+
+describe("groupRecurringByTimeline", () => {
+  it("categorizes recurring items into overdue, dueToday, thisWeek, later, and paused", () => {
+    const today = "2026-06-15";
+    const items = [
+      base({ id: 1, nextDate: "2026-06-10", active: true }), // overdue
+      base({ id: 2, nextDate: "2026-06-15", active: true }), // dueToday
+      base({ id: 3, nextDate: "2026-06-18", active: true }), // thisWeek
+      base({ id: 4, nextDate: "2026-06-22", active: true }), // thisWeek (within 7 days)
+      base({ id: 5, nextDate: "2026-07-01", active: true }), // later
+      base({ id: 6, nextDate: "2026-06-12", active: false }), // paused
+    ];
+
+    const grouped = groupRecurringByTimeline(items, today);
+    expect(grouped.overdue.map((x) => x.id)).toEqual([1]);
+    expect(grouped.dueToday.map((x) => x.id)).toEqual([2]);
+    expect(grouped.thisWeek.map((x) => x.id)).toEqual([3, 4]);
+    expect(grouped.later.map((x) => x.id)).toEqual([5]);
+    expect(grouped.paused.map((x) => x.id)).toEqual([6]);
   });
 });

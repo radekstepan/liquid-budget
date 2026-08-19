@@ -333,10 +333,16 @@ export async function postRecurringTransaction(
     });
   }
 
+  const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+  const isOneOff = normFreq === "never" || normFreq === "once";
   const next = nextDateFor(r.frequency, r.nextDate);
-  await db.update(recurring).set({ nextDate: next }).where(eq(recurring.id, r.id));
+  const updatePayload: { nextDate: string; active?: boolean } = { nextDate: next };
+  if (isOneOff) {
+    updatePayload.active = false;
+  }
+  await db.update(recurring).set(updatePayload).where(eq(recurring.id, r.id));
 
-  return { transaction: postedTxn, nextDate: next };
+  return { transaction: postedTxn, nextDate: next, active: isOneOff ? false : r.active };
 }
 
 /**

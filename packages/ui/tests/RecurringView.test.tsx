@@ -194,4 +194,65 @@ describe("RecurringView", () => {
     });
     expect(screen.getByText("Every Other Week")).toBeInTheDocument();
   });
+
+  it("renders timeline section headers and due badges", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [],
+      recurring: [
+        {
+          id: 1,
+          accountId: 1,
+          categoryId: 10,
+          payee: "Past Due Utility",
+          amount: "-5000",
+          frequency: "monthly",
+          nextDate: "2020-01-01", // overdue
+          active: true,
+          subTransactions: [],
+        },
+        {
+          id: 2,
+          accountId: 1,
+          categoryId: 10,
+          payee: "Far Future Vacation",
+          amount: "-100000",
+          frequency: "yearly",
+          nextDate: "2099-01-01", // later
+          active: true,
+          subTransactions: [],
+        },
+        {
+          id: 3,
+          accountId: 1,
+          categoryId: 10,
+          payee: "Paused Subscription",
+          amount: "-1500",
+          frequency: "monthly",
+          nextDate: "2020-01-01",
+          active: false,
+          subTransactions: [],
+        },
+      ],
+    };
+
+    const { onPost } = renderView({ data });
+    expect(screen.getAllByText("Overdue").length).toBe(2); // section header + card pill
+    expect(screen.getByText("Later")).toBeInTheDocument();
+    expect(screen.getAllByText("Paused").length).toBe(2); // section header + card pill
+
+    // Clicking Post Now on a future item calls onPost with today's date
+    const postBtns = screen.getAllByRole("button", { name: /^post now$/i });
+    // postBtns[1] is the future item
+    fireEvent.click(postBtns[1]!);
+    expect(onPost).toHaveBeenCalledWith(2, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+  });
 });
+

@@ -13,6 +13,7 @@ import {
   previousMonthKey,
   round2,
   todayISO,
+  countDueRecurring,
   DEMO_MONTH,
 } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
@@ -35,9 +36,9 @@ import { ErrorBoundary } from "./ErrorBoundary.js";
 
 type ModalState =
   | { kind: "none" }
-  | { kind: "addTransaction"; defaultDate?: string }
+  | { kind: "addTransaction"; defaultDate?: string; mode?: "single" | "transfer" }
   | { kind: "editTransaction"; transactionId: number }
-  | { kind: "recurring" }
+  | { kind: "recurring"; mode?: "single" | "transfer" }
   | { kind: "editRecurring"; recurringId: number }
   | { kind: "account" }
   | { kind: "editAccount"; accountId: number }
@@ -128,7 +129,7 @@ export type BudgetAppApi = {
     }
   ) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;
-  postRecurring: (id: number) => Promise<void>;
+  postRecurring: (id: number, date?: string) => Promise<void>;
   saveCategory: (
     groupId: number | null,
     categoryId: number | null,
@@ -499,6 +500,29 @@ export function BudgetApp({
     };
   }, [modal, data.accounts, data.transactions]);
 
+  const dueBadgeCount = useMemo(() => {
+    return countDueRecurring(data.recurring, todayISO());
+  }, [data.recurring]);
+
+  const dueByAccount = useMemo(() => {
+    const today = todayISO();
+    const map: Record<number, number> = {};
+    for (const r of data.recurring) {
+      if (r.active && r.nextDate <= today) {
+        map[r.accountId] = (map[r.accountId] ?? 0) + 1;
+        if (r.transferAccountId != null) {
+          map[r.transferAccountId] = (map[r.transferAccountId] ?? 0) + 1;
+        }
+        for (const c of r.subTransactions ?? []) {
+          if (c.transferAccountId != null) {
+            map[c.transferAccountId] = (map[c.transferAccountId] ?? 0) + 1;
+          }
+        }
+      }
+    }
+    return map;
+  }, [data.recurring]);
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "transparent" }}>
       <Sidebar
@@ -513,6 +537,8 @@ export function BudgetApp({
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onReorderAccount={api.reorderAccount}
+        dueBadgeCount={dueBadgeCount}
+        dueByAccount={dueByAccount}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
@@ -554,23 +580,19 @@ export function BudgetApp({
             <TransactionsView
               data={data}
               accountFilter={accountFilter}
-              onAdd={() => setModal({ kind: "addTransaction" })}
+              onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
+              onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
               onCycleStatus={cycleStatus}
               onBulkDelete={api.bulkDeleteTransactions}
               onBulkUpdate={api.bulkUpdateTransactions}
-            />
-          )}
-          {view === "recurring" && (
-            <RecurringView
-              data={data}
-              onAdd={() => setModal({ kind: "recurring" })}
-              onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
-              onDelete={api.deleteRecurring}
-              onPost={api.postRecurring}
-              onToggleActive={(id, active) => api.updateRecurring(id, { active })}
+              onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
+              onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}
+              onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}
+              onDeleteRecurring={api.deleteRecurring}
+              onPostRecurring={api.postRecurring}
             />
           )}
           {view === "reports" && (
@@ -623,6 +645,7 @@ export function BudgetApp({
           categories={data.categories}
           defaultAccountId={accountFilter}
           defaultDate={modal.defaultDate}
+          initialMode={modal.mode}
           allTransactions={data.transactions}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
@@ -655,6 +678,8 @@ export function BudgetApp({
         <RecurringModal
           accounts={data.accounts}
           categories={data.categories}
+          defaultAccountId={accountFilter}
+          initialMode={modal.mode}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.addRecurring(v);

@@ -10,15 +10,13 @@ export type View =
   | "reports"
   | "calendar"
   | "projections"
-  | "transactions"
-  | "recurring";
+  | "transactions";
 
 type NavItem = { key: View; label: string; icon: string };
 const NAV_TOP: NavItem[] = [
   { key: "budget", label: "Budget", icon: "budget" },
   { key: "reports", label: "Reports", icon: "chart" },
   { key: "calendar", label: "Calendar", icon: "calendar" },
-  { key: "recurring", label: "Recurring", icon: "clock" },
   { key: "projections", label: "Projections", icon: "projections" },
 ];
 
@@ -36,6 +34,8 @@ export const Sidebar = memo(function Sidebar({
   onAddAccount,
   onEditAccount,
   onReorderAccount,
+  dueBadgeCount = 0,
+  dueByAccount,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -45,6 +45,8 @@ export const Sidebar = memo(function Sidebar({
   onAddAccount: () => void;
   onEditAccount?: (id: number) => void;
   onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
+  dueBadgeCount?: number;
+  dueByAccount?: Record<number, number>;
 }) {
   const activeAccounts = accounts.filter((a) => !a.archived);
   const archivedAccounts = accounts.filter((a) => !!a.archived);
@@ -215,7 +217,7 @@ export const Sidebar = memo(function Sidebar({
               className={cx("y-side-item y-side-nav", active && "is-sel")}
             >
               <Icon name={icon} size={14} />
-              {label}
+              <span className="truncate flex-1">{label}</span>
             </button>
           );
         })}
@@ -231,6 +233,15 @@ export const Sidebar = memo(function Sidebar({
       >
         <Icon name="bank" size={14} />
         <span className="truncate flex-1">Accounts</span>
+        {dueBadgeCount > 0 && (
+          <span
+            className="y-badge mr-1"
+            aria-label={`${dueBadgeCount} due`}
+            title={`${dueBadgeCount} scheduled transaction${dueBadgeCount === 1 ? "" : "s"} due`}
+          >
+            {dueBadgeCount}
+          </span>
+        )}
         <span
           className="y-side-amt"
           style={{
@@ -273,6 +284,7 @@ export const Sidebar = memo(function Sidebar({
                   const isSelected = view === "transactions" && selectedAccountId === a.id;
                   const isDropTarget = accOverId === a.id;
                   const hasActions = Boolean(onEditAccount);
+                  const accDueCount = dueByAccount?.[a.id] ?? 0;
                   return (
                     <div
                       key={a.id}
@@ -288,8 +300,17 @@ export const Sidebar = memo(function Sidebar({
                         className={cx("y-side-item", isSelected && "is-sel")}
                       >
                         <span className="truncate">{a.name}</span>
+                        {accDueCount > 0 && (
+                          <span
+                            className="y-badge ml-auto mr-1"
+                            style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
+                            title={`${accDueCount} scheduled due`}
+                          >
+                            {accDueCount}
+                          </span>
+                        )}
                         <span
-                          className="y-side-amt"
+                          className={cx("y-side-amt", accDueCount === 0 && "ml-auto")}
                           style={{
                             color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
                             fontWeight: 500,

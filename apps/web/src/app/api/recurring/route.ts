@@ -61,9 +61,10 @@ export async function POST(req: Request) {
 
   if (action === "post") {
     const id = Number(searchParams.get("id"));
+    const postDate = searchParams.get("date") || undefined;
     if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
     try {
-      const res = await postRecurringTransaction(db, id);
+      const res = await postRecurringTransaction(db, id, postDate);
       return Response.json(res);
     } catch (e) {
       return errorResponse(e);

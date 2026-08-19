@@ -344,6 +344,45 @@ body::after {
   font-weight: 700;
   padding: 7px 12px;
 }
+/* ---------- sidebar navigation badge ---------- */
+.y-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: linear-gradient(#e05341, #bf3726);
+  border: 1px solid #972b1d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4);
+  margin-left: auto;
+  letter-spacing: 0;
+}
+
+/* ---------- recurring section headers ---------- */
+.y-recurring-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--y-ink-soft);
+  margin-top: 16px;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--y-line-soft);
+}
+.y-recurring-section-header:first-of-type {
+  margin-top: 0;
+}
 .y-side-row {
   position: relative;
   width: 100%;
@@ -1413,3 +1452,134 @@ button.y-pill:hover {
     transform: translateY(0);
   }
 }
+
+/* ---------- YNAB4 Register Footer & Balance Bar ---------- */
+.y-register-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background: linear-gradient(#f7f7f5, #e0e0dc);
+  border-top: 1px solid #b6b6b1;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.y-working-balance-box {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #b6b6b1;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  font-size: 11px;
+}
+
+.y-working-balance-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+}
+
+.y-working-balance-op {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--y-ink-soft);
+  padding: 0 1px;
+}
+
+.y-working-balance-label {
+  font-size: 9.5px;
+  color: var(--y-ink-soft);
+  white-space: nowrap;
+}
+
+.y-working-balance-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--y-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- YNAB4 Scheduled Transactions Drawer ---------- */
+.y-scheduled-drawer {
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid #2b95c4;
+  background: #f4f4f2;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+  max-height: 48%;
+  min-height: 180px;
+}
+
+.y-scheduled-divider-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 8px;
+  background: #2b95c4;
+  cursor: pointer;
+  color: #fff;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.y-scheduled-divider-toggle:hover {
+  background: #237fa8;
+}
+
+.y-scheduled-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: linear-gradient(#eaeae8, #d8d8d5);
+  border-bottom: 1px solid #b6b6b1;
+  position: relative;
+}
+
+.y-scheduled-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 14px;
+  border-radius: 12px;
+  background: linear-gradient(#fdfdfc, #ebebe8);
+  border: 1px solid #b8b8b3;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 700;
+  color: var(--y-ink);
+}
+
+.y-scheduled-table thead th {
+  background: linear-gradient(#68747d, #4e5861);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-right: 1px solid #3c444b;
+  border-bottom: 1px solid #30373d;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  text-align: left;
+  user-select: none;
+}
+
+.y-scheduled-table thead th.num {
+  text-align: right;
+}
+
+.y-scheduled-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: linear-gradient(#f7f7f5, #e0e0dc);
+  border-top: 1px solid #b6b6b1;
+}
+
