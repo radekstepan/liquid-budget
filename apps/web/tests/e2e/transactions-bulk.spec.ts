@@ -16,7 +16,7 @@ async function waitForReady(page: Page) {
 }
 
 async function gotoAllTransactions(page: Page) {
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(
     page.getByText("All Transactions", { exact: true }).first()
   ).toBeVisible();
@@ -35,10 +35,10 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
 
   // Create two distinct transactions
   for (const p of [payee1, payee2]) {
-    await page.getByRole("button", { name: "Add Transaction" }).click();
+    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("15.00");
-    await modal.locator('input[type="date"]').first().fill("2026-06-15");
+    await modal.locator('input[type="date"]').first().fill("2026-09-01");
     await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
@@ -73,10 +73,10 @@ test("bulk marks selected rows as Cleared and Uncleared", async ({ page }) => {
 
   // Create two uncleared transactions
   for (const p of [payee1, payee2]) {
-    await page.getByRole("button", { name: "Add Transaction" }).click();
+    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("20.00");
-    await modal.locator('input[type="date"]').first().fill("2026-06-15");
+    await modal.locator('input[type="date"]').first().fill("2026-09-01");
     await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
     // Uncheck cleared to create uncleared transaction
     await modal.getByText("Cleared (bank has processed this)").click();
@@ -120,10 +120,10 @@ test("bulk deletes selected transactions", async ({ page }) => {
   const payee2 = `PW BulkDel 2 ${stamp}`;
 
   for (const p of [payee1, payee2]) {
-    await page.getByRole("button", { name: "Add Transaction" }).click();
+    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("18.00");
-    await modal.locator('input[type="date"]').first().fill("2026-06-15");
+    await modal.locator('input[type="date"]').first().fill("2026-09-01");
     await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
@@ -168,10 +168,10 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   const stamp = Date.now();
   const payee = `PW Keyboard ${stamp}`;
 
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("33.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
   await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();

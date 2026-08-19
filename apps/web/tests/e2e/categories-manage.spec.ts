@@ -64,13 +64,13 @@ test("deleting a category with transactions prompts for reassign target", async 
   await expect(modal).toBeHidden();
 
   // 2. Add a transaction tied to this category
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const txModal = page.locator(".y-modal").last();
   await txModal.locator('input[inputmode="decimal"]').first().fill("15.00");
-  await txModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await txModal.locator('input[type="date"]').first().fill("2026-09-01");
   await txModal.locator('input[placeholder="e.g. Whole Foods"]').fill(`PW Tx ${stamp}`);
 
   // Select the newly created category in the dropdown

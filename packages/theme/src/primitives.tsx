@@ -89,6 +89,7 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
       </>
     ),
     swap: <path d="M3 6h9M9 3l3 3-3 3M13 10H4M7 13l-3-3 3-3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    transactions: <path d="M3 6h9M9 3l3 3-3 3M13 10H4M7 13l-3-3 3-3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
     clock: (
       <>
         <circle cx="8" cy="8" r="5.6" strokeWidth="1.5" />
@@ -620,7 +621,7 @@ export const Checkbox: React.FC<{
   label?: string;
   radio?: boolean;
 }> = ({ checked = false, onChange, label, radio }) => (
-  <label className="inline-flex items-center gap-[6px] cursor-pointer select-none">
+  <label className="inline-flex items-center gap-[6px] cursor-pointer select-none leading-none">
     <input
       type={radio ? "radio" : "checkbox"}
       checked={checked}
@@ -631,7 +632,7 @@ export const Checkbox: React.FC<{
       aria-hidden
       className={cx("y-check", radio && "y-radio", checked && "is-on")}
     />
-    {label && <span className="text-[11.5px]" style={{ color: "var(--y-ink)" }}>{label}</span>}
+    {label && <span className="text-[11.5px] leading-none" style={{ color: "var(--y-ink)" }}>{label}</span>}
   </label>
 );
 

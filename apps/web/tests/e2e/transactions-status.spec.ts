@@ -19,7 +19,7 @@ async function waitForReady(page: Page) {
 }
 
 async function gotoAllTransactions(page: Page) {
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(
     page.getByText("All Transactions", { exact: true }).first()
   ).toBeVisible();
@@ -98,10 +98,10 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
 
   // Add a fresh row
   const payee = `PW Reconcile Cycle ${stamp}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("3.21");
-  await modal.locator('input[type="date"]').first().fill("2026-06-15");
+  await modal.locator('input[type="date"]').first().fill("2026-08-15");
   await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -112,7 +112,7 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
   await expect(newFlag).toHaveText("C");
 
   // Reconcile via the toolbar
-  await page.getByRole("button", { name: "Reconcile", exact: true }).click();
+  await page.getByRole("button", { name: /Reconcile/i }).click();
   const rModal = page.locator(".y-modal").last();
   await expect(rModal.locator(".y-modal-head")).toHaveText(new RegExp(`Reconcile: ${accName}`));
   await rModal.getByRole("button", { name: "Reconcile", exact: true }).click();
@@ -130,10 +130,10 @@ test("editing a transaction through the modal persists the new amount", async ({
   // find after the save.
   const stamp = Date.now();
   const payee = `PW Edit ${stamp}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("1.11");
-  await modal.locator('input[type="date"]').first().fill("2026-06-15");
+  await modal.locator('input[type="date"]').first().fill("2026-08-15");
   await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -165,7 +165,7 @@ test("split transactions render parent ClearedFlag and no subtransaction rows in
   const stamp = Date.now();
   const payee = `PW Split Parent Flag ${stamp}`;
 
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
   await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);

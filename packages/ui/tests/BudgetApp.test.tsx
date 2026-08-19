@@ -77,7 +77,7 @@ describe("BudgetApp", () => {
   it("renders Sidebar, Inspector, and the default Budget view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    expect(screen.getByRole("button", { name: /^accounts/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^transactions/i })).toBeInTheDocument();
     expect(screen.getAllByText(/To Be Budgeted|Overbudgeted/i).length).toBeGreaterThan(0);
     // The single-month budget view has a MonthNav with prev/next buttons
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe("BudgetApp", () => {
   it("opens the Add Transaction and Schedule Transaction modals from the Transactions view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
     fireEvent.click(screen.getAllByRole("button", { name: /add a? ?new transaction/i })[0]!);
     expect(screen.getAllByText("Add Transaction").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
@@ -107,8 +107,8 @@ describe("BudgetApp", () => {
   it("calls api.addTransaction with the form values when the modal is saved", async () => {
     const { api, calls } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add a new transaction/i }));
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
       target: { value: "Coffee" },
@@ -180,7 +180,7 @@ describe("BudgetApp", () => {
     render(<BudgetApp data={seed} api={api} />);
 
     // Navigate to All Transactions
-    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
 
     // Click on the first transaction row in the register to open edit modal
     const tableRows = screen.getAllByRole("row");
@@ -225,7 +225,7 @@ describe("BudgetApp", () => {
     render(<BudgetApp data={dataWithTransfer} api={api} />);
 
     // Navigate to All Transactions
-    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
 
     // Find and click the transfer transaction row
     const transferCells = screen.getAllByText("Transfer: Unique Savings");
@@ -290,7 +290,7 @@ describe("BudgetApp", () => {
     render(<BudgetApp data={dataWithSplit} api={api} />);
 
     // Navigate to All Transactions
-    fireEvent.click(screen.getByRole("button", { name: /^accounts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
 
     const splitCells = screen.getAllByText("Split Grocery & Home");
     const row = splitCells[0]!.closest("tr")!;
@@ -313,7 +313,7 @@ describe("BudgetApp", () => {
     expect(deleteCall?.args[0]).toBe(9990);
   });
 
-  it("does not highlight 'Accounts' when an account is selected", () => {
+  it("does not highlight 'Transactions' when an account is selected", () => {
     const { api } = makeApi();
     const seed = makeSeedBudgetData();
     render(<BudgetApp data={seed} api={api} />);
@@ -326,11 +326,11 @@ describe("BudgetApp", () => {
     )!;
     fireEvent.click(accountRow);
 
-    const navAll = screen.getByRole("button", { name: /^accounts/i });
+    const navAll = screen.getByRole("button", { name: /^transactions/i });
     expect(navAll.className).not.toMatch(/\bis-sel\b/);
 
     // Toggling the same account again (now in the filtered view) clears
-    // the filter and re-highlights "Accounts".
+    // the filter and re-highlights "Transactions".
     fireEvent.click(accountRow);
     expect(navAll.className).toMatch(/\bis-sel\b/);
   });

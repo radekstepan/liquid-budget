@@ -1,16 +1,15 @@
 "use client";
 
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, Recurring, RecurringSubTransaction, Transaction } from "@ynab/logic";
+import type { BudgetData, Transaction } from "@ynab/logic";
 import {
   computeRunningBalances,
-  fmt,
   frequencyLabel,
   num,
   recurringFlavour,
   todayISO,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money, Pill, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
@@ -74,22 +73,6 @@ export const TransactionsView = memo(function TransactionsView({
     });
   };
 
-  const [selectedScheduledIds, setSelectedScheduledIds] = useState<Set<number>>(new Set());
-  const [editMenuOpen, setEditMenuOpen] = useState(false);
-  const editMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (editMenuRef.current && !editMenuRef.current.contains(e.target as Node)) {
-        setEditMenuOpen(false);
-      }
-    };
-    if (editMenuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [editMenuOpen]);
-
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -129,7 +112,7 @@ export const TransactionsView = memo(function TransactionsView({
   );
 
   const rows = useMemo<Txn[]>(() => {
-    const filtered: (Omit<Transaction, "amount"> & { amount: number })[] = [];
+    const filteredList: (Omit<Transaction, "amount"> & { amount: number })[] = [];
     const len = data.transactions.length;
     for (let i = 0; i < len; i++) {
       const t = data.transactions[i]!;
@@ -138,11 +121,11 @@ export const TransactionsView = memo(function TransactionsView({
         t.accountId === accountFilter ||
         (t.transferAccountId != null && t.transferAccountId === accountFilter)
       ) {
-        filtered.push({ ...t, amount: num(t.amount) });
+        filteredList.push({ ...t, amount: num(t.amount) });
       }
     }
-    filtered.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
-    return computeRunningBalances(filtered, accountBalances, accountFilter ?? undefined);
+    filteredList.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
+    return computeRunningBalances(filteredList, accountBalances, accountFilter ?? undefined);
   }, [data.transactions, accountFilter, accountBalances]);
 
   const splitParentIds = useMemo(() => {
@@ -227,7 +210,7 @@ export const TransactionsView = memo(function TransactionsView({
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
   const colCount = (accountFilter ? 8 : 9) + 1;
 
-  // Scheduled transactions for the active account / view
+  // Scheduled transactions for the active account / view (always sorted by date ASC)
   const scheduledRows = useMemo(() => {
     const list = data.recurring.filter((r) => {
       if (accountFilter == null) return true;
@@ -275,38 +258,6 @@ export const TransactionsView = memo(function TransactionsView({
     return scheduledRows.filter((r) => r.active && r.nextDate <= today).length;
   }, [scheduledRows, today]);
 
-  // Balance Math Bar (Cleared + Uncleared = Working Balance)
-  const balanceMath = useMemo(() => {
-    let working = 0;
-    let uncleared = 0;
-
-    if (accountFilter != null && filterAccount) {
-      working = num(filterAccount.balance);
-      const accTxns = rows;
-      for (const t of accTxns) {
-        if (t.status === "u") {
-          const isIncoming = t.transferAccountId === accountFilter;
-          const effAmt = isIncoming ? -t.amount : t.amount;
-          uncleared += effAmt;
-        }
-      }
-    } else {
-      const activeBudgetAccs = data.accounts.filter((a) => !a.archived && a.onBudget);
-      working = activeBudgetAccs.reduce((s, a) => s + num(a.balance), 0);
-      for (const t of rows) {
-        if (t.status === "u") {
-          const srcAcc = accountById.get(t.accountId);
-          if (srcAcc?.onBudget) {
-            uncleared += t.amount;
-          }
-        }
-      }
-    }
-
-    const cleared = working - uncleared;
-    return { cleared, uncleared, working };
-  }, [accountFilter, filterAccount, rows, data.accounts, accountById]);
-
   // Virtualization window calculations
   const totalCount = filtered.length;
   const effectiveHeight =
@@ -351,23 +302,6 @@ export const TransactionsView = memo(function TransactionsView({
     });
   };
 
-  const toggleScheduledRowSelect = (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSelectedScheduledIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleAllScheduledSelect = () => {
-    setSelectedScheduledIds((prev) => {
-      if (prev.size === scheduledRows.length) return new Set();
-      return new Set(scheduledRows.map((r) => r.id));
-    });
-  };
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (filtered.length === 0) return;
@@ -400,7 +334,7 @@ export const TransactionsView = memo(function TransactionsView({
   );
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" onKeyDown={handleKeyDown} tabIndex={0}>
+    <div className="flex h-full flex-col overflow-hidden bg-white" onKeyDown={handleKeyDown} tabIndex={0}>
       {/* Top Register Header Toolbar */}
       <Toolbar>
         <div className="flex items-center gap-2">
@@ -429,101 +363,102 @@ export const TransactionsView = memo(function TransactionsView({
           placeholder="Search register"
           style={{ width: 168 }}
         />
-        <div className="ml-auto flex items-center gap-2">
-          <Button onClick={onAdd} variant="primary">
-            <Icon name="plus" size={11} color="#fff" /> Add Transaction
-          </Button>
-        </div>
       </Toolbar>
 
-      {/* Multi-Selection Bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-800 text-[12px] flex-shrink-0">
-          <span className="font-semibold text-blue-900 dark:text-blue-200">
-            {selectedIds.size} selected
-          </span>
-          <div className="h-4 w-px bg-blue-300 dark:bg-blue-700 mx-1" />
-          <Button
-            variant="default"
-            size="sm"
-            onClick={async () => {
-              const ids = Array.from(selectedIds);
-              setSelectedIds(new Set());
-              if (onBulkUpdate) await onBulkUpdate(ids, { status: "c" });
-              else for (const id of ids) onCycleStatus(id);
-            }}
-          >
-            Mark Cleared
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={async () => {
-              const ids = Array.from(selectedIds);
-              setSelectedIds(new Set());
-              if (onBulkUpdate) await onBulkUpdate(ids, { status: "u" });
-              else for (const id of ids) onCycleStatus(id);
-            }}
-          >
-            Mark Uncleared
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={async () => {
-              const ids = Array.from(selectedIds);
-              setSelectedIds(new Set());
-              if (onBulkDelete) await onBulkDelete(ids);
-              else for (const id of ids) onDelete(id);
-            }}
-          >
-            Delete ({selectedIds.size})
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            className="ml-auto"
-            onClick={() => setSelectedIds(new Set())}
-          >
-            Deselect All
-          </Button>
-        </div>
-      )}
-
-      {/* Register Summary Strip */}
-      <div className="y-subbar flex items-center gap-3 px-3 py-1.5 text-[11px] flex-shrink-0">
-        <span className="y-caps">{totals.count} transactions</span>
-        <span className="y-num font-bold" style={{ color: "var(--y-ink)" }}>
-          Inflow {money(totals.inflow)}
-        </span>
-        <span className="y-num font-bold" style={{ color: "var(--y-ink-soft)" }}>
-          Outflow −{money(totals.outflow)}
-        </span>
-        <span
-          className="y-num font-bold ml-auto"
-          style={{ color: totals.net >= 0 ? "var(--y-green-dk)" : "var(--y-red)" }}
-        >
-          Net {money(totals.net)}
-        </span>
+      {/* Register Summary Strip / Multi-Selection Actions Bar (in-place replacement, no layout shift) */}
+      <div className="y-subbar flex items-center gap-2 px-3 py-1 text-[11px] flex-shrink-0 min-h-[28px]">
+        {selectedIds.size > 0 ? (
+          <>
+            <span className="y-caps font-bold" style={{ color: "var(--y-ink)" }}>
+              {selectedIds.size} selected
+            </span>
+            <div className="y-tb-sep mx-1" style={{ height: 14 }} />
+            <Button
+              variant="default"
+              size="sm"
+              className="!py-0.5 !px-2 text-[11px]"
+              onClick={async () => {
+                const ids = Array.from(selectedIds);
+                setSelectedIds(new Set());
+                if (onBulkUpdate) await onBulkUpdate(ids, { status: "c" });
+                else for (const id of ids) onCycleStatus(id);
+              }}
+            >
+              Mark Cleared
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="!py-0.5 !px-2 text-[11px]"
+              onClick={async () => {
+                const ids = Array.from(selectedIds);
+                setSelectedIds(new Set());
+                if (onBulkUpdate) await onBulkUpdate(ids, { status: "u" });
+                else for (const id of ids) onCycleStatus(id);
+              }}
+            >
+              Mark Uncleared
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              className="!py-0.5 !px-2 text-[11px]"
+              onClick={async () => {
+                const ids = Array.from(selectedIds);
+                setSelectedIds(new Set());
+                if (onBulkDelete) await onBulkDelete(ids);
+                else for (const id of ids) onDelete(id);
+              }}
+            >
+              Delete ({selectedIds.size})
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="ml-auto !py-0.5 !px-2 text-[11px]"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Deselect All
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="y-caps">{totals.count} transactions</span>
+            <span className="y-num font-bold" style={{ color: "var(--y-ink)" }}>
+              Inflow {money(totals.inflow)}
+            </span>
+            <span className="y-num font-bold" style={{ color: "var(--y-ink-soft)" }}>
+              Outflow −{money(totals.outflow)}
+            </span>
+            <span
+              className="y-num font-bold ml-auto"
+              style={{ color: totals.net >= 0 ? "var(--y-green-dk)" : "var(--y-red)" }}
+            >
+              Net {money(totals.net)}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Main Register Table View */}
       <div
         ref={containerRef}
+        tabIndex={0}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto overflow-x-auto y-scroll"
-        style={{ minHeight: 120 }}
+        className="flex-1 overflow-y-auto overflow-x-auto y-scroll bg-white"
+        style={{ minHeight: 120, background: "#ffffff" }}
       >
-        <table className="y-table w-full text-left">
+        <table className="y-table w-full text-left bg-white">
           <thead className="y-thead--sticky">
             <tr>
-              <th style={{ width: 28 }} className="text-center">
+              <th style={{ width: 28, textAlign: "center", padding: "4px 0" }} className="text-center">
                 <input
                   type="checkbox"
                   aria-label="Select all transactions"
                   checked={allVisibleSelected}
                   onChange={toggleSelectAll}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle inline-block"
+                  style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
                 />
               </th>
               <th style={{ width: 85 }}>Date</th>
@@ -579,21 +514,22 @@ export const TransactionsView = memo(function TransactionsView({
                   return (
                     <tr
                       key={t.id}
-                      className={`group y-row ${isSelected ? "y-row--selected bg-[#eff6ff] dark:bg-[#1e293b]" : globalIndex % 2 === 1 ? "alt" : ""}`}
+                      className={cx("group y-row", isSelected && "y-row--selected is-sel", globalIndex % 2 === 1 && !isSelected && "alt")}
                       onClick={() => {
                         setSelectedId(t.id);
                         onEdit(t.parentId ?? t.id);
                       }}
                       style={{ cursor: "pointer" }}
                     >
-                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <td style={{ width: 28, textAlign: "center", padding: "4px 0" }} className="text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           aria-label={`Select transaction ${t.payee || t.id}`}
                           checked={isChecked}
                           onChange={() => {}}
                           onClick={(e) => toggleRowSelect(t.id, e)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle inline-block"
+                          style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
                         />
                       </td>
                       <td className="y-num">{t.date}</td>
@@ -656,7 +592,7 @@ export const TransactionsView = memo(function TransactionsView({
         </table>
       </div>
 
-      {/* YNAB4 Register Footer Bar: Action Buttons & Balance Math Strip */}
+      {/* Register Footer Bar: Action Buttons */}
       <div className="y-register-footer">
         <div className="flex items-center gap-2">
           <Button onClick={onAdd} variant="primary" size="sm">
@@ -673,7 +609,7 @@ export const TransactionsView = memo(function TransactionsView({
 
           <Button
             onClick={toggleScheduledDrawer}
-            variant={showScheduledDrawer ? "blue" : "default"}
+            variant="default"
             size="sm"
             className="flex items-center gap-1.5"
             title={showScheduledDrawer ? "Hide Scheduled Transactions drawer" : "Show Scheduled Transactions drawer"}
@@ -691,163 +627,52 @@ export const TransactionsView = memo(function TransactionsView({
           </Button>
         </div>
 
-        {/* Right Balance Box & Reconcile */}
-        <div className="flex items-center gap-3">
-          <div className="y-working-balance-box">
-            <div className="y-working-balance-cell">
-              <span className="y-working-balance-label">Cleared Balance</span>
-              <span
-                className="y-working-balance-val"
-                style={{ color: balanceMath.cleared < 0 ? "var(--y-red)" : undefined }}
-              >
-                {fmt(balanceMath.cleared)}
-              </span>
-            </div>
-            <span className="y-working-balance-op">+</span>
-            <div className="y-working-balance-cell">
-              <span className="y-working-balance-label">Uncleared Transactions</span>
-              <span
-                className="y-working-balance-val"
-                style={{ color: balanceMath.uncleared < 0 ? "var(--y-red)" : undefined }}
-              >
-                {fmt(balanceMath.uncleared)}
-              </span>
-            </div>
-            <span className="y-working-balance-op">=</span>
-            <div className="y-working-balance-cell bg-slate-50 dark:bg-slate-900/50 rounded-r">
-              <span className="y-working-balance-label font-bold">Working Balance</span>
-              <span
-                className="y-working-balance-val font-bold"
-                style={{ color: balanceMath.working < 0 ? "var(--y-red)" : undefined }}
-              >
-                {fmt(balanceMath.working)}
-              </span>
-            </div>
-          </div>
+        {filterAccount && (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => onReconcile(filterAccount.id)}
+            title="Reconcile this account against your bank statement"
+            aria-label="Reconcile"
+            className="font-semibold"
+          >
+            <Icon name="reconcile" size={11} color="var(--y-ink)" />
+            <span className="ml-1">Reconcile</span>
+          </Button>
+        )}
+      </div>
 
-          {filterAccount && (
+      {/* Scheduled Transactions Drawer (Bottom Table) */}
+      {showScheduledDrawer && (
+        <div className="y-scheduled-drawer">
+          {/* Drawer Header Bar */}
+          <div className="y-scheduled-header">
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] font-bold text-[var(--y-ink)]">
+                Scheduled Transactions
+              </span>
+              <span className="text-[11px] text-gray-500 font-medium">
+                ({scheduledRows.length} scheduled{dueScheduledCount > 0 ? ` · ${dueScheduledCount} due` : ""})
+              </span>
+            </div>
+
             <Button
               variant="default"
               size="sm"
-              onClick={() => onReconcile(filterAccount.id)}
-              title="Reconcile this account against your bank statement"
-              className="font-semibold"
+              onClick={toggleScheduledDrawer}
+              className="text-[11px] !py-0.5 !px-1.5 text-gray-500"
+              title="Close drawer"
             >
-              <Icon name="reconcile" size={11} color="var(--y-ink)" />
-              <span className="ml-1">Reconcile Account</span>
+              <span>✕</span>
             </Button>
-          )}
-        </div>
-      </div>
-
-      {/* YNAB4 Scheduled Transactions Drawer (Bottom Table) */}
-      {showScheduledDrawer && (
-        <div className="y-scheduled-drawer">
-          {/* Top Divider / Collapse Toggle */}
-          <div
-            onClick={toggleScheduledDrawer}
-            className="y-scheduled-divider-toggle"
-            title="Click to collapse scheduled transactions"
-          >
-            <span>▼</span>
-          </div>
-
-          {/* Drawer Header Bar */}
-          <div className="y-scheduled-header">
-            {/* Edit Transactions Dropdown / Actions */}
-            <div className="relative" ref={editMenuRef}>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setEditMenuOpen((o) => !o)}
-                className="flex items-center gap-1 text-[11px]"
-              >
-                <span>Edit Transactions</span>
-                <span className="text-[9px]">▼</span>
-              </Button>
-
-              {editMenuOpen && (
-                <div className="y-menu absolute left-0 top-full mt-1 z-50 min-w-[180px] shadow-lg rounded bg-white border border-gray-300 py-1">
-                  <button
-                    className="y-menu-item"
-                    disabled={selectedScheduledIds.size === 0}
-                    onClick={() => {
-                      setEditMenuOpen(false);
-                      if (onPostRecurring) {
-                        for (const id of selectedScheduledIds) {
-                          onPostRecurring(id, today);
-                        }
-                      }
-                      setSelectedScheduledIds(new Set());
-                    }}
-                  >
-                    <Icon name="clock" size={12} />
-                    <span>Enter into Register Now</span>
-                  </button>
-
-                  <button
-                    className="y-menu-item"
-                    disabled={selectedScheduledIds.size !== 1}
-                    onClick={() => {
-                      setEditMenuOpen(false);
-                      const id = Array.from(selectedScheduledIds)[0];
-                      if (id && onEditRecurring) onEditRecurring(id);
-                    }}
-                  >
-                    <Icon name="edit" size={12} />
-                    <span>Edit Scheduled Rule</span>
-                  </button>
-
-                  <button
-                    className="y-menu-item text-red-600 hover:bg-red-50"
-                    disabled={selectedScheduledIds.size === 0}
-                    onClick={() => {
-                      setEditMenuOpen(false);
-                      if (onDeleteRecurring) {
-                        for (const id of selectedScheduledIds) {
-                          onDeleteRecurring(id);
-                        }
-                      }
-                      setSelectedScheduledIds(new Set());
-                    }}
-                  >
-                    <Icon name="trash" size={12} />
-                    <span>Delete ({selectedScheduledIds.size})</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Centered Capsule Title */}
-            <div className="absolute left-1/2 transform -translate-x-1/2">
-              <span className="y-scheduled-pill">Scheduled Transactions</span>
-            </div>
-
-            {/* Summary Count on Right */}
-            <div className="text-[11px] text-gray-500 font-medium">
-              {scheduledRows.length} scheduled
-              {dueScheduledCount > 0 && ` · ${dueScheduledCount} due`}
-            </div>
           </div>
 
           {/* Drawer Scheduled Table */}
-          <div className="flex-1 overflow-y-auto overflow-x-auto y-scroll bg-white">
-            <table className="y-table y-scheduled-table w-full text-left">
+          <div className="flex-1 overflow-y-auto overflow-x-auto y-scroll bg-white" style={{ background: "#ffffff" }}>
+            <table className="y-table y-scheduled-table w-full text-left bg-white" style={{ background: "#ffffff" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 28 }} className="text-center">
-                    <input
-                      type="checkbox"
-                      aria-label="Select all scheduled transactions"
-                      checked={scheduledRows.length > 0 && selectedScheduledIds.size === scheduledRows.length}
-                      onChange={toggleAllScheduledSelect}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    />
-                  </th>
-                  <th style={{ width: 30 }} className="text-center">
-                    Flag
-                  </th>
-                  <th style={{ width: 85 }}>Date ▲</th>
+                  <th style={{ width: 85 }}>Date</th>
                   <th style={{ width: 110 }}>Frequency</th>
                   {!accountFilter && <th style={{ width: 120 }}>Account</th>}
                   <th>Payee</th>
@@ -867,13 +692,16 @@ export const TransactionsView = memo(function TransactionsView({
               <tbody>
                 {scheduledRows.length === 0 ? (
                   <tr>
-                    <td colSpan={colCount + 2} className="text-center py-6 y-hint text-[12px]">
+                    <td
+                      colSpan={accountFilter ? 8 : 9}
+                      className="text-center py-8 text-[12px]"
+                      style={{ color: "var(--y-ink-faint)", background: "#ffffff" }}
+                    >
                       No scheduled transactions for {filterAccount ? filterAccount.name : "these accounts"}.
                     </td>
                   </tr>
                 ) : (
                   scheduledRows.map((r, idx) => {
-                    const isSelected = selectedScheduledIds.has(r.id);
                     const flavour = recurringFlavour(r, r.subTransactions ?? []);
                     const sourceName = accountById.get(r.accountId)?.name ?? "";
                     const destName =
@@ -915,46 +743,12 @@ export const TransactionsView = memo(function TransactionsView({
                         key={r.id}
                         className={cx(
                           "y-row hover:bg-blue-50/60 cursor-pointer",
-                          isSelected && "y-row--selected bg-[#eff6ff]",
-                          idx % 2 === 1 && !isSelected && "alt"
+                          idx % 2 === 1 && "alt"
                         )}
                         onClick={() => {
                           if (onEditRecurring) onEditRecurring(r.id);
                         }}
                       >
-                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            aria-label={`Select scheduled ${r.payee || r.id}`}
-                            checked={isSelected}
-                            onChange={() => {}}
-                            onClick={(e) => toggleScheduledRowSelect(r.id, e)}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                        </td>
-                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                          {isOverdue ? (
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full bg-red-600"
-                              title="Overdue"
-                            />
-                          ) : isDueToday ? (
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500"
-                              title="Due Today"
-                            />
-                          ) : !r.active ? (
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400"
-                              title="Paused"
-                            />
-                          ) : (
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full bg-green-500"
-                              title="Active"
-                            />
-                          )}
-                        </td>
                         <td className="y-num font-medium">
                           <span
                             style={{
@@ -1000,8 +794,8 @@ export const TransactionsView = memo(function TransactionsView({
                         <td className="text-center" onClick={(e) => e.stopPropagation()}>
                           <Button
                             size="sm"
-                            variant="blue"
-                            className="text-[10px] !py-0.5 !px-2 font-bold"
+                            variant="default"
+                            className="text-[11px] !py-0.5 !px-2 font-medium"
                             title={isFuture ? `Enter early into register as of today (${today})` : "Enter into register"}
                             onClick={() => {
                               if (onPostRecurring) {

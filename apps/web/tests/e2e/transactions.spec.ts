@@ -15,7 +15,7 @@ async function waitForReady(page: Page) {
 }
 
 async function gotoAllTransactions(page: Page) {
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(
     page.getByText("All Transactions", { exact: true }).first()
   ).toBeVisible();
@@ -30,14 +30,14 @@ test.beforeEach(async ({ page }) => {
 test("adds a new transaction via the modal and renders the row", async ({ page }) => {
   const uniquePayee = `PW Test ${Date.now()}`;
 
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   await expect(page.getByText("Add Transaction", { exact: true }).first()).toBeVisible();
 
   // The modal title is rendered twice (toolbar button + modal head);
   // we use a scoped locator to target just the dialog.
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("12.34");
-  await modal.locator('input[type="date"]').first().fill("2026-06-15");
+  await modal.locator('input[type="date"]').first().fill("2026-09-01");
   await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
 
@@ -53,15 +53,15 @@ test("search filter narrows the register rows", async ({ page }) => {
   // just the prefix.
   const stamp = Date.now().toString();
   const uniquePayee = `PW Search ${stamp}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
-  await modal.locator('input[type="date"]').first().fill("2026-06-15");
+  await modal.locator('input[type="date"]').first().fill("2026-09-01");
   await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
-  const allRows = page.locator("tbody tr.y-row");
+  const allRows = page.locator("table.y-table:not(.y-scheduled-table) tbody tr.y-row");
   const totalBefore = await allRows.count();
 
   // Type the exact stamp; only the matching row stays visible.
@@ -74,7 +74,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(allRows).toHaveCount(totalBefore);
 });
 
-test("selecting a sidebar account marks the row and scopes the register; Accounts nav clears it", async ({ page }) => {
+test("selecting a sidebar account marks the row and scopes the register; Transactions nav clears it", async ({ page }) => {
   // The toolbar title (a <span>) shows "All Transactions" by default
   // and the account name when an account row is selected
   // (TransactionsView.tsx).
@@ -96,10 +96,10 @@ test("selecting a sidebar account marks the row and scopes the register; Account
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
-  // Re-select, then click the top-level "Accounts" nav to clear.
+  // Re-select, then click the top-level "Transactions" nav to clear.
   await accountRow.click();
   await expect(accountRow).toHaveClass(/is-sel/);
-  await page.getByRole("button", { name: /^Accounts/ }).click();
+  await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 });
@@ -121,10 +121,10 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
   const uniquePayee = `PW Delete ${Date.now()}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
   await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
@@ -152,14 +152,14 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
 test("deletes a transfer transaction via modal showing linked transfer warning", async ({ page }) => {
   const stamp = Date.now().toString();
   const transferPayee = `PW Transfer ${stamp}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
 
   // Switch to Transfer mode
   await addModal.getByRole("button", { name: /^transfer$/i }).click();
   await addModal.locator('input[placeholder^="Transfer"]').fill(transferPayee);
   await addModal.locator('input[inputmode="decimal"]').first().fill("-30.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
 
   // Pick destination account
   const destTrigger = addModal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
@@ -195,13 +195,13 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
 test("deletes a split transaction via modal showing split warning notice", async ({ page }) => {
   const stamp = Date.now().toString();
   const splitPayee = `PW Split ${stamp}`;
-  await page.getByRole("button", { name: "Add Transaction" }).click();
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
 
   // Switch to Split mode
   await addModal.getByRole("button", { name: /^split$/i }).click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
   await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(splitPayee);
 
   // Sub-row 1 amount

@@ -27,7 +27,7 @@ describe("TransactionsView", () => {
     expect(screen.queryByText("SAP Concur")).not.toBeInTheDocument();
   });
 
-  it("calls onAdd when Add Transaction is clicked", () => {
+  it("calls onAdd when Add a new transaction is clicked", () => {
     const onAdd = vi.fn();
     render(
       <TransactionsView
@@ -40,7 +40,7 @@ describe("TransactionsView", () => {
         onCycleStatus={() => {}}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /add transaction/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add.*transaction/i }));
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
@@ -294,7 +294,6 @@ describe("TransactionsView", () => {
     expect(drawerBtn).toBeInTheDocument();
 
     // Drawer is open by default
-    expect(screen.getByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /schedule a transfer/i })).toBeInTheDocument();
 
@@ -307,11 +306,11 @@ describe("TransactionsView", () => {
 
     // Click toggle button to collapse drawer
     fireEvent.click(drawerBtn);
-    expect(screen.queryByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /schedule a new transaction/i })).not.toBeInTheDocument();
 
     // Click toggle button again to reopen
     fireEvent.click(drawerBtn);
-    expect(screen.getByText("Scheduled Transactions", { selector: ".y-scheduled-pill" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
   });
 });
 

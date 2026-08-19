@@ -413,13 +413,11 @@ body::after {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.y-side-row:hover .y-side-actions,
-.y-side-row:focus-within .y-side-actions {
+.y-side-row:hover .y-side-actions {
   opacity: 1;
   pointer-events: auto;
 }
-.y-side-row:hover .y-side-amt,
-.y-side-row:focus-within .y-side-amt {
+.y-side-row:hover .y-side-amt {
   opacity: 0;
 }
 .y-side-amt {
@@ -776,13 +774,14 @@ body::after {
   background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 13 13'><circle cx='5.2' cy='5.2' r='3.9' fill='none' stroke='%23868c90' stroke-width='1.6'/><path d='M8.3 8.3 L11.6 11.6' stroke='%23868c90' stroke-width='1.8' stroke-linecap='round'/></svg>")
     no-repeat 6px 50%;
   padding-left: 24px;
-  border-radius: 12px;
+  border-radius: 3px;
 }
 
 /* checkbox / radio */
 .y-check {
   width: 13px;
   height: 13px;
+  box-sizing: border-box;
   border: 1px solid #92989c;
   border-radius: 2px;
   background: linear-gradient(#ffffff, #e8e9e7);
@@ -792,6 +791,9 @@ body::after {
   justify-content: center;
   cursor: pointer;
   flex: none;
+  position: relative;
+  line-height: 0;
+  vertical-align: middle;
 }
 .y-check.is-on {
   background: linear-gradient(#4092c2, var(--y-blue-dark));
@@ -799,11 +801,14 @@ body::after {
 }
 .y-check.is-on::after {
   content: "";
+  display: block;
+  box-sizing: border-box;
   width: 7px;
   height: 4px;
   border-left: 2px solid #fff;
   border-bottom: 2px solid #fff;
-  transform: rotate(-45deg) translate(1px, -1px);
+  transform: rotate(-45deg) translate(0.5px, -0.5px);
+  flex-shrink: 0;
 }
 .y-radio {
   border-radius: 50%;
@@ -863,27 +868,31 @@ button.y-pill:hover {
   border-spacing: 0;
   font-size: 12px;
 }
+.y-table thead th,
 .y-thead th {
-  background: linear-gradient(#f3f3f1, #dcdcd8);
-  border-bottom: 1px solid #adadA8;
-  border-bottom-color: #adada8;
+  background: linear-gradient(#f7f7f5, #e2e2df);
+  border-bottom: 1px solid #b6b6b1;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: #71777a;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
-  padding: 5px 8px;
+  color: var(--y-ink);
+  padding: 4px 6px;
   text-align: left;
   white-space: nowrap;
   position: relative;
+  user-select: none;
 }
+.y-table thead th + th,
 .y-thead th + th {
-  border-left: 1px solid #cbcbc6;
+  border-left: 1px solid #c8c8c3;
 }
+.y-table thead th.num,
 .y-thead th.num {
   text-align: right;
+}
+.y-table thead th.text-center,
+.y-thead th.text-center {
+  text-align: center;
 }
 .y-thead--sticky th {
   position: sticky;
@@ -1453,13 +1462,13 @@ button.y-pill:hover {
   }
 }
 
-/* ---------- YNAB4 Register Footer & Balance Bar ---------- */
+/* ---------- Register Footer ---------- */
 .y-register-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 5px 10px;
   background: linear-gradient(#f7f7f5, #e0e0dc);
   border-top: 1px solid #b6b6b1;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset;
@@ -1467,118 +1476,33 @@ button.y-pill:hover {
   z-index: 10;
 }
 
-.y-working-balance-box {
-  display: flex;
-  align-items: center;
-  background: #ffffff;
-  border: 1px solid #b6b6b1;
-  border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  font-size: 11px;
-}
-
-.y-working-balance-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 3px 10px;
-}
-
-.y-working-balance-op {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--y-ink-soft);
-  padding: 0 1px;
-}
-
-.y-working-balance-label {
-  font-size: 9.5px;
-  color: var(--y-ink-soft);
-  white-space: nowrap;
-}
-
-.y-working-balance-val {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--y-ink);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---------- YNAB4 Scheduled Transactions Drawer ---------- */
+/* ---------- Scheduled Transactions Drawer ---------- */
 .y-scheduled-drawer {
   display: flex;
   flex-direction: column;
-  border-top: 2px solid #2b95c4;
-  background: #f4f4f2;
-  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.12);
+  border-top: 1px solid #b6b6b1;
+  background: #ffffff;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
   max-height: 48%;
-  min-height: 180px;
-}
-
-.y-scheduled-divider-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 8px;
-  background: #2b95c4;
-  cursor: pointer;
-  color: #fff;
-  font-size: 8px;
-  line-height: 1;
-}
-
-.y-scheduled-divider-toggle:hover {
-  background: #237fa8;
+  min-height: 160px;
 }
 
 .y-scheduled-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
-  background: linear-gradient(#eaeae8, #d8d8d5);
+  padding: 5px 10px;
+  background: linear-gradient(#f3f3f0, #e4e4e0);
   border-bottom: 1px solid #b6b6b1;
-  position: relative;
 }
 
-.y-scheduled-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 14px;
-  border-radius: 12px;
-  background: linear-gradient(#fdfdfc, #ebebe8);
-  border: 1px solid #b8b8b3;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  font-size: 11px;
-  font-style: italic;
-  font-weight: 700;
-  color: var(--y-ink);
-}
-
-.y-scheduled-table thead th {
-  background: linear-gradient(#68747d, #4e5861);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 6px;
-  border-right: 1px solid #3c444b;
-  border-bottom: 1px solid #30373d;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
-  text-align: left;
-  user-select: none;
-}
-
-.y-scheduled-table thead th.num {
-  text-align: right;
-}
 
 .y-scheduled-footer {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 5px 10px;
   background: linear-gradient(#f7f7f5, #e0e0dc);
   border-top: 1px solid #b6b6b1;
 }

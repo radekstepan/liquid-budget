@@ -1251,29 +1251,28 @@ export function RecurringModal({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Next Date">
-          <TextField
-            type="date"
-            value={nextDate}
-            onChange={(e) => setNextDate(e.target.value)}
-            onKeyDown={(e) => {
-              const adjusted = adjustDateShortcut(nextDate, e.key);
-              if (adjusted) {
-                e.preventDefault();
-                setNextDate(adjusted);
-              }
-            }}
-            className={inputClass}
-          />
-        </Field>
-        <div className="flex items-end pb-1">
-          <Checkbox
-            checked={active}
-            onChange={setActive}
-            label="Active"
-          />
-        </div>
+      <Field label="Next Date">
+        <TextField
+          type="date"
+          value={nextDate}
+          onChange={(e) => setNextDate(e.target.value)}
+          onKeyDown={(e) => {
+            const adjusted = adjustDateShortcut(nextDate, e.key);
+            if (adjusted) {
+              e.preventDefault();
+              setNextDate(adjusted);
+            }
+          }}
+          className={inputClass}
+        />
+      </Field>
+
+      <div className="pt-1">
+        <Checkbox
+          checked={active}
+          onChange={setActive}
+          label="Active"
+        />
       </div>
     </Modal>
   );
