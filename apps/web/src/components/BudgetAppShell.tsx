@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { BudgetData } from "@ynab/logic";
+import type { BudgetData, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary } from "@ynab/logic";
 import { todayISO, num, nextDateFor } from "@ynab/logic";
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
@@ -552,7 +552,9 @@ export function BudgetAppShell() {
           const text = await res.text().catch(() => "");
           throw new Error(`Import failed (${res.status}): ${text}`);
         }
+        const json = (await res.json()) as { summary?: ImportSummary };
         await reload();
+        return json?.summary;
       });
     },
     importCsv: async ({ accountId, swap, csv }) => {
@@ -566,11 +568,29 @@ export function BudgetAppShell() {
           const text = await res.text().catch(() => "");
           throw new Error(`Import failed (${res.status}): ${text}`);
         }
-        const json = (await res.json()) as { imported?: number };
+        const json = (await res.json()) as {
+          imported?: number;
+          skipped?: ImportSkippedEntry[];
+        };
         const count = json.imported ?? 0;
+        const skipped = json.skipped?.length ?? 0;
         await reload();
-        addToast(`Imported ${count} transactions.`, "ok");
+        addToast(
+          skipped > 0
+            ? `Imported ${count} transaction${count === 1 ? "" : "s"} (${skipped} duplicate${skipped === 1 ? "" : "s"} skipped).`
+            : `Imported ${count} transaction${count === 1 ? "" : "s"}.`,
+          "ok"
+        );
         return count;
+      });
+    },
+    analyzeDuplicates: async () => {
+      return withSync(async () => {
+        const json = await jsonReq<DuplicateAnalysisResult>("/api/duplicates", {
+          method: "POST",
+        });
+        await reload();
+        return json;
       });
     },
   };

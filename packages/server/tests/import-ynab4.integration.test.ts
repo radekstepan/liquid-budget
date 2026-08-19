@@ -191,6 +191,16 @@ describe("importYnab4 full import", () => {
       categoryGroups: 3, // Everyday + "Hidden Categories" + "Credit Card Payments"
       categories: 1, // only mapped subcategories (sc1); CC-payment cats aren't in the map
       transactions: 6, // 1 regular + 1 transfer (de-duplicated from pair) + 1 income + 1 split parent + 2 split children
+      duplicatesSkipped: [
+        {
+          accountName: "Visa",
+          date: "2026-06-02",
+          payee: "",
+          memo: "",
+          amount: 50000,
+          reason: "Duplicate transfer counterpart",
+        },
+      ],
     });
   });
 
@@ -325,5 +335,63 @@ describe("importYnab4 full import", () => {
     const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
     expect(visaPaymentCat).toBeTruthy();
     expect(Number(visaPaymentCat.carryover)).toBe(75000); // 75000 cents ($750.00)
+  });
+
+  it("skips plain duplicate transactions within the backup and reports them", async () => {
+    const dupData = {
+      accounts: [{ entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true }],
+      payees: [{ entityId: "p1", name: "Store" }],
+      masterCategories: [],
+      transactions: [
+        {
+          entityId: "a",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -100,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: null,
+        },
+        {
+          entityId: "b",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -100,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: null,
+        },
+        {
+          entityId: "c",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -100,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: null,
+          memo: "different",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    const result = await importYnab4(db, dupData);
+    expect(result.transactions).toBe(2);
+    expect(result.duplicatesSkipped).toHaveLength(1);
+    expect(result.duplicatesSkipped[0]).toMatchObject({
+      accountName: "Chequing",
+      date: "2026-06-01",
+      payee: "Store",
+      memo: "",
+      amount: -10000,
+      reason: "Duplicate of an earlier transaction in this backup",
+    });
+
+    const { transactions } = await getBudgetData(db);
+    expect(transactions).toHaveLength(2);
+    const payees = transactions.map((t) => `${t.payee}|${t.memo}`);
+    expect(payees).toContain("Store|");
+    expect(payees).toContain("Store|different");
   });
 });

@@ -145,6 +145,60 @@ test("POST /api/import rejects a zip without a .ynab4 entry with 400", async ({ 
   await resetToDemo(base);
 });
 
+test("POST /api/import reports plain duplicate entries that were skipped", async ({
+  request,
+}) => {
+  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
+  await resetToDemo(base);
+
+  const zip = new AdmZip();
+  zip.addFile(
+    "budget.ynab4",
+    Buffer.from(
+      JSON.stringify({
+        ...ynabData,
+        transactions: [
+          ...ynabData.transactions,
+          {
+            entityId: "t1-dup",
+            accountId: "acc1",
+            date: "2026-08-01",
+            amount: -42.5,
+            cleared: "Cleared",
+            payeeId: "p1",
+            categoryId: "sc1",
+          },
+        ],
+      }),
+      "utf-8"
+    )
+  );
+  const res = await request.post("/api/import", {
+    multipart: {
+      file: {
+        name: "backup.y4backup",
+        mimeType: "application/zip",
+        buffer: zip.toBuffer(),
+      },
+    },
+  });
+  expect(res.status()).toBe(200);
+  const body = await res.json();
+  expect(body.summary.transactions).toBe(1);
+  expect(body.summary.duplicatesSkipped).toHaveLength(1);
+  expect(body.summary.duplicatesSkipped[0]).toMatchObject({
+    payee: IMPORTED_PAYEE,
+    reason: "Duplicate of an earlier transaction in this backup",
+  });
+
+  const budget = await (await request.get("/api/budget")).json();
+  expect(
+    budget.transactions.filter((t: { payee: string }) => t.payee === IMPORTED_PAYEE)
+  ).toHaveLength(1);
+
+  await resetToDemo(base);
+});
+
 test("uploading a backup through the Settings menu reloads the app with imported data", async ({ page, request }) => {
   const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
   await resetToDemo(base);
@@ -169,9 +223,10 @@ test("uploading a backup through the Settings menu reloads the app with imported
   await expect(page.getByText(IMPORTED_ACCOUNT)).toBeVisible();
   await expect(page.getByText("TD Unlimited Chequing")).toHaveCount(0);
 
-  // And the imported transaction shows up in the register.
+  // And the imported transaction shows up in the register. (The scheduled
+  // drawer also renders "Imported Payee", so scope to the register row.)
   await page.getByRole("button", { name: /^Transactions/ }).click();
-  await expect(page.getByText(IMPORTED_PAYEE)).toBeVisible();
+  await expect(page.getByText(IMPORTED_PAYEE).first()).toBeVisible();
 
   await resetToDemo(base);
 });

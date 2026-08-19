@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   const db = getDefaultDb();
   try {
     const out = await importCsvTransactions(db, { accountId, rows: result.rows });
-    return NextResponse.json({ ok: true, imported: out.count });
+    return NextResponse.json({ ok: true, imported: out.count, skipped: out.skipped });
   } catch (e) {
     if (e instanceof TransactionError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

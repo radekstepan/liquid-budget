@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
-import { dollarsToCents, nextMonthKey, type TransactionFlagColor } from "@ynab/logic";
+import { dollarsToCents, nextMonthKey, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
+import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
@@ -285,6 +286,11 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     const processedTransferIds = new Set<string>();
     let totalImportedTxCount = 0;
+    // Fingerprints of already-inserted plain regular rows (used to skip
+    // duplicate ordinary entries within the backup). Split rows and
+    // transfers are intentionally excluded.
+    const plainFingerprints = new Set<string>();
+    const skippedDuplicates: ImportSkippedEntry[] = [];
 
     for (const t of yTransactions) {
       if (t.isTombstone) continue;
@@ -388,11 +394,27 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           // This was the duplicate counterpart of a split subtransaction in YNAB4.
           // Since the subtransaction on the parent split now carries transferAccountId,
           // the transfer is already fully accounted for without needing this duplicate row.
+          skippedDuplicates.push({
+            accountName: accNameMap.get(accId) || "",
+            date: t.date,
+            payee: payeeMap.get(t.payeeId) || "",
+            memo: t.memo || "",
+            amount: dollarsToCents(t.amount),
+            reason: "Duplicate counterpart of a split transfer",
+          });
           continue;
         } else if (t.transferTransactionId) {
           // Top-level regular transfer pair
           if (processedTransferIds.has(t.entityId)) {
             // Already imported from counterpart
+            skippedDuplicates.push({
+              accountName: accNameMap.get(accId) || "",
+              date: t.date,
+              payee: payeeMap.get(t.payeeId) || "",
+              memo: t.memo || "",
+              amount: dollarsToCents(t.amount),
+              reason: "Duplicate transfer counterpart",
+            });
             continue;
           }
 
@@ -480,6 +502,31 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             (isSpecialIncomeCat || (catId === null && destAccId === null)) &&
             (t.amount || 0) > 0;
           const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+
+          // Skip ordinary duplicate entries within the backup: the same
+          // account + date + amount + normalized payee/memo appearing more
+          // than once is very likely an accidental duplicate.
+          if (destAccId === null) {
+            const fp = duplicateFingerprint({
+              accountId: accId,
+              date: t.date,
+              payee,
+              memo: t.memo || "",
+              amount: dollarsToCents(t.amount),
+            });
+            if (plainFingerprints.has(fp)) {
+              skippedDuplicates.push({
+                accountName: accNameMap.get(accId) || "",
+                date: t.date,
+                payee,
+                memo: t.memo || "",
+                amount: dollarsToCents(t.amount),
+                reason: "Duplicate of an earlier transaction in this backup",
+              });
+              continue;
+            }
+            plainFingerprints.add(fp);
+          }
 
           await db.insert(transactions).values({
             accountId: accId,
@@ -647,12 +694,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         ? parseYnab4SettingsXml(settingsXmlOrObj)
         : settingsXmlOrObj;
 
-    const result = {
+    const result: ImportSummary = {
       accounts: accountIdMap.size,
       categoryGroups: groupSort,
       categories: categoryIdMap.size,
       transactions: totalImportedTxCount,
       settings,
+      duplicatesSkipped: skippedDuplicates,
     };
     db.run(sql`COMMIT`);
     return result;
