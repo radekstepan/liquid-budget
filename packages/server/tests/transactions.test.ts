@@ -109,6 +109,33 @@ describe("transactions queries", () => {
       expect(ops).toEqual(["select", "run", "insert", "update", "update", "run"]);
     });
 
+    it("inserts a transfer row with categoryId when specified", async () => {
+      mock.respondWith("select:accounts", [{ name: "RRSP" }]);
+      mock.respondWith("insert:transactions", [{ id: 43 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createTransfer(
+        mock.db,
+        {
+          accountId: 1,
+          categoryId: 10,
+          date: "2026-07-01",
+          payee: "",
+          memo: "RRSP contribution",
+          amount: -50000,
+        },
+        2
+      );
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({
+        payee: "Transfer : RRSP",
+        transferAccountId: 2,
+        categoryId: 10,
+        amount: -50000,
+      });
+    });
+
     it("rejects transfers to the same account", async () => {
       await expect(
         createTransfer(
@@ -257,13 +284,13 @@ describe("transactions queries", () => {
       ).toThrow(/must have a category or transfer account/);
     });
 
-    it("rejects a sub-transaction with both category and transfer account", () => {
+    it("allows a sub-transaction with both category and transfer account (e.g. transfer to off-budget)", () => {
       expect(() =>
         assertSplitsBalanced(-5000, [
           { categoryId: 1, amount: -3000 },
           { categoryId: 2, transferAccountId: 3, amount: -2000 },
         ])
-      ).toThrow(/cannot have both a category and transfer account/);
+      ).not.toThrow();
     });
 
     it("rejects an off-by-cent mismatch", () => {

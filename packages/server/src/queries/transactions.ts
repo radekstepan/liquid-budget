@@ -150,9 +150,6 @@ export function assertSplitsBalanced(
     if (!c.categoryId && !c.transferAccountId) {
       throw new TransactionError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
-    if (c.categoryId && c.transferAccountId) {
-      throw new TransactionError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
-    }
     assertValidAmount(c.amount);
   }
   const sum = children.reduce((s, c) => s + Number(c.amount), 0);
@@ -206,7 +203,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       .insert(transactions)
       .values({
         accountId: input.accountId,
-        categoryId: input.transferAccountId != null ? null : input.categoryId,
+        categoryId: input.categoryId ?? null,
         date: input.date,
         payee,
         memo: input.memo,
@@ -264,7 +261,7 @@ export async function createTransfer(
       .insert(transactions)
       .values({
         accountId: baseInput.accountId,
-        categoryId: null,
+        categoryId: baseInput.categoryId ?? null,
         date: baseInput.date,
         payee,
         memo: baseInput.memo,
@@ -336,7 +333,7 @@ export async function createSplitWithChildren(
     for (const c of children) {
       let payee = parent.payee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+      const categoryId = c.categoryId ? Number(c.categoryId) : null;
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
@@ -415,9 +412,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
   const p: Record<string, unknown> = {};
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if (existing.transferAccountId != null) {
-    p.categoryId = null;
-  } else if ("categoryId" in patch) {
+  if ("categoryId" in patch) {
     p.categoryId = patch.categoryId ?? null;
   }
   if (patch.date != null) p.date = String(patch.date);
@@ -566,7 +561,7 @@ export async function updateSplit(
     for (const c of children) {
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+      const categoryId = c.categoryId ? Number(c.categoryId) : null;
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
@@ -766,7 +761,7 @@ export async function bulkUpdateTransactions(
       }
       const setFields: Record<string, unknown> = {};
       if (patch.status !== undefined) setFields.status = patch.status;
-      if (patch.categoryId !== undefined && existing.transferAccountId == null) {
+      if (patch.categoryId !== undefined) {
         setFields.categoryId = patch.categoryId;
       }
       if (Object.keys(setFields).length > 0) {

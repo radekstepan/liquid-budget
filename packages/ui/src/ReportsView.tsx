@@ -7,6 +7,7 @@ import {
   num,
   monthKey,
   parseMonthKey,
+  todayISO,
   MONTHS_LONG,
   computeNetWorthReport,
   type NetWorthPoint,
@@ -40,9 +41,15 @@ export const ReportsView = memo(function ReportsView({
   maxYear?: number;
 }) {
   const allMonths = useMemo(() => {
+    const thisMonth = todayISO().slice(0, 7);
     const s = new Set<string>();
-    for (const t of data.transactions) s.add(t.date.slice(0, 7));
-    if (s.size === 0) return [month];
+    for (const t of data.transactions) {
+      const m = t.date.slice(0, 7);
+      if (m <= thisMonth) {
+        s.add(m);
+      }
+    }
+    if (s.size === 0) return [month <= thisMonth ? month : thisMonth];
     return Array.from(s).sort();
   }, [data.transactions, month]);
 
@@ -57,27 +64,39 @@ export const ReportsView = memo(function ReportsView({
   const { year: endYear, month0: endMonth0 } = parseMonthKey(endMonth);
 
   const years = useMemo(() => {
-    const { year: currentYear } = parseMonthKey(month);
-    let yMin = minYear ?? currentYear - 10;
-    let yMax = maxYear ?? currentYear + 5;
+    const thisYear = Number(todayISO().slice(0, 4));
+    let yMin = thisYear;
+    let yMax = thisYear;
+    let hasData = false;
+
     for (const t of data.transactions) {
       const y = Number(t.date.slice(0, 4));
-      if (Number.isFinite(y)) {
-        if (y < yMin) yMin = y;
-        if (y > yMax) yMax = y;
+      if (Number.isFinite(y) && y >= 1900 && y <= thisYear) {
+        if (!hasData) {
+          yMin = y;
+          yMax = y;
+          hasData = true;
+        } else {
+          if (y < yMin) yMin = y;
+          if (y > yMax) yMax = y;
+        }
       }
     }
+
+    if (minYear != null && minYear < yMin) yMin = minYear;
+    if (maxYear != null && maxYear <= thisYear && maxYear > yMax) yMax = maxYear;
+
     const { year: sY } = parseMonthKey(startMonth);
     const { year: eY } = parseMonthKey(endMonth);
     if (sY < yMin) yMin = sY;
-    if (sY > yMax) yMax = sY;
+    if (sY > yMax && sY <= thisYear) yMax = sY;
     if (eY < yMin) yMin = eY;
-    if (eY > yMax) yMax = eY;
+    if (eY > yMax && eY <= thisYear) yMax = eY;
 
     const list: number[] = [];
     for (let y = yMin; y <= yMax; y++) list.push(y);
     return list;
-  }, [data.transactions, month, minYear, maxYear, startMonth, endMonth]);
+  }, [data.transactions, minYear, maxYear, startMonth, endMonth]);
 
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
@@ -115,7 +134,7 @@ export const ReportsView = memo(function ReportsView({
   const expense = useMemo(
     () =>
       rangeTxns
-        .filter((t) => t.transferAccountId == null && num(t.amount) < 0)
+        .filter((t) => (t.transferAccountId == null || t.categoryId != null) && num(t.amount) < 0)
         .reduce((s, t) => s + num(t.amount), 0),
     [rangeTxns]
   );
@@ -123,7 +142,7 @@ export const ReportsView = memo(function ReportsView({
   const spending: SpendingItem[] = useMemo(() => {
     const byCat = new Map<number, number>();
     for (const t of rangeTxns) {
-      if (t.categoryId == null || t.transferAccountId != null) continue;
+      if (t.categoryId == null) continue;
       const a = num(t.amount);
       if (a < 0) byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) + -a);
     }
@@ -137,7 +156,7 @@ export const ReportsView = memo(function ReportsView({
   const payees = useMemo(() => {
     const byPayee = new Map<string, number>();
     for (const t of rangeTxns) {
-      if (t.transferAccountId != null) continue;
+      if (t.transferAccountId != null && t.categoryId == null) continue;
       const a = num(t.amount);
       if (a < 0 && t.payee) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
     }

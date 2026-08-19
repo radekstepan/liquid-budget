@@ -200,7 +200,7 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
     const amt = num(t.amount);
     if (isIncomeTransaction(t, accountMap)) {
       income = Math.round(income + amt);
-    } else if (t.transferAccountId == null && amt < 0) {
+    } else if ((t.transferAccountId == null || t.categoryId != null) && amt < 0) {
       outflow = Math.round(outflow + Math.abs(amt));
     }
   }
@@ -300,7 +300,7 @@ export function computeMonthlyInsights(
 
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null || t.transferAccountId != null) continue;
+    if (t.categoryId == null) continue;
     if (isIncomeTransaction(t)) continue;
 
     const netOutflow = -num(t.amount);
@@ -454,7 +454,7 @@ export function computeSpendingTrends(
 
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null || t.transferAccountId != null) continue;
+    if (t.categoryId == null) continue;
     if (isIncomeTransaction(t)) continue;
 
     // Category filter check
@@ -616,7 +616,7 @@ export function getSpendingTransactions(
   return data.transactions
     .filter((t) => {
       if (splitParentIds.has(t.id)) return false;
-      if (t.categoryId == null || t.transferAccountId != null) return false;
+      if (t.categoryId == null) return false;
       if (isIncomeTransaction(t)) return false;
 
       const mk = t.date.slice(0, 7);

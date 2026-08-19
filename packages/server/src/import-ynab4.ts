@@ -327,10 +327,6 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               subPayee = payeeMap.get(st.payeeId) || "";
             }
 
-            if (subTransferAccountId != null) {
-              subCatId = null;
-            }
-
             const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
             const isChildIncome =
               (st.categoryId === "Category/__ImmediateIncome__" ||
@@ -386,6 +382,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           let rawAmount = t.amount || 0;
           let memo = t.memo || "";
           let cleared = t.cleared;
+          let catEntityId = t.categoryId;
 
           // Normalize so source is outflow (negative amount) if counterpart exists and is negative
           if (rawAmount > 0 && partner && (partner.amount || 0) < 0) {
@@ -394,6 +391,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             rawAmount = partner.amount || 0;
             if (!memo && partner.memo) memo = partner.memo;
             cleared = partner.cleared;
+            catEntityId = partner.categoryId || t.categoryId;
+          } else if (partner && partner.categoryId && !catEntityId) {
+            catEntityId = partner.categoryId;
           }
 
           const sourceAccId = accountIdMap.get(sourceAccEntityId);
@@ -408,9 +408,11 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee = payeeMap.get(t.payeeId) || "";
           }
 
+          const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
+
           await db.insert(transactions).values({
             accountId: sourceAccId,
-            categoryId: null,
+            categoryId: catId,
             date: t.date,
             payee,
             memo,
@@ -444,7 +446,6 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             t.categoryId === "Category/__ImmediateIncome__" ||
             isTxDeferred;
           if (
-            destAccId ||
             isSpecialIncomeCat ||
             t.categoryId === "Category/__Split__"
           ) {
@@ -537,9 +538,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         catId = null;
       }
 
-      // Transfers and splits cannot have a top-level category.
+      // Splits cannot have a top-level category.
       const hasSubs = Array.isArray(st.subTransactions) && st.subTransactions.length > 0;
-      if (transferAccountId != null || hasSubs) {
+      if (hasSubs) {
         catId = null;
       }
 
@@ -600,9 +601,6 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             if (foundTarget) {
               subTransferAccountId = foundTarget;
             }
-          }
-          if (subTransferAccountId != null) {
-            subCatId = null;
           }
 
           if (!subCatId && !subTransferAccountId) continue;
