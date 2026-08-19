@@ -282,4 +282,33 @@ describe("SpendingTrendsReport", () => {
     // Second row has alt class for alternating row colors
     expect(rows[1]!.classList.contains("alt")).toBe(true);
   });
+
+  it("toggles between Linear and Logarithmic chart scale modes", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    const linearBtn = screen.getByRole("button", { name: "Linear" });
+    const logBtn = screen.getByRole("button", { name: "Log" });
+
+    expect(linearBtn).toBeInTheDocument();
+    expect(logBtn).toBeInTheDocument();
+
+    // Initially linear is active
+    expect(linearBtn.classList.contains("is-on")).toBe(true);
+    expect(logBtn.classList.contains("is-on")).toBe(false);
+
+    // Switch to Log scale
+    fireEvent.click(logBtn);
+    expect(logBtn.classList.contains("is-on")).toBe(true);
+    expect(linearBtn.classList.contains("is-on")).toBe(false);
+
+    // SVG elements remain properly rendered with log ticks
+    const svg = document.querySelector("svg");
+    expect(svg).not.toBeNull();
+
+    // Switch back to Linear scale
+    fireEvent.click(linearBtn);
+    expect(linearBtn.classList.contains("is-on")).toBe(true);
+    expect(logBtn.classList.contains("is-on")).toBe(false);
+  });
 });
