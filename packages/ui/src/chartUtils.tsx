@@ -27,21 +27,29 @@ export function fmtShort(cents: number): string {
   const abs = Math.abs(dollars);
   const sign = dollars < 0 ? "-" : "";
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1).replace(/\.?0+$/, "")}K`;
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2).replace(/\.?0+$/, "")}K`;
   return fmt(cents);
 }
 
 export function niceTicks(min: number, max: number, count = 5): number[] {
-  if (min === max) return [min];
+  if (min === max) {
+    if (min === 0) return [0, 1];
+    const step = Math.pow(10, Math.floor(Math.log10(Math.abs(min))));
+    return [Math.floor(min / step) * step, Math.ceil(min / step) * step];
+  }
+  if (min > max) {
+    [min, max] = [max, min];
+  }
   const span = max - min;
   const rawStep = span / count;
   const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
   const norm = rawStep / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
   const start = Math.floor(min / step) * step;
+  const end = Math.ceil(max / step) * step;
   const out: number[] = [];
-  for (let v = start; v <= max + step * 1e-6; v += step) {
+  for (let v = start; v <= end + step * 0.5; v += step) {
     out.push(Number(v.toFixed(10)));
   }
   return out;
@@ -65,8 +73,8 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
 
   if (minVal < 0) {
     const minAbs = Math.abs(minVal);
-    const maxPower = Math.ceil(Math.log10(Math.max(10, minAbs)));
-    const minPower = Math.max(4, maxPower >= 7 ? 5 : 4);
+    const maxPower = Math.max(2, Math.ceil(Math.log10(minAbs)));
+    const minPower = Math.min(maxPower >= 7 ? 5 : 4, maxPower);
     for (let p = maxPower; p >= minPower; p--) {
       ticks.push(-Math.pow(10, p));
     }
@@ -75,8 +83,8 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
   ticks.push(0);
 
   if (maxVal > 0) {
-    const maxPower = Math.ceil(Math.log10(Math.max(10, maxVal)));
-    const minPower = Math.max(4, maxPower >= 7 ? 5 : 4);
+    const maxPower = Math.max(2, Math.ceil(Math.log10(maxVal)));
+    const minPower = Math.min(maxPower >= 7 ? 5 : 4, maxPower);
     for (let p = minPower; p <= maxPower; p++) {
       ticks.push(Math.pow(10, p));
     }
