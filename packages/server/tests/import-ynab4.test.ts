@@ -283,6 +283,84 @@ describe("importYnab4 transaction wrapping", () => {
     expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
     expect(sqls).not.toContain("COMMIT");
   });
+
+  it("preserves categoryId on transfers to off-budget accounts", async () => {
+    const ynabData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "RRSP", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Savings, Investments",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Retirement" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc1",
+          targetAccountId: "acc2",
+          transferTransactionId: "t2",
+          date: "2026-01-15",
+          amount: -500,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc2",
+          categoryId: "sc1",
+        },
+        {
+          entityId: "t2",
+          accountId: "acc2",
+          targetAccountId: "acc1",
+          transferTransactionId: "t1",
+          date: "2026-01-15",
+          amount: 500,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc1",
+          categoryId: null,
+        },
+      ],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    mock.respondWith("select:accounts", []);
+    mock.respondWith("insert:accounts#1", [{ id: 1 }]);
+    mock.respondWith("insert:accounts#2", [{ id: 2 }]);
+    mock.respondWith("insert:category_groups", [{ id: 1 }]);
+    mock.respondWith("insert:categories", [{ id: 10 }]);
+    mock.respondWith("insert:category_groups#2", [{ id: 2 }]);
+    mock.respondWith("select:accounts#2", []);
+    mock.respondWith("select:accounts#3", [
+      { id: 1, name: "Chequing" },
+      { id: 2, name: "RRSP" },
+    ]);
+    mock.respondWith("insert:transactions", [{ id: 1 }]);
+    mock.respondWith("select:accounts#4", [
+      { id: 1, name: "Chequing" },
+      { id: 2, name: "RRSP" },
+    ]);
+    mock.respondWith("select:transactions#1", [{ sum: -50000 }]);
+    mock.respondWith("select:transactions#2", [{ sum: 0 }]);
+    mock.respondWith("update:accounts#1", [{}]);
+    mock.respondWith("select:transactions#3", [{ sum: 0 }]);
+    mock.respondWith("select:transactions#4", [{ sum: -50000 }]);
+    mock.respondWith("update:accounts#2", [{}]);
+    mock.respondWith("select:accounts#5", []);
+
+    await importYnab4(mock.db, ynabData);
+
+    const txInsert = mock.calls.find((c) => c.op === "insert" && (c as any).table === "transactions" || ((c.values as any)?.amount === -50000));
+    expect(txInsert?.values).toMatchObject({
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: 10,
+      amount: -50000,
+    });
+  });
 });
 
 describe("parseYnab4SettingsXml (UNI-26 / BUG-30)", () => {

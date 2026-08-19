@@ -434,4 +434,29 @@ describe("getSpendingTransactions", () => {
     expect(mayOnly).toHaveLength(1);
     expect(mayOnly[0]?.date).toBe("2026-05-01");
   });
+
+  it("includes transfers with a category (e.g. to off-budget investment accounts)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+        { id: 2, name: "Wealthsimple RRSP", kind: "offbudget", groupLabel: "Investments", balance: "25000", onBudget: false, sort: 1 },
+      ],
+      groups: [{ id: 1, name: "Savings, Investments", sort: 0, isCreditCardPayments: false }],
+      categories: [{ id: 50, groupId: 1, name: "Retirement", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 50, date: "2026-04-15", payee: "Transfer : Wealthsimple RRSP", memo: "", amount: "-25000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const trends = computeSpendingTrends(data, "2026-04", "2026-04");
+    expect(trends.total).toBe(25000);
+    expect(trends.constituents[0]?.name).toBe("Savings, Investments");
+    expect(trends.constituents[0]?.total).toBe(25000);
+
+    const txs = getSpendingTransactions(data, "2026-04", "2026-04", { categoryId: 50 });
+    expect(txs).toHaveLength(1);
+    expect(txs[0]?.payee).toBe("Transfer : Wealthsimple RRSP");
+  });
 });

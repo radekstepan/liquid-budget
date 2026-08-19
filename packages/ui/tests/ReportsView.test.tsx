@@ -363,5 +363,59 @@ describe("ReportsView", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
     expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);
   });
+
+  it("does not include future years beyond the dataset/current year in the year selector", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      transactions: [
+        txn("2024-05", 1, "Groceries", -50, 10),
+        txn("2025-06", 1, "Groceries", -50, 10),
+        txn("2026-04", 1, "Groceries", -50, 10),
+      ],
+    };
+    renderView({ data });
+
+    const fromYearBtn = screen.getByRole("button", { name: /from year/i });
+    expect(fromYearBtn).toBeInTheDocument();
+    // Years 2027..2031 must NOT be in the document
+    expect(screen.queryByText("2027")).not.toBeInTheDocument();
+    expect(screen.queryByText("2028")).not.toBeInTheDocument();
+    expect(screen.queryByText("2031")).not.toBeInTheDocument();
+  });
+
+  it("includes categorized transfers in spending and expenses", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+        { id: 2, name: "RRSP", kind: "offbudget", groupLabel: "Investments", balance: "100000", onBudget: false, sort: 1 },
+      ],
+      categories: [
+        { id: 20, groupId: 1, name: "Retirement", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      transactions: [
+        {
+          id: 1,
+          accountId: 1,
+          transferAccountId: 2,
+          categoryId: 20,
+          date: "2026-06-15",
+          payee: "Transfer : RRSP",
+          memo: "Savings",
+          amount: "-50000",
+          status: "c",
+        },
+      ],
+    };
+    renderView({ data });
+
+    // Overview expenses must reflect the $500 transfer to RRSP
+    expect(screen.getAllByText("-$500.00").length).toBeGreaterThanOrEqual(1);
+
+    // Spending tab must show Retirement category
+    clickTab("Spending by Category");
+    expect(screen.getByText("Retirement")).toBeInTheDocument();
+    expect(screen.getAllByText("$500.00").length).toBeGreaterThanOrEqual(1);
+  });
 });
 
