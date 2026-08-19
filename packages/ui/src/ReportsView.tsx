@@ -2,8 +2,16 @@
 
 import { memo, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
-import { fmt, num, monthLabel, computeNetWorthReport, type NetWorthPoint } from "@ynab/logic";
-import { Icon, Toolbar, ToolbarSep, MonthNav, Select, Panel, MathCell, Tabs } from "@ynab/theme";
+import {
+  fmt,
+  num,
+  monthKey,
+  parseMonthKey,
+  MONTHS_LONG,
+  computeNetWorthReport,
+  type NetWorthPoint,
+} from "@ynab/logic";
+import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 
@@ -18,9 +26,6 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
 export const ReportsView = memo(function ReportsView({
   data,
   month,
-  onPrev,
-  onNext,
-  onSetMonth,
   minYear,
   maxYear,
 }: {
@@ -45,6 +50,32 @@ export const ReportsView = memo(function ReportsView({
   const [startMonth, setStartMonth] = useState<string>(defaultStart);
   const [endMonth, setEndMonth] = useState<string>(defaultEnd);
   const [sub, setSub] = useState<SubTab>("overview");
+
+  const { year: startYear, month0: startMonth0 } = parseMonthKey(startMonth);
+  const { year: endYear, month0: endMonth0 } = parseMonthKey(endMonth);
+
+  const years = useMemo(() => {
+    const { year: currentYear } = parseMonthKey(month);
+    let yMin = minYear ?? currentYear - 10;
+    let yMax = maxYear ?? currentYear + 5;
+    for (const t of data.transactions) {
+      const y = Number(t.date.slice(0, 4));
+      if (Number.isFinite(y)) {
+        if (y < yMin) yMin = y;
+        if (y > yMax) yMax = y;
+      }
+    }
+    const { year: sY } = parseMonthKey(startMonth);
+    const { year: eY } = parseMonthKey(endMonth);
+    if (sY < yMin) yMin = sY;
+    if (sY > yMax) yMax = sY;
+    if (eY < yMin) yMin = eY;
+    if (eY > yMax) yMax = eY;
+
+    const list: number[] = [];
+    for (let y = yMin; y <= yMax; y++) list.push(y);
+    return list;
+  }, [data.transactions, month, minYear, maxYear, startMonth, endMonth]);
 
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
@@ -125,44 +156,57 @@ export const ReportsView = memo(function ReportsView({
           <Icon name="chart" size={14} color="var(--y-ink)" />
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Reports</span>
         </div>
-        {(onPrev || onNext || onSetMonth) && (
-          <>
-            <ToolbarSep />
-            <MonthNav
-              month={month}
-              onPrev={onPrev}
-              onNext={onNext}
-              onSetMonth={onSetMonth}
-              minYear={minYear}
-              maxYear={maxYear}
-            />
-          </>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="y-caps">From</span>
-          <Select
-            value={startMonth}
-            onChange={(v) => setStartMonth(v)}
-            ariaLabel="From month"
-          >
-            {allMonths.map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
-              </option>
-            ))}
-          </Select>
-          <span className="y-caps">To</span>
-          <Select
-            value={endMonth}
-            onChange={(v) => setEndMonth(v)}
-            ariaLabel="To month"
-          >
-            {allMonths.map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
-              </option>
-            ))}
-          </Select>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="y-caps">From</span>
+            <Select
+              value={String(startMonth0)}
+              onChange={(v) => setStartMonth(monthKey(startYear, Number(v)))}
+              ariaLabel="From month"
+            >
+              {MONTHS_LONG.map((m, i) => (
+                <option key={m} value={String(i)}>
+                  {m}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={String(startYear)}
+              onChange={(v) => setStartMonth(monthKey(Number(v), startMonth0))}
+              ariaLabel="From year"
+            >
+              {years.map((y) => (
+                <option key={y} value={String(y)}>
+                  {y}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="y-caps">To</span>
+            <Select
+              value={String(endMonth0)}
+              onChange={(v) => setEndMonth(monthKey(endYear, Number(v)))}
+              ariaLabel="To month"
+            >
+              {MONTHS_LONG.map((m, i) => (
+                <option key={m} value={String(i)}>
+                  {m}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={String(endYear)}
+              onChange={(v) => setEndMonth(monthKey(Number(v), endMonth0))}
+              ariaLabel="To year"
+            >
+              {years.map((y) => (
+                <option key={y} value={String(y)}>
+                  {y}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
       </Toolbar>
 

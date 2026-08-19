@@ -577,9 +577,6 @@ export function BudgetApp({
             <ReportsView
               data={data}
               month={month}
-              onPrev={() => shiftMonth(-1)}
-              onNext={() => shiftMonth(1)}
-              onSetMonth={setMonth}
               minYear={minYear}
               maxYear={maxYear}
             />

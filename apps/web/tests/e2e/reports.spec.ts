@@ -46,8 +46,8 @@ test("changing the To selector narrows the range and re-totals Income", async ({
     await page.getByRole("button", { name: label }).click();
     await page.locator(`.y-dropdown [data-value="${value}"]`).click();
   };
-  await pickMonth(/from month/i, "2026-06");
-  await pickMonth(/to month/i, "2026-06");
+  await pickMonth(/from month/i, "5");
+  await pickMonth(/to month/i, "5");
 
   const narrowIncome = (await incomeCell.locator(".y-math-val").textContent())?.trim();
   expect(narrowIncome).toBeTruthy();
