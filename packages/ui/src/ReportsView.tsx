@@ -6,15 +6,13 @@ import { fmt, num, monthLabel, computeNetWorthReport, type NetWorthPoint } from 
 import { Icon, Toolbar, ToolbarSep, MonthNav, Select, Panel, MathCell, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
-import { ExpenseBreakdownReport } from "./ExpenseBreakdownReport.js";
 
-type SubTab = "overview" | "networth" | "spending" | "breakdown";
+type SubTab = "overview" | "networth" | "spending";
 
 const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "networth", label: "Net Worth" },
   { key: "spending", label: "Spending by Category" },
-  { key: "breakdown", label: "Expense Breakdown" },
 ];
 
 export const ReportsView = memo(function ReportsView({
@@ -237,13 +235,8 @@ export const ReportsView = memo(function ReportsView({
             <SpendingReport spending={spending} total={totalSpend} />
           </div>
         )}
-
-        {sub === "breakdown" && (
-          <div className="h-full p-4">
-            <ExpenseBreakdownReport spending={spending} total={totalSpend} />
-          </div>
-        )}
       </div>
     </div>
   );
 });
+
