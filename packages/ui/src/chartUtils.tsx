@@ -4,18 +4,18 @@ import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "
 import { fmt } from "@ynab/logic";
 
 export const PALETTE = [
-  "#2f7fb0",
-  "#1f5c85",
-  "#5aa5d0",
-  "#e8a33d",
-  "#5c8f2c",
-  "#97341f",
-  "#b3bbc0",
-  "#a482d4",
-  "#4f9f8f",
-  "#c07d1c",
-  "#5f7fb8",
-  "#b0608f",
+  "#2f7fb0", // 0: Classic Steel Blue
+  "#5c8f2c", // 1: Olive/Forest Green
+  "#e8a33d", // 2: Amber/Gold
+  "#7e57c2", // 3: Purple/Violet
+  "#d45042", // 4: Coral Red
+  "#26a69a", // 5: Teal/Cyan
+  "#1f5c85", // 6: Deep Navy
+  "#c07d1c", // 7: Warm Ochre
+  "#b0608f", // 8: Rose/Magenta
+  "#5aa5d0", // 9: Sky Blue
+  "#78909c", // 10: Slate Grey
+  "#8bc34a", // 11: Lime Green
 ];
 
 export function colorAt(i: number): string {
