@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction } from "@ynab/logic";
+import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionFlagColor } from "@ynab/logic";
 import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox, Notice } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice, FlagPicker } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
@@ -18,6 +18,7 @@ export type TransactionSavePayload = {
   memo: string;
   amount: number;
   status: "u" | "c" | "r";
+  flagColor?: TransactionFlagColor | null;
   transferAccountId?: number | null;
   incomeMonth?: string | null;
   /**
@@ -115,6 +116,7 @@ export function TransactionModal({
     initial ? initialAmt.toFixed(2) : ""
   );
   const [cleared, setCleared] = useState<boolean>(initial?.status === "c" || initial?.status === "r" || initial?.status == null);
+  const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(initial?.flagColor ?? null);
 
   // Transfer destination
   const [transferAccountId, setTransferAccountId] = useState<number | "">(
@@ -202,6 +204,7 @@ export function TransactionModal({
         memo: memo.trim(),
         amount: amountCents,
         status: cleared ? "c" : "u",
+        flagColor,
         transferAccountId: Number(transferAccountId),
       });
       return;
@@ -219,6 +222,7 @@ export function TransactionModal({
         memo: memo.trim(),
         amount: amountCents,
         status: cleared ? "c" : "u",
+        flagColor,
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId ?? null,
           transferAccountId: r.transferAccountId ?? null,
@@ -244,6 +248,7 @@ export function TransactionModal({
       memo: memo.trim(),
       amount: amountCents,
       status: cleared ? "c" : "u",
+      flagColor,
       incomeMonth: incMonth,
     });
   };
@@ -585,6 +590,15 @@ export function TransactionModal({
               checked={cleared}
               onChange={setCleared}
               label="Cleared (bank has processed this)"
+            />
+          </div>
+
+          <div className="pt-1 flex items-center gap-2">
+            <span className="y-label">Flag</span>
+            <FlagPicker
+              value={flagColor}
+              onChange={setFlagColor}
+              disabled={initial?.status === "r"}
             />
           </div>
         </>

@@ -479,7 +479,7 @@ export const Sidebar = memo(function Sidebar({
       <div
         onMouseDown={startResizing}
         onDoubleClick={resetWidth}
-        className="absolute right-0 top-0 bottom-0 w-[5px] -mr-[2.5px] cursor-col-resize z-30 hover:bg-[var(--y-side-sel-top)] opacity-0 hover:opacity-100 transition-opacity"
+        className="y-side-resizer"
         title="Drag to resize sidebar (double-click to reset)"
         aria-label="Resize sidebar"
       />

@@ -787,6 +787,185 @@ export const ClearedFlag: React.FC<{
   return inner;
 };
 
+/* -------------------------------------------------- Transaction flag color */
+export type FlagColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+
+/** Canonical YNAB4 flag palette (display order). */
+export const FLAG_COLORS: FlagColor[] = ["red", "orange", "yellow", "green", "blue", "purple"];
+
+/** Hex swatches for the flag palette. */
+export const FLAG_HEX: Record<FlagColor, string> = {
+  red: "#d65a3a",
+  orange: "#e0903a",
+  yellow: "#d6b73a",
+  green: "#5aa84a",
+  blue: "#3a7bd6",
+  purple: "#7c5fb6",
+};
+
+/** Label used in tooltips / aria labels. */
+export const FLAG_LABEL: Record<FlagColor, string> = {
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+  purple: "Purple",
+};
+
+/**
+ * Inline row of flag swatches (used inside the transaction modal). Renders
+ * the six color circles plus a "clear" (×) button when `onClear` is set.
+ */
+export const FlagPicker: React.FC<{
+  value: FlagColor | null;
+  onChange: (color: FlagColor | null) => void;
+  disabled?: boolean;
+  className?: string;
+}> = ({ value, onChange, disabled, className }) => {
+  return (
+    <div
+      className={cx("y-flag-picker", className)}
+      role="radiogroup"
+      aria-label="Transaction flag color"
+      style={{ opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? "none" : undefined }}
+    >
+      {FLAG_COLORS.map((c) => {
+        const active = value === c;
+        return (
+          <button
+            key={c}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-label={FLAG_LABEL[c]}
+            title={FLAG_LABEL[c]}
+            onClick={() => onChange(c)}
+            className={cx("y-flag-swatch", active && "is-active")}
+            style={{ background: FLAG_HEX[c] }}
+          />
+        );
+      })}
+      {value != null && (
+        <button
+          type="button"
+          aria-label="Clear flag"
+          title="Clear flag"
+          onClick={() => onChange(null)}
+          className="y-flag-clear"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A single clickable flag circle shown in the register's Flag column.
+ * Clicking opens a small popover with the swatch picker. Disabled when the
+ * row is reconciled (locked), mirroring ClearedFlag semantics.
+ */
+export const FlagCell: React.FC<{
+  color: FlagColor | null;
+  onChange: (color: FlagColor | null) => void;
+  disabled?: boolean;
+}> = ({ color, onChange, disabled }) => {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number; placeAbove: boolean }>({
+    left: 0,
+    top: 0,
+    placeAbove: false,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (disabled) return;
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const btn = triggerRef.current;
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      const estH = 120;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setPos({
+        left: rect.left,
+        top: rect.bottom + 4,
+        placeAbove: spaceBelow < estH && rect.top > spaceBelow,
+      });
+    }
+    setOpen(true);
+  };
+
+  const commit = (c: FlagColor | null) => {
+    setOpen(false);
+    onChange(c);
+  };
+
+  const interactive = !disabled;
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={color != null ? `Flag: ${FLAG_LABEL[color]}` : "No flag"}
+        title={color != null ? `Flag: ${FLAG_LABEL[color]}` : "Add a flag"}
+        onClick={toggle}
+        className={cx("y-flag-cell", interactive && "cursor-pointer")}
+        style={{ opacity: disabled ? 0.45 : 1 }}
+      >
+        {color != null ? (
+          <span className="y-flag" style={{ background: FLAG_HEX[color] }} />
+        ) : (
+          <span className="y-flag y-flag--empty" />
+        )}
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            role="dialog"
+            aria-label="Choose flag color"
+            className="y-flag-popover"
+            style={{
+              position: "fixed",
+              left: pos.left,
+              top: pos.placeAbove ? undefined : pos.top,
+              bottom: pos.placeAbove ? window.innerHeight - pos.top + 8 : undefined,
+              zIndex: 60,
+            }}
+          >
+            <FlagPicker value={color} onChange={commit} />
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
+
 /* -------------------------------------------------- Toast */
 export type ToastTone = "info" | "ok" | "warn" | "danger";
 

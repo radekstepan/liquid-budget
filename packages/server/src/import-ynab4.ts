@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
-import { dollarsToCents, nextMonthKey } from "@ynab/logic";
+import { dollarsToCents, nextMonthKey, type TransactionFlagColor } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
@@ -37,6 +37,28 @@ export function parseYnab4SettingsXml(xmlStr?: string): Ynab4Settings {
   settings.budgetName = matchTag("budgetName") || matchTag("budgetTitle");
 
   return settings;
+}
+
+/** YNAB4 flag color name → our enum. Unknown/missing values map to null. */
+export function ynabFlagToColor(flag: unknown): TransactionFlagColor | null {
+  if (typeof flag !== "string") return null;
+  const normalized = flag.trim().toLowerCase();
+  switch (normalized) {
+    case "red":
+      return "red";
+    case "orange":
+      return "orange";
+    case "yellow":
+      return "yellow";
+    case "green":
+      return "green";
+    case "blue":
+      return "blue";
+    case "purple":
+      return "purple";
+    default:
+      return null;
+  }
 }
 
 /**
@@ -293,6 +315,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 : t.cleared === "Uncleared"
                   ? "u"
                   : "c",
+            flagColor: ynabFlagToColor(t.flag),
             transferAccountId: null,
             parentId: null,
             isIncome: isParentIncome,
@@ -423,6 +446,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 : cleared === "Uncleared"
                   ? "u"
                   : "c",
+            flagColor: ynabFlagToColor(t.flag),
             transferAccountId: destAccId,
             parentId: null,
             isIncome: false,
@@ -470,6 +494,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 : t.cleared === "Uncleared"
                   ? "u"
                   : "c",
+            flagColor: ynabFlagToColor(t.flag),
             transferAccountId: destAccId,
             parentId: null,
             isIncome: isTxIncome,

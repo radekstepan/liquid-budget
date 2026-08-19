@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, Transaction } from "@ynab/logic";
+import type { BudgetData, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
   computeRunningBalances,
   frequencyLabel,
@@ -9,7 +9,7 @@ import {
   recurringFlavour,
   todayISO,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
@@ -25,6 +25,7 @@ export const TransactionsView = memo(function TransactionsView({
   onDelete,
   onReconcile,
   onCycleStatus,
+  onFlag,
   onBulkDelete,
   onBulkUpdate,
   onAddRecurring,
@@ -41,6 +42,7 @@ export const TransactionsView = memo(function TransactionsView({
   onDelete: (id: number) => void;
   onReconcile: (accountId: number) => void;
   onCycleStatus: (id: number) => void;
+  onFlag: (id: number, color: TransactionFlagColor | null) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
   onBulkUpdate?: (ids: number[], patch: { status?: "u" | "c" | "r"; categoryId?: number | null }) => Promise<void> | void;
   onAddRecurring?: () => void;
@@ -208,7 +210,11 @@ export const TransactionsView = memo(function TransactionsView({
   }, [filtered, accountFilter]);
 
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
-  const colCount = (accountFilter ? 8 : 9) + 1;
+  const hasFlagColumn = useMemo(
+    () => filtered.some((r) => r.flagColor != null),
+    [filtered]
+  );
+  const colCount = (accountFilter ? 8 : 9) + 1 + (hasFlagColumn ? 1 : 0);
 
   // Scheduled transactions for the active account / view (always sorted by date ASC)
   const scheduledRows = useMemo(() => {
@@ -461,6 +467,11 @@ export const TransactionsView = memo(function TransactionsView({
                   style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
                 />
               </th>
+              {hasFlagColumn && (
+                <th style={{ width: 32 }} className="text-center" title="Flag">
+                  F
+                </th>
+              )}
               <th style={{ width: 85 }}>Date</th>
               {!accountFilter && <th style={{ width: 120 }}>Account</th>}
               <th>Payee</th>
@@ -532,6 +543,15 @@ export const TransactionsView = memo(function TransactionsView({
                           style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
                         />
                       </td>
+                      {hasFlagColumn && (
+                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                          <FlagCell
+                            color={t.flagColor ?? null}
+                            onChange={(color) => onFlag(t.id, color)}
+                            disabled={t.status === "r"}
+                          />
+                        </td>
+                      )}
                       <td className="y-num">{t.date}</td>
                       {!accountFilter && (
                         <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>

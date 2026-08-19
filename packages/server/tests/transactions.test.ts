@@ -58,6 +58,42 @@ describe("transactions queries", () => {
       expect(ops).toEqual(["run", "select", "insert", "run"]);
     });
 
+    it("persists a flagColor on insert", async () => {
+      mock.respondWith("insert:transactions", [{ id: 1 }]);
+      mock.respondWith("update:accounts", [{ id: 1 }]);
+
+      await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: 2,
+        date: "2026-07-01",
+        payee: "Coffee",
+        memo: "",
+        amount: -500,
+        flagColor: "red",
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({ flagColor: "red" });
+    });
+
+    it("sanitizes an invalid flagColor to null on insert", async () => {
+      mock.respondWith("insert:transactions", [{ id: 1 }]);
+      mock.respondWith("update:accounts", [{ id: 1 }]);
+
+      await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: 2,
+        date: "2026-07-01",
+        payee: "Coffee",
+        memo: "",
+        amount: -500,
+        flagColor: "neon-pink" as never,
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({ flagColor: null });
+    });
+
     it("applies balance for split children (parentId set) regardless of skipBalance", async () => {
       mock.respondWith("insert:transactions", [{ id: 5 }]);
       mock.respondWith("update:accounts", [{}]);
@@ -450,6 +486,33 @@ describe("transactions queries", () => {
       await expect(updateTransaction(mock.db, 1, { amount: -20000 })).rejects.toThrow(
         /split parent/
       );
+    });
+
+    it("persists a flagColor on update", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
+      ]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("update:transactions", [{ id: 1, flagColor: "blue" }]);
+
+      const row = await updateTransaction(mock.db, 1, { flagColor: "blue" });
+      expect(row).toMatchObject({ flagColor: "blue" });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ flagColor: "blue" });
+    });
+
+    it("clears a flagColor with an explicit null", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
+      ]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("update:transactions", [{ id: 1, flagColor: null }]);
+
+      await updateTransaction(mock.db, 1, { flagColor: null });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ flagColor: null });
     });
 
     it("UNI-08 / F-08: rejects modifying a reconciled transaction with 422 error", async () => {

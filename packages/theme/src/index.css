@@ -286,9 +286,45 @@ body::after {
     rgba(8, 22, 32, 0.06) 0%,
     rgba(8, 22, 32, 0.18) 100%
   );
-  border-right: 1px solid var(--y-side-edge);
+  border-right: none;
   color: var(--y-side-ink);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
+  /* right edge: a thin translucent navy line that just shades the cyan
+     linen (reads as part of the blue, not a black bar), plus a soft
+     drop onto the light content area */
+  box-shadow:
+    inset -1px 0 0 0 rgba(23, 60, 86, 0.45),
+    4px 0 8px -6px rgba(0, 0, 0, 0.25);
+}
+/* ---------- sidebar resize handle ---------- */
+.y-side-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  margin-right: -3px;
+  cursor: col-resize;
+  z-index: 30;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.y-side-resizer:hover,
+.y-side-resizer:active {
+  opacity: 1;
+}
+.y-side-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: linear-gradient(180deg, var(--y-side-sel-top), var(--y-side-sel-bot));
+  box-shadow:
+    0 0 6px rgba(78, 170, 213, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .y-side-head {
   font-size: 10px;
@@ -1073,10 +1109,79 @@ button.y-pill:hover {
 
 .y-flag {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 0 0 1px rgba(0, 0, 0, 0.15);
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 0 0 1px rgba(0, 0, 0, 0.18);
+  vertical-align: middle;
+}
+.y-flag--empty {
+  background: transparent;
+  border: 1px dashed var(--y-line, #cbd5e1);
+  box-shadow: none;
+}
+.y-flag-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  padding: 0;
+  line-height: 1;
+}
+.y-flag-cell:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.y-flag-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.y-flag-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: transform 0.08s ease;
+}
+.y-flag-swatch:hover {
+  transform: scale(1.15);
+}
+.y-flag-swatch.is-active {
+  outline: 2px solid var(--y-ink, #1e293b);
+  outline-offset: 1px;
+}
+.y-flag-clear {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--y-ink-soft, #64748b);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+}
+.y-flag-clear:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--y-ink, #1e293b);
+}
+.y-flag-popover {
+  background: linear-gradient(#fbfbfa, #f0f0ed);
+  border: 1px solid var(--y-line, #cbd5e1);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 2px;
+  display: inline-block;
 }
 
 /* ---------- panels ---------- */

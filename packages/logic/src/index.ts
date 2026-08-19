@@ -14,3 +14,23 @@ export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";
 export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
+
+/**
+ * YNAB4's six flag colours, in canonical display order.
+ */
+export const TRANSACTION_FLAG_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+
+/**
+ * Hex swatches for the six YNAB4 flag colours. Mirrors the palette YNAB4
+ * uses for its register flag column so imported flags look native.
+ */
+export const TRANSACTION_FLAG_HEX: Record<(typeof TRANSACTION_FLAG_COLORS)[number], string> = {
+  red: "#d65a3a",
+  orange: "#e0903a",
+  yellow: "#d6b73a",
+  green: "#5aa84a",
+  blue: "#3a7bd6",
+  purple: "#7c5fb6",
+};
+
+export type TransactionFlagColor = (typeof TRANSACTION_FLAG_COLORS)[number];

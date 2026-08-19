@@ -117,6 +117,7 @@ export async function POST(req: Request) {
           memo: body.memo,
           amount: body.amount,
           status: body.status,
+          flagColor: body.flagColor ?? null,
         },
         body.subTransactions.map((c) => ({
           categoryId: c.categoryId ?? null,
@@ -140,6 +141,7 @@ export async function POST(req: Request) {
       memo: body.memo,
       amount: body.amount,
       status: body.status,
+      flagColor: body.flagColor ?? null,
       transferAccountId: body.transferAccountId ?? null,
       parentId: body.parentId ?? null,
       skipBalance: body.skipBalance,
@@ -185,6 +187,7 @@ export async function PATCH(req: Request) {
           payee: body.payee,
           memo: body.memo ?? undefined,
           status: body.status,
+          flagColor: "flagColor" in body ? (body.flagColor ?? null) : undefined,
         },
         body.subTransactions.map((c) => ({
           categoryId: c.categoryId ?? null,
@@ -208,6 +211,7 @@ export async function PATCH(req: Request) {
       memo: body.memo !== undefined ? (body.memo ?? undefined) : undefined,
       amount: body.amount,
       status: body.status,
+      flagColor: "flagColor" in body ? (body.flagColor ?? null) : undefined,
       incomeMonth: body.incomeMonth,
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });

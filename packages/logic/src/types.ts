@@ -70,6 +70,13 @@ export type Assignment = {
  */
 export type ClearedStatus = "u" | "c" | "r";
 
+/**
+ * YNAB4's six flag colors, used to highlight transactions in the register.
+ * Mirrors the colour names YNAB4 writes into its .ynab4 backup JSON
+ * (`t.flag` = "Red" | "Orange" | "Yellow" | "Green" | "Blue" | "Purple").
+ */
+export type TransactionFlagColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+
 export type Transaction = {
   id: number;
   accountId: number;
@@ -79,6 +86,8 @@ export type Transaction = {
   memo: string;
   amount: string;
   status: ClearedStatus;
+  /** YNAB4-style flag color, or null when the transaction is unflagged. */
+  flagColor?: TransactionFlagColor | null;
   createdAt?: string;
   parentId?: number | null;
   transferAccountId?: number | null;
