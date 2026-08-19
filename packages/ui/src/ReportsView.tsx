@@ -14,13 +14,15 @@ import {
 import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
+import { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 
-type SubTab = "overview" | "networth" | "spending";
+type SubTab = "overview" | "trends" | "spending" | "networth";
 
 const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "overview", label: "Overview" },
-  { key: "networth", label: "Net Worth" },
+  { key: "trends", label: "Spending Trends" },
   { key: "spending", label: "Spending by Category" },
+  { key: "networth", label: "Net Worth" },
 ];
 
 export const ReportsView = memo(function ReportsView({
@@ -268,15 +270,21 @@ export const ReportsView = memo(function ReportsView({
           </div>
         )}
 
-        {sub === "networth" && (
+        {sub === "trends" && (
           <div className="h-full p-4">
-            <NetWorthReport points={netWorthData} />
+            <SpendingTrendsReport data={data} startMonth={actualStart} endMonth={actualEnd} />
           </div>
         )}
 
         {sub === "spending" && (
           <div className="h-full p-4">
             <SpendingReport spending={spending} total={totalSpend} />
+          </div>
+        )}
+
+        {sub === "networth" && (
+          <div className="h-full p-4">
+            <NetWorthReport points={netWorthData} />
           </div>
         )}
       </div>

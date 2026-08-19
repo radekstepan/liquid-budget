@@ -113,8 +113,8 @@ describe("ReportsView", () => {
   it("renders the toolbar, tabs, math strip, and Top Payees on Overview", () => {
     renderView();
     expect(screen.getByText("Reports")).toBeInTheDocument();
-    // Tabs include the three report pages.
-    for (const tab of ["Overview", "Net Worth", "Spending by Category"]) {
+    // Tabs include the four report pages.
+    for (const tab of ["Overview", "Spending Trends", "Spending by Category", "Net Worth"]) {
       expect(screen.getByRole("button", { name: tab })).toBeInTheDocument();
     }
     // Math strip cells.
@@ -125,6 +125,16 @@ describe("ReportsView", () => {
     const topPanel = findPanel("Top Payees")!;
     expect(topPanel).toBeTruthy();
     expect(screen.queryByText("Net Worth", { selector: ".y-panel-head" })).not.toBeInTheDocument();
+  });
+
+  it("Spending Trends tab renders the stacked chart and breadcrumb navigation", () => {
+    renderView();
+    clickTab("Spending Trends");
+    const panel = findPanel("Spending Trends")!;
+    expect(panel).toBeTruthy();
+    expectPanelBodyIsFlexColumn(panel);
+    expect(within(panel).getByText("All Categories")).toBeInTheDocument();
+    expect(panel.querySelector("svg")).not.toBeNull();
   });
 
   it("totals income and expenses across the default range", () => {
