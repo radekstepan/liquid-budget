@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./format.js";
 export * from "./split.js";
 export * from "./recurring.js";
+export * from "./csv-import.js";
 // Full YNAB4 engine
 export {
   computeBudget,
