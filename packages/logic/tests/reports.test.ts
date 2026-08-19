@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { computeNetWorthReport, computeTrailingNetWorth, getMonthsBetween } from "../src/reports.js";
+import {
+  computeNetWorthReport,
+  computeTrailingNetWorth,
+  getMonthsBetween,
+  computeSpendingTrends,
+  getSpendingTransactions,
+} from "../src/reports.js";
 import type { BudgetData } from "../src/types.js";
 
 function makeBaseData(): BudgetData {
@@ -252,5 +258,180 @@ describe("computeTrailingNetWorth", () => {
     expect(res.currentNet).toBe(0);
     expect(res.delta).toBe(0);
     expect(res.pctDelta).toBe(0);
+  });
+});
+
+describe("computeSpendingTrends", () => {
+  function makeSpendingData(): BudgetData {
+    return {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+      ],
+      groups: [
+        { id: 1, name: "Everyday Expenses", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Monthly Bills", sort: 1, isCreditCardPayments: false },
+        { id: 3, name: "CC Payments", sort: 2, isCreditCardPayments: true },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 11, groupId: 1, name: "Fuel", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 20, groupId: 2, name: "Rent", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 21, groupId: 2, name: "Internet", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // 2026-04
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-15000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 11, date: "2026-04-10", payee: "Gas Station", memo: "", amount: "-5000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 20, date: "2026-04-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        // 2026-05
+        { id: 4, accountId: 1, categoryId: 10, date: "2026-05-02", payee: "Supermarket", memo: "", amount: "-20000", status: "c" },
+        { id: 5, accountId: 1, categoryId: 10, date: "2026-05-15", payee: "Refund", memo: "Return", amount: "5000", status: "c" }, // refund net 15000
+        { id: 6, accountId: 1, categoryId: 20, date: "2026-05-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        { id: 7, accountId: 1, categoryId: 21, date: "2026-05-10", payee: "ISP", memo: "", amount: "-6000", status: "c" },
+        // 2026-06
+        { id: 8, accountId: 1, categoryId: 10, date: "2026-06-08", payee: "Supermarket", memo: "", amount: "-18000", status: "c" },
+        { id: 9, accountId: 1, categoryId: 11, date: "2026-06-12", payee: "Gas Station", memo: "", amount: "-6000", status: "c" },
+        { id: 10, accountId: 1, categoryId: 20, date: "2026-06-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        // Split parent + children in 2026-06
+        { id: 100, accountId: 1, categoryId: null, date: "2026-06-20", payee: "Costco", memo: "Parent", amount: "-10000", status: "c" },
+        { id: 101, accountId: 1, parentId: 100, categoryId: 10, date: "2026-06-20", payee: "Costco", memo: "Food", amount: "-7000", status: "c" },
+        { id: 102, accountId: 1, parentId: 100, categoryId: 11, date: "2026-06-20", payee: "Costco", memo: "Gas", amount: "-3000", status: "c" },
+        // Transfer (should be ignored)
+        { id: 200, accountId: 1, transferAccountId: 2, categoryId: null, date: "2026-06-25", payee: "Transfer", memo: "", amount: "-5000", status: "c" },
+        // Income (should be ignored)
+        { id: 300, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Paycheck", memo: "", amount: "300000", status: "c" },
+      ],
+      recurring: [],
+    };
+  }
+
+  it("computes top-level spending by master category across months", () => {
+    const data = makeSpendingData();
+    const result = computeSpendingTrends(data, "2026-04", "2026-06");
+
+    expect(result.drillLevel).toBe("all");
+    expect(result.months).toHaveLength(3);
+
+    // 2026-04: Everyday (15000 + 5000 = 20000), Bills (100000) -> total 120000
+    expect(result.months[0]?.month).toBe("2026-04");
+    expect(result.months[0]?.total).toBe(120000);
+    expect(result.months[0]?.segments).toEqual([
+      { id: 1, name: "Everyday Expenses", amount: 20000 },
+      { id: 2, name: "Monthly Bills", amount: 100000 },
+    ]);
+
+    // 2026-05: Everyday (20000 - 5000 = 15000), Bills (100000 + 6000 = 106000) -> total 121000
+    expect(result.months[1]?.month).toBe("2026-05");
+    expect(result.months[1]?.total).toBe(121000);
+
+    // 2026-06: Everyday (18000 + 6000 + 7000 + 3000 = 34000), Bills (100000) -> total 134000
+    expect(result.months[2]?.month).toBe("2026-06");
+    expect(result.months[2]?.total).toBe(134000);
+
+    // Overall stats
+    expect(result.total).toBe(120000 + 121000 + 134000); // 375000
+    expect(result.avgPerMonth).toBe(125000);
+    expect(result.maxMonthSpend).toBe(134000);
+
+    // Constituents: Monthly Bills (306000) > Everyday Expenses (69000)
+    expect(result.constituents).toHaveLength(2);
+    expect(result.constituents[0]?.name).toBe("Monthly Bills");
+    expect(result.constituents[0]?.total).toBe(306000);
+    expect(result.constituents[1]?.name).toBe("Everyday Expenses");
+    expect(result.constituents[1]?.total).toBe(69000);
+  });
+
+  it("drills down into a master category to show constituent subcategories", () => {
+    const data = makeSpendingData();
+    const result = computeSpendingTrends(data, "2026-04", "2026-06", {
+      drillGroupId: 1,
+    });
+
+    expect(result.drillLevel).toBe("group");
+    expect(result.currentGroupId).toBe(1);
+    expect(result.currentGroupName).toBe("Everyday Expenses");
+    expect(result.months).toHaveLength(3);
+
+    // 2026-04: Groceries (15000), Fuel (5000) -> total 20000
+    expect(result.months[0]?.total).toBe(20000);
+    expect(result.months[0]?.segments).toEqual([
+      { id: 10, name: "Groceries", amount: 15000 },
+      { id: 11, name: "Fuel", amount: 5000 },
+    ]);
+
+    // 2026-05: Groceries (20000 - 5000 = 15000) -> total 15000
+    expect(result.months[1]?.total).toBe(15000);
+    expect(result.months[1]?.segments).toEqual([
+      { id: 10, name: "Groceries", amount: 15000 },
+    ]);
+
+    // 2026-06: Groceries (18000 + 7000 = 25000), Fuel (6000 + 3000 = 9000) -> total 34000
+    expect(result.months[2]?.total).toBe(34000);
+
+    // Constituents: Groceries (15000 + 15000 + 25000 = 55000), Fuel (5000 + 0 + 9000 = 14000)
+    expect(result.constituents[0]?.name).toBe("Groceries");
+    expect(result.constituents[0]?.total).toBe(55000);
+    expect(result.constituents[1]?.name).toBe("Fuel");
+    expect(result.constituents[1]?.total).toBe(14000);
+  });
+
+  it("drills down into a specific subcategory", () => {
+    const data = makeSpendingData();
+    const result = computeSpendingTrends(data, "2026-04", "2026-06", {
+      drillCategoryId: 10,
+    });
+
+    expect(result.drillLevel).toBe("category");
+    expect(result.currentCategoryId).toBe(10);
+    expect(result.currentCategoryName).toBe("Groceries");
+    expect(result.currentGroupId).toBe(1);
+    expect(result.currentGroupName).toBe("Everyday Expenses");
+
+    expect(result.months[0]?.total).toBe(15000);
+    expect(result.months[1]?.total).toBe(15000);
+    expect(result.months[2]?.total).toBe(25000);
+    expect(result.total).toBe(55000);
+    expect(result.constituents).toHaveLength(1);
+  });
+
+  it("respects activeCategoryIds filter", () => {
+    const data = makeSpendingData();
+    // Only Groceries (10) and Rent (20) are active
+    const active = new Set([10, 20]);
+    const result = computeSpendingTrends(data, "2026-04", "2026-06", {
+      activeCategoryIds: active,
+    });
+
+    // 2026-04: Groceries (15000) + Rent (100000) = 115000 (Fuel is excluded)
+    expect(result.months[0]?.total).toBe(115000);
+    expect(result.months[0]?.segments).toEqual([
+      { id: 1, name: "Everyday Expenses", amount: 15000 },
+      { id: 2, name: "Monthly Bills", amount: 100000 },
+    ]);
+  });
+});
+
+describe("getSpendingTransactions", () => {
+  it("filters transactions by date range and category", () => {
+    const data: BudgetData = {
+      accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "0", onBudget: true, sort: 0 }],
+      groups: [{ id: 1, name: "Bills", sort: 0, isCreditCardPayments: false }],
+      categories: [{ id: 10, groupId: 1, name: "Rent", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-05-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 10, date: "2026-06-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const all = getSpendingTransactions(data, "2026-04", "2026-06", { categoryId: 10 });
+    expect(all).toHaveLength(3);
+
+    const mayOnly = getSpendingTransactions(data, "2026-04", "2026-06", { categoryId: 10, month: "2026-05" });
+    expect(mayOnly).toHaveLength(1);
+    expect(mayOnly[0]?.date).toBe("2026-05-01");
   });
 });

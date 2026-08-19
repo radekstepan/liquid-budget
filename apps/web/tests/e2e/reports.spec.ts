@@ -30,7 +30,7 @@ test("Overview renders the math strip, Top Payees panel, and all chart tabs", as
     page.locator(".y-panel-head").filter({ hasText: "Top Payees" })
   ).toBeVisible();
 
-  for (const tab of ["Net Worth", "Spending by Category"]) {
+  for (const tab of ["Net Worth", "Spending Trends", "Spending by Category"]) {
     await expect(page.getByRole("button", { name: tab, exact: true })).toBeVisible();
   }
 });
@@ -96,7 +96,7 @@ test("Spending by Category tab renders the top spender with a percent bar and to
   // Switch to Donut view
   await donutBtn.click();
   await expect(panel.locator("svg")).toBeVisible();
-  await expect(panel.getByText("TOTAL")).toBeVisible();
+  await expect(panel.getByText("TOTAL", { exact: true })).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
 
   // Switch back to Bars view
@@ -125,4 +125,81 @@ test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale",
   // Switch back to Linear scale
   await linearBtn.click();
   await expect(panel.locator("svg")).toBeVisible();
+});
+
+test("Spending Trends tab renders stacked multi-month chart and supports multi-level drill-down", async ({ page }) => {
+  await page.getByRole("button", { name: "Spending Trends", exact: true }).click();
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+
+  // SVG chart with stacked bars and X axis labels
+  await expect(panel.locator("svg.overflow-visible")).toBeVisible();
+  await expect(panel.locator("g rect").first()).toBeVisible();
+
+  // Breadcrumb at top level
+  await expect(panel.getByRole("button", { name: "All Categories" })).toBeVisible();
+
+  // Category filter trigger is visible
+  await expect(panel.getByTitle("Filter included categories")).toBeVisible();
+
+  // Top level constituents list is visible
+  const constituentsTable = panel.locator(".bg-white");
+  await expect(constituentsTable.getByText("Master Category")).toBeVisible();
+
+  // Drill down into a master category (e.g. first available category group row in table)
+  const firstGroupRow = constituentsTable.locator(".cursor-pointer").first();
+  const groupName = (await firstGroupRow.locator(".truncate.font-medium").textContent())?.trim();
+  expect(groupName).toBeTruthy();
+  await firstGroupRow.click();
+
+  // Breadcrumb now shows All Categories > Group Name
+  await expect(panel.getByRole("button", { name: groupName! })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "↑ Up" })).toBeVisible();
+  await expect(constituentsTable.getByText("Subcategory")).toBeVisible();
+
+  // Drill down into a constituent subcategory
+  const firstCatRow = constituentsTable.locator(".cursor-pointer").first();
+  const catName = (await firstCatRow.locator(".truncate.font-medium").textContent())?.trim();
+  expect(catName).toBeTruthy();
+  await firstCatRow.click();
+
+  // Subcategory level shows transaction register table with standard y-table and y-row styling
+  await expect(panel.getByText(`${catName} Transactions`)).toBeVisible();
+  await expect(panel.locator("table.y-table")).toBeVisible();
+  await expect(panel.locator("thead.y-thead")).toBeVisible();
+  await expect(panel.locator("tbody tr.y-row").first()).toBeVisible();
+
+  // Navigate back to master category using Up button
+  await panel.getByRole("button", { name: "↑ Up" }).click();
+  await expect(panel.getByRole("button", { name: groupName! })).toBeVisible();
+  await expect(constituentsTable.getByText("Subcategory")).toBeVisible();
+
+  // Open contextual category filter for this group
+  const filterBtn = panel.getByTitle("Filter included categories");
+  await filterBtn.click();
+  await expect(panel.getByText(`Filter: ${groupName}`)).toBeVisible();
+  // Close filter
+  await filterBtn.click();
+
+  // Navigate back to All Categories using breadcrumb
+  await panel.getByRole("button", { name: "All Categories" }).click();
+  await expect(constituentsTable.getByText("Master Category")).toBeVisible();
+});
+
+test("Spending Trends handles wide multi-year range with readable X-axis stride", async ({ page }) => {
+  await page.getByRole("button", { name: "Spending Trends", exact: true }).click();
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+
+  // Change From year to an earlier year (e.g. 2016)
+  await page.getByRole("button", { name: /from year/i }).click();
+  const earliestYearOption = page.locator('.y-dropdown [role="option"]').first();
+  await earliestYearOption.click();
+
+  // Ensure SVG chart renders with readable axis labels (fewer than 15 labels across the chart)
+  const chartSvg = panel.locator("svg.overflow-visible");
+  await expect(chartSvg).toBeVisible();
+
+  const labels = chartSvg.locator("text.y-num");
+  const count = await labels.count();
+  // Y-axis ticks (~5) + X-axis labels (~6-10) should not exceed 25 total text elements
+  expect(count).toBeLessThan(25);
 });
