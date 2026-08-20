@@ -584,7 +584,11 @@ export const Select: React.FC<SelectProps> = ({
             ) : (
               filteredItems.map((it, i) => {
                 const originalIdx = openItems.indexOf(it);
-                const isSel = originalIdx === selectedIdx;
+                // A disabled option can never be selected, so it must not be
+                // shown with the selected check/state even when its value
+                // happens to match the current value (e.g. a disabled
+                // "Select account…" placeholder with value="").
+                const isSel = originalIdx === selectedIdx && !it.disabled;
                 const isActive = i === activeIdx;
                 // Render an <optgroup> heading above the first option of
                 // each group (persisting while the list is filtered so the

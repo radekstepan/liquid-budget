@@ -422,7 +422,7 @@ export function TransactionModal({
                   className="w-full"
                   searchable
                 >
-                  <option value="">Select account…</option>
+                  <option value="" disabled>Select account…</option>
                   {otherAccounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
@@ -1181,7 +1181,7 @@ export function RecurringModal({
               className="w-full"
               searchable
             >
-              <option value="">Select account…</option>
+              <option value="" disabled>Select account…</option>
               {otherAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
