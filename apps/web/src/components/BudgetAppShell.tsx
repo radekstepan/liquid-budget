@@ -587,6 +587,30 @@ export function BudgetAppShell() {
         return json;
       });
     },
+    addRenameRule: async (sourcePattern, targetPayee) => {
+      return withSync(async () => {
+        await jsonReq("/api/rename-rules", {
+          method: "POST",
+          body: JSON.stringify({ sourcePattern, targetPayee }),
+        });
+        await reload();
+      });
+    },
+    updateRenameRule: async (id, sourcePattern, targetPayee) => {
+      return withSync(async () => {
+        await jsonReq("/api/rename-rules", {
+          method: "PATCH",
+          body: JSON.stringify({ id, sourcePattern, targetPayee }),
+        });
+        await reload();
+      });
+    },
+    deleteRenameRule: async (id) => {
+      return withSync(async () => {
+        await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
+        await reload();
+      });
+    },
   };
 
   if (error) {

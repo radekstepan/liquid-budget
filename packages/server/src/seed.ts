@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
 
 // Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
@@ -23,6 +23,7 @@ export async function resetDatabase(db: Db, isNested = false): Promise<void> {
     await db.delete(categories);
     await db.delete(categoryGroups);
     await db.delete(accounts);
+    await db.delete(renameRules);
     // Reset sqlite_sequence so IDs restart from 1 on the next insert.
     await db.run(sql`DELETE FROM sqlite_sequence`);
     if (!isNested) db.run(sql`COMMIT`);

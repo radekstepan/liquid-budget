@@ -189,6 +189,25 @@ export const recurringSubTransactions = sqliteTable(
   })
 );
 
+export const renameRules = sqliteTable(
+  "rename_rules",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /**
+     * Source payee pattern to match. May contain `[N]` (matches one or more
+     * digits). Matching is case- and whitespace-insensitive.
+     */
+    sourcePattern: text("source_pattern").notNull(),
+    /** Payee to substitute when the source pattern matches. */
+    targetPayee: text("target_payee").notNull(),
+    createdAt: text("created_at").notNull().default(""),
+    updatedAt: text("updated_at"),
+  },
+  (t) => ({
+    uniq: uniqueIndex("rename_rules_source_target_uniq").on(t.sourcePattern, t.targetPayee),
+  })
+);
+
 export type Account = typeof accounts.$inferSelect;
 export type CategoryGroup = typeof categoryGroups.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -197,3 +216,4 @@ export type Transaction = typeof transactions.$inferSelect;
 export type Reconciliation = typeof reconciliations.$inferSelect;
 export type Recurring = typeof recurring.$inferSelect;
 export type RecurringSubTransaction = typeof recurringSubTransactions.$inferSelect;
+export type RenameRule = typeof renameRules.$inferSelect;

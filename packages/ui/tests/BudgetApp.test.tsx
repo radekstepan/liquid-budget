@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { BudgetApp, type BudgetAppApi } from "../src/BudgetApp.js";
 import type { BudgetData } from "@ynab/logic";
 import { makeSeedBudgetData } from "@ynab/logic";
@@ -86,6 +86,39 @@ describe("BudgetApp", () => {
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     fireEvent.click(screen.getByRole("button", { name: /reports/i }));
     expect(screen.getByText("Spending by Category")).toBeInTheDocument();
+  });
+
+  it("renders the Settings view with rename rules and calls the api on add", async () => {
+    const addRenameRule = vi.fn(async () => {});
+    const updateRenameRule = vi.fn(async () => {});
+    const deleteRenameRule = vi.fn(async () => {});
+    const { api } = makeApi({ addRenameRule, updateRenameRule, deleteRenameRule });
+    const seed = makeSeedBudgetData();
+    render(
+      <BudgetApp
+        data={{ ...seed, renameRules: [{ id: 7, sourcePattern: "BCF[N]", targetPayee: "BC Ferries", createdAt: "" }] }}
+        api={api}
+      />
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: /settings/i })[0]!);
+    expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
+    expect(screen.getByText("BCF[N]")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /add rename rule/i }));
+    fireEvent.change(screen.getByLabelText("Source pattern"), { target: { value: "UBER" } });
+    fireEvent.change(screen.getByLabelText("Target payee"), { target: { value: "Uber" } });
+    fireEvent.click(screen.getByRole("button", { name: /save rule/i }));
+    await waitFor(() => {
+      expect(addRenameRule).toHaveBeenCalledWith("UBER", "Uber");
+    });
+  });
+
+  it("navigates to the Settings view from the Inspector gear menu", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    fireEvent.click(screen.getByTitle("Settings"));
+    fireEvent.click(screen.getByText("Rename rules…"));
+    expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
   });
 
   it("opens the Add Transaction and Schedule Transaction modals from the Transactions view", () => {

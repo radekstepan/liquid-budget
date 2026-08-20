@@ -62,6 +62,7 @@ describe("Drizzle migrations", () => {
     expect(tableNames).toContain("recurring");
     expect(tableNames).toContain("recurring_sub_transactions");
     expect(tableNames).toContain("reconciliations");
+    expect(tableNames).toContain("rename_rules");
     expect(tableNames).toContain("__drizzle_migrations");
   });
 
@@ -106,12 +107,12 @@ describe("Drizzle migrations", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as Array<{ name: string }>;
     const tableNames = tables.map((t) => t.name);
-    // 8 app tables + __drizzle_migrations + sqlite_sequence (the
+    // 10 app tables + __drizzle_migrations + sqlite_sequence (the
     // SQLite-internal bookkeeping table for AUTOINCREMENT columns).
     // No duplicates. sqlite_sequence is excluded from the count.
     const systemTables = new Set(["__drizzle_migrations", "sqlite_sequence"]);
     const appTableCount = tableNames.filter((n) => !systemTables.has(n)).length;
-    expect(appTableCount).toBe(9);
+    expect(appTableCount).toBe(10);
   });
 
   it("enforces DB-level CHECK constraints (UNI-29 / BUG-12, F-19)", () => {

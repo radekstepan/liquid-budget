@@ -10,7 +10,8 @@ export type View =
   | "reports"
   | "calendar"
   | "projections"
-  | "transactions";
+  | "transactions"
+  | "settings";
 
 type NavItem = { key: View; label: string; icon: string };
 const NAV_TOP: NavItem[] = [
@@ -18,6 +19,7 @@ const NAV_TOP: NavItem[] = [
   { key: "reports", label: "Reports", icon: "chart" },
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "projections", label: "Projections", icon: "projections" },
+  { key: "settings", label: "Settings", icon: "gear" },
 ];
 
 const DEFAULT_WIDTH = 214;

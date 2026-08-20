@@ -109,6 +109,17 @@ export const AssignmentUpsertSchema = z.object({
   amount: z.number().int(),
 });
 
+export const RenameRuleCreateSchema = z.object({
+  sourcePattern: z.string().min(1).max(255),
+  targetPayee: z.string().min(1).max(255),
+});
+
+export const RenameRulePatchSchema = z.object({
+  id: z.number().int().positive(),
+  sourcePattern: z.string().min(1).max(255).optional(),
+  targetPayee: z.string().min(1).max(255).optional(),
+});
+
 export const RecurringCreateSchema = z.object({
   accountId: z.number().int().positive(),
   categoryId: z.number().int().positive().nullable().optional(),

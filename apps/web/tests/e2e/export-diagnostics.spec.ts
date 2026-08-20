@@ -17,7 +17,7 @@ test("Inspector Settings cog reveals all export and backup options", async ({ pa
   await page.goto("/");
   await waitForReady(page);
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTitle("Settings").click();
   await expect(page.getByText("Export as CSV")).toBeVisible();
   await expect(page.getByText("Export as JSON")).toBeVisible();
   await expect(page.getByText("Backup SQLite DB")).toBeVisible();

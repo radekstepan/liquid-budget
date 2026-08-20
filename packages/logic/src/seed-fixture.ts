@@ -328,5 +328,5 @@ const recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[] 
 // Export
 // ---------------------------------------------------------------------------
 export function makeSeedBudgetData(): BudgetData {
-  return { accounts, groups, categories, assignments, transactions, recurring };
+  return { accounts, groups, categories, assignments, transactions, recurring, renameRules: [] };
 }

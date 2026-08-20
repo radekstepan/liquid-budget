@@ -4,6 +4,7 @@ import { buildBudgetIndex } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { sanitizeFlagState } from "./transactions.js";
+import { getRenameRules } from "./rename-rules.js";
 
 export async function getBudgetData(
   db: Db,
@@ -78,6 +79,7 @@ export async function getBudgetData(
         amount: String(s.amount),
       })),
     })),
+    renameRules: getRenameRules(db),
   };
 
   data.budgetIndex = buildBudgetIndex(data);

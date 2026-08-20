@@ -150,4 +150,67 @@ describe("CsvImportModal", () => {
     expect(screen.getByText(/2 importable · 1 skipped/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^import 2 transactions$/i })).toBeEnabled();
   });
+
+  it("previews the renamed payee when a rename rule matches", async () => {
+    const csv = [
+      "Date,Payee,Outflow",
+      "13/08/2026,BCF1,28.08",
+      "13/08/2026,BCF22,18.63",
+      "13/08/2026,UBER TRIP,11.11",
+    ].join("\n");
+    const view = render(
+      <CsvImportModal
+        accounts={accounts}
+        transactions={[]}
+        renameRules={[{ id: 1, sourcePattern: "BCF[N]", targetPayee: "BC Ferries", createdAt: "" }]}
+        defaultAccountId={null}
+        file={makeFile(csv)}
+        onClose={() => {}}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getAllByText("BC Ferries")).toHaveLength(2);
+    });
+    expect(screen.getByText("UBER TRIP")).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("detects duplicates against existing transactions using the renamed payee", async () => {
+    const existing: Transaction[] = [
+      {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "BC Ferries",
+        memo: "",
+        amount: "-2808",
+        status: "c",
+        flagColor: null,
+        parentId: null,
+        transferAccountId: null,
+      },
+    ];
+    const csv = [
+      "Date,Payee,Outflow",
+      "13/08/2026,BCF1,28.08",
+      "13/08/2026,UBER TRIP,11.11",
+    ].join("\n");
+    render(
+      <CsvImportModal
+        accounts={accounts}
+        transactions={existing}
+        renameRules={[{ id: 1, sourcePattern: "BCF[N]", targetPayee: "BC Ferries", createdAt: "" }]}
+        defaultAccountId={null}
+        file={makeFile(csv)}
+        onClose={() => {}}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/1 importable · 1 skipped/)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
+  });
 });

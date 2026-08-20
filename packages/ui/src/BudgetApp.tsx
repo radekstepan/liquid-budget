@@ -25,6 +25,7 @@ import { RecurringView } from "./RecurringView.js";
 import { ReportsView } from "./ReportsView.js";
 import { CalendarView } from "./CalendarView.js";
 import { ProjectionsView } from "./ProjectionsView.js";
+import { SettingsView } from "./SettingsView.js";
 import {
   TransactionModal,
   CategoryModal,
@@ -177,6 +178,9 @@ export type BudgetAppApi = {
   importYnab4?: (file: File) => Promise<ImportSummary | void>;
   importCsv?: (input: { accountId: number; swap: boolean; csv: string }) => Promise<number>;
   analyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
+  addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
+  updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
+  deleteRenameRule?: (id: number) => Promise<void>;
 };
 
 export function BudgetApp({
@@ -629,6 +633,20 @@ export function BudgetApp({
             />
           )}
           {view === "projections" && <ProjectionsView data={data} month={month} />}
+          {view === "settings" && (
+            <SettingsView
+              rules={data.renameRules ?? []}
+              onAdd={async (sourcePattern, targetPayee) => {
+                await api.addRenameRule?.(sourcePattern, targetPayee);
+              }}
+              onUpdate={async (id, sourcePattern, targetPayee) => {
+                await api.updateRenameRule?.(id, sourcePattern, targetPayee);
+              }}
+              onDelete={async (id) => {
+                await api.deleteRenameRule?.(id);
+              }}
+            />
+          )}
         </ErrorBoundary>
       </main>
 
@@ -650,6 +668,7 @@ export function BudgetApp({
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
           onClearOverdraft={clearOverdraft}
+          onOpenRenameRules={() => navigateView("settings")}
         />
       </ErrorBoundary>
 
@@ -803,6 +822,7 @@ export function BudgetApp({
         <CsvImportModal
           accounts={data.accounts}
           transactions={data.transactions}
+          renameRules={data.renameRules ?? []}
           defaultAccountId={accountFilter}
           file={modal.file}
           onClose={() => setModal({ kind: "none" })}

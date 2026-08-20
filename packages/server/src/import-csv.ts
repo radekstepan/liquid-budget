@@ -1,9 +1,10 @@
 import { eq, sql } from "drizzle-orm";
 import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
-import { duplicateFingerprint } from "@ynab/logic";
+import { applyRenameRules, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, categories, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
+import { getRenameRules } from "./queries/rename-rules.js";
 
 export type ImportCsvInput = {
   accountId: number;
@@ -28,7 +29,13 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     const key = c.name.trim().toLowerCase();
     if (!categoryByName.has(key)) categoryByName.set(key, c.id);
   }
-  const rows = input.rows.filter((r) => !r.error && r.date != null && r.amountCents != null);
+  // Automatic payee rename rules are applied to every incoming row before
+  // duplicate detection and insertion, so re-importing a bank statement
+  // produces clean, consistent payee names.
+  const renameRules = getRenameRules(db);
+  const rows = input.rows
+    .filter((r) => !r.error && r.date != null && r.amountCents != null)
+    .map((r) => ({ ...r, payee: applyRenameRules(renameRules, r.payee ?? "") }));
 
   // Build a fingerprint set from existing plain regular transactions in
   // this account so re-importing a statement never doubles the rows.

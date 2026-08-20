@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Account, DuplicateEntry, Transaction } from "@ynab/logic";
-import { parseCsvImport, swapPayeeMemo, findDuplicateGroups } from "@ynab/logic";
+import type { Account, DuplicateEntry, RenameRule, Transaction } from "@ynab/logic";
+import { applyRenameRules, parseCsvImport, swapPayeeMemo, findDuplicateGroups } from "@ynab/logic";
 import { Checkbox, Notice, Select, money, cx } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 
 export function CsvImportModal({
   accounts,
   transactions,
+  renameRules,
   defaultAccountId,
   file,
   onClose,
@@ -16,6 +17,7 @@ export function CsvImportModal({
 }: {
   accounts: Account[];
   transactions: Transaction[];
+  renameRules?: RenameRule[];
   defaultAccountId: number | null;
   file: File;
   onClose: () => void;
@@ -48,10 +50,15 @@ export function CsvImportModal({
   );
 
   const parsed = useMemo(() => (text != null ? parseCsvImport(text) : null), [text]);
-  const rows = useMemo(
-    () => (parsed ? swapPayeeMemo(parsed.rows, swap) : []),
-    [parsed, swap]
-  );
+  const rows = useMemo(() => {
+    if (!parsed) return [];
+    // The server applies rename rules after the swap, so the preview mirrors
+    // that exactly — this keeps duplicate detection in sync with the import.
+    const rules = renameRules ?? [];
+    return swapPayeeMemo(parsed.rows, swap).map((r) =>
+      r.error ? r : { ...r, payee: applyRenameRules(rules, r.payee ?? "") }
+    );
+  }, [parsed, swap, renameRules]);
   const validRows = useMemo(() => rows.filter((r) => !r.error), [rows]);
   const errorRows = useMemo(() => rows.filter((r) => r.error), [rows]);
 
