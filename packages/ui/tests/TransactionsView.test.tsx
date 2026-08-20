@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TransactionsView } from "../src/TransactionsView.js";
-import { makeSeedBudgetData } from "@ynab/logic";
+import { makeSeedBudgetData, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
   it("renders transaction rows and search filters them", () => {
@@ -311,6 +311,146 @@ describe("TransactionsView", () => {
     // Click toggle button again to reopen
     fireEvent.click(drawerBtn);
     expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
+  });
+
+  describe("column sorting", () => {
+    const renderView = (data = makeSeedBudgetData()) =>
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={null}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+
+    const visiblePayees = (): string[] => {
+      const tbody = screen.getAllByRole("rowgroup")[1]!;
+      // A flag column (when present) shifts every data cell one column right.
+      const hasFlagHeader = screen.queryAllByRole("columnheader", { name: /^f$/i }).length > 0;
+      const payeeIdx = hasFlagHeader ? 4 : 3;
+      const payees: string[] = [];
+      for (const r of within(tbody).getAllByRole("row")) {
+        const cells = within(r).getAllByRole("cell");
+        if (cells.length <= payeeIdx) continue;
+        payees.push(cells[payeeIdx]!.textContent ?? "");
+      }
+      return payees;
+    };
+
+    const mk = (id: number, payee: string, amount = "-100", flagColor?: TransactionFlagColor | "duplicate" | null) => ({
+      id: 100000 + id,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-01",
+      payee,
+      memo: "",
+      amount,
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+      ...(flagColor !== undefined ? { flagColor } : {}),
+    });
+
+    it("defaults to Date descending and toggles direction on header clicks", () => {
+      renderView();
+      const dateTh = screen.getAllByRole("columnheader", { name: /^date/i })[0]!;
+      expect(dateTh).toHaveAttribute("aria-sort", "descending");
+
+      fireEvent.click(screen.getByRole("button", { name: /^date$/i }));
+      expect(dateTh).toHaveAttribute("aria-sort", "ascending");
+
+      fireEvent.click(screen.getByRole("button", { name: /^date$/i }));
+      expect(dateTh).toHaveAttribute("aria-sort", "descending");
+    });
+
+    it("sorts rows by Payee on header click, toggling asc/desc", () => {
+      const data = makeSeedBudgetData();
+      // Copy the (module-shared) transactions array before adding rows so
+      // we never mutate the seed state reused by later tests.
+      data.transactions = [
+        ...data.transactions,
+        mk(1, "SORTX MMM Middle"),
+        mk(2, "SORTX ZZZ Apple"),
+        mk(3, "SORTX AAA Zebra"),
+      ];
+      renderView(data);
+
+      // Scope the register to just our rows so all of them fit in the
+      // virtualization window.
+      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /^payee$/i }));
+      expect(visiblePayees()).toEqual(["SORTX AAA Zebra", "SORTX MMM Middle", "SORTX ZZZ Apple"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^payee$/i }));
+      expect(visiblePayees()).toEqual(["SORTX ZZZ Apple", "SORTX MMM Middle", "SORTX AAA Zebra"]);
+    });
+
+    it("sorts the Outflow column numerically", () => {
+      const data = makeSeedBudgetData();
+      data.transactions = [
+        ...data.transactions,
+        mk(1, "SORTX O Small", "-100"),
+        mk(2, "SORTX O Medium", "-5000"),
+        mk(3, "SORTX O Big", "-99999900"),
+      ];
+      renderView(data);
+
+      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /^outflow$/i }));
+      expect(visiblePayees()).toEqual(["SORTX O Small", "SORTX O Medium", "SORTX O Big"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^outflow$/i }));
+      expect(visiblePayees()).toEqual(["SORTX O Big", "SORTX O Medium", "SORTX O Small"]);
+    });
+
+    it("sorts rows by flag color when the F header is clicked", () => {
+      const data = makeSeedBudgetData();
+      data.transactions = [
+        ...data.transactions,
+        mk(1, "SORTX F Purple", "-100", "purple"),
+        mk(2, "SORTX F None", "-100", null),
+        mk(3, "SORTX F Red", "-100", "red"),
+      ];
+      renderView(data);
+
+      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
+
+      // Ascending: unflagged first, then palette order (red before purple).
+      fireEvent.click(screen.getByRole("button", { name: /^f$/i }));
+      expect(visiblePayees()).toEqual(["SORTX F None", "SORTX F Red", "SORTX F Purple"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^f$/i }));
+      expect(visiblePayees()).toEqual(["SORTX F Purple", "SORTX F Red", "SORTX F None"]);
+    });
+
+    it("keeps the selection column width and reserves sort indicator space", () => {
+      const { container } = renderView();
+      const firstTh = screen.getAllByRole("columnheader")[0]!;
+      expect(firstTh).toHaveStyle("width: 34px");
+
+      // Every sortable header always reserves an indicator slot so the table
+      // never reflows when the active sort column changes.
+      const sortBtns = Array.from(container.querySelectorAll(".y-sort-btn"));
+      expect(sortBtns.length).toBeGreaterThan(0);
+      for (const btn of sortBtns) {
+        expect(btn.querySelector(".y-sort-ind")).not.toBeNull();
+      }
+
+      // Sorting by Payee must not shrink the selection column.
+      fireEvent.click(screen.getByRole("button", { name: /^payee$/i }));
+      expect(screen.getAllByRole("columnheader")[0]).toHaveStyle("width: 34px");
+    });
+
+    it("keeps the register header sticky via y-thead--sticky", () => {
+      renderView();
+      expect(document.querySelector("table.y-table thead.y-thead--sticky")).not.toBeNull();
+    });
   });
 });
 

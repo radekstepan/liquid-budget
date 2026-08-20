@@ -13,6 +13,80 @@ import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, mo
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
+type SortKey =
+  | "date"
+  | "account"
+  | "payee"
+  | "category"
+  | "memo"
+  | "outflow"
+  | "inflow"
+  | "cleared"
+  | "flag"
+  | "balance";
+
+type SortState = { key: SortKey; dir: "asc" | "desc" };
+
+const CLEARED_RANK: Record<string, number> = { u: 0, c: 1, r: 2 };
+
+// Flag sort order: unflagged rows first, then the YNAB4 palette order, with
+// the read-only duplicate marker last.
+const FLAG_RANK: Record<string, number> = {
+  red: 1,
+  orange: 2,
+  yellow: 3,
+  green: 4,
+  blue: 5,
+  purple: 6,
+  duplicate: 7,
+};
+
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+  style,
+  title,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  className?: string;
+  style?: React.CSSProperties;
+  title?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+      className={className}
+      style={style}
+    >
+      <button
+        type="button"
+        className="y-sort-btn"
+        onClick={() => onSort(sortKey)}
+        title={title ?? `Sort by ${label}`}
+      >
+        {label}
+        {/* The indicator slot is always reserved (even when inactive) so a
+            column's intrinsic width never changes when the sort key moves —
+            otherwise the register columns would reflow on every click. */}
+        <span
+          aria-hidden="true"
+          className="y-sort-ind"
+          style={{ display: "inline-block", width: 10, fontSize: 8, textAlign: "center" }}
+        >
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 const ROW_HEIGHT = 27;
 const OVERSCAN = 15;
 
@@ -55,6 +129,16 @@ export const TransactionsView = memo(function TransactionsView({
   const deferredSearch = useDeferredValue(search);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [sort, setSort] = useState<SortState>({ key: "date", dir: "desc" });
+
+  const toggleSort = useCallback((key: SortKey) => {
+    setSort((prev) => {
+      if (prev.key === key) {
+        return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+      }
+      return { key, dir: key === "date" ? "desc" : "asc" };
+    });
+  }, []);
 
   // Scheduled drawer state
   const [showScheduledDrawer, setShowScheduledDrawer] = useState<boolean>(() => {
@@ -155,7 +239,7 @@ export const TransactionsView = memo(function TransactionsView({
     return map;
   }, [data.transactions]);
 
-  const filtered = useMemo(() => {
+  const searchFiltered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
     const isRowVisible = (r: Txn) => {
       if (r.parentId == null) return true;
@@ -194,6 +278,94 @@ export const TransactionsView = memo(function TransactionsView({
       return false;
     });
   }, [rows, deferredSearch, childrenByParent, categoryById, accountFilter, accountById]);
+
+  // Apply the user-selected column sort on top of the search-filtered rows.
+  // The default (Date descending) returns `searchFiltered` unchanged since
+  // `rows` is already date-descending — running balances stay anchored to
+  // that canonical order regardless of how the display is sorted.
+  const filtered = useMemo(() => {
+    if (sort.key === "date" && sort.dir === "desc") return searchFiltered;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const payeeOf = (t: Txn): string => {
+      const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+      return isIncoming ? `Transfer : ${accountById.get(t.accountId)?.name ?? "Unknown"}` : t.payee;
+    };
+    const catOf = (t: Txn): string => {
+      if (splitParentIds.has(t.id)) return "Split (Multiple Categories)";
+      if (t.categoryId != null) return categoryById.get(t.categoryId)?.name ?? "";
+      return t.transferAccountId ? "Transfer" : "";
+    };
+    const effAmtOf = (t: Txn): number => {
+      const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+      return isIncoming ? -t.amount : t.amount;
+    };
+    return [...searchFiltered].sort((a, b) => {
+      let cmp = 0;
+      switch (sort.key) {
+        case "date":
+          cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+          break;
+        case "account": {
+          const an = accountById.get(a.accountId)?.name ?? "";
+          const bn = accountById.get(b.accountId)?.name ?? "";
+          cmp = an < bn ? -1 : an > bn ? 1 : 0;
+          break;
+        }
+        case "payee": {
+          const an = payeeOf(a);
+          const bn = payeeOf(b);
+          cmp = an < bn ? -1 : an > bn ? 1 : 0;
+          break;
+        }
+        case "category": {
+          const an = catOf(a);
+          const bn = catOf(b);
+          cmp = an < bn ? -1 : an > bn ? 1 : 0;
+          break;
+        }
+        case "memo": {
+          const an = a.memo ?? "";
+          const bn = b.memo ?? "";
+          cmp = an < bn ? -1 : an > bn ? 1 : 0;
+          break;
+        }
+        case "outflow": {
+          const an = effAmtOf(a) < 0 ? -effAmtOf(a) : 0;
+          const bn = effAmtOf(b) < 0 ? -effAmtOf(b) : 0;
+          cmp = an - bn;
+          break;
+        }
+        case "inflow": {
+          const an = effAmtOf(a) > 0 ? effAmtOf(a) : 0;
+          const bn = effAmtOf(b) > 0 ? effAmtOf(b) : 0;
+          cmp = an - bn;
+          break;
+        }
+        case "cleared":
+          cmp = (CLEARED_RANK[a.status] ?? 0) - (CLEARED_RANK[b.status] ?? 0);
+          break;
+        case "flag": {
+          const an = a.flagColor != null ? FLAG_RANK[a.flagColor] ?? 0 : 0;
+          const bn = b.flagColor != null ? FLAG_RANK[b.flagColor] ?? 0 : 0;
+          cmp = an - bn;
+          break;
+        }
+        case "balance":
+          cmp = a.runningBalance - b.runningBalance;
+          break;
+      }
+      if (cmp === 0) {
+        if (sort.key === "date") {
+          cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+          if (cmp === 0) cmp = a.id - b.id;
+        } else {
+          cmp = a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+          if (cmp === 0) cmp = b.id - a.id;
+        }
+      }
+      return cmp * dir;
+    });
+  }, [searchFiltered, sort, accountById, categoryById, accountFilter, splitParentIds]);
 
   const totals = useMemo(() => {
     let inflow = 0;
@@ -457,7 +629,10 @@ export const TransactionsView = memo(function TransactionsView({
         <table className="y-table w-full text-left bg-white">
           <thead className="y-thead--sticky">
             <tr>
-              <th style={{ width: 28, textAlign: "center", padding: "4px 0" }} className="text-center">
+              <th
+                style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}
+                className="text-center"
+              >
                 <input
                   type="checkbox"
                   aria-label="Select all transactions"
@@ -468,27 +643,73 @@ export const TransactionsView = memo(function TransactionsView({
                 />
               </th>
               {hasFlagColumn && (
-                <th style={{ width: 32 }} className="text-center" title="Flag">
-                  F
-                </th>
+                <SortableTh
+                  label="F"
+                  title="Sort by Flag"
+                  sortKey="flag"
+                  sort={sort}
+                  onSort={toggleSort}
+                  className="text-center"
+                  style={{ width: 32 }}
+                />
               )}
-              <th style={{ width: 85 }}>Date</th>
-              {!accountFilter && <th style={{ width: 120 }}>Account</th>}
-              <th>Payee</th>
-              <th style={{ width: 180 }}>Category</th>
-              <th style={{ width: 160 }}>Memo</th>
-              <th className="num" style={{ width: 95 }}>
-                Outflow
-              </th>
-              <th className="num" style={{ width: 95 }}>
-                Inflow
-              </th>
-              <th style={{ width: 32 }} className="text-center">
-                C
-              </th>
-              <th className="num" style={{ width: 108 }}>
-                Balance
-              </th>
+              <SortableTh label="Date" sortKey="date" sort={sort} onSort={toggleSort} style={{ width: 85 }} />
+              {!accountFilter && (
+                <SortableTh
+                  label="Account"
+                  sortKey="account"
+                  sort={sort}
+                  onSort={toggleSort}
+                  style={{ width: 120 }}
+                />
+              )}
+              <SortableTh label="Payee" sortKey="payee" sort={sort} onSort={toggleSort} />
+              <SortableTh
+                label="Category"
+                sortKey="category"
+                sort={sort}
+                onSort={toggleSort}
+                style={{ width: 180 }}
+              />
+              <SortableTh
+                label="Memo"
+                sortKey="memo"
+                sort={sort}
+                onSort={toggleSort}
+                style={{ width: 160 }}
+              />
+              <SortableTh
+                label="Outflow"
+                sortKey="outflow"
+                sort={sort}
+                onSort={toggleSort}
+                className="num"
+                style={{ width: 95 }}
+              />
+              <SortableTh
+                label="Inflow"
+                sortKey="inflow"
+                sort={sort}
+                onSort={toggleSort}
+                className="num"
+                style={{ width: 95 }}
+              />
+              <SortableTh
+                label="C"
+                sortKey="cleared"
+                sort={sort}
+                onSort={toggleSort}
+                className="text-center"
+                style={{ width: 32 }}
+              />
+              <SortableTh
+                label="Balance"
+                sortKey="balance"
+                sort={sort}
+                onSort={toggleSort}
+                className="num"
+                style={{ width: 108 }}
+              />
             </tr>
           </thead>
           <tbody>
@@ -532,7 +753,11 @@ export const TransactionsView = memo(function TransactionsView({
                       }}
                       style={{ cursor: "pointer" }}
                     >
-                      <td style={{ width: 28, textAlign: "center", padding: "4px 0" }} className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <td
+                        style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}
+                        className="text-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <input
                           type="checkbox"
                           aria-label={`Select transaction ${t.payee || t.id}`}
