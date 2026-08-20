@@ -546,6 +546,20 @@ describe("transactions queries", () => {
       expect(update?.set).toMatchObject({ flagColor: null });
     });
 
+    it("rejects changing the flag of a duplicate-flagged transaction", async () => {
+      mock.respondWith("select:transactions", [
+        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c", flagColor: "duplicate" },
+      ]);
+
+      await expect(
+        updateTransaction(mock.db, 1, { flagColor: "red" })
+      ).rejects.toMatchObject({ status: 422, name: "TransactionError", message: /duplicate/ });
+
+      await expect(
+        updateTransaction(mock.db, 1, { flagColor: null })
+      ).rejects.toMatchObject({ status: 422, name: "TransactionError", message: /duplicate/ });
+    });
+
     it("UNI-08 / F-08: rejects modifying a reconciled transaction with 422 error", async () => {
       mock.respondWith("select:transactions", [
         { id: 1, accountId: 1, amount: -5000, status: "r", payee: "Locked Payee", date: "2026-07-01" },
@@ -608,6 +622,24 @@ describe("transactions queries", () => {
           ]
         )
       ).rejects.toThrow(/no children/);
+    });
+
+    it("rejects changing the flag of a duplicate-flagged split parent", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -5000, payee: "X", categoryId: null, parentId: null, transferAccountId: null, status: "c", flagColor: "duplicate" },
+      ]);
+
+      await expect(
+        updateSplit(
+          mock.db,
+          1,
+          { flagColor: "red" },
+          [
+            { categoryId: 1, amount: -2500 },
+            { categoryId: 2, amount: -2500 },
+          ]
+        )
+      ).rejects.toMatchObject({ status: 422, name: "TransactionError", message: /duplicate/ });
     });
 
     it("UNI-08 / F-08: rejects modifying a reconciled split parent with 422 error", async () => {
@@ -813,6 +845,16 @@ describe("transactions queries", () => {
 
       const res = await bulkUpdateTransactions(mock.db, [1, 2], { status: "c" });
       expect(res).toHaveLength(2);
+    });
+
+    it("rejects changing the flag of a duplicate-flagged transaction", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, status: "c", categoryId: 1, transferAccountId: null, flagColor: "duplicate" },
+      ]);
+
+      await expect(
+        bulkUpdateTransactions(mock.db, [1], { flagColor: "red" })
+      ).rejects.toMatchObject({ status: 422, name: "TransactionError", message: /duplicate/ });
     });
   });
 });

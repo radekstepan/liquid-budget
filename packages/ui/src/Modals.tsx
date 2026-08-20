@@ -611,11 +611,21 @@ export function TransactionModal({
 
           <div className="pt-1 flex items-center gap-2">
             <span className="y-label">Flag</span>
-            <FlagPicker
-              value={pickerFlagColor}
-              onChange={(c) => setFlagColor(c)}
-              disabled={initial?.status === "r"}
-            />
+            {isDuplicateFlag ? (
+              <span className="flex items-center gap-2">
+                <span className="y-cleared y-cleared--duplicate">D</span>
+                <span className="y-hint">
+                  Duplicate — remove one of the matching transactions and rerun
+                  the duplicate check to clear this flag.
+                </span>
+              </span>
+            ) : (
+              <FlagPicker
+                value={pickerFlagColor}
+                onChange={(c) => setFlagColor(c)}
+                disabled={initial?.status === "r"}
+              />
+            )}
           </div>
         </>
       )}
