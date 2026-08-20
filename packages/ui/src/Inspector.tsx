@@ -26,7 +26,6 @@ export const Inspector = memo(function Inspector({
   trailingNetWorth,
   insights,
   onSelectMonth,
-  onResetDemo,
   onImportYnab4,
   onImportCsv,
   onAnalyzeDuplicates,
@@ -44,15 +43,12 @@ export const Inspector = memo(function Inspector({
   trailingNetWorth?: TrailingNetWorthSummary;
   insights?: SpendingInsight[];
   onSelectMonth: (key: string) => void;
-  onResetDemo?: () => Promise<void> | void;
   onImportYnab4?: (file: File) => Promise<ImportSummary | void>;
   onImportCsv?: (file: File) => void;
   onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmingReset, setConfirmingReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -75,24 +71,10 @@ export const Inspector = memo(function Inspector({
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
-  const { year, month0 } = parseMonthKey(month);
-  const monthName = MONTHS[month0] ?? "";
   const overdraftCats = groups
     .flatMap((g) => g.rows)
     .filter((r) => r.available < 0)
     .map((r) => r.category.id);
-
-  const confirmReset = async () => {
-    if (!onResetDemo) return;
-    setResetting(true);
-    try {
-      await onResetDemo();
-    } finally {
-      setResetting(false);
-      setConfirmingReset(false);
-      setMenuOpen(false);
-    }
-  };
 
   // Fallback defaults if not provided
   const effectiveCashFlow: CashFlowSummary = cashFlow ?? {
@@ -119,14 +101,8 @@ export const Inspector = memo(function Inspector({
 
   return (
     <aside className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto">
-      {/* Header with Month & Settings Cog */}
+      {/* Header with Settings Cog */}
       <div className="flex items-center px-1">
-        <div>
-          <div className="y-caps">Demo Budget</div>
-          <div className="text-[12.5px] font-bold mt-[1px]" style={{ color: "var(--y-ink)" }}>
-            {monthName} {year}
-          </div>
-        </div>
         <div className="ml-auto relative" ref={menuRef}>
           <Button
             onClick={() => setMenuOpen((o) => !o)}
@@ -213,17 +189,6 @@ export const Inspector = memo(function Inspector({
                 >
                   <Icon name="flag" size={12} />{" "}
                   {analyzing ? "Analyzing…" : "Flag duplicates"}
-                </button>
-              )}
-              {onResetDemo && (
-                <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setConfirmingReset(true);
-                  }}
-                  className="y-menu-item"
-                >
-                  <Icon name="reset" size={12} /> Reset demo data
                 </button>
               )}
             </div>
@@ -629,28 +594,6 @@ export const Inspector = memo(function Inspector({
             </div>
           ))}
       </Panel>
-
-      {confirmingReset && (
-        <Modal
-          title="Reset demo data?"
-          onClose={() => !resetting && setConfirmingReset(false)}
-          footer={
-            <>
-              <Btn onClick={() => setConfirmingReset(false)} disabled={resetting}>
-                Cancel
-              </Btn>
-              <Btn variant="danger" onClick={confirmReset} disabled={resetting}>
-                {resetting ? "Resetting…" : "Yes, reset it"}
-              </Btn>
-            </>
-          }
-        >
-          <Notice tone="danger" title="This cannot be undone">
-            Resetting will permanently wipe all your changes (budgets,
-            transactions, accounts) and restore the demo dataset.
-          </Notice>
-        </Modal>
-      )}
 
       {importError && (
         <Modal

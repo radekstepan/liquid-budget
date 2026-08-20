@@ -201,6 +201,10 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   await page.keyboard.press("Enter");
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+
+  // Opening the editor clears the selection; cancelling leaves no row
+  // still highlighted behind the modal.
   await editModal.getByRole("button", { name: "Cancel" }).click();
   await expect(editModal).toBeHidden();
+  await expect(page.locator("tr.y-row--selected")).toHaveCount(0);
 });

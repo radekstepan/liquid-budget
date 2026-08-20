@@ -498,7 +498,10 @@ export const TransactionsView = memo(function TransactionsView({
       } else if (e.key === "Enter" && selectedId != null) {
         e.preventDefault();
         const row = filtered.find((r) => r.id === selectedId);
-        if (row) onEdit(row.parentId ?? row.id);
+        if (row) {
+          setSelectedId(null);
+          onEdit(row.parentId ?? row.id);
+        }
       } else if ((e.key === "c" || e.key === "C" || e.key === " ") && selectedId != null) {
         e.preventDefault();
         const row = filtered.find((r) => r.id === selectedId);
@@ -748,7 +751,7 @@ export const TransactionsView = memo(function TransactionsView({
                       key={t.id}
                       className={cx("group y-row", isSelected && "y-row--selected is-sel", globalIndex % 2 === 1 && !isSelected && "alt")}
                       onClick={() => {
-                        setSelectedId(t.id);
+                        setSelectedId(null);
                         onEdit(t.parentId ?? t.id);
                       }}
                       style={{ cursor: "pointer" }}
@@ -915,7 +918,7 @@ export const TransactionsView = memo(function TransactionsView({
           {/* Drawer Scheduled Table */}
           <div className="flex-1 overflow-y-auto overflow-x-auto y-scroll bg-white" style={{ background: "#ffffff" }}>
             <table className="y-table y-scheduled-table w-full text-left bg-white" style={{ background: "#ffffff" }}>
-              <thead>
+              <thead className="y-thead--sticky">
                 <tr>
                   <th style={{ width: 85 }}>Date</th>
                   <th style={{ width: 110 }}>Frequency</th>

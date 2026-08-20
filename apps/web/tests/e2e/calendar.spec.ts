@@ -20,14 +20,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("toolbar reflects the active month", async ({ page }) => {
-  // The MonthNav now exposes a month+year picker (blocks.tsx:57-86)
-  // instead of a static text label, so we read the active month off
-  // the Inspector badge (Inspector.tsx:38-53) which stays in sync.
-  const monthBadge = page
-    .locator(".y-inspector")
-    .locator("div.text-\\[12\\.5px\\].font-bold")
-    .first();
-  await expect(monthBadge).toHaveText("Jun 2026");
+  // The MonthNav picker (blocks.tsx:57-86) reflects the active month/year
+  // and stays in sync with the Calendar view.
+  const picker = page.getByTestId("month-nav-picker");
+  await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
+  await expect(picker.getByRole("button", { name: "Year" })).toHaveText("2026");
 });
 
 test("year dropdown jumps to the same month in the chosen year", async ({ page }) => {
@@ -40,12 +37,8 @@ test("year dropdown jumps to the same month in the chosen year", async ({ page }
   await yearSelect.click();
   await page.locator('.y-dropdown [data-value="2028"]').click();
 
-  const monthBadge = page
-    .locator(".y-inspector")
-    .locator("div.text-\\[12\\.5px\\].font-bold")
-    .first();
-  await expect(monthBadge).toHaveText("Jun 2028");
   await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
+  await expect(yearSelect).toHaveText("2028");
 });
 
 test("clicking an empty day opens the Add Transaction modal pre-dated to that day", async ({ page }) => {

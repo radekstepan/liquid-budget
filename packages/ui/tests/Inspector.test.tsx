@@ -60,50 +60,17 @@ const baseProps = {
 };
 
 describe("Inspector", () => {
-  it("renders the budget name header and month", () => {
+  it("renders the settings cog", () => {
     render(<Inspector {...baseProps} />);
-    expect(screen.getByText("Demo Budget")).toBeInTheDocument();
-    expect(screen.getByText("Jun 2026")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
   });
 
   it("opens the settings menu when the gear is clicked", () => {
     render(<Inspector {...baseProps} />);
-    expect(screen.queryByText("Reset demo data")).not.toBeInTheDocument();
+    expect(screen.queryByText("Import YNAB4 Backup")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /settings/i }));
     expect(screen.getByText("Import YNAB4 Backup")).toBeInTheDocument();
-  });
-
-  it("calls onResetDemo when the modal is confirmed", async () => {
-    const onResetDemo = vi.fn().mockResolvedValue(undefined);
-    render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-    fireEvent.click(screen.getByText("Reset demo data"));
-
-    expect(screen.getByText("Reset demo data?")).toBeInTheDocument();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /yes, reset it/i }));
-    });
-    expect(onResetDemo).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not call onResetDemo when the modal is cancelled", () => {
-    const onResetDemo = vi.fn();
-    render(<Inspector {...baseProps} onResetDemo={onResetDemo} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-    fireEvent.click(screen.getByText("Reset demo data"));
-
-    expect(screen.getByText("Reset demo data?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
-    expect(onResetDemo).not.toHaveBeenCalled();
-  });
-
-  it("hides the Reset menu item when onResetDemo is not provided", () => {
-    render(<Inspector {...baseProps} />);
-    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-    expect(screen.queryByText("Reset demo data")).not.toBeInTheDocument();
   });
 
   describe("Net Monthly Card", () => {
@@ -156,8 +123,7 @@ describe("Inspector", () => {
       // Move to X=216 (W - padX = 224 - 8 = 216), index 11: 2026-06, net: $16,000
       fireEvent.mouseMove(screen.getByLabelText("12-Month Net Worth Sparkline"), { clientX: 216 });
       expect(screen.getByText("$16,000.00")).toBeInTheDocument();
-      // Since Jun 2026 appears in the header too, check both exist
-      expect(screen.getAllByText("Jun 2026").length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText("Jun 2026")).toBeInTheDocument();
 
       // Mouse leave resets to Current Net Worth
       fireEvent.mouseLeave(screen.getByLabelText("12-Month Net Worth Sparkline"));

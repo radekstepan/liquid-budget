@@ -159,6 +159,40 @@ test("editing a transaction through the modal persists the new amount", async ({
   await expect(row).toContainText("$9.99");
 });
 
+test("toggling the Cleared checkbox does not shift the modal fields", async ({ page }) => {
+  // Open the edit modal on the first register row.
+  const row = page
+    .locator("table.y-table:not(.y-scheduled-table) tbody tr.y-row")
+    .first();
+  await row.click();
+
+  const modal = page.locator(".y-modal").last();
+  await expect(modal.getByText("Edit Transaction")).toBeVisible();
+
+  const cbLabel = modal
+    .locator("label")
+    .filter({ hasText: "Cleared (bank has processed this)" });
+  const cbInput = cbLabel.locator("input[type='checkbox']");
+  const flagRow = modal.locator("div.pt-1.flex.items-center.gap-2");
+
+  const before = await cbLabel.boundingBox();
+  const flagBefore = await flagRow.boundingBox();
+  const initiallyChecked = await cbInput.isChecked();
+
+  // Toggle the checkbox twice (state-agnostic start); neither the checkbox
+  // nor the field below it may move.
+  await cbLabel.click();
+  await expect(cbInput).toBeChecked({ checked: !initiallyChecked });
+  await cbLabel.click();
+  await expect(cbInput).toBeChecked({ checked: initiallyChecked });
+
+  const after = await cbLabel.boundingBox();
+  const flagAfter = await flagRow.boundingBox();
+  expect(after?.y).toBe(before?.y);
+  expect(after?.height).toBe(before?.height);
+  expect(flagAfter?.y).toBe(flagBefore?.y);
+});
+
 test("split transactions render parent ClearedFlag and no subtransaction rows in list", async ({ page }) => {
   // Create a fresh split so we don't depend on seed data and so the
   // test survives a dev DB with leftover state.

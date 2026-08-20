@@ -56,9 +56,6 @@ function makeApi(overrides: Partial<BudgetAppApi> = {}): {
     updateAccount: vi.fn(async (...args) => {
       calls.push({ method: "updateAccount", args });
     }),
-    resetDemo: vi.fn(async (...args) => {
-      calls.push({ method: "resetDemo", args });
-    }),
     reorderCategory: vi.fn(async (...args) => {
       calls.push({ method: "reorderCategory", args });
     }),
@@ -333,18 +330,6 @@ describe("BudgetApp", () => {
     // the filter and re-highlights "Transactions".
     fireEvent.click(accountRow);
     expect(navAll.className).toMatch(/\bis-sel\b/);
-  });
-
-  it("calls api.resetDemo when the menu item is clicked", async () => {
-    const { api, calls } = makeApi();
-    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-    fireEvent.click(screen.getByText("Reset demo data"));
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /yes, reset it/i }));
-    });
-    expect(calls.some((c) => c.method === "resetDemo")).toBe(true);
   });
 
   it("calls api.updateAccount with archived: true when archiving an account", async () => {
