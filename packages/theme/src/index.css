@@ -930,10 +930,35 @@ button.y-pill:hover {
 .y-thead th.text-center {
   text-align: center;
 }
-.y-thead--sticky th {
+/* Sticky register header. The selector must out-specify `.y-table thead th`
+   (0,1,2) which sets `position: relative` — otherwise that rule wins and the
+   header scrolls away. Repeating the background keeps the sticky cells opaque
+   over the virtualized spacer rows. */
+.y-table thead.y-thead--sticky th,
+.y-thead.y-thead--sticky th {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 10;
+  background: linear-gradient(#f7f7f5, #e2e2df);
+}
+
+/* Sortable column header button (wraps the th label, inherits th styling). */
+.y-sort-btn {
+  display: inline-block;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.y-sort-btn:hover {
+  color: var(--y-blue-dark);
 }
 .y-row td {
   padding: 4px 8px;
