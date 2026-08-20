@@ -1,4 +1,4 @@
-import type { ClearedStatus, TransactionFlagColor } from "./types.js";
+import type { ClearedStatus, TransactionFlagState } from "./types.js";
 
 /**
  * A single row that participates in duplicate detection.
@@ -20,7 +20,7 @@ export type DuplicateEntry = {
   memo: string;
   /** Amount in cents. */
   amount: number;
-  flagColor?: TransactionFlagColor | null;
+  flagColor?: TransactionFlagState;
   status?: ClearedStatus;
   parentId?: number | null;
   transferAccountId?: number | null;
@@ -38,12 +38,14 @@ export type DuplicateAnalysisResult = {
   groups: DuplicateGroup[];
   /** Total number of duplicate entries (excludes each group's keeper). */
   duplicateCount: number;
-  /** Duplicates that were newly flagged yellow by the analysis. */
+  /** Duplicates that were newly flagged with the internal duplicate marker. */
   flaggedCount: number;
-  /** Duplicates that already carried a flag and were left untouched. */
+  /** Duplicates that already carried a manual flag and were left untouched. */
   alreadyFlaggedCount: number;
   /** Duplicates that are reconciled (locked) and were left untouched. */
   lockedCount: number;
+  /** Rows whose stale internal duplicate marker was cleared this run. */
+  clearedCount: number;
 };
 
 /**

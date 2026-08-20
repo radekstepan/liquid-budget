@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -63,7 +64,7 @@ describe("analyzeUnflaggedDuplicates", () => {
     await seedAccount(db);
   });
 
-  it("flags unflagged duplicates yellow and leaves flagged/reconciled untouched", async () => {
+  it("marks unflagged duplicates with the internal marker and leaves manual/reconciled untouched", async () => {
     await insertTx(db, { payee: "Store" });
     await insertTx(db, { payee: "Store" });
     await insertTx(db, { payee: "Store", flagColor: "red" });
@@ -74,13 +75,29 @@ describe("analyzeUnflaggedDuplicates", () => {
     expect(result.flaggedCount).toBe(1);
     expect(result.alreadyFlaggedCount).toBe(1);
     expect(result.lockedCount).toBe(1);
+    expect(result.clearedCount).toBe(0);
     expect(result.groups).toHaveLength(1);
 
     const data = await getBudgetData(db);
     const cleared = data.transactions.filter((t) => t.status === "c");
-    expect(cleared.map((t) => t.flagColor).sort()).toEqual([null, "red", "yellow"]);
+    expect(new Set(cleared.map((t) => t.flagColor))).toEqual(new Set([null, "duplicate", "red"]));
     expect(data.transactions.find((t) => t.status === "r")!.flagColor).toBeNull();
     expect(data.transactions.find((t) => t.flagColor === "red")).toBeTruthy();
+    expect(data.transactions.find((t) => t.flagColor === "duplicate")).toBeTruthy();
+  });
+
+  it("treats an existing manual yellow flag as user-owned (not cleared, not overridden)", async () => {
+    await insertTx(db, { payee: "Store" });
+    await insertTx(db, { payee: "Store", flagColor: "yellow" });
+
+    const result = await analyzeUnflaggedDuplicates(db);
+    expect(result.flaggedCount).toBe(0);
+    expect(result.alreadyFlaggedCount).toBe(1);
+    expect(result.clearedCount).toBe(0);
+
+    const data = await getBudgetData(db);
+    const flagged = data.transactions.filter((t) => t.flagColor != null);
+    expect(flagged.map((t) => t.flagColor)).toEqual(["yellow"]);
   });
 
   it("is idempotent when run twice", async () => {
@@ -93,6 +110,47 @@ describe("analyzeUnflaggedDuplicates", () => {
     const second = await analyzeUnflaggedDuplicates(db);
     expect(second.flaggedCount).toBe(0);
     expect(second.alreadyFlaggedCount).toBe(1);
+    expect(second.clearedCount).toBe(0);
+  });
+
+  it("clears the internal marker when a transaction is no longer a duplicate", async () => {
+    const keeper = await insertTx(db, { payee: "Store" });
+    const dup = await insertTx(db, { payee: "Store" });
+
+    const first = await analyzeUnflaggedDuplicates(db);
+    expect(first.flaggedCount).toBe(1);
+
+    // Remove the keeper: the remaining row no longer forms a duplicate group.
+    await db.delete(schema.transactions).where(eq(schema.transactions.id, keeper));
+
+    const second = await analyzeUnflaggedDuplicates(db);
+    expect(second.flaggedCount).toBe(0);
+    expect(second.clearedCount).toBe(1);
+    expect(second.duplicateCount).toBe(0);
+
+    const data = await getBudgetData(db);
+    const row = data.transactions.find((t) => t.id === dup)!;
+    expect(row.flagColor).toBeNull();
+  });
+
+  it("does not clear the internal marker on reconciled rows", async () => {
+    const keeper = await insertTx(db, { payee: "Store" });
+    const dup = await insertTx(db, { payee: "Store" });
+    await analyzeUnflaggedDuplicates(db);
+
+    // Make the duplicate reconciled, then remove the keeper so the group
+    // disappears — the reconciled row must keep its marker.
+    await db
+      .update(schema.transactions)
+      .set({ status: "r" })
+      .where(eq(schema.transactions.id, dup));
+    await db.delete(schema.transactions).where(eq(schema.transactions.id, keeper));
+
+    const result = await analyzeUnflaggedDuplicates(db);
+    expect(result.clearedCount).toBe(0);
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.find((t) => t.id === dup)!.flagColor).toBe("duplicate");
   });
 
   it("ignores split parents, split children, and transfers", async () => {

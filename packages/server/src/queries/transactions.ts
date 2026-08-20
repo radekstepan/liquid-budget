@@ -1,6 +1,11 @@
 import { eq, sql } from "drizzle-orm";
-import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
-import { TRANSACTION_FLAG_COLORS } from "@ynab/logic";
+import type {
+  ClearedStatus,
+  TransactionDuplicateFlag,
+  TransactionFlagColor,
+  TransactionFlagState,
+} from "@ynab/logic";
+import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
@@ -84,12 +89,26 @@ export function assertValidAmount(amount: unknown): number {
 }
 
 /**
- * Coerce an arbitrary value into a valid flag color (or null). Unknown
- * values are treated as "no flag" so rogue payloads never crash the
- * register or trip the DB CHECK.
+ * Coerce an arbitrary value into a valid user-facing flag color (or null).
+ * Unknown values — including the internal "duplicate" marker — are treated
+ * as "no flag" so rogue payloads never crash the register or trip the DB
+ * CHECK. The duplicate marker is never writable through the transaction API.
  */
 export function sanitizeFlagColor(value: unknown): TransactionFlagColor | null {
   if (typeof value !== "string") return null;
+  return (TRANSACTION_FLAG_COLORS as readonly string[]).includes(value)
+    ? (value as TransactionFlagColor)
+    : null;
+}
+
+/**
+ * Read-side coerce that additionally accepts the internal "duplicate"
+ * marker the duplicate analyzer writes. Used when loading budget data so
+ * the register can render the D badge without crashing on the value.
+ */
+export function sanitizeFlagState(value: unknown): TransactionFlagState {
+  if (typeof value !== "string") return null;
+  if (value === TRANSACTION_DUPLICATE_FLAG) return value as TransactionDuplicateFlag;
   return (TRANSACTION_FLAG_COLORS as readonly string[]).includes(value)
     ? (value as TransactionFlagColor)
     : null;

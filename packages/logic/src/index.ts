@@ -36,3 +36,11 @@ export const TRANSACTION_FLAG_HEX: Record<(typeof TRANSACTION_FLAG_COLORS)[numbe
 };
 
 export type TransactionFlagColor = (typeof TRANSACTION_FLAG_COLORS)[number];
+
+/**
+ * Internal flag the duplicate analyzer writes onto rows that match another
+ * transaction. Not part of the YNAB4 palette: users cannot select it, but
+ * can switch away from it (to a color or to none).
+ */
+export const TRANSACTION_DUPLICATE_FLAG = "duplicate";
+export type TransactionDuplicateFlag = typeof TRANSACTION_DUPLICATE_FLAG;

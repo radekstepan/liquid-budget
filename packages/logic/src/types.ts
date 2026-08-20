@@ -77,6 +77,16 @@ export type ClearedStatus = "u" | "c" | "r";
  */
 export type TransactionFlagColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
+/**
+ * Internal flag marker the duplicate analyzer writes onto rows that match
+ * another transaction. It is not part of the YNAB4 palette: the user can
+ * never select it, but can switch away from it (to a color or to none).
+ */
+export type TransactionDuplicateFlag = "duplicate";
+
+/** The full set of flag states a row can carry (read-side). */
+export type TransactionFlagState = TransactionFlagColor | TransactionDuplicateFlag | null;
+
 export type Transaction = {
   id: number;
   accountId: number;
@@ -86,8 +96,8 @@ export type Transaction = {
   memo: string;
   amount: string;
   status: ClearedStatus;
-  /** YNAB4-style flag color, or null when the transaction is unflagged. */
-  flagColor?: TransactionFlagColor | null;
+  /** YNAB4-style flag color, "duplicate", or null when the transaction is unflagged. */
+  flagColor?: TransactionFlagState;
   createdAt?: string;
   parentId?: number | null;
   transferAccountId?: number | null;

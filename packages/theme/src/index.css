@@ -1112,6 +1112,11 @@ button.y-pill:hover {
 .y-cleared--r {
   background: linear-gradient(#5aa5d0, var(--y-blue-dark));
 }
+/* Internal duplicate marker — a warning yellow/orange status badge that
+   matches the C/U language (square, letter inside) rather than a circle. */
+.y-cleared--duplicate {
+  background: linear-gradient(#f0b559, var(--y-orange-dk));
+}
 
 .y-flag {
   display: inline-block;
