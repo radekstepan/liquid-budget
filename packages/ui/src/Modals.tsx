@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionFlagColor } from "@ynab/logic";
+import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
 import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
@@ -18,6 +18,11 @@ export type TransactionSavePayload = {
   memo: string;
   amount: number;
   status: "u" | "c" | "r";
+  /**
+   * When omitted the server leaves the flag untouched (preserving an
+   * internal "duplicate" marker the user did not change). When present it
+   * replaces the flag; null clears it.
+   */
   flagColor?: TransactionFlagColor | null;
   transferAccountId?: number | null;
   incomeMonth?: string | null;
@@ -116,7 +121,18 @@ export function TransactionModal({
     initial ? initialAmt.toFixed(2) : ""
   );
   const [cleared, setCleared] = useState<boolean>(initial?.status === "c" || initial?.status === "r" || initial?.status == null);
-  const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(initial?.flagColor ?? null);
+  const [flagColor, setFlagColor] = useState<TransactionFlagColor | TransactionDuplicateFlag | null>(
+    initial?.flagColor ?? null
+  );
+
+  // The internal "duplicate" marker is not a pickable color; we keep it
+  // around so editing other fields preserves it, and it is dropped once the
+  // user picks a manual color or clears the flag.
+  const isDuplicateFlag = flagColor === "duplicate";
+  const pickerFlagColor: TransactionFlagColor | null = isDuplicateFlag ? null : flagColor;
+  const savedFlagColor: TransactionFlagColor | null | undefined = isDuplicateFlag
+    ? undefined
+    : flagColor;
 
   // Transfer destination
   const [transferAccountId, setTransferAccountId] = useState<number | "">(
@@ -204,7 +220,7 @@ export function TransactionModal({
         memo: memo.trim(),
         amount: amountCents,
         status: cleared ? "c" : "u",
-        flagColor,
+        flagColor: savedFlagColor,
         transferAccountId: Number(transferAccountId),
       });
       return;
@@ -222,7 +238,7 @@ export function TransactionModal({
         memo: memo.trim(),
         amount: amountCents,
         status: cleared ? "c" : "u",
-        flagColor,
+        flagColor: savedFlagColor,
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId ?? null,
           transferAccountId: r.transferAccountId ?? null,
@@ -248,7 +264,7 @@ export function TransactionModal({
       memo: memo.trim(),
       amount: amountCents,
       status: cleared ? "c" : "u",
-      flagColor,
+      flagColor: savedFlagColor,
       incomeMonth: incMonth,
     });
   };
@@ -596,8 +612,8 @@ export function TransactionModal({
           <div className="pt-1 flex items-center gap-2">
             <span className="y-label">Flag</span>
             <FlagPicker
-              value={flagColor}
-              onChange={setFlagColor}
+              value={pickerFlagColor}
+              onChange={(c) => setFlagColor(c)}
               disabled={initial?.status === "r"}
             />
           </div>

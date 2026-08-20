@@ -1,17 +1,25 @@
 import { inArray } from "drizzle-orm";
-import type { ClearedStatus, DuplicateAnalysisResult, DuplicateEntry, TransactionFlagColor } from "@ynab/logic";
-import { findDuplicateGroups } from "@ynab/logic";
+import type {
+  DuplicateAnalysisResult,
+  DuplicateEntry,
+  TransactionDuplicateFlag,
+  TransactionFlagState,
+} from "@ynab/logic";
+import { findDuplicateGroups, TRANSACTION_DUPLICATE_FLAG } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
 /**
- * Analyze the whole database for duplicate transactions and flag the
- * unflagged ones (yellow) so they stand out in the register.
+ * Analyze the whole database for duplicate transactions and mark the
+ * unflagged ones with the internal "duplicate" flag so they stand out in
+ * the register as a D badge.
  *
  * Only plain regular rows participate (no split parents/children, no
  * transfers). Reconciled duplicates are reported but never modified
- * (they are locked). Duplicates that already carry a flag are reported
- * but left untouched so the analysis is idempotent.
+ * (they are locked). Duplicates that already carry a manual flag are
+ * reported but left untouched so the analysis never overrides a user
+ * flag. Rows still carrying the "duplicate" marker that are no longer
+ * part of an active duplicate group have it cleared.
  */
 export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnalysisResult> {
   const rows = await db
@@ -41,8 +49,8 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
       payee: r.payee,
       memo: r.memo,
       amount: r.amount,
-      flagColor: (r.flagColor as TransactionFlagColor | null) ?? null,
-      status: (r.status as ClearedStatus) ?? "c",
+      flagColor: (r.flagColor as TransactionFlagState | null) ?? null,
+      status: (r.status as "u" | "c" | "r") ?? "c",
       parentId: r.parentId,
       transferAccountId: r.transferAccountId,
     }))
@@ -50,6 +58,9 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
 
   const groups = findDuplicateGroups(entries);
 
+  // Ids that remain duplicates after this run (either newly marked or
+  // already carrying the internal marker from a previous run).
+  const activeDuplicateIds = new Set<number>();
   const flagIds: number[] = [];
   let flaggedCount = 0;
   let alreadyFlaggedCount = 0;
@@ -63,10 +74,14 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
       }
       if (dup.flagColor != null) {
         alreadyFlaggedCount++;
+        if (dup.flagColor === TRANSACTION_DUPLICATE_FLAG && dup.id != null) {
+          activeDuplicateIds.add(dup.id);
+        }
         continue;
       }
       if (dup.id != null) {
         flagIds.push(dup.id);
+        activeDuplicateIds.add(dup.id);
         flaggedCount++;
       }
     }
@@ -75,15 +90,58 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
   if (flagIds.length > 0) {
     await db
       .update(transactions)
-      .set({ flagColor: "yellow" })
+      .set({ flagColor: TRANSACTION_DUPLICATE_FLAG })
       .where(inArray(transactions.id, flagIds));
   }
 
+  // Clear stale internal duplicate markers on rows that are no longer part
+  // of an active duplicate group (and are not reconciled / locked).
+  let clearedCount = 0;
+  for (const r of rows) {
+    if (r.id == null) continue;
+    if (activeDuplicateIds.has(r.id)) continue;
+    if (r.flagColor !== TRANSACTION_DUPLICATE_FLAG) continue;
+    if (r.status === "r") continue;
+    clearedCount++;
+  }
+  if (clearedCount > 0) {
+    const staleIds = rows
+      .filter(
+        (r) =>
+          r.id != null &&
+          !activeDuplicateIds.has(r.id) &&
+          r.flagColor === TRANSACTION_DUPLICATE_FLAG &&
+          r.status !== "r"
+      )
+      .map((r) => r.id!);
+    await db
+      .update(transactions)
+      .set({ flagColor: null })
+      .where(inArray(transactions.id, staleIds));
+  }
+
+  // Drop cleared entries from the returned groups so the report reflects
+  // the post-run state.
+  const effectiveGroups = clearedCount > 0
+    ? groups
+        .map((g) => ({
+          ...g,
+          duplicates: g.duplicates.filter((d) => d.id == null || !d.flagColor),
+        }))
+        .filter((g) => g.duplicates.length > 0)
+    : groups;
+
+  const effectiveDuplicateCount = effectiveGroups.reduce(
+    (n, g) => n + g.duplicates.length,
+    0
+  );
+
   return {
-    groups,
-    duplicateCount: groups.reduce((n, g) => n + g.duplicates.length, 0),
+    groups: effectiveGroups,
+    duplicateCount: effectiveDuplicateCount,
     flaggedCount,
     alreadyFlaggedCount,
     lockedCount,
+    clearedCount,
   };
 }

@@ -1,8 +1,9 @@
 import { asc, desc, sql } from "drizzle-orm";
-import type { BudgetData, ClearedStatus, TransactionFlagColor } from "@ynab/logic";
-import { buildBudgetIndex, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
+import type { BudgetData, ClearedStatus } from "@ynab/logic";
+import { buildBudgetIndex } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { sanitizeFlagState } from "./transactions.js";
 
 export async function getBudgetData(
   db: Db,
@@ -66,10 +67,8 @@ export async function getBudgetData(
       isIncome: Boolean(t.isIncome),
       reconciledAt: t.reconciledAt,
       // Sanitize any flag_color read from the DB so a rogue value never
-      // reaches the UI.
-      flagColor: (TRANSACTION_FLAG_COLORS as readonly string[]).includes(String(t.flagColor))
-        ? (t.flagColor as TransactionFlagColor)
-        : null,
+      // reaches the UI. The internal "duplicate" marker is allowed here.
+      flagColor: sanitizeFlagState(t.flagColor),
     })),
     recurring: recur.map((r) => ({
       ...r,

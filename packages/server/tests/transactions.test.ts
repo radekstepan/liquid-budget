@@ -94,6 +94,24 @@ describe("transactions queries", () => {
       expect(insert?.values).toMatchObject({ flagColor: null });
     });
 
+    it("rejects the internal duplicate marker on insert (it is not user-writable)", async () => {
+      mock.respondWith("insert:transactions", [{ id: 1 }]);
+      mock.respondWith("update:accounts", [{ id: 1 }]);
+
+      await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: 2,
+        date: "2026-07-01",
+        payee: "Coffee",
+        memo: "",
+        amount: -500,
+        flagColor: "duplicate" as never,
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({ flagColor: null });
+    });
+
     it("applies balance for split children (parentId set) regardless of skipBalance", async () => {
       mock.respondWith("insert:transactions", [{ id: 5 }]);
       mock.respondWith("update:accounts", [{}]);
@@ -510,6 +528,19 @@ describe("transactions queries", () => {
       mock.respondWith("update:transactions", [{ id: 1, flagColor: null }]);
 
       await updateTransaction(mock.db, 1, { flagColor: null });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ flagColor: null });
+    });
+
+    it("sanitizes the internal duplicate marker to null on update (not user-writable)", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
+      ]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("update:transactions", [{ id: 1, flagColor: null }]);
+
+      await updateTransaction(mock.db, 1, { flagColor: "duplicate" as never });
 
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ flagColor: null });

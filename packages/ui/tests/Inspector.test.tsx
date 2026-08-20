@@ -254,6 +254,7 @@ describe("Inspector", () => {
         flaggedCount: 1,
         alreadyFlaggedCount: 0,
         lockedCount: 0,
+        clearedCount: 0,
       });
       render(<Inspector {...baseProps} onAnalyzeDuplicates={onAnalyzeDuplicates} />);
 
@@ -265,7 +266,7 @@ describe("Inspector", () => {
       );
       expect(onAnalyzeDuplicates).toHaveBeenCalledTimes(1);
       expect(screen.getByText(/1 duplicate entry in 1 group/)).toBeInTheDocument();
-      expect(screen.getByText(/1 flagged yellow/)).toBeInTheDocument();
+      expect(screen.getByText(/1 marked duplicate/)).toBeInTheDocument();
     });
 
     it("hides the analyze menu item when the callback is not provided", () => {

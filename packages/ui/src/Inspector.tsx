@@ -760,9 +760,12 @@ export const Inspector = memo(function Inspector({
                   analysisResult.duplicateCount === 1 ? "y" : "ies"
                 } in ${analysisResult.groups.length} group${analysisResult.groups.length === 1 ? "" : "s"}`}
               >
-                {analysisResult.flaggedCount} flagged yellow ·{" "}
+                {analysisResult.flaggedCount} marked duplicate ·{" "}
                 {analysisResult.alreadyFlaggedCount} already flagged ·{" "}
                 {analysisResult.lockedCount} reconciled (left untouched)
+                {analysisResult.clearedCount > 0
+                  ? ` · ${analysisResult.clearedCount} no longer duplicate (cleared)`
+                  : ""}
               </Notice>
               <div className="y-scroll mt-3 max-h-[300px] space-y-2 overflow-auto">
                 {analysisResult.groups.map((g) => (
@@ -783,7 +786,7 @@ export const Inspector = memo(function Inspector({
                             ? " · locked"
                             : d.flagColor
                               ? ` · already flagged ${d.flagColor}`
-                              : " · flagged yellow"}
+                              : " · marked duplicate"}
                         </div>
                       ))}
                     </div>
