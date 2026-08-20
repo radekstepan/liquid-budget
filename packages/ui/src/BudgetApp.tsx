@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, useTransition } from "react";
-import type { BudgetData } from "@ynab/logic";
+import type { BudgetData, DuplicateAnalysisResult, ImportSummary } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -175,8 +175,9 @@ export type BudgetAppApi = {
   }) => Promise<void>;
   unreconcileAccount: (accountId: number) => Promise<void>;
   resetDemo: () => Promise<void>;
-  importYnab4?: (file: File) => Promise<void>;
+  importYnab4?: (file: File) => Promise<ImportSummary | void>;
   importCsv?: (input: { accountId: number; swap: boolean; csv: string }) => Promise<number>;
+  analyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
 };
 
 export function BudgetApp({
@@ -649,6 +650,7 @@ export function BudgetApp({
           onResetDemo={api.resetDemo}
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
+          onAnalyzeDuplicates={api.analyzeDuplicates}
           onClearOverdraft={clearOverdraft}
         />
       </ErrorBoundary>
@@ -802,6 +804,7 @@ export function BudgetApp({
       {modal.kind === "csvImport" && (
         <CsvImportModal
           accounts={data.accounts}
+          transactions={data.transactions}
           defaultAccountId={accountFilter}
           file={modal.file}
           onClose={() => setModal({ kind: "none" })}

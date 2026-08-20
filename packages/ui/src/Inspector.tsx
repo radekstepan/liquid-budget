@@ -6,6 +6,8 @@ import type {
   CashFlowSummary,
   TrailingNetWorthSummary,
   SpendingInsight,
+  DuplicateAnalysisResult,
+  ImportSummary,
 } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
 import { Icon, Button, Panel, Notice, cx, money } from "@ynab/theme";
@@ -27,6 +29,7 @@ export const Inspector = memo(function Inspector({
   onResetDemo,
   onImportYnab4,
   onImportCsv,
+  onAnalyzeDuplicates,
   onClearOverdraft,
 }: {
   groups: GroupRow[];
@@ -42,14 +45,19 @@ export const Inspector = memo(function Inspector({
   insights?: SpendingInsight[];
   onSelectMonth: (key: string) => void;
   onResetDemo?: () => Promise<void> | void;
-  onImportYnab4?: (file: File) => Promise<void>;
+  onImportYnab4?: (file: File) => Promise<ImportSummary | void>;
   onImportCsv?: (file: File) => void;
+  onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ImportSummary | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<DuplicateAnalysisResult | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<{ month: string; net: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
@@ -185,6 +193,28 @@ export const Inspector = memo(function Inspector({
               >
                 <Icon name="export" size={12} /> Backup SQLite DB
               </button>
+              {onAnalyzeDuplicates && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setAnalysisError(null);
+                    setAnalyzing(true);
+                    onAnalyzeDuplicates()
+                      .then((res) => {
+                        if (res) setAnalysisResult(res);
+                      })
+                      .catch((err: any) =>
+                        setAnalysisError(err?.message ? String(err.message) : String(err))
+                      )
+                      .finally(() => setAnalyzing(false));
+                  }}
+                  className="y-menu-item"
+                  disabled={analyzing}
+                >
+                  <Icon name="flag" size={12} />{" "}
+                  {analyzing ? "Analyzing…" : "Flag duplicates"}
+                </button>
+              )}
               {onResetDemo && (
                 <button
                   onClick={() => {
@@ -208,7 +238,10 @@ export const Inspector = memo(function Inspector({
                 const f = e.target.files?.[0];
                 if (f) {
                   try {
-                    await onImportYnab4(f);
+                    const summary = await onImportYnab4(f);
+                    if (summary && summary.duplicatesSkipped?.length) {
+                      setImportResult(summary);
+                    }
                   } catch (err: any) {
                     setImportError(err?.message ? String(err.message) : String(err));
                   }
@@ -632,6 +665,133 @@ export const Inspector = memo(function Inspector({
           <Notice tone="danger" title="Unable to import YNAB4 data">
             {importError}
           </Notice>
+        </Modal>
+      )}
+
+      {importResult && importResult.duplicatesSkipped.length > 0 && (
+        <Modal
+          title="Import Complete"
+          onClose={() => setImportResult(null)}
+          footer={
+            <Btn variant="primary" onClick={() => setImportResult(null)}>
+              Done
+            </Btn>
+          }
+        >
+          <Notice
+            tone="warn"
+            title={`${importResult.duplicatesSkipped.length} duplicate entr${
+              importResult.duplicatesSkipped.length === 1 ? "y was" : "ies were"
+            } skipped`}
+          >
+            {importResult.transactions} transaction{importResult.transactions === 1 ? "" : "s"}{" "}
+            imported. The entries below matched an earlier entry and were not imported.
+          </Notice>
+          <div
+            className="y-scroll mt-3 max-h-[300px] overflow-auto rounded border"
+            style={{ borderColor: "var(--y-line)" }}
+          >
+            <table className="y-table w-full text-left">
+              <thead className="y-thead--sticky">
+                <tr>
+                  <th>Date</th>
+                  <th>Account</th>
+                  <th>Payee</th>
+                  <th className="num">Amount</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importResult.duplicatesSkipped.slice(0, 50).map((d, i) => (
+                  <tr key={i} className="y-row">
+                    <td className="y-num whitespace-nowrap">{d.date}</td>
+                    <td className="truncate">{d.accountName || <span className="y-hint">—</span>}</td>
+                    <td className="truncate">{d.payee || <span className="y-hint">—</span>}</td>
+                    <td className="num y-num">{money(d.amount)}</td>
+                    <td className="y-hint text-[10px]">{d.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {importResult.duplicatesSkipped.length > 50 && (
+            <p className="y-hint mt-2 text-[11px]">
+              …and {importResult.duplicatesSkipped.length - 50} more.
+            </p>
+          )}
+        </Modal>
+      )}
+
+      {analysisError && (
+        <Modal
+          title="Analysis Failed"
+          onClose={() => setAnalysisError(null)}
+          footer={
+            <Btn variant="primary" onClick={() => setAnalysisError(null)}>
+              Dismiss
+            </Btn>
+          }
+        >
+          <Notice tone="danger" title="Unable to analyze duplicates">
+            {analysisError}
+          </Notice>
+        </Modal>
+      )}
+
+      {analysisResult && (
+        <Modal
+          title="Duplicate Analysis"
+          onClose={() => setAnalysisResult(null)}
+          footer={
+            <Btn variant="primary" onClick={() => setAnalysisResult(null)}>
+              Done
+            </Btn>
+          }
+        >
+          {analysisResult.duplicateCount === 0 ? (
+            <Notice tone="ok" title="No duplicate transactions found">
+              Every transaction in your budget is unique.
+            </Notice>
+          ) : (
+            <>
+              <Notice
+                tone="warn"
+                title={`${analysisResult.duplicateCount} duplicate entr${
+                  analysisResult.duplicateCount === 1 ? "y" : "ies"
+                } in ${analysisResult.groups.length} group${analysisResult.groups.length === 1 ? "" : "s"}`}
+              >
+                {analysisResult.flaggedCount} flagged yellow ·{" "}
+                {analysisResult.alreadyFlaggedCount} already flagged ·{" "}
+                {analysisResult.lockedCount} reconciled (left untouched)
+              </Notice>
+              <div className="y-scroll mt-3 max-h-[300px] space-y-2 overflow-auto">
+                {analysisResult.groups.map((g) => (
+                  <div
+                    key={g.fingerprint}
+                    className="rounded border p-2"
+                    style={{ borderColor: "var(--y-line-soft)" }}
+                  >
+                    <div className="text-[11px] font-semibold" style={{ color: "var(--y-ink)" }}>
+                      {g.keeper.date} · {g.keeper.accountName} · {g.keeper.payee || "—"} ·{" "}
+                      {money(g.keeper.amount)}
+                    </div>
+                    <div className="y-hint pl-3 text-[11px]">
+                      {g.duplicates.map((d) => (
+                        <div key={d.id ?? d.rowNumber ?? 0} className="truncate">
+                          {d.date} · {d.payee || "—"} · {money(d.amount)}
+                          {d.status === "r"
+                            ? " · locked"
+                            : d.flagColor
+                              ? ` · already flagged ${d.flagColor}`
+                              : " · flagged yellow"}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </aside>

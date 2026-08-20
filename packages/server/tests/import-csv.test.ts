@@ -212,4 +212,66 @@ describe("importCsvTransactions", () => {
       importCsvTransactions(db, { accountId: 999, rows: [] })
     ).rejects.toMatchObject({ status: 404 });
   });
+
+  it("skips duplicate rows within the same file and keeps the first", async () => {
+    const accountId = await seedAccount();
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Store", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "Store", amountCents: -1000 }),
+        row({ rowNumber: 4, payee: "Other", amountCents: -2000 }),
+      ],
+    });
+    expect(out.count).toBe(2);
+    expect(out.skipped).toHaveLength(1);
+    expect(out.skipped[0]).toMatchObject({
+      rowNumber: 3,
+      payee: "Store",
+      amount: -1000,
+      reason: "Duplicate of row 2 in this file",
+      accountName: "Chequing",
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions).toHaveLength(2);
+    expect(data.accounts.find((a) => a.id === accountId)?.balance).toBe(
+      String(100000 - 1000 - 2000)
+    );
+  });
+
+  it("skips rows that duplicate existing transactions without double-counting balance", async () => {
+    const accountId = await seedAccount();
+    const first = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Store", amountCents: -1000 })],
+    });
+    expect(first.count).toBe(1);
+
+    const second = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Store", amountCents: -1000 })],
+    });
+    expect(second.count).toBe(0);
+    expect(second.skipped).toHaveLength(1);
+    expect(second.skipped[0]!.reason).toBe("Matches an existing transaction");
+
+    const data = await getBudgetData(db);
+    expect(data.transactions).toHaveLength(1);
+    expect(data.accounts.find((a) => a.id === accountId)?.balance).toBe(String(100000 - 1000));
+  });
+
+  it("normalizes whitespace/case when comparing payee and memo", async () => {
+    const accountId = await seedAccount();
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "  PHNOM PENH   RESTAURANT ", memo: " Lunch " })],
+    });
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "phnom penh restaurant", memo: "lunch" })],
+    });
+    expect(out.count).toBe(0);
+    expect(out.skipped).toHaveLength(1);
+  });
 });

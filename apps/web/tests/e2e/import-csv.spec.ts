@@ -87,6 +87,33 @@ test("POST /api/import/csv rejects malformed CSV without touching the DB", async
   await resetToDemo(base);
 });
 
+test("POST /api/import/csv skips duplicate rows on a second import", async ({ request }) => {
+  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
+  await resetToDemo(base);
+
+  const budget = await (await request.get("/api/budget")).json();
+  const chequing = budget.accounts.find(
+    (a: { name: string }) => a.name === "TD Unlimited Chequing"
+  );
+
+  const first = await request.post("/api/import/csv", {
+    data: { accountId: chequing.id, swap: false, csv: SWAP_CSV },
+  });
+  expect(first.status()).toBe(200);
+  expect((await first.json()).imported).toBe(2);
+
+  const second = await request.post("/api/import/csv", {
+    data: { accountId: chequing.id, swap: false, csv: SWAP_CSV },
+  });
+  expect(second.status()).toBe(200);
+  const secondBody = await second.json();
+  expect(secondBody.imported).toBe(0);
+  expect(secondBody.skipped).toHaveLength(2);
+  expect(secondBody.skipped[0].reason).toBe("Matches an existing transaction");
+
+  await resetToDemo(base);
+});
+
 test("importing through the Settings menu previews, swaps Payee/Memo, and imports", async ({
   page,
   request,

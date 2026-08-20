@@ -9,6 +9,7 @@ export * from "./queries/transactions.js";
 export * from "./queries/reconcile.js";
 export * from "./queries/diagnostics.js";
 export * from "./queries/payees.js";
+export * from "./queries/duplicates.js";
 export { seedDatabase, resetDatabase, DEMO_MONTH } from "./seed.js";
 export { importYnab4, extractYnab4DataFromZip, parseYnab4SettingsXml, type ExtractedYnab4Data, type Ynab4Settings } from "./import-ynab4.js";
 export { importCsvTransactions, type ImportCsvInput } from "./import-csv.js";

@@ -15,6 +15,7 @@ export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";
 export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
+export * from "./duplicates.js";
 
 /**
  * YNAB4's six flag colours, in canonical display order.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { Inspector } from "../src/Inspector.js";
 
 const baseProps = {
@@ -217,6 +217,61 @@ describe("Inspector", () => {
       expect(screen.queryByText("Import Failed")).not.toBeInTheDocument();
 
       alertSpy.mockRestore();
+    });
+  });
+
+  describe("Duplicate analysis (settings)", () => {
+    it("runs the analysis from the settings menu and shows the result", async () => {
+      const onAnalyzeDuplicates = vi.fn().mockResolvedValue({
+        groups: [
+          {
+            fingerprint: "x",
+            keeper: {
+              id: 1,
+              accountId: 1,
+              accountName: "Chequing",
+              date: "2026-06-01",
+              payee: "Store",
+              memo: "",
+              amount: -1000,
+            },
+            duplicates: [
+              {
+                id: 2,
+                accountId: 1,
+                accountName: "Chequing",
+                date: "2026-06-01",
+                payee: "Store",
+                memo: "",
+                amount: -1000,
+                flagColor: null,
+                status: "c",
+              },
+            ],
+          },
+        ],
+        duplicateCount: 1,
+        flaggedCount: 1,
+        alreadyFlaggedCount: 0,
+        lockedCount: 0,
+      });
+      render(<Inspector {...baseProps} onAnalyzeDuplicates={onAnalyzeDuplicates} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      fireEvent.click(screen.getByText("Flag duplicates"));
+
+      await waitFor(() =>
+        expect(screen.getByText("Duplicate Analysis")).toBeInTheDocument()
+      );
+      expect(onAnalyzeDuplicates).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/1 duplicate entry in 1 group/)).toBeInTheDocument();
+      expect(screen.getByText(/1 flagged yellow/)).toBeInTheDocument();
+    });
+
+    it("hides the analyze menu item when the callback is not provided", () => {
+      render(<Inspector {...baseProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      expect(screen.queryByText("Flag duplicates")).not.toBeInTheDocument();
     });
   });
 });

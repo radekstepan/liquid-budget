@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { CsvImportModal } from "../src/CsvImportModal.js";
-import type { Account } from "@ynab/logic";
+import type { Account, Transaction } from "@ynab/logic";
 
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
@@ -20,10 +20,15 @@ function makeFile(content: string) {
   return f;
 }
 
-async function renderModal(csv: string, onImport = vi.fn().mockResolvedValue(undefined)) {
+async function renderModal(
+  csv: string,
+  onImport = vi.fn().mockResolvedValue(undefined),
+  transactions: Transaction[] = []
+) {
   const view = render(
     <CsvImportModal
       accounts={accounts}
+      transactions={transactions}
       defaultAccountId={null}
       file={makeFile(csv)}
       onClose={() => {}}
@@ -106,6 +111,43 @@ describe("CsvImportModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^import 2 transactions$/i }));
 
     await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^import 2 transactions$/i })).toBeEnabled();
+  });
+
+  it("marks rows that duplicate an existing transaction and excludes them from import", async () => {
+    const existing: Transaction[] = [
+      {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "PHNOM PENH RESTAURANT",
+        memo: "Vancouver",
+        amount: "-2808",
+        status: "c",
+        flagColor: null,
+        parentId: null,
+        transferAccountId: null,
+      },
+    ];
+    await renderModal(validCsv, vi.fn().mockResolvedValue(undefined), existing);
+
+    expect(screen.getByText("1 row(s) are duplicates and will be skipped")).toBeInTheDocument();
+    expect(screen.getByText(/1 importable · 1 skipped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
+  });
+
+  it("marks duplicate rows within the same file", async () => {
+    const dupCsv = [
+      "Date,Payee,Outflow",
+      "13/08/2026,UBER TRIP,18.63",
+      "13/08/2026,UBER TRIP,18.63",
+      "13/08/2026,WAL-MART,101.76",
+    ].join("\n");
+    await renderModal(dupCsv);
+
+    expect(screen.getByText("1 row(s) are duplicates and will be skipped")).toBeInTheDocument();
+    expect(screen.getByText(/2 importable · 1 skipped/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^import 2 transactions$/i })).toBeEnabled();
   });
 });

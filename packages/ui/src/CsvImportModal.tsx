@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Account } from "@ynab/logic";
-import { parseCsvImport, swapPayeeMemo } from "@ynab/logic";
+import type { Account, DuplicateEntry, Transaction } from "@ynab/logic";
+import { parseCsvImport, swapPayeeMemo, findDuplicateGroups } from "@ynab/logic";
 import { Checkbox, Notice, Select, money, cx } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 
 export function CsvImportModal({
   accounts,
+  transactions,
   defaultAccountId,
   file,
   onClose,
   onImport,
 }: {
   accounts: Account[];
+  transactions: Transaction[];
   defaultAccountId: number | null;
   file: File;
   onClose: () => void;
@@ -53,8 +55,52 @@ export function CsvImportModal({
   const validRows = useMemo(() => rows.filter((r) => !r.error), [rows]);
   const errorRows = useMemo(() => rows.filter((r) => r.error), [rows]);
 
+  // Rows that are an exact duplicate of an existing transaction (same
+  // account + date + amount + normalized payee/memo) or of an earlier
+  // row in this file. These will be skipped on import.
+  const duplicateRowNumbers = useMemo(() => {
+    if (validRows.length === 0) return new Set<number>();
+    const existing: DuplicateEntry[] = transactions
+      .filter((t) => t.accountId === accountId)
+      .map((t) => ({
+        id: t.id,
+        accountId: t.accountId,
+        date: t.date,
+        payee: t.payee,
+        memo: t.memo,
+        amount: Number(t.amount),
+        parentId: t.parentId ?? null,
+        transferAccountId: t.transferAccountId ?? null,
+      }));
+    const incoming: DuplicateEntry[] = validRows.map((r) => ({
+      rowNumber: r.rowNumber,
+      accountId,
+      date: r.date ?? "",
+      payee: r.payee ?? "",
+      memo: r.memo ?? "",
+      amount: r.amountCents ?? 0,
+    }));
+    const groups = findDuplicateGroups([...existing, ...incoming]);
+    const set = new Set<number>();
+    for (const g of groups) {
+      for (const d of g.duplicates) {
+        if (d.rowNumber != null) set.add(d.rowNumber);
+      }
+    }
+    return set;
+  }, [transactions, accountId, validRows]);
+
+  const duplicateRows = useMemo(
+    () => validRows.filter((r) => duplicateRowNumbers.has(r.rowNumber)),
+    [validRows, duplicateRowNumbers]
+  );
+  const importableRows = useMemo(
+    () => validRows.filter((r) => !duplicateRowNumbers.has(r.rowNumber)),
+    [validRows, duplicateRowNumbers]
+  );
+
   const canImport =
-    validRows.length > 0 && errorRows.length === 0 && accountId > 0 && !importing;
+    importableRows.length > 0 && errorRows.length === 0 && accountId > 0 && !importing;
 
   const doImport = async () => {
     if (!canImport || !text) return;
@@ -81,7 +127,7 @@ export function CsvImportModal({
           <Btn variant="primary" onClick={doImport} disabled={!canImport}>
             {importing
               ? "Importing…"
-              : `Import ${validRows.length} transaction${validRows.length === 1 ? "" : "s"}`}
+              : `Import ${importableRows.length} transaction${importableRows.length === 1 ? "" : "s"}`}
           </Btn>
         </>
       }
@@ -120,12 +166,12 @@ export function CsvImportModal({
       <div className="mb-3 flex items-center justify-between">
         <Checkbox checked={swap} onChange={setSwap} label="Swap Payee and Memo" />
         <span className="y-hint text-[11px]">
-          {validRows.length} importable · {errorRows.length} skipped
+          {importableRows.length} importable · {errorRows.length + duplicateRows.length} skipped
         </span>
       </div>
 
       {errorRows.length > 0 && (
-        <Notice tone="warn" title={`${errorRows.length} row(s) skipped`}>
+        <Notice tone="warn" className="mb-3" title={`${errorRows.length} row(s) skipped`}>
           <ul className="list-disc pl-4">
             {errorRows.slice(0, 10).map((r) => (
               <li key={r.rowNumber}>
@@ -133,6 +179,23 @@ export function CsvImportModal({
               </li>
             ))}
             {errorRows.length > 10 && <li>…and {errorRows.length - 10} more</li>}
+          </ul>
+        </Notice>
+      )}
+
+      {duplicateRows.length > 0 && (
+        <Notice
+          tone="warn"
+          className="mb-3"
+          title={`${duplicateRows.length} row(s) are duplicates and will be skipped`}
+        >
+          <ul className="list-disc pl-4">
+            {duplicateRows.slice(0, 10).map((r) => (
+              <li key={r.rowNumber}>
+                Row {r.rowNumber}: {r.date ?? ""} · {r.payee || "—"} · {money(r.amountCents ?? 0)}
+              </li>
+            ))}
+            {duplicateRows.length > 10 && <li>…and {duplicateRows.length - 10} more</li>}
           </ul>
         </Notice>
       )}
@@ -161,6 +224,7 @@ export function CsvImportModal({
                   className={cx(
                     "y-row",
                     r.error && "y-row--error",
+                    !r.error && duplicateRowNumbers.has(r.rowNumber) && "y-row--warn",
                     swap && !r.error && !r.payee && "y-row--warn"
                   )}
                 >
