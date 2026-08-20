@@ -21,7 +21,8 @@ test.beforeEach(async ({ page }) => {
   await gotoAllTransactions(page);
 });
 
-test("register header is sticky and Date sort state follows header clicks", async ({ page }) => {
+test("register and scheduled headers are sticky", async ({ page }) => {
+  // The transactions register header must stick while scrolling.
   const register = page.locator("table.y-table:not(.y-scheduled-table)");
   const dateTh = register.locator("thead th").filter({ hasText: "Date" });
 
@@ -33,6 +34,12 @@ test("register header is sticky and Date sort state follows header clicks", asyn
     el.scrollTop = el.scrollHeight;
   });
   await expect(dateTh).toBeVisible();
+
+  // The Scheduled Transactions drawer table header is sticky as well.
+  const scheduledTh = page
+    .locator("table.y-scheduled-table thead th")
+    .filter({ hasText: "Date" });
+  await expect(scheduledTh).toHaveCSS("position", "sticky");
 
   // Click the Date header to flip to ascending; aria-sort follows.
   await dateTh.locator("button").click();

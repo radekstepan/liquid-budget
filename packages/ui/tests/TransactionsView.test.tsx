@@ -220,13 +220,44 @@ describe("TransactionsView", () => {
     fireEvent.keyDown(scrollContainer, { key: "c" });
     expect(onCycleStatus).toHaveBeenCalledTimes(1);
 
-    // Press Enter to edit selected row
+    // Press Enter to edit selected row. Opening the editor clears the
+    // selection so the row is not still highlighted after cancelling.
     fireEvent.keyDown(scrollContainer, { key: "Enter" });
     expect(onEdit).toHaveBeenCalledTimes(1);
 
+    // Re-select a row with the keyboard before deleting it.
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
     // Press Delete to delete selected row
     fireEvent.keyDown(scrollContainer, { key: "Delete" });
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the row selection when the edit modal is opened", () => {
+    const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // Keyboard-select the first row, then press Enter to open the editor.
+    const scrollContainer = container.querySelector(".y-scroll")!;
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
+    expect(container.querySelector("tr.y-row--selected")).not.toBeNull();
+
+    fireEvent.keyDown(scrollContainer, { key: "Enter" });
+    expect(onEdit).toHaveBeenCalledTimes(1);
+
+    // The selection is cleared once the modal opens, so cancelling the
+    // modal leaves no highlighted row behind.
+    expect(container.querySelector("tr.y-row--selected")).toBeNull();
   });
 
   it("supports multi-selection and bulk actions", async () => {
@@ -447,9 +478,13 @@ describe("TransactionsView", () => {
       expect(screen.getAllByRole("columnheader")[0]).toHaveStyle("width: 34px");
     });
 
-    it("keeps the register header sticky via y-thead--sticky", () => {
+    it("keeps the register and scheduled headers sticky via y-thead--sticky", () => {
       renderView();
-      expect(document.querySelector("table.y-table thead.y-thead--sticky")).not.toBeNull();
+      const stickyHeaders = document.querySelectorAll(
+        "table.y-table thead.y-thead--sticky"
+      );
+      // Register table + scheduled transactions drawer table.
+      expect(stickyHeaders.length).toBe(2);
     });
   });
 });

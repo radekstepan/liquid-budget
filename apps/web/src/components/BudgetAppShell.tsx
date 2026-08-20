@@ -534,12 +534,6 @@ export function BudgetAppShell() {
         await reload();
       });
     },
-    resetDemo: async () => {
-      return withSync(async () => {
-        await jsonReq("/api/reset", { method: "POST" });
-        await reload();
-      });
-    },
     importYnab4: async (file: File) => {
       return withSync(async () => {
         const formData = new FormData();

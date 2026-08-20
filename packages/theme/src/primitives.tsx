@@ -621,7 +621,7 @@ export const Checkbox: React.FC<{
   label?: string;
   radio?: boolean;
 }> = ({ checked = false, onChange, label, radio }) => (
-  <label className="inline-flex items-center gap-[6px] cursor-pointer select-none leading-none">
+  <label className="inline-flex items-center gap-[6px] cursor-pointer select-none leading-none align-middle">
     <input
       type={radio ? "radio" : "checkbox"}
       checked={checked}

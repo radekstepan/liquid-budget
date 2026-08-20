@@ -1,8 +1,7 @@
 // apps/web/tests/e2e/inspector.spec.ts
 //
 // Covers Inspector chrome (packages/ui/src/Inspector.tsx):
-//   - Settings cog opens the menu with "Import YNAB4 Backup" and
-//     "Reset demo data"
+//   - Settings cog opens the menu with "Import YNAB4 Backup"
 //   - the Net Monthly panel renders Net Cash Flow, Income, and Expenses
 //   - the Net Worth (12 mo) panel renders 12 interactive month jump buttons
 //   - the Trends & Insights panel renders
@@ -17,10 +16,9 @@ test.beforeEach(async ({ page }) => {
   await waitForReady(page);
 });
 
-test("Settings cog opens the menu with both options", async ({ page }) => {
+test("Settings cog opens the menu", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText("Import YNAB4 Backup")).toBeVisible();
-  await expect(page.getByText("Reset demo data")).toBeVisible();
 });
 
 test("Net Monthly panel shows cash flow breakdown", async ({ page }) => {

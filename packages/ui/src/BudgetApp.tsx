@@ -174,7 +174,6 @@ export type BudgetAppApi = {
     adjustmentCategoryId: number | null;
   }) => Promise<void>;
   unreconcileAccount: (accountId: number) => Promise<void>;
-  resetDemo: () => Promise<void>;
   importYnab4?: (file: File) => Promise<ImportSummary | void>;
   importCsv?: (input: { accountId: number; swap: boolean; csv: string }) => Promise<number>;
   analyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
@@ -647,7 +646,6 @@ export function BudgetApp({
           trailingNetWorth={trailingNetWorth}
           insights={insights}
           onSelectMonth={setMonth}
-          onResetDemo={api.resetDemo}
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
