@@ -6,6 +6,7 @@
 //   - Post Now creates a transaction and advances the next date
 //     (BudgetAppShell.tsx:87-113)
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -25,9 +26,8 @@ test("adds a new recurring transaction and renders its card", async ({ page }) =
   const modal = page.locator(".y-modal").last();
   await expect(modal.getByText("Add Recurring Transaction")).toBeVisible();
 
-  // Payee input is the first unlabeled text field above the Amount/Frequency
-  // grid (Modals.tsx:354-356).
-  await modal.locator(".y-label").filter({ hasText: "Payee" }).locator("..").locator("input").fill(uniquePayee);
+  // Payee field opens from its closed trigger above the Amount/Frequency grid.
+  await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
   await modal.locator('input[inputmode="decimal"]').first().fill("42.00");
   await modal.locator('input[type="date"]').first().fill("2026-08-01");
   await modal.getByRole("button", { name: "Save" }).click();

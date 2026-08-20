@@ -9,6 +9,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -38,7 +39,7 @@ test("adds a new transaction via the modal and renders the row", async ({ page }
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("12.34");
   await modal.locator('input[type="date"]').first().fill("2026-09-01");
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
+  await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
 
   // Modal closes and the new row appears.
@@ -57,7 +58,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
   await modal.locator('input[type="date"]').first().fill("2026-09-01");
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
+  await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -114,9 +115,10 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
 
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
+  // The payee field is closed: it shows the value on its trigger button.
   await expect(
-    editModal.locator('input[placeholder="e.g. Whole Foods"]')
-  ).toHaveValue(payeeText!);
+    editModal.locator(".y-searchlist-trigger").first()
+  ).toHaveText(payeeText!);
 });
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
@@ -125,7 +127,7 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
   await addModal.locator('input[type="date"]').first().fill("2026-09-01");
-  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(uniquePayee);
+  await fillSearchlist(addModal, "e.g. Whole Foods", uniquePayee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
@@ -157,13 +159,13 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
 
   // Switch to Transfer mode
   await addModal.getByRole("button", { name: /^transfer$/i }).click();
-  await addModal.locator('input[placeholder^="Transfer"]').fill(transferPayee);
+  await addModal.locator(".y-searchlist-trigger").first().click();
+  await addModal.locator('input[placeholder^="Transfer"]').first().fill(transferPayee);
   await addModal.locator('input[inputmode="decimal"]').first().fill("-30.00");
   await addModal.locator('input[type="date"]').first().fill("2026-09-01");
 
   // Pick destination account (the searchable "Transfer to" field)
-  const destInput = addModal.locator('input[placeholder="Select account…"]').first();
-  await destInput.click();
+  await openSearchField(addModal, "Select account…");
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   await options.nth(1).click();
@@ -202,7 +204,7 @@ test("deletes a split transaction via modal showing split warning notice", async
   await addModal.getByRole("button", { name: /^split$/i }).click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
   await addModal.locator('input[type="date"]').first().fill("2026-09-01");
-  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(splitPayee);
+  await fillSearchlist(addModal, "e.g. Whole Foods", splitPayee);
 
   // Sub-row 1 amount
   const subAmountInputs = addModal.locator('input[inputmode="decimal"]');
@@ -210,13 +212,10 @@ test("deletes a split transaction via modal showing split warning notice", async
   await subAmountInputs.nth(2).fill("20.00");
 
   // Pick category for sub-row 1
-  const subCatInputs = addModal.locator('input[placeholder="Category or Transfer…"]');
-  await subCatInputs.nth(0).click();
-  await page.getByRole("option", { name: "Groceries" }).click();
+  await pickSubCategory(addModal, page, "Groceries");
 
   // Pick category for sub-row 2
-  await subCatInputs.nth(0).click();
-  await page.getByRole("option", { name: "Household" }).click();
+  await pickSubCategory(addModal, page, "Household");
 
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();

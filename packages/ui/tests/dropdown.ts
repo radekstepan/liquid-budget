@@ -41,15 +41,7 @@ export function pickFromOpenDropdownByValue(
   value: string
 ): void {
   openDropdown(label);
-  const list = screen.getByRole("listbox");
-  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
-  const target = options.find((o) => o.getAttribute("data-value") === value);
-  if (!target) {
-    throw new Error(
-      `No option with value="${value}" in dropdown (label=${String(label)})`
-    );
-  }
-  fireEvent.click(target);
+  fireEvent.click(findOptionByValueAcrossListboxes(value));
 }
 
 /**
@@ -83,13 +75,7 @@ export function pickPlaceholderDropdownByIndexByValue(
     );
   }
   fireEvent.click(trigger);
-  const list = screen.getByRole("listbox");
-  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
-  const target = options.find((o) => o.getAttribute("data-value") === value);
-  if (!target) {
-    throw new Error(`No option with value="${value}" in dropdown`);
-  }
-  fireEvent.click(target);
+  fireEvent.click(findOptionByValueAcrossListboxes(value));
 }
 
 /* -------------------------------------------------- searchable <Select>
@@ -97,13 +83,55 @@ export function pickPlaceholderDropdownByIndexByValue(
  * the trigger). Focus it to open the dropdown, then pick an option.
  */
 
-/** Focus the inline search input of a searchable <Select> (opens the dropdown). */
+/**
+ * Open a searchable <Select>. The search input only exists while the dropdown
+ * is open, so click the closed trigger button first, then focus the input.
+ */
 export function openSearchable(label: string | RegExp): HTMLInputElement {
+  const existing = screen.queryByRole("textbox", { name: label });
+  if (existing) {
+    act(() => {
+      existing.focus();
+    });
+    return existing;
+  }
+  const trigger = screen.getByRole("button", { name: label });
+  fireEvent.click(trigger);
   const input = screen.getByRole("textbox", { name: label });
   act(() => {
     input.focus();
   });
   return input;
+}
+
+/**
+ * Open a closed <SearchList> (free-text combobox) by its placeholder text.
+ * The closed field is a button showing the placeholder as its own text, so it
+ * is located by text content (its accessible name may be the field label).
+ */
+export function openSearchlistByPlaceholder(
+  placeholderLabel: string | RegExp
+): HTMLInputElement {
+  const trigger = screen.getByText(placeholderLabel);
+  fireEvent.click(trigger);
+  const input = screen.getByPlaceholderText(placeholderLabel) as HTMLInputElement;
+  act(() => {
+    input.focus();
+  });
+  return input;
+}
+
+/**
+ * Find the option with `value` across every currently open listbox (other
+ * searchlists may keep their dropdown open, e.g. a typed payee field).
+ */
+function findOptionByValueAcrossListboxes(value: string): HTMLButtonElement {
+  for (const list of screen.getAllByRole("listbox")) {
+    const options = within(list).getAllByRole("option") as HTMLButtonElement[];
+    const target = options.find((o) => o.getAttribute("data-value") === value);
+    if (target) return target;
+  }
+  throw new Error(`No option with value="${value}" in any open searchable dropdown`);
 }
 
 /** Open a searchable <Select> by its accessible label and pick an option by value. */
@@ -112,15 +140,7 @@ export function pickFromOpenSearchableByValue(
   value: string
 ): void {
   openSearchable(label);
-  const list = screen.getByRole("listbox");
-  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
-  const target = options.find((o) => o.getAttribute("data-value") === value);
-  if (!target) {
-    throw new Error(
-      `No option with value="${value}" in searchable dropdown (label=${String(label)})`
-    );
-  }
-  fireEvent.click(target);
+  fireEvent.click(findOptionByValueAcrossListboxes(value));
 }
 
 /**
@@ -133,21 +153,15 @@ export function pickPlaceholderSearchableByIndexByValue(
   index: number,
   value: string
 ): void {
-  const inputs = screen.getAllByPlaceholderText(placeholderLabel) as HTMLInputElement[];
-  const input = inputs[index];
-  if (!input) {
+  const triggers = screen
+    .getAllByRole("button", { name: placeholderLabel })
+    .filter((b) => b.getAttribute("aria-haspopup") === "listbox");
+  const trigger = triggers[index];
+  if (!trigger) {
     throw new Error(
-      `No "${String(placeholderLabel)}" searchable input at index ${index} (found ${inputs.length})`
+      `No "${String(placeholderLabel)}" searchable trigger at index ${index} (found ${triggers.length})`
     );
   }
-  act(() => {
-    input.focus();
-  });
-  const list = screen.getByRole("listbox");
-  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
-  const target = options.find((o) => o.getAttribute("data-value") === value);
-  if (!target) {
-    throw new Error(`No option with value="${value}" in searchable dropdown`);
-  }
-  fireEvent.click(target);
+  fireEvent.click(trigger);
+  fireEvent.click(findOptionByValueAcrossListboxes(value));
 }

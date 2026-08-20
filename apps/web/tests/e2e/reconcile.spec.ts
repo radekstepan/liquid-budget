@@ -87,9 +87,9 @@ test.describe("reconcile flow", () => {
     // a category dropdown and a "Mark for adjustment" button.
     await expect(modal.getByText("Absorb the difference")).toBeVisible();
 
-    // Pick a non-CC-payment category. The searchable input is inside the modal.
-    const categorySelect = modal.locator('input[aria-haspopup="listbox"]').last();
-    await expect(categorySelect).toBeVisible();
+    // Pick a non-CC-payment category. The searchable field is inside the modal.
+    const categoryField = modal.locator('button[aria-haspopup="listbox"]').last();
+    await expect(categoryField).toBeVisible();
 
     // Acknowledge the diff by clicking "Mark for adjustment" — the
     // modal's primary button only enables once the user signals

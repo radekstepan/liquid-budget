@@ -10,6 +10,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -39,7 +40,7 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("15.00");
     await modal.locator('input[type="date"]').first().fill("2026-09-01");
-    await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
+    await fillSearchlist(modal, "e.g. Whole Foods", p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
@@ -77,7 +78,7 @@ test("bulk marks selected rows as Cleared and Uncleared", async ({ page }) => {
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("20.00");
     await modal.locator('input[type="date"]').first().fill("2026-09-01");
-    await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
+    await fillSearchlist(modal, "e.g. Whole Foods", p);
     // Uncheck cleared to create uncleared transaction
     await modal.getByText("Cleared (bank has processed this)").click();
     await modal.getByRole("button", { name: "Save Transaction" }).click();
@@ -124,7 +125,7 @@ test("bulk deletes selected transactions", async ({ page }) => {
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("18.00");
     await modal.locator('input[type="date"]').first().fill("2026-09-01");
-    await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(p);
+    await fillSearchlist(modal, "e.g. Whole Foods", p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
@@ -172,7 +173,7 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("33.00");
   await addModal.locator('input[type="date"]').first().fill("2026-09-01");
-  await addModal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
+  await fillSearchlist(addModal, "e.g. Whole Foods", payee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 

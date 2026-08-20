@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist } from "./helpers";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
@@ -32,7 +33,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("4.20");
   await modal.locator('input[type="date"]').first().fill("2026-09-01");
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("radio", { name: "Red" }).click();
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -118,7 +119,7 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   await expect(modal).toBeVisible();
   await expect(modal.locator(".y-cleared--duplicate")).toHaveText("D");
   await expect(modal.getByRole("radio", { name: /Red|Blue|Yellow|Green|Purple|Orange/ })).toHaveCount(0);
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(`${payee} edited`);
+  await fillSearchlist(modal, "e.g. Whole Foods", `${payee} edited`);
   await modal.getByRole("button", { name: "Save Changes" }).click();
   await expect(modal).toBeHidden();
 

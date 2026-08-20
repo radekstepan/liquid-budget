@@ -13,6 +13,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist, pickSubCategory } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -102,7 +103,7 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("3.21");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -134,7 +135,7 @@ test("editing a transaction through the modal persists the new amount", async ({
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("1.11");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -202,16 +203,13 @@ test("split transactions render parent ClearedFlag and no subtransaction rows in
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
-  await modal.locator('input[placeholder="e.g. Whole Foods"]').fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   // Children must sum to the parent *with sign* (packages/logic/src/split.ts:88)
   // — so for a -$20 parent the children are also negative.
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-20");
-  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
-  await subCategoryInputs.nth(0).click();
-  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryInputs.nth(0).click();
-  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
+  await pickSubCategory(modal, page, 1);
+  await pickSubCategory(modal, page, 2);
   await allDecimals.nth(1).fill("-12");
   await allDecimals.nth(2).fill("-8");
   await modal.getByRole("button", { name: "Save Transaction" }).click();
