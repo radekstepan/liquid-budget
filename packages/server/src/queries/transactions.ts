@@ -7,6 +7,7 @@ import type {
 } from "@ynab/logic";
 import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
+import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
 export type CreateTransactionInput = {
   accountId: number;
@@ -533,6 +534,22 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
 
     db.run(sql`COMMIT`);
+    // Learn an automatic rename rule from a deliberate payee rename on a
+    // plain regular transaction. Runs after the commit so a rule-learning
+    // failure never rolls back (or blocks) the transaction edit itself.
+    if (
+      patch.payee != null &&
+      String(patch.payee).trim() !== existing.payee.trim() &&
+      existing.transferAccountId == null &&
+      existing.parentId == null &&
+      !isSplitParent
+    ) {
+      try {
+        await learnRenameRuleFromPayees(db, existing.payee, String(patch.payee));
+      } catch (learnErr) {
+        console.error("[transactions] failed to learn rename rule:", learnErr);
+      }
+    }
     return row;
   } catch (err) {
     db.run(sql`ROLLBACK`);
@@ -649,6 +666,17 @@ export async function updateSplit(
     }
 
     db.run(sql`COMMIT`);
+    // Learn a rename rule when a split's display payee is changed.
+    if (
+      parentFields.payee != null &&
+      String(parentFields.payee).trim() !== parent.payee.trim()
+    ) {
+      try {
+        await learnRenameRuleFromPayees(db, parent.payee, String(parentFields.payee));
+      } catch (learnErr) {
+        console.error("[transactions] failed to learn rename rule:", learnErr);
+      }
+    }
     return { parent: { ...parent, ...pf }, children: newChildren };
   } catch (err) {
     db.run(sql`ROLLBACK`);

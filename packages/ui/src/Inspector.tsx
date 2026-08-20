@@ -30,6 +30,7 @@ export const Inspector = memo(function Inspector({
   onImportCsv,
   onAnalyzeDuplicates,
   onClearOverdraft,
+  onOpenRenameRules,
 }: {
   groups: GroupRow[];
   summary?: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -47,6 +48,7 @@ export const Inspector = memo(function Inspector({
   onImportCsv?: (file: File) => void;
   onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
+  onOpenRenameRules?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -169,6 +171,17 @@ export const Inspector = memo(function Inspector({
               >
                 <Icon name="export" size={12} /> Backup SQLite DB
               </button>
+              {onOpenRenameRules && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenRenameRules();
+                  }}
+                  className="y-menu-item"
+                >
+                  <Icon name="gear" size={12} /> Rename rules…
+                </button>
+              )}
               {onAnalyzeDuplicates && (
                 <button
                   onClick={() => {

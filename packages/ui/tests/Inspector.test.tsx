@@ -241,4 +241,20 @@ describe("Inspector", () => {
       expect(screen.queryByText("Flag duplicates")).not.toBeInTheDocument();
     });
   });
+
+  describe("Rename rules shortcut", () => {
+    it("opens the settings page when the menu item is clicked", () => {
+      const onOpenRenameRules = vi.fn();
+      render(<Inspector {...baseProps} onOpenRenameRules={onOpenRenameRules} />);
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      fireEvent.click(screen.getByText("Rename rules…"));
+      expect(onOpenRenameRules).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides the menu item when the callback is not provided", () => {
+      render(<Inspector {...baseProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      expect(screen.queryByText("Rename rules…")).not.toBeInTheDocument();
+    });
+  });
 });

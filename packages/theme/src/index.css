@@ -477,6 +477,21 @@ body::after {
   opacity: 1;
   background: rgba(255, 255, 255, 0.15);
 }
+.y-icon-btn {
+  display: inline-grid;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--y-ink-soft);
+  background: transparent;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+.y-icon-btn:hover {
+  background: var(--y-hover);
+  color: var(--y-ink);
+}
 .y-side-section-divider {
   height: 1px;
   margin: 3px 0;

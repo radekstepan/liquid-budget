@@ -455,11 +455,20 @@ describe("transactions queries", () => {
       ]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, payee: "New" }]);
+      mock.respondWith("insert:rename_rules", [
+        { id: 5, sourcePattern: "Old", targetPayee: "New", createdAt: "2026-01-01T00:00:00.000Z" },
+      ]);
 
       const row = await updateTransaction(mock.db, 1, { payee: "New" });
       expect(row).toMatchObject({ payee: "New" });
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "select", "run", "select", "update", "run"]);
+      // The rename is also learned as an automatic rename rule after the
+      // commit (select rename_rules -> BEGIN -> insert rule -> COMMIT ->
+      // select again).
+      expect(ops).toEqual([
+        "select", "select", "run", "select", "update", "run",
+        "select", "run", "insert", "run", "select",
+      ]);
     });
 
     it("applies a balance correction when the amount changes", async () => {

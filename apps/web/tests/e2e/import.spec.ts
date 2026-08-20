@@ -207,7 +207,7 @@ test("uploading a backup through the Settings menu reloads the app with imported
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByText("TD Unlimited Chequing")).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTitle("Settings").click();
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.getByText("Import YNAB4 Backup").click(),

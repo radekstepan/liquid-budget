@@ -7,6 +7,7 @@ export { ReportsView } from "./ReportsView.js";
 export { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 export { CalendarView } from "./CalendarView.js";
 export { ProjectionsView } from "./ProjectionsView.js";
+export { SettingsView } from "./SettingsView.js";
 export {
   TransactionModal,
   CategoryModal,

@@ -77,6 +77,8 @@ interface Chain {
   values(v: unknown): Chain;
   onConflictDoUpdate(opts: unknown): Chain;
   returning(): Promise<Row[]>;
+  all(): Row[];
+  get(): Row | undefined;
   then<T>(resolve: (v: T) => void, reject?: (e: unknown) => void): Promise<void>;
 }
 
@@ -132,6 +134,13 @@ function makeChain(
     },
     async returning() {
       return resolve() as Row[];
+    },
+    all() {
+      return resolve() as Row[];
+    },
+    get() {
+      const rows = resolve() as Row[];
+      return rows[0];
     },
     then(resolveFn, reject) {
       const value = resolve();

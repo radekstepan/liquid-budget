@@ -87,6 +87,14 @@ export type TransactionDuplicateFlag = "duplicate";
 /** The full set of flag states a row can carry (read-side). */
 export type TransactionFlagState = TransactionFlagColor | TransactionDuplicateFlag | null;
 
+export type RenameRule = {
+  id: number;
+  sourcePattern: string;
+  targetPayee: string;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
 export type Transaction = {
   id: number;
   accountId: number;
@@ -163,6 +171,11 @@ export type BudgetData = {
   transactions: Transaction[];
   recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[];
   budgetIndex?: SerializedBudgetIndex;
+  /**
+   * Automatic payee rename rules applied to future CSV imports. Empty when
+   * no rules have been learned or added.
+   */
+  renameRules?: RenameRule[];
 };
 
 export type CatRow = {
