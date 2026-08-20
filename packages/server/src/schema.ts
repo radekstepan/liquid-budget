@@ -109,6 +109,7 @@ export const transactions = sqliteTable(
     memo: text("memo").notNull().default(""),
     amount: integer("amount").notNull().default(0),
     status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
+    flagColor: text("flag_color"),
     createdAt: text("created_at").notNull().default(""),
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),

@@ -145,6 +145,7 @@ export function BudgetAppShell() {
             ...(t.memo !== undefined ? { memo: t.memo } : {}),
             ...(t.amount !== undefined ? { amount: t.amount.toFixed(2) } : {}),
             ...(t.status !== undefined ? { status: t.status } : {}),
+            ...("flagColor" in t ? { flagColor: t.flagColor ?? null } : {}),
           };
         });
         return { ...prev, transactions, budgetIndex: undefined };

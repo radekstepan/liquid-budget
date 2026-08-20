@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const TransactionFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple"]);
+
 export const SubTransactionSchema = z.object({
   categoryId: z.number().int().positive().nullable().optional(),
   transferAccountId: z.number().int().positive().nullable().optional(),
@@ -16,6 +18,7 @@ export const TransactionCreateSchema = z.object({
   memo: z.string().max(1000).optional().default(""),
   amount: z.number().int(),
   status: z.enum(["u", "c", "r"]).optional().default("c"),
+  flagColor: TransactionFlagSchema.nullable().optional(),
   incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
   skipBalance: z.boolean().optional(),
@@ -31,6 +34,7 @@ export const TransactionPatchSchema = z.object({
   memo: z.string().max(1000).nullable().optional(),
   amount: z.number().int().optional(),
   status: z.enum(["u", "c", "r"]).optional(),
+  flagColor: TransactionFlagSchema.nullable().optional(),
   incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
@@ -45,6 +49,7 @@ export const TransactionBulkUpdateSchema = z.object({
   patch: z.object({
     status: z.enum(["u", "c", "r"]).optional(),
     categoryId: z.number().int().positive().nullable().optional(),
+    flagColor: TransactionFlagSchema.nullable().optional(),
   }),
 });
 

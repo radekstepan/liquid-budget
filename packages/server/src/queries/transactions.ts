@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
-import type { ClearedStatus } from "@ynab/logic";
+import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
+import { TRANSACTION_FLAG_COLORS } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
@@ -11,6 +12,8 @@ export type CreateTransactionInput = {
   memo: string;
   amount: number;
   status?: ClearedStatus;
+  /** YNAB4-style flag color; null/undefined leaves the row unflagged. */
+  flagColor?: TransactionFlagColor | null;
   /**
    * If set, this row is one half of a transfer. The other side is the
    * destination account identified by `transferAccountId`; no row is
@@ -43,6 +46,7 @@ export type UpdateTransactionInput = {
   memo?: string;
   amount?: number;
   status?: ClearedStatus;
+  flagColor?: TransactionFlagColor | null;
   isIncome?: boolean;
   incomeMonth?: string | null;
 };
@@ -77,6 +81,18 @@ export function assertValidAmount(amount: unknown): number {
     throw new TransactionError("Amount exceeds safe integer range", 400);
   }
   return Math.round(n);
+}
+
+/**
+ * Coerce an arbitrary value into a valid flag color (or null). Unknown
+ * values are treated as "no flag" so rogue payloads never crash the
+ * register or trip the DB CHECK.
+ */
+export function sanitizeFlagColor(value: unknown): TransactionFlagColor | null {
+  if (typeof value !== "string") return null;
+  return (TRANSACTION_FLAG_COLORS as readonly string[]).includes(value)
+    ? (value as TransactionFlagColor)
+    : null;
 }
 
 async function applyBalance(db: Database, accountId: number, delta: number) {
@@ -209,6 +225,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         memo: input.memo,
         amount: input.amount,
         status: input.status ?? "c",
+        flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: input.transferAccountId ?? null,
         parentId: input.parentId ?? null,
         isIncome,
@@ -267,6 +284,7 @@ export async function createTransfer(
         memo: baseInput.memo,
         amount: baseInput.amount,
         status: baseInput.status ?? "c",
+        flagColor: sanitizeFlagColor(baseInput.flagColor),
         transferAccountId,
         parentId: baseInput.parentId ?? null,
         isIncome: false,
@@ -298,6 +316,7 @@ export async function createSplitWithChildren(
     memo: string;
     amount: number;
     status?: ClearedStatus;
+    flagColor?: TransactionFlagColor | null;
   },
   children: SubTransactionInput[]
 ) {
@@ -322,6 +341,7 @@ export async function createSplitWithChildren(
         memo: parent.memo,
         amount: parent.amount,
         status: parentStatus,
+        flagColor: sanitizeFlagColor(parent.flagColor),
         transferAccountId: null,
         parentId: null,
         isIncome: false,
@@ -420,6 +440,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.memo != null) p.memo = String(patch.memo);
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.status != null) p.status = patch.status;
+  if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("incomeMonth" in patch) p.incomeMonth = patch.incomeMonth ?? null;
   if ("isIncome" in patch) p.isIncome = patch.isIncome;
 
@@ -505,6 +526,7 @@ export async function updateSplit(
     payee?: string;
     memo?: string;
     status?: ClearedStatus;
+    flagColor?: TransactionFlagColor | null;
   },
   children: SubTransactionInput[]
 ) {
@@ -546,6 +568,7 @@ export async function updateSplit(
     if (parentFields.payee != null) pf.payee = String(parentFields.payee);
     if (parentFields.memo != null) pf.memo = String(parentFields.memo);
     if (parentFields.status != null) pf.status = parentFields.status;
+    if ("flagColor" in parentFields) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
     if (Object.keys(pf).length > 0) {
       await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
     }
@@ -736,6 +759,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
 export type BulkUpdateTransactionPatch = {
   status?: "u" | "c" | "r";
   categoryId?: number | null;
+  flagColor?: TransactionFlagColor | null;
 };
 
 /**
@@ -763,6 +787,9 @@ export async function bulkUpdateTransactions(
       if (patch.status !== undefined) setFields.status = patch.status;
       if (patch.categoryId !== undefined) {
         setFields.categoryId = patch.categoryId;
+      }
+      if ("flagColor" in patch) {
+        setFields.flagColor = sanitizeFlagColor(patch.flagColor);
       }
       if (Object.keys(setFields).length > 0) {
         const [row] = await db

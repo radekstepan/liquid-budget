@@ -15,6 +15,7 @@ import {
   todayISO,
   countDueRecurring,
   DEMO_MONTH,
+  type TransactionFlagColor,
 } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
 import { Inspector } from "./Inspector.js";
@@ -78,6 +79,7 @@ export type BudgetAppApi = {
       memo?: string;
       amount?: number;
       status?: "u" | "c" | "r";
+      flagColor?: TransactionFlagColor | null;
       subTransactions?: {
         id?: number;
         categoryId: number | null;
@@ -411,6 +413,13 @@ export function BudgetApp({
     [api, data.transactions]
   );
 
+  const setFlag = useCallback(
+    async (id: number, flagColor: TransactionFlagColor | null) => {
+      await api.updateTransaction(id, { flagColor });
+    },
+    [api]
+  );
+
   const clearOverdraft = useCallback(
     async (categoryIds: number[]): Promise<void> => {
       await Promise.all(categoryIds.map((id) => api.assign(id, 0, month)));
@@ -586,6 +595,7 @@ export function BudgetApp({
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
               onCycleStatus={cycleStatus}
+              onFlag={setFlag}
               onBulkDelete={api.bulkDeleteTransactions}
               onBulkUpdate={api.bulkUpdateTransactions}
               onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}

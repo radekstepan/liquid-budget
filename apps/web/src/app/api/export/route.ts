@@ -4,6 +4,16 @@ import { num } from "@ynab/logic";
 
 export const dynamic = "force-dynamic";
 
+/** Our flag enum → YNAB4 colour name (round-trip with .y4backup import). */
+const FLAG_NAME: Record<string, string> = {
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+  purple: "Purple",
+};
+
 function csvEscape(val: string | number): string {
   const s = String(val);
   if (s.includes(",") || s.includes('"') || s.includes("\n")) {
@@ -79,11 +89,12 @@ export async function GET(req: NextRequest) {
     lines.push("");
 
     // Transactions
-    lines.push(csvLine(["Type", "ID", "AccountID", "CategoryID", "Date", "Payee", "Memo", "Amount", "Status", "TransferAccountID", "ParentID", "IsIncome"]));
+    lines.push(csvLine(["Type", "ID", "AccountID", "CategoryID", "Date", "Payee", "Memo", "Amount", "Status", "Flag", "TransferAccountID", "ParentID", "IsIncome"]));
     for (const t of data.transactions) {
       lines.push(csvLine([
         "Transaction", t.id, t.accountId, t.categoryId ?? "", t.date,
         t.payee, t.memo, num(t.amount), t.status,
+        t.flagColor ? (FLAG_NAME[t.flagColor] ?? "") : "",
         t.transferAccountId ?? "", t.parentId ?? "", t.isIncome ? "Y" : "N"
       ]));
     }

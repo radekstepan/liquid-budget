@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `flag_color` text;
