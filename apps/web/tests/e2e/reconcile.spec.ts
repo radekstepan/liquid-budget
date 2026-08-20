@@ -87,8 +87,8 @@ test.describe("reconcile flow", () => {
     // a category dropdown and a "Mark for adjustment" button.
     await expect(modal.getByText("Absorb the difference")).toBeVisible();
 
-    // Pick a non-CC-payment category. The select trigger is inside the modal.
-    const categorySelect = modal.locator(".y-select-trigger").last();
+    // Pick a non-CC-payment category. The searchable input is inside the modal.
+    const categorySelect = modal.locator('input[aria-haspopup="listbox"]').last();
     await expect(categorySelect).toBeVisible();
 
     // Acknowledge the diff by clicking "Mark for adjustment" — the

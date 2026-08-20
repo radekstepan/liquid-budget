@@ -160,6 +160,7 @@ export function CsvImportModal({
           value={accountId}
           onChange={(v) => setAccountId(Number(v))}
           className="w-full"
+          searchable
           ariaLabel="Import account"
         >
           {availableAccounts.map((a) => (

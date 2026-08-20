@@ -144,81 +144,77 @@ describe("Dropdown (Select)", () => {
         value,
         onChange: () => {},
         searchable: true,
+        ariaLabel: "Account",
         options: accounts,
       });
     }
 
-    it("renders a search input inside the listbox and focuses it on open", () => {
+    it("shows the selected label in the field and focuses the input on open", () => {
       renderSearchable();
-      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
-      const list = screen.getByRole("listbox");
-      const search = screen.getByRole("textbox", { name: /filter options/i });
-      expect(list).toContainElement(search);
+      const input = screen.getByRole("textbox", { name: /account/i });
+      expect(input).toHaveValue("Checking");
+      // The input lives in the field position, not inside the dropdown.
       act(() => {
-        search.focus();
-      });
-      expect(search).toHaveFocus();
+      input.focus();
+    });
+      const list = screen.getByRole("listbox");
+      expect(list).not.toContainElement(input);
+      expect(input).toHaveFocus();
     });
 
-    it("filters options by case-insensitive substring", () => {
+    it("filters options by case-insensitive substring as the user types", () => {
       renderSearchable();
-      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
-      const search = screen.getByRole("textbox", { name: /filter options/i });
-
+      const input = screen.getByRole("textbox", { name: /account/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "cre" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "cre" } });
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Credit Card"]);
 
-      const visible = screen.getAllByRole("option");
-      expect(visible.map((o) => o.textContent)).toEqual(["Credit Card"]);
-
-      act(() => {
-        fireEvent.change(search, { target: { value: "CASH" } });
-      });
+      fireEvent.change(input, { target: { value: "CASH" } });
       expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Cash"]);
     });
 
     it("shows a 'No matches' placeholder when nothing matches", () => {
       renderSearchable();
-      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
-      const search = screen.getByRole("textbox", { name: /filter options/i });
+      const input = screen.getByRole("textbox", { name: /account/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "zzz" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "zzz" } });
       expect(screen.queryAllByRole("option")).toHaveLength(0);
       expect(screen.getByText(/no matches/i)).toBeInTheDocument();
     });
 
     it("restores the full list when the query is cleared", () => {
       renderSearchable();
-      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
-      const search = screen.getByRole("textbox", { name: /filter options/i });
+      const input = screen.getByRole("textbox", { name: /account/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "cre" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "cre" } });
       expect(screen.getAllByRole("option")).toHaveLength(1);
 
-      act(() => {
-        fireEvent.change(search, { target: { value: "" } });
-      });
+      fireEvent.change(input, { target: { value: "" } });
       expect(screen.getAllByRole("option")).toHaveLength(4);
     });
 
-    it("resets the query when the dropdown is reopened", () => {
+    it("resets the query when the field is refocused", () => {
       renderSearchable();
-      const trigger = screen.getByRole("button", { name: "Checking" });
-
-      fireEvent.click(trigger);
-      const search = screen.getByRole("textbox", { name: /filter options/i });
+      const input = screen.getByRole("textbox", { name: /account/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "cre" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "cre" } });
       fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
-      fireEvent.click(trigger);
-      expect(
-        screen.getByRole("textbox", { name: /filter options/i })
-      ).toHaveValue("");
+      // Refocusing after a blur reopens with a clean (empty) query.
+      input.blur();
+      act(() => {
+        input.focus();
+      });
+      expect(screen.getByRole("textbox", { name: /account/i })).toHaveValue("");
     });
 
     it("commits against the filtered list, not the snapshot", () => {
@@ -228,14 +224,15 @@ describe("Dropdown (Select)", () => {
           value="1"
           onChange={onChange}
           searchable
+          ariaLabel="Account"
           options={accounts}
         />
       );
-      fireEvent.click(screen.getByRole("button", { name: "Checking" }));
-      const search = screen.getByRole("textbox", { name: /filter options/i });
+      const input = screen.getByRole("textbox", { name: /account/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "sav" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "sav" } });
       fireEvent.click(screen.getByRole("option", { name: "Savings" }));
       expect(onChange).toHaveBeenCalledWith("2");
     });
@@ -327,12 +324,12 @@ describe("Dropdown (Select)", () => {
     });
 
     it("keeps the heading of the matched group while filtering search results", () => {
-      renderSelect({ value: "", onChange: () => {}, searchable: true, children });
-      fireEvent.click(screen.getByRole("button", { name: "Pick…" }));
-      const search = screen.getByRole("textbox", { name: /filter options/i });
+      renderSelect({ value: "", onChange: () => {}, searchable: true, ariaLabel: "Category", children });
+      const input = screen.getByRole("textbox", { name: /category/i });
       act(() => {
-        fireEvent.change(search, { target: { value: "mov" } });
-      });
+      input.focus();
+    });
+      fireEvent.change(input, { target: { value: "mov" } });
       const list = screen.getByRole("listbox");
       expect(within(list).getByRole("option", { name: "Movies" })).toBeInTheDocument();
       expect(within(list).getByText("Fun")).toBeInTheDocument();

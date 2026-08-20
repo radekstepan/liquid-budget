@@ -14,7 +14,13 @@ import type {
   Recurring,
   RecurringSubTransaction,
 } from "@ynab/logic";
-import { pickFromOpenDropdownByValue, pickPlaceholderDropdownByIndexByValue } from "./dropdown.js";
+import {
+  openSearchable,
+  pickFromOpenDropdownByValue,
+  pickFromOpenSearchableByValue,
+  pickPlaceholderDropdownByIndexByValue,
+  pickPlaceholderSearchableByIndexByValue,
+} from "./dropdown.js";
 
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
@@ -138,10 +144,9 @@ describe("CategoryModal", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
-    fireEvent.click(screen.getByRole("button", { name: /move transactions to/i }));
+    openSearchable(/move transactions to/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /filter options/i })).toBeInTheDocument();
   });
 });
 
@@ -269,14 +274,11 @@ describe("TransactionModal", () => {
         onSave={() => {}}
       />
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /^category$/i })
-    );
+    const category = openSearchable(/^category$/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();
 
-    const search = screen.getByRole("textbox", { name: /filter options/i });
-    fireEvent.change(search, { target: { value: "gro" } });
+    fireEvent.change(category, { target: { value: "gro" } });
     expect(within(list).getByRole("option", { name: "Groceries" })).toBeInTheDocument();
     expect(within(list).queryByRole("option", { name: "Rent" })).not.toBeInTheDocument();
     // The group heading persists while filtering.
@@ -606,11 +608,11 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
-      expect(screen.queryByRole("button", { name: /category/i })).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /transfer to/i })).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: /category/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: /transfer to/i })).toBeInTheDocument();
     });
 
-    it("provides a search input inside the Transfer-to dropdown", () => {
+    it("renders the Transfer-to search input in the field position", () => {
       render(
         <TransactionModal
           accounts={accounts}
@@ -621,15 +623,13 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
-      fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+      const input = openSearchable(/transfer to/i);
 
       const list = screen.getByRole("listbox");
-      const search = within(list).getByRole("textbox", { name: /filter options/i });
-      expect(search).toBeInTheDocument();
+      expect(list).not.toContainElement(input);
+      expect(input).toHaveFocus();
 
-      act(() => {
-        fireEvent.change(search, { target: { value: "cre" } });
-      });
+      fireEvent.change(input, { target: { value: "cre" } });
       const visible = within(list).getAllByRole("option");
       expect(visible.map((o) => o.textContent)).toEqual(["Credit"]);
     });
@@ -646,7 +646,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
-      fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+      openSearchable(/transfer to/i);
 
       const placeholder = screen.getByRole("option", { name: /select account/i });
       expect(placeholder).toBeDisabled();
@@ -672,7 +672,7 @@ describe("TransactionModal", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
       fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
-      pickFromOpenDropdownByValue(/transfer to/i, "2");
+      pickFromOpenSearchableByValue(/transfer to/i, "2");
       fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
       expect(onSave).toHaveBeenCalledTimes(1);
       expect(onSave.mock.calls[0]![0]).toMatchObject({
@@ -768,8 +768,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "-100" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
       // Children retain the sign the user types. Parent is -100, so we
       // type -60 and -40; the sum matches the parent.
       fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
@@ -815,8 +815,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "4000" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 
@@ -853,8 +853,8 @@ describe("TransactionModal", () => {
       const parent = allZeros[0]!;
       fireEvent.change(parent, { target: { value: "4000" } });
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
       fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-2000" } });
 
@@ -884,8 +884,8 @@ describe("TransactionModal", () => {
       fireEvent.change(parent, { target: { value: "-100" } });
 
       const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-      pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "transfer:2");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "transfer:2");
       fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
       fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
 
@@ -1076,7 +1076,7 @@ describe("RecurringModal", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
     // Source account stays the first one (Chequing); pick the destination.
-    pickFromOpenDropdownByValue(/transfer to/i, "2");
+    pickFromOpenSearchableByValue(/transfer to/i, "2");
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-500" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -1102,7 +1102,7 @@ describe("RecurringModal", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
-    fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+    openSearchable(/transfer to/i);
 
     const placeholder = screen.getByRole("option", { name: /select account/i });
     expect(placeholder).toBeDisabled();
@@ -1128,8 +1128,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "-200" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
     // Children retain the typed sign (no coercion by the modal).
     fireEvent.change(subAmounts[0]!, { target: { value: "-120" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-80" } });
@@ -1245,8 +1245,8 @@ describe("RecurringModal", () => {
     fireEvent.change(total, { target: { value: "4000" } });
 
     const subAmounts = allZeros.slice(1) as HTMLInputElement[];
-    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:10");
-    pickPlaceholderDropdownByIndexByValue(/category or transfer…/i, 0, "category:11");
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
     fireEvent.change(subAmounts[0]!, { target: { value: "5000" } });
     fireEvent.change(subAmounts[1]!, { target: { value: "-1000" } });
 

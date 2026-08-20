@@ -161,9 +161,9 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   await addModal.locator('input[inputmode="decimal"]').first().fill("-30.00");
   await addModal.locator('input[type="date"]').first().fill("2026-09-01");
 
-  // Pick destination account
-  const destTrigger = addModal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
-  await destTrigger.click();
+  // Pick destination account (the searchable "Transfer to" field)
+  const destInput = addModal.locator('input[placeholder="Select account…"]').first();
+  await destInput.click();
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   await options.nth(1).click();
@@ -210,12 +210,12 @@ test("deletes a split transaction via modal showing split warning notice", async
   await subAmountInputs.nth(2).fill("20.00");
 
   // Pick category for sub-row 1
-  const subCatTriggers = addModal.locator(".y-select-trigger");
-  await subCatTriggers.nth(1).click();
+  const subCatInputs = addModal.locator('input[placeholder="Category or Transfer…"]');
+  await subCatInputs.nth(0).click();
   await page.getByRole("option", { name: "Groceries" }).click();
 
   // Pick category for sub-row 2
-  await subCatTriggers.nth(2).click();
+  await subCatInputs.nth(0).click();
   await page.getByRole("option", { name: "Household" }).click();
 
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
