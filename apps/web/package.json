@@ -9,7 +9,7 @@
     "start": "next start",
     "clean": "rm -rf .next",
     "lint": "echo \"(no lint configured)\" && exit 0",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",

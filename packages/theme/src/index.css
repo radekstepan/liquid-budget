@@ -950,6 +950,12 @@ button.y-pill:hover {
 .y-row:hover td:first-child {
   box-shadow: inset 3px 0 0 var(--y-blue);
 }
+.y-row--warn td {
+  background: #fdf3dd;
+}
+.y-row--warn:hover td {
+  background: #f8e8c4;
+}
 .y-row.is-empty {
   opacity: 0.55;
 }

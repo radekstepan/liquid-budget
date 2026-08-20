@@ -169,9 +169,9 @@ describe("swapPayeeMemo", () => {
     expect(swapped[0]!.memo).toBe("A");
   });
 
-  it("keeps payee intact when memo is empty", () => {
+  it("swaps unconditionally, leaving an empty payee when memo is empty", () => {
     const swapped = swapPayeeMemo(rows, true);
-    expect(swapped[1]!.payee).toBe("C");
-    expect(swapped[1]!.memo).toBe("");
+    expect(swapped[1]!.payee).toBe("");
+    expect(swapped[1]!.memo).toBe("C");
   });
 });

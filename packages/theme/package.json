@@ -20,7 +20,7 @@
     "build": "tsc -b",
     "clean": "rm -rf dist .tsbuildinfo",
     "lint": "echo \"(no lint configured)\" && exit 0",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "peerDependencies": {
     "react": "19.2.6",
