@@ -701,11 +701,6 @@ export const Select: React.FC<SelectProps> = ({
                       )}
                     >
                       <span className="y-dropdown-item-label">{it.label}</span>
-                      {isSel && (
-                        <span className="y-dropdown-item-check" aria-hidden>
-                          &#x2713;
-                        </span>
-                      )}
                     </button>
                   </React.Fragment>
                 );
@@ -934,7 +929,11 @@ export const SearchList: React.FC<SearchListProps> = ({
   };
 
   return (
-    <div className={cx("y-searchlist", className)}>
+    <div
+      className={cx("y-searchlist", className)}
+      data-open={open ? "true" : undefined}
+      data-above={pos.placeAbove ? "true" : undefined}
+    >
       {open ? (
         <input
           ref={inputRef}
@@ -988,7 +987,7 @@ export const SearchList: React.FC<SearchListProps> = ({
             ref={listRef}
             role="listbox"
             tabIndex={-1}
-            className="y-dropdown"
+            className={cx("y-dropdown", pos.placeAbove ? "y-dropdown--above" : "y-dropdown--below")}
             style={{
               position: "fixed",
               left: pos.left,

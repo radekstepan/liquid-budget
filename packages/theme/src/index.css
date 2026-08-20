@@ -815,12 +815,6 @@ body::after {
   font-style: italic;
   color: var(--y-blue-dark);
 }
-.y-dropdown-item-check {
-  margin-left: 8px;
-  color: var(--y-blue-dark);
-  font-size: 11px;
-  line-height: 1;
-}
 /* Searchable selects render their search input in the field position
    (instead of inside the dropdown popover), so it looks like the SearchList
    combobox: a plain text input with no chevron affordance. */
@@ -838,6 +832,28 @@ body::after {
   text-align: left;
   cursor: pointer;
   user-select: none;
+}
+/* Searchlist: when the dropdown is open the input and list sit flush. The
+   input's facing edge loses its border and rounding, and the dropdown's
+   facing corners are squared, so the dropdown's 1px border reads as a
+   hairline divider between the field and the list. */
+.y-searchlist[data-open="true"][data-above="false"] .y-input {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.y-searchlist[data-open="true"][data-above="true"] .y-input {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.y-dropdown--below {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.y-dropdown--above {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .y-dropdown-empty {
   display: block;
