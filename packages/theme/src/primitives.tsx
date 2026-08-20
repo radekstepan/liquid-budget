@@ -220,22 +220,30 @@ export const TextField: React.FC<
 
 export type SelectOption = string | { value: string | number; label: string };
 
-type DropdownItem = { value: string; label: string; disabled?: boolean };
+type DropdownItem = { value: string; label: string; disabled?: boolean; group?: string };
 
 function childrenToItems(children: React.ReactNode): DropdownItem[] {
   const out: DropdownItem[] = [];
-  const walk = (nodes: React.ReactNode) => {
+  // `<optgroup label="…">` boundaries are captured so the dropdown can
+  // render a group heading above each block of options (e.g. category
+  // group names in the category picker). Fragments pass the current
+  // group through untouched.
+  const walk = (nodes: React.ReactNode, group?: string) => {
     Children.forEach(nodes, (child) => {
       if (!isValidElement(child)) return;
       const el = child as React.ReactElement<{
         value?: string | number;
+        label?: string;
         disabled?: boolean;
         children?: React.ReactNode;
       }>;
       // Fragments (and arrays of children passed as a single Fragment)
       // don't carry a `value` — recurse into their children.
       if (el.props.value === undefined) {
-        if (el.props.children != null) walk(el.props.children as React.ReactNode);
+        if (el.props.children != null) {
+          const nextGroup = typeof el.props.label === "string" ? el.props.label : group;
+          walk(el.props.children as React.ReactNode, nextGroup);
+        }
         return;
       }
       const raw = el.props.value;
@@ -248,7 +256,7 @@ function childrenToItems(children: React.ReactNode): DropdownItem[] {
                 .map((c) => (typeof c === "string" || typeof c === "number" ? String(c) : ""))
                 .join("")
             : "";
-      out.push({ value, label, disabled: !!el.props.disabled });
+      out.push({ value, label, disabled: !!el.props.disabled, group });
     });
   };
   walk(children);
@@ -578,35 +586,348 @@ export const Select: React.FC<SelectProps> = ({
                 const originalIdx = openItems.indexOf(it);
                 const isSel = originalIdx === selectedIdx;
                 const isActive = i === activeIdx;
+                // Render an <optgroup> heading above the first option of
+                // each group (persisting while the list is filtered so the
+                // user can tell which subcategories a search matched).
+                const showHeader =
+                  it.group != null && it.group !== filteredItems[i - 1]?.group;
                 return (
+                  <React.Fragment key={it.value}>
+                    {showHeader && (
+                      <div className="y-dropdown-group" role="presentation">
+                        {it.group}
+                      </div>
+                    )}
+                    <button
+                      ref={(el) => {
+                        itemRefs.current[i] = el;
+                      }}
+                      type="button"
+                      role="option"
+                      aria-selected={isSel}
+                      data-value={it.value}
+                      disabled={it.disabled}
+                      onMouseEnter={() => setActiveIdx(i)}
+                      onClick={() => commit(i)}
+                      className={cx(
+                        "y-dropdown-item",
+                        isSel && "is-sel",
+                        isActive && "is-active",
+                        it.disabled && "is-disabled"
+                      )}
+                    >
+                      <span className="y-dropdown-item-label">{it.label}</span>
+                      {isSel && (
+                        <span className="y-dropdown-item-check" aria-hidden>
+                          &#x2713;
+                        </span>
+                      )}
+                    </button>
+                  </React.Fragment>
+                );
+              })
+            )}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+};
+
+/* -------------------------------------------------- SearchList (combobox) */
+export type SearchListOption = {
+  /** Committed value; defaults to `label` when omitted. */
+  value?: string;
+  label: string;
+  /** Optional section heading shown above the option in the dropdown. */
+  group?: string;
+};
+
+export type SearchListProps = {
+  /** The raw text of the field (controlled). */
+  value: string;
+  onChange: (next: string) => void;
+  options?: SearchListOption[];
+  placeholder?: string;
+  /**
+   * When true and the typed text has no exact match among `options`,
+   * the dropdown offers a "Create "<query>"" row so the user can commit
+   * a brand-new value (used for payees). When false the dropdown is
+   * pick-only (used for categories).
+   */
+  allowCreate?: boolean;
+  className?: string;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  ariaLabel?: string;
+  "aria-label"?: string;
+};
+
+/**
+ * A searchable combobox: a text input that opens a dropdown of existing
+ * options filtered by substring as the user types. Backed by the same
+ * portaled dropdown + keyboard navigation as `Select`. Used for payees,
+ * where free-typing a brand-new name is allowed (`allowCreate`), and for
+ * any field that needs "type to filter" over a long list.
+ */
+export const SearchList: React.FC<SearchListProps> = ({
+  value,
+  onChange,
+  options = [],
+  placeholder,
+  allowCreate = false,
+  className,
+  disabled = false,
+  autoFocus,
+  ariaLabel,
+  "aria-label": ariaLabelAttr,
+}) => {
+  const labelForAria = ariaLabel ?? ariaLabelAttr;
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; placeAbove: boolean }>(
+    { left: 0, top: 0, width: 0, placeAbove: false }
+  );
+  const [mounted, setMounted] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // When the dropdown is closed by a commit/Escape we restore focus to the
+  // input programmatically; that focus event must not immediately reopen
+  // the dropdown, so it is suppressed for that one tick.
+  const suppressOpenRef = useRef(false);
+
+  const refocusInput = () => {
+    suppressOpenRef.current = true;
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      suppressOpenRef.current = false;
+    });
+  };
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const q = value.trim();
+  const qLower = q.toLowerCase();
+
+  const filtered = useMemo(() => {
+    if (!qLower) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(qLower));
+  }, [options, qLower]);
+
+  const hasExactMatch =
+    qLower.length > 0 && filtered.some((o) => o.label.toLowerCase() === qLower);
+  const showCreate = allowCreate && qLower.length > 0 && !hasExactMatch;
+  // Row space of the dropdown: index 0 is the create row (when shown),
+  // indexes [1, filtered.length] are the filtered options.
+  const rowCount = filtered.length + (showCreate ? 1 : 0);
+  const optionAt = (i: number): SearchListOption | undefined =>
+    showCreate ? filtered[i - 1] : filtered[i];
+
+  // Keep the active row valid whenever the filter shrinks the list.
+  useEffect(() => {
+    if (rowCount === 0) {
+      setActiveIdx(0);
+      return;
+    }
+    setActiveIdx((i) => (i >= rowCount ? rowCount - 1 : i));
+  }, [rowCount, filtered]);
+
+  const computePos = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    const rect = input.getBoundingClientRect();
+    const estimatedH = Math.min(280, rowCount * 24 + 8);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const placeAbove = spaceBelow < estimatedH && rect.top > spaceBelow;
+    setPos({
+      left: rect.left,
+      top: placeAbove ? rect.top - 1 : rect.bottom - 1,
+      width: rect.width,
+      placeAbove,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    computePos();
+    const onScroll = () => computePos();
+    const onResize = () => computePos();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (open) setActiveIdx(0);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (inputRef.current?.contains(t)) return;
+      if (listRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        refocusInput();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const commitRow = (i: number) => {
+    if (i < 0 || i >= rowCount) return;
+    if (showCreate && i === 0) {
+      onChange(q);
+      setOpen(false);
+      refocusInput();
+      return;
+    }
+    const it = optionAt(i);
+    if (!it) return;
+    onChange(it.value ?? it.label);
+    setOpen(false);
+    refocusInput();
+  };
+
+  const onKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => (rowCount === 0 ? 0 : (i + 1) % rowCount));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => (rowCount === 0 ? 0 : (i - 1 + rowCount) % rowCount));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActiveIdx(Math.max(0, rowCount - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      commitRow(activeIdx);
+    } else if (e.key === "Tab") {
+      // Dropdown closes without committing; focus moves naturally.
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className={cx("y-searchlist", className)}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => {
+          if (suppressOpenRef.current) return;
+          if (!disabled) setOpen(true);
+        }}
+        onKeyDown={onKeyDownInput}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={labelForAria}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="y-input w-full"
+      />
+      {open &&
+        mounted &&
+        createPortal(
+          <div
+            ref={listRef}
+            role="listbox"
+            tabIndex={-1}
+            className="y-dropdown"
+            style={{
+              position: "fixed",
+              left: pos.left,
+              top: pos.placeAbove ? undefined : pos.top,
+              bottom: pos.placeAbove ? window.innerHeight - pos.top : undefined,
+              width: pos.width,
+              zIndex: 60,
+            }}
+          >
+            {rowCount === 0 ? (
+              <span className="y-dropdown-empty" role="presentation">
+                No matches
+              </span>
+            ) : (
+              <>
+                {showCreate && (
                   <button
-                    key={it.value}
                     ref={(el) => {
-                      itemRefs.current[i] = el;
+                      itemRefs.current[0] = el;
                     }}
                     type="button"
                     role="option"
-                    aria-selected={isSel}
-                    data-value={it.value}
-                    disabled={it.disabled}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    onClick={() => commit(i)}
+                    aria-selected={false}
+                    onMouseEnter={() => setActiveIdx(0)}
+                    onClick={() => commitRow(0)}
                     className={cx(
                       "y-dropdown-item",
-                      isSel && "is-sel",
-                      isActive && "is-active",
-                      it.disabled && "is-disabled"
+                      "y-dropdown-create",
+                      activeIdx === 0 && "is-active"
                     )}
                   >
-                    <span className="y-dropdown-item-label">{it.label}</span>
-                    {isSel && (
-                      <span className="y-dropdown-item-check" aria-hidden>
-                        &#x2713;
-                      </span>
-                    )}
+                    <span className="y-dropdown-item-label">Create “{q}”</span>
                   </button>
-              );
-            })
+                )}
+                {filtered.map((it, i) => {
+                  const rowIdx = showCreate ? i + 1 : i;
+                  const isActive = activeIdx === rowIdx;
+                  const showHeader =
+                    it.group != null && it.group !== filtered[i - 1]?.group;
+                  return (
+                    <React.Fragment key={`${it.value ?? it.label}-${i}`}>
+                      {showHeader && (
+                        <div className="y-dropdown-group" role="presentation">
+                          {it.group}
+                        </div>
+                      )}
+                      <button
+                        ref={(el) => {
+                          itemRefs.current[rowIdx] = el;
+                        }}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        onMouseEnter={() => setActiveIdx(rowIdx)}
+                        onClick={() => commitRow(rowIdx)}
+                        className={cx("y-dropdown-item", isActive && "is-active")}
+                      >
+                        <span className="y-dropdown-item-label">{it.label}</span>
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </>
             )}
           </div>,
           document.body

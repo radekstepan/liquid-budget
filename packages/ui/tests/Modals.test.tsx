@@ -122,6 +122,27 @@ describe("CategoryModal", () => {
     });
     expect(onDelete).toHaveBeenCalledWith(undefined);
   });
+
+  it("UNI-03 / F-03: renders the reassignment dropdown searchable with group headings", () => {
+    const onDelete = vi.fn();
+    render(
+      <CategoryModal
+        initial={categories[0]!}
+        transactionCount={3}
+        otherCategories={[categories[1]!]}
+        groups={[{ id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false }]}
+        onClose={() => {}}
+        onSave={() => {}}
+        onDelete={onDelete}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    fireEvent.click(screen.getByRole("button", { name: /move transactions to/i }));
+    const list = screen.getByRole("listbox");
+    expect(within(list).getByText("Everyday")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /filter options/i })).toBeInTheDocument();
+  });
 });
 
 describe("TransactionModal", () => {
@@ -190,6 +211,76 @@ describe("TransactionModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("filters existing payees and picks one from the search list", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        payees={[
+          { value: "Whole Foods", label: "Whole Foods" },
+          { value: "IGA", label: "IGA" },
+        ]}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    const input = screen.getByPlaceholderText("e.g. Whole Foods");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "iga" } });
+    fireEvent.click(screen.getByRole("option", { name: "IGA" }));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-10" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "IGA" });
+  });
+
+  it("saves a brand-new payee typed into the field (create allowed)", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        payees={[{ value: "IGA", label: "IGA" }]}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      target: { value: "New Coffee Shop" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-5" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "New Coffee Shop" });
+  });
+
+  it("groups category options by group and lets the user search within them", () => {
+    const groups = [{ id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false }];
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        groups={groups}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /^category$/i })
+    );
+    const list = screen.getByRole("listbox");
+    expect(within(list).getByText("Everyday")).toBeInTheDocument();
+
+    const search = screen.getByRole("textbox", { name: /filter options/i });
+    fireEvent.change(search, { target: { value: "gro" } });
+    expect(within(list).getByRole("option", { name: "Groceries" })).toBeInTheDocument();
+    expect(within(list).queryByRole("option", { name: "Rent" })).not.toBeInTheDocument();
+    // The group heading persists while filtering.
+    expect(within(list).getByText("Everyday")).toBeInTheDocument();
   });
 
   it("pre-fills the date from defaultDate when provided", () => {
@@ -903,6 +994,23 @@ describe("RecurringModal", () => {
       amount: -8000,
       frequency: "everyotherweek",
     });
+  });
+
+  it("offers the searchable payee list in the recurring modal", () => {
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        payees={[{ value: "Telus", label: "Telus" }]}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    const input = screen.getByPlaceholderText("e.g. Whole Foods");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "tel" } });
+    expect(screen.getByRole("option", { name: "Telus" })).toBeInTheDocument();
   });
 
   it("pre-fills the values and saves with id when editing", () => {

@@ -18,6 +18,7 @@ import {
   type TransactionFlagColor,
 } from "@ynab/logic";
 import { Sidebar, type View } from "./Sidebar.js";
+import type { SearchListOption } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
@@ -241,6 +242,26 @@ export function BudgetApp({
     available: budgetGroups.reduce((s, g) => s + g.available, 0),
     totalAvailable: groups.reduce((s, g) => s + g.available, 0),
   };
+
+  // Distinct payee names from transaction/recurring history, offered as
+  // search suggestions in the transaction + recurring modals. New payees
+  // typed into the field are always allowed (free-text, `allowCreate`).
+  const payeeOptions = useMemo<SearchListOption[]>(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const add = (name: string) => {
+      const t = name.trim();
+      if (!t || t.startsWith("Transfer : ")) return;
+      const key = t.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(t);
+    };
+    for (const t of data.transactions) add(t.payee);
+    for (const r of data.recurring) add(r.payee);
+    names.sort((a, b) => a.localeCompare(b));
+    return names.map((n) => ({ value: n, label: n }));
+  }, [data]);
 
   // Quick-fill: last month's budgeted per category (only computed for budget view)
   const lastMonthAssignments = useMemo(() => {
@@ -676,6 +697,8 @@ export function BudgetApp({
         <TransactionModal
           accounts={data.accounts}
           categories={data.categories}
+          groups={data.groups}
+          payees={payeeOptions}
           defaultAccountId={accountFilter}
           defaultDate={modal.defaultDate}
           initialMode={modal.mode}
@@ -692,6 +715,8 @@ export function BudgetApp({
         <TransactionModal
           accounts={data.accounts}
           categories={data.categories}
+          groups={data.groups}
+          payees={payeeOptions}
           defaultAccountId={accountFilter}
           initial={editingTransaction}
           allTransactions={data.transactions}
@@ -711,6 +736,8 @@ export function BudgetApp({
         <RecurringModal
           accounts={data.accounts}
           categories={data.categories}
+          groups={data.groups}
+          payees={payeeOptions}
           defaultAccountId={accountFilter}
           initialMode={modal.mode}
           onClose={() => setModal({ kind: "none" })}
@@ -724,6 +751,8 @@ export function BudgetApp({
         <RecurringModal
           accounts={data.accounts}
           categories={data.categories}
+          groups={data.groups}
+          payees={payeeOptions}
           initial={editingRecurring}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
@@ -774,6 +803,7 @@ export function BudgetApp({
       )}
       {modal.kind === "addCategory" && (
         <CategoryModal
+          groups={data.groups}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (v) => {
             await api.saveCategory(modal.groupId, null, v);
@@ -784,6 +814,7 @@ export function BudgetApp({
       {modal.kind === "editCategory" && editingCategory && (
         <CategoryModal
           initial={editingCategory}
+          groups={data.groups}
           transactionCount={
             data.transactions.filter((t) => t.categoryId === editingCategory.id).length
           }
