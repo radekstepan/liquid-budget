@@ -555,6 +555,24 @@ export function BudgetAppShell() {
         await reload();
       });
     },
+    importCsv: async ({ accountId, swap, csv }) => {
+      return withSync(async () => {
+        const res = await fetch("/api/import/csv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId, swap, csv }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`Import failed (${res.status}): ${text}`);
+        }
+        const json = (await res.json()) as { imported?: number };
+        const count = json.imported ?? 0;
+        await reload();
+        addToast(`Imported ${count} transactions.`, "ok");
+        return count;
+      });
+    },
   };
 
   if (error) {

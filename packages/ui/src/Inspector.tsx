@@ -26,6 +26,7 @@ export const Inspector = memo(function Inspector({
   onSelectMonth,
   onResetDemo,
   onImportYnab4,
+  onImportCsv,
   onClearOverdraft,
 }: {
   groups: GroupRow[];
@@ -42,6 +43,7 @@ export const Inspector = memo(function Inspector({
   onSelectMonth: (key: string) => void;
   onResetDemo?: () => Promise<void> | void;
   onImportYnab4?: (file: File) => Promise<void>;
+  onImportCsv?: (file: File) => void;
   onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,6 +52,7 @@ export const Inspector = memo(function Inspector({
   const [importError, setImportError] = useState<string | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<{ month: string; net: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when user clicks outside
@@ -139,6 +142,15 @@ export const Inspector = memo(function Inspector({
             >
               <button
                 onClick={() => {
+                  csvFileRef.current?.click();
+                  setMenuOpen(false);
+                }}
+                className="y-menu-item"
+              >
+                <Icon name="import" size={12} /> Import CSV…
+              </button>
+              <button
+                onClick={() => {
                   fileRef.current?.click();
                   setMenuOpen(false);
                 }}
@@ -201,6 +213,19 @@ export const Inspector = memo(function Inspector({
                     setImportError(err?.message ? String(err.message) : String(err));
                   }
                 }
+                e.target.value = "";
+              }}
+            />
+          )}
+          {onImportCsv && (
+            <input
+              ref={csvFileRef}
+              type="file"
+              accept=".csv,text/csv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onImportCsv(f);
                 e.target.value = "";
               }}
             />

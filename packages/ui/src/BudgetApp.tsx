@@ -32,6 +32,7 @@ import {
   RecurringModal,
   AccountModal,
 } from "./Modals.js";
+import { CsvImportModal } from "./CsvImportModal.js";
 import { ReconcileModal } from "./ReconcileModal.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 
@@ -47,7 +48,8 @@ type ModalState =
   | { kind: "editCategory"; categoryId: number }
   | { kind: "addGroup" }
   | { kind: "editGroup"; groupId: number }
-  | { kind: "reconcile"; accountId: number };
+  | { kind: "reconcile"; accountId: number }
+  | { kind: "csvImport"; file: File };
 
 export type BudgetAppApi = {
   reload: () => Promise<void>;
@@ -174,6 +176,7 @@ export type BudgetAppApi = {
   unreconcileAccount: (accountId: number) => Promise<void>;
   resetDemo: () => Promise<void>;
   importYnab4?: (file: File) => Promise<void>;
+  importCsv?: (input: { accountId: number; swap: boolean; csv: string }) => Promise<number>;
 };
 
 export function BudgetApp({
@@ -645,6 +648,7 @@ export function BudgetApp({
           onSelectMonth={setMonth}
           onResetDemo={api.resetDemo}
           onImportYnab4={api.importYnab4}
+          onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onClearOverdraft={clearOverdraft}
         />
       </ErrorBoundary>
@@ -791,6 +795,19 @@ export function BudgetApp({
           onClose={() => setModal({ kind: "none" })}
           onSave={async (name) => {
             await api.saveGroup(editingGroup.id, name);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
+      {modal.kind === "csvImport" && (
+        <CsvImportModal
+          accounts={data.accounts}
+          categories={data.categories}
+          defaultAccountId={accountFilter}
+          file={modal.file}
+          onClose={() => setModal({ kind: "none" })}
+          onImport={async (input) => {
+            await api.importCsv?.(input);
             setModal({ kind: "none" });
           }}
         />
