@@ -869,11 +869,11 @@ export const FlagPicker: React.FC<{
 
 /**
  * A single clickable flag cell shown in the register's Flag column. Manual
- * flags render as the classic YNAB4 color circle; the internal "duplicate"
- * marker renders as a square "D" status badge (same language as the C/U
- * cleared flags). Clicking either opens the swatch picker so the user can
- * pick a manual color or clear the flag — the duplicate marker itself is
- * never offered. Disabled when the row is reconciled (locked).
+ * flags render as the classic YNAB4 color circle and open the swatch picker.
+ * The internal "duplicate" marker renders as a square "D" status badge (same
+ * language as the C/U cleared flags) and is read-only — the user cannot
+ * change or clear it; they must remove the duplicate and rerun the duplicate
+ * check. Disabled when the row is reconciled (locked).
  */
 export const FlagCell: React.FC<{
   color: FlagColor | TransactionDuplicateFlag | null;
@@ -934,6 +934,21 @@ export const FlagCell: React.FC<{
 
   const interactive = !disabled;
   const isDuplicate = color === "duplicate";
+
+  // The duplicate marker is analyzer-owned and read-only: no popover, no
+  // way to switch away from it.
+  if (isDuplicate) {
+    return (
+      <span
+        className="y-flag-cell"
+        aria-label="Flag: Duplicate"
+        title="Duplicate transaction — remove one of the matching transactions and rerun the duplicate check"
+      >
+        <span className="y-cleared y-cleared--duplicate">D</span>
+      </span>
+    );
+  }
+
   return (
     <>
       <button
@@ -941,15 +956,13 @@ export const FlagCell: React.FC<{
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={isDuplicate ? "Flag: Duplicate" : color != null ? `Flag: ${FLAG_LABEL[color]}` : "No flag"}
-        title={isDuplicate ? "Duplicate transaction" : color != null ? `Flag: ${FLAG_LABEL[color]}` : "Add a flag"}
+        aria-label={color != null ? `Flag: ${FLAG_LABEL[color]}` : "No flag"}
+        title={color != null ? `Flag: ${FLAG_LABEL[color]}` : "Add a flag"}
         onClick={toggle}
         className={cx("y-flag-cell", interactive && "cursor-pointer")}
         style={{ opacity: disabled ? 0.45 : 1 }}
       >
-        {color === "duplicate" ? (
-          <span className="y-cleared y-cleared--duplicate">D</span>
-        ) : color != null ? (
+        {color != null ? (
           <span className="y-flag" style={{ background: FLAG_HEX[color] }} />
         ) : (
           <span className="y-flag y-flag--empty" />
@@ -970,10 +983,7 @@ export const FlagCell: React.FC<{
               zIndex: 60,
             }}
           >
-            <FlagPicker
-              value={isDuplicate ? null : color}
-              onChange={commit}
-            />
+            <FlagPicker value={color} onChange={commit} />
           </div>,
           document.body
         )}

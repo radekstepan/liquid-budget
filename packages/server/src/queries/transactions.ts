@@ -5,8 +5,7 @@ import type {
   TransactionFlagColor,
   TransactionFlagState,
 } from "@ynab/logic";
-import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
-import type { Database } from "../client.js";
+import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 
 export type CreateTransactionInput = {
@@ -442,6 +441,16 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   }
 
   if (
+    patch.flagColor !== undefined &&
+    existing.flagColor === TRANSACTION_DUPLICATE_FLAG
+  ) {
+    throw new TransactionError(
+      "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
+      422
+    );
+  }
+
+  if (
     existing.transferAccountId != null &&
     patch.accountId != null &&
     Number(patch.accountId) === existing.transferAccountId
@@ -459,7 +468,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.memo != null) p.memo = String(patch.memo);
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.status != null) p.status = patch.status;
-  if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
+  if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("incomeMonth" in patch) p.incomeMonth = patch.incomeMonth ?? null;
   if ("isIncome" in patch) p.isIncome = patch.isIncome;
 
@@ -559,6 +568,12 @@ export async function updateSplit(
   if (parent.parentId != null || parent.transferAccountId != null) {
     throw new TransactionError("target row is not a split parent");
   }
+  if ("flagColor" in parentFields && parentFields.flagColor !== undefined && parent.flagColor === TRANSACTION_DUPLICATE_FLAG) {
+    throw new TransactionError(
+      "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
+      422
+    );
+  }
   if ((await childCount(db, parentId)) === 0) {
     throw new TransactionError("target row has no children; use a regular update");
   }
@@ -587,7 +602,7 @@ export async function updateSplit(
     if (parentFields.payee != null) pf.payee = String(parentFields.payee);
     if (parentFields.memo != null) pf.memo = String(parentFields.memo);
     if (parentFields.status != null) pf.status = parentFields.status;
-    if ("flagColor" in parentFields) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
+    if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
     if (Object.keys(pf).length > 0) {
       await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
     }
@@ -802,12 +817,18 @@ export async function bulkUpdateTransactions(
           422
         );
       }
+      if ("flagColor" in patch && patch.flagColor !== undefined && existing.flagColor === TRANSACTION_DUPLICATE_FLAG) {
+        throw new TransactionError(
+          `Transaction ${id} is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.`,
+          422
+        );
+      }
       const setFields: Record<string, unknown> = {};
       if (patch.status !== undefined) setFields.status = patch.status;
       if (patch.categoryId !== undefined) {
         setFields.categoryId = patch.categoryId;
       }
-      if ("flagColor" in patch) {
+      if ("flagColor" in patch && patch.flagColor !== undefined) {
         setFields.flagColor = sanitizeFlagColor(patch.flagColor);
       }
       if (Object.keys(setFields).length > 0) {
