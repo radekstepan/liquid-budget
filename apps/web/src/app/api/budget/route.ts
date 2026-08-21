@@ -9,7 +9,10 @@ export async function GET() {
   if (!seeded) {
     await seedDatabase(db);
   }
-  await autoPostDueRecurringTransactions(db);
+  const autoPosted = await autoPostDueRecurringTransactions(db);
   const data = await getBudgetData(db);
-  return Response.json(data);
+  return Response.json({
+    ...data,
+    autoPostedRecurringCount: autoPosted.length,
+  });
 }
