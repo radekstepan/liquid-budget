@@ -367,6 +367,26 @@ describe("BudgetApp", () => {
     expect(navAll.className).toMatch(/\bis-sel\b/);
   });
 
+  it("pushes the correct URL when selecting an account", async () => {
+    const { api } = makeApi();
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    const seed = makeSeedBudgetData();
+    render(<BudgetApp data={seed} api={api} />);
+
+    const accountBtns = screen.getAllByRole("button", {
+      name: /td unlimited chequing/i,
+    });
+    const accountRow = accountBtns.find((b) => b.getAttribute("aria-label") == null)!;
+    fireEvent.click(accountRow);
+
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).toHaveBeenCalledWith(null, "", "/transactions/1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /add a? ?new transaction/i })).toBeInTheDocument();
+    });
+    pushSpy.mockRestore();
+  });
+
   it("calls api.updateAccount with archived: true when archiving an account", async () => {
     const { api, calls } = makeApi();
     const seed = makeSeedBudgetData();

@@ -243,7 +243,12 @@ export function BudgetApp({
       path = `/${newView}`;
     }
     if (window.location.pathname !== path) {
-      window.history.pushState(null, "", path);
+      try {
+        window.history.pushState(null, "", path);
+      } catch {
+        // pushState is cosmetic; in-memory state + popstate listener
+        // already keep the UI in sync.
+      }
     }
   }, []);
 
@@ -501,15 +506,13 @@ export function BudgetApp({
   const handleSelectAccount = useCallback(
     (id: number) => {
       startTransition(() => {
-        setAccountFilter((cur) => {
-          const next = cur === id ? null : id;
-          updateUrl("transactions", next, month);
-          return next;
-        });
+        const next = accountFilter === id ? null : id;
+        setAccountFilter(next);
+        updateUrl("transactions", next, month);
         setView("transactions");
       });
     },
-    [updateUrl, month]
+    [updateUrl, month, accountFilter]
   );
 
   const cycleStatus = useCallback(
