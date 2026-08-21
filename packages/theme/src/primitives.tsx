@@ -135,6 +135,12 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
         <path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6 11 5M5 11l-1.4 1.4" strokeWidth="1.4" strokeLinecap="round" />
       </>
     ),
+    cog: (
+      <>
+        <circle cx="8" cy="8" r="2.8" strokeWidth="1.5" />
+        <path d="M8 1.2v2.5M8 12.3v2.5M1.2 8h2.5M12.3 8h2.5M3.2 3.2l1.8 1.8M11 11l1.8 1.8M12.8 3.2 11 5M5 11l-1.8 1.8" strokeWidth="1.5" strokeLinecap="round" />
+      </>
+    ),
     reconcile: (
       <>
         <circle cx="8" cy="8" r="6" strokeWidth="1.4" />
@@ -1480,16 +1486,6 @@ export const Toast: React.FC<{ items: ToastItem[]; onDismiss: (id: number) => vo
           onClick={() => onDismiss(t.id)}
         >
           <span className="y-toast-msg">{t.message}</span>
-          <button
-            className="y-toast-close"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDismiss(t.id);
-            }}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
         </div>
       ))}
     </div>,

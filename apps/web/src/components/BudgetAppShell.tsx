@@ -26,7 +26,15 @@ type MutationMessages<T> = {
   onSuccess?: (result: T) => void;
 };
 
-export function BudgetAppShell() {
+export function BudgetAppShell({
+  initialView = "budget",
+  initialMonth,
+  initialAccount,
+}: {
+  initialView?: string;
+  initialMonth?: string;
+  initialAccount?: number;
+}) {
   const [data, setData] = useState<BudgetData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -762,7 +770,7 @@ export function BudgetAppShell() {
               borderTopColor: "var(--y-side-ink)",
             }}
           />
-          <span style={{ color: "var(--y-side-ink)" }}>Loading budget…</span>
+          <span style={{ color: "var(--y-side-ink)" }}>Loading budget</span>
         </div>
       </div>
     );
@@ -790,10 +798,10 @@ export function BudgetAppShell() {
                 borderTopColor: "var(--y-ink)",
               }}
             />
-            <span>Syncing…</span>
+            <span>Syncing</span>
           </div>
         )}
-        <BudgetApp data={data} api={api} />
+        <BudgetApp data={data} api={api} initialView={initialView} initialMonth={initialMonth} initialAccount={initialAccount} />
         <Toast items={toasts} onDismiss={dismissToast} />
       </div>
     </ErrorBoundary>

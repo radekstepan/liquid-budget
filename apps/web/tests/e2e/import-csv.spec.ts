@@ -7,7 +7,7 @@
 //     chosen account (apps/web/src/app/api/import/csv/route.ts)
 //   - API contract: malformed CSV is rejected with 400 and the DB is
 //     left untouched
-//   - UI flow: Settings cog → "Import CSV…" opens a YNAB4-style
+//   - UI flow: Settings cog → "Import CSV" opens a YNAB4-style
 //     preview where the user picks the account, toggles "Swap Payee
 //     and Memo", and imports (Inspector.tsx + CsvImportModal.tsx)
 //
@@ -128,7 +128,7 @@ test("importing through the Settings menu previews, swaps Payee/Memo, and import
   await page.getByTitle("Settings").click();
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByText("Import CSV…").click(),
+    page.getByText("Import CSV").click(),
   ]);
   await chooser.setFiles({
     name: "import.csv",

@@ -133,6 +133,7 @@ test("the Settings page lists rename rules and explains [N]", async ({ page, req
   await page.goto("/");
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
   await page.getByRole("button", { name: /^settings$/i }).first().click();
+  await page.getByText("Rename rules").click();
   await expect(page.getByText("Payee Rename Rules")).toBeVisible();
   await expect(page.getByRole("cell", { name: "BCF[N]", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "BC Ferries", exact: true })).toBeVisible();

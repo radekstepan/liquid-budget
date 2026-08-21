@@ -102,6 +102,7 @@ describe("BudgetApp", () => {
       />
     );
     fireEvent.click(screen.getAllByRole("button", { name: /settings/i })[0]!);
+    fireEvent.click(screen.getByText("Rename rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
     expect(screen.getByText("BCF[N]")).toBeInTheDocument();
 
@@ -118,7 +119,7 @@ describe("BudgetApp", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     fireEvent.click(screen.getByTitle("Settings"));
-    fireEvent.click(screen.getByText("Rename rules…"));
+    fireEvent.click(screen.getByText("Rename rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
   });
 
@@ -220,7 +221,7 @@ describe("BudgetApp", () => {
 
     expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
 
-    // Step 1: Click Delete…
+        // Step 1: Click Delete
     fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
     expect(screen.getByText(/^Delete /)).toBeInTheDocument();
 
@@ -265,7 +266,7 @@ describe("BudgetApp", () => {
 
     expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
 
-    // Click Delete…
+        // Click Delete
     fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
     expect(screen.getByText(/linked transfer/i)).toBeInTheDocument();
 
@@ -329,7 +330,7 @@ describe("BudgetApp", () => {
 
     expect(screen.getByText("Edit Transaction")).toBeInTheDocument();
 
-    // Click Delete…
+        // Click Delete
     fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
     expect(screen.getByText(/split transaction/i)).toBeInTheDocument();
     expect(screen.getByText(/also delete all of its 2 sub-transactions/i)).toBeInTheDocument();

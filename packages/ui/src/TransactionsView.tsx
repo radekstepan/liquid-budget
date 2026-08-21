@@ -139,7 +139,6 @@ export const TransactionsView = memo(function TransactionsView({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
-  const [scheduledFlagMenuOpen, setScheduledFlagMenuOpen] = useState(false);
   const [sort, setSort] = useLocalStorage<SortState>("ynab:transactions:sort", { key: "date", dir: "desc" });
 
   const toggleSort = useCallback((key: SortKey) => {
@@ -434,6 +433,13 @@ export const TransactionsView = memo(function TransactionsView({
   const dueScheduledCount = useMemo(() => {
     return scheduledRows.filter((r) => r.active && r.nextDate <= today).length;
   }, [scheduledRows, today]);
+
+  const hasScheduledFlag = useMemo(
+    () => scheduledRows.some((r) => r.flagColor != null),
+    [scheduledRows]
+  );
+
+  const scheduledColCount = (accountFilter ? 8 : 9) + 1 + (hasScheduledFlag ? 1 : 0);
 
   // Virtualization window calculations
   const totalCount = filtered.length;
@@ -900,91 +906,6 @@ export const TransactionsView = memo(function TransactionsView({
                   {selectedRecurringIds.size} scheduled selected
                 </span>
                 <div className="y-tb-sep mx-1" style={{ height: 14 }} />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="!py-0.5 !px-2 text-[11px] font-bold"
-                  title="Enter selected scheduled transactions into register"
-                  onClick={async () => {
-                    const ids = Array.from(selectedRecurringIds);
-                    setSelectedRecurringIds(new Set());
-                    if (onBulkPostRecurring) {
-                      await onBulkPostRecurring(ids, today);
-                    } else if (onPostRecurring) {
-                      for (const id of ids) onPostRecurring(id, today);
-                    }
-                  }}
-                >
-                  Enter Now ({selectedRecurringIds.size})
-                </Button>
-                <div className="relative">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="!py-0.5 !px-2 text-[11px]"
-                    onClick={() => setScheduledFlagMenuOpen((o) => !o)}
-                  >
-                    Set Flag
-                  </Button>
-                  {scheduledFlagMenuOpen && (
-                    <div
-                      className="absolute left-0 top-[24px] z-30 flex gap-1 p-1.5 rounded shadow-lg"
-                      style={{
-                        background: "#fff",
-                        border: "1px solid var(--y-border-strong)",
-                      }}
-                    >
-                      {(["red", "orange", "yellow", "green", "blue", "purple"] as TransactionFlagColor[]).map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className="h-4 w-4 rounded-full border border-black/20 hover:scale-110 transition-transform"
-                          style={{
-                            background:
-                              c === "red"
-                                ? "#e53935"
-                                : c === "orange"
-                                ? "#fb8c00"
-                                : c === "yellow"
-                                ? "#fdd835"
-                                : c === "green"
-                                ? "#43a047"
-                                : c === "blue"
-                                ? "#1e88e5"
-                                : "#8e24aa",
-                          }}
-                          onClick={async () => {
-                            const ids = Array.from(selectedRecurringIds);
-                            setSelectedRecurringIds(new Set());
-                            setScheduledFlagMenuOpen(false);
-                            if (onBulkUpdateRecurring) {
-                              await onBulkUpdateRecurring(ids, { flagColor: c });
-                            } else if (onFlagRecurring) {
-                              for (const id of ids) onFlagRecurring(id, c);
-                            }
-                          }}
-                          title={`Set flag to ${c}`}
-                        />
-                      ))}
-                      <button
-                        type="button"
-                        className="text-[10px] px-1 rounded hover:bg-gray-100 text-gray-500"
-                        onClick={async () => {
-                          const ids = Array.from(selectedRecurringIds);
-                          setSelectedRecurringIds(new Set());
-                          setScheduledFlagMenuOpen(false);
-                          if (onBulkUpdateRecurring) {
-                            await onBulkUpdateRecurring(ids, { flagColor: null });
-                          } else if (onFlagRecurring) {
-                            for (const id of ids) onFlagRecurring(id, null);
-                          }
-                        }}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  )}
-                </div>
                 {onBulkDeleteRecurring && (
                   <Button
                     variant="danger"
@@ -1050,7 +971,7 @@ export const TransactionsView = memo(function TransactionsView({
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
                     />
                   </th>
-                  <th style={{ width: 32 }} className="text-center">Flag</th>
+                  {hasScheduledFlag && <th style={{ width: 32 }} className="text-center">Flag</th>}
                   <th style={{ width: 85 }}>Date</th>
                   <th style={{ width: 110 }}>Frequency</th>
                   {!accountFilter && <th style={{ width: 120 }}>Account</th>}
@@ -1063,16 +984,13 @@ export const TransactionsView = memo(function TransactionsView({
                   <th className="num" style={{ width: 90 }}>
                     Inflow
                   </th>
-                  <th style={{ width: 85 }} className="text-center">
-                    Action
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {scheduledRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={accountFilter ? 10 : 11}
+                      colSpan={scheduledColCount}
                       className="text-center py-8 text-[12px]"
                       style={{ color: "var(--y-ink-faint)", background: "#ffffff" }}
                     >
@@ -1152,12 +1070,14 @@ export const TransactionsView = memo(function TransactionsView({
                             className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
                           />
                         </td>
-                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                          <FlagCell
-                            color={r.flagColor ?? null}
-                            onChange={(color) => onFlagRecurring?.(r.id, color)}
-                          />
-                        </td>
+                        {hasScheduledFlag && (
+                          <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                            <FlagCell
+                              color={r.flagColor ?? null}
+                              onChange={(color) => onFlagRecurring?.(r.id, color)}
+                            />
+                          </td>
+                        )}
                         <td className="y-num font-medium">
                           <span
                             style={{
@@ -1199,25 +1119,6 @@ export const TransactionsView = memo(function TransactionsView({
                           }}
                         >
                           {inflow ? money(inflow) : ""}
-                        </td>
-                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            size="sm"
-                            variant="default"
-                            className="text-[11px] !py-0.5 !px-2 font-medium"
-                            title={isFuture ? `Enter early into register as of today (${today})` : "Enter into register"}
-                            onClick={() => {
-                              if (onPostRecurring) {
-                                if (isFuture) {
-                                  onPostRecurring(r.id, today);
-                                } else {
-                                  onPostRecurring(r.id);
-                                }
-                              }
-                            }}
-                          >
-                            Enter Now
-                          </Button>
                         </td>
                       </tr>
                     );

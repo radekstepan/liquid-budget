@@ -139,7 +139,7 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
 
-  // Click Delete… button
+  // Click Delete button
   await editModal.getByRole("button", { name: /^Delete/ }).click();
   await expect(editModal.locator(".y-modal-head")).toContainText("Delete");
 
@@ -181,7 +181,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
 
-  // Click Delete… button
+  // Click Delete button
   await editModal.getByRole("button", { name: /^Delete/ }).click();
   await expect(editModal.getByText(/Linked transfer/i)).toBeVisible();
   await expect(editModal.getByText(/also remove the corresponding transaction in the linked account/i)).toBeVisible();
@@ -230,7 +230,7 @@ test("deletes a split transaction via modal showing split warning notice", async
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Transaction")).toBeVisible();
 
-  // Click Delete…
+  // Click Delete
   await editModal.getByRole("button", { name: /^Delete/ }).click();
   await expect(editModal.getByText(/Split transaction/i)).toBeVisible();
   await expect(editModal.getByText(/also delete all of its 2 sub-transactions/i)).toBeVisible();

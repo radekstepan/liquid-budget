@@ -75,7 +75,7 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /delete rule BCF1/i }));
     expect(onDelete).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /delete rule BCF1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledWith(1);
     });

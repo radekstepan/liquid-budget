@@ -267,7 +267,7 @@ export const BudgetView = memo(function BudgetView({
                     </th>
                   ))}
                 </tr>
-                <tr>
+                <tr className="y-thead-sub">
                   {resolvedVisibleMonths.map((m, idx) => (
                     <Fragment key={m}>
                       <th
@@ -783,9 +783,7 @@ function MonthCells({
   return (
     <>
       <td className={cx("num", COL_A, divCls, readOnlyCls)}>
-        {isOtherMonth || !onAssign ? (
-          <span className="y-num">{fmt(row.assigned)}</span>
-        ) : (
+        {onAssign && !isOtherMonth ? (
           <CategoryMonthCell
             value={row.assigned}
             onAssign={onAssign}
@@ -793,6 +791,8 @@ function MonthCells({
             categoryId={categoryId}
             available={row.available}
           />
+        ) : (
+          <span className="y-num">{fmt(row.assigned)}</span>
         )}
       </td>
       <td

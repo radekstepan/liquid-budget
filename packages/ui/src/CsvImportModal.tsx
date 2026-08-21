@@ -136,7 +136,7 @@ export function CsvImportModal({
           <div className="flex items-center gap-2 ml-auto">
             <Btn variant="primary" onClick={doImport} disabled={!canImport}>
               {importing
-                ? "Importing…"
+                ? "Importing"
                 : `Import ${importableRows.length} transaction${importableRows.length === 1 ? "" : "s"}`}
             </Btn>
           </div>

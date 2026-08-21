@@ -20,6 +20,7 @@ import {
 import { useLocalStorage } from "./useLocalStorage.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
+import { Icon } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
@@ -198,12 +199,22 @@ export type BudgetAppApi = {
 export function BudgetApp({
   data,
   api,
+  initialView = "budget",
+  initialMonth,
+  initialAccount,
 }: {
   data: BudgetData;
   api: BudgetAppApi;
+  initialView?: string;
+  initialMonth?: string;
+  initialAccount?: number;
 }) {
-  const [view, setView] = useState<View>("budget");
-  const [month, setMonth] = useState(DEMO_MONTH);
+  const [view, setView] = useState<View>(
+    (["budget", "reports", "calendar", "projections", "transactions", "recurring"] as View[]).includes(initialView as View)
+      ? (initialView as View)
+      : "budget"
+  );
+  const [month, setMonth] = useState(initialMonth ?? DEMO_MONTH);
   const [monthCount, setMonthCount] = useLocalStorage<number>("ynab:budget:monthCount", 3);
   const [collapsed, setCollapsed] = useLocalStorage<Record<number, boolean>>("ynab:budget:collapsed", () => {
     const init: Record<number, boolean> = {};
@@ -215,57 +226,56 @@ export function BudgetApp({
     if (hidden) init[hidden.id] = true;
     return init;
   });
-  const [accountFilter, setAccountFilter] = useState<number | null>(null);
+  const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
+  const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [isPending, startTransition] = useTransition();
 
-  // URL routing synchronization
+  // URL routing synchronization — path-based nice URLs
   const updateUrl = useCallback((newView: View, newAccount: number | null, newMonth: string) => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    params.set("view", newView);
-    if (newAccount != null && newView === "transactions") {
-      params.set("account", String(newAccount));
-    } else {
-      params.delete("account");
-    }
+    let path: string;
     if (newView === "budget") {
-      params.set("month", newMonth);
+      path = `/budget/${newMonth}`;
+    } else if (newView === "transactions" && newAccount != null) {
+      path = `/transactions/${newAccount}`;
     } else {
-      params.delete("month");
+      path = `/${newView}`;
     }
-    const newUrl = window.location.pathname + "?" + params.toString();
-    if (window.location.search !== "?" + params.toString()) {
-      window.history.pushState(null, "", newUrl);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
     }
   }, []);
 
-  // Initialize from URL on mount
+  // Initialize from initial props on mount and listen for popstate
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const parseUrl = () => {
-      const params = new URLSearchParams(window.location.search);
-      const urlView = params.get("view") as View | null;
-      const urlAccount = params.get("account");
-      const urlMonth = params.get("month");
+    const parsePath = () => {
+      const path = window.location.pathname.replace(/\/$/, "");
+      const segments = path.split("/").filter(Boolean);
+      const validViews = ["budget", "reports", "calendar", "projections", "transactions", "recurring"] as const;
 
-      if (urlView && ["budget", "reports", "calendar", "projections", "transactions", "recurring", "settings"].includes(urlView)) {
-        setView(urlView);
+      if (segments.length >= 1 && (validViews as readonly string[]).includes(segments[0]!)) {
+        setView(segments[0] as View);
+      } else {
+        setView("budget");
       }
-      if (urlAccount) {
-        const accId = Number(urlAccount);
+
+      if (segments[0] === "transactions" && segments[1]) {
+        const accId = Number(segments[1]);
         if (!Number.isNaN(accId)) setAccountFilter(accId);
-      } else if (urlView !== "transactions") {
+      } else if (segments[0] !== "transactions") {
         setAccountFilter(null);
       }
-      if (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) {
-        setMonth(urlMonth);
+
+      if (segments[0] === "budget" && segments[1] && /^\d{4}-\d{2}$/.test(segments[1]!)) {
+        setMonth(segments[1]!);
       }
     };
 
-    parseUrl();
-    window.addEventListener("popstate", parseUrl);
-    return () => window.removeEventListener("popstate", parseUrl);
+    parsePath();
+    window.addEventListener("popstate", parsePath);
+    return () => window.removeEventListener("popstate", parsePath);
   }, []);
 
   const isBudgetView = view === "budget";
@@ -771,20 +781,6 @@ export function BudgetApp({
               onToggleActive={(id, active) => api.updateRecurring(id, { active })}
             />
           )}
-          {view === "settings" && (
-            <SettingsView
-              rules={data.renameRules ?? []}
-              onAdd={async (sourcePattern, targetPayee) => {
-                await api.addRenameRule?.(sourcePattern, targetPayee);
-              }}
-              onUpdate={async (id, sourcePattern, targetPayee) => {
-                await api.updateRenameRule?.(id, sourcePattern, targetPayee);
-              }}
-              onDelete={async (id) => {
-                await api.deleteRenameRule?.(id);
-              }}
-            />
-          )}
         </ErrorBoundary>
       </main>
 
@@ -806,9 +802,56 @@ export function BudgetApp({
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
           onClearOverdraft={clearOverdraft}
-          onOpenRenameRules={() => navigateView("settings")}
+          onOpenRenameRules={() => setShowSettingsOverlay(true)}
         />
       </ErrorBoundary>
+
+      {showSettingsOverlay && (
+        <div
+          className="fixed inset-0 z-50 y-scrim"
+          onClick={() => setShowSettingsOverlay(false)}
+        >
+          <div
+            className="absolute inset-0 flex flex-col"
+            style={{ background: "var(--y-row)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center justify-between px-5 py-3"
+              style={{
+                borderBottom: "1px solid var(--y-line)",
+                background: "var(--y-chrome-top)",
+              }}
+            >
+              <h1 className="text-[16px] font-bold" style={{ color: "var(--y-ink)" }}>
+                Settings
+              </h1>
+              <button
+                className="y-icon-btn"
+                onClick={() => setShowSettingsOverlay(false)}
+                aria-label="Close settings"
+                title="Close"
+              >
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <SettingsView
+                rules={data.renameRules ?? []}
+                onAdd={async (sourcePattern, targetPayee) => {
+                  await api.addRenameRule?.(sourcePattern, targetPayee);
+                }}
+                onUpdate={async (id, sourcePattern, targetPayee) => {
+                  await api.updateRenameRule?.(id, sourcePattern, targetPayee);
+                }}
+                onDelete={async (id) => {
+                  await api.deleteRenameRule?.(id);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal.kind === "addTransaction" && (
         <TransactionModal
@@ -875,6 +918,13 @@ export function BudgetApp({
           onSave={async (v) => {
             const { id, ...rest } = v;
             if (id) await api.updateRecurring(id, rest);
+            setModal({ kind: "none" });
+          }}
+          onPost={async (id) => {
+            const today = todayISO();
+            const r = data.recurring.find((x) => x.id === id);
+            const isFuture = r ? r.nextDate > today : false;
+            await api.postRecurring(id, isFuture ? today : undefined);
             setModal({ kind: "none" });
           }}
         />
