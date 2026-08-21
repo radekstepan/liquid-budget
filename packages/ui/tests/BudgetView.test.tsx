@@ -396,22 +396,20 @@ describe("BudgetView", () => {
       expect(screen.queryByRole("group", { name: /months shown/i })).not.toBeInTheDocument();
     });
 
-    it("makes non-anchor months read-only", () => {
+    it("makes every visible month's Budgeted cell editable", () => {
       renderView({
         monthCount: 3,
         visibleMonths: ["2026-05", "2026-06", "2026-07"],
         budgets: [monthBudget(), monthBudget(), monthBudget()],
         currentMonth: "2026-06",
       });
-      // The anchor (Jun) cell renders the editable button.
+      // All three months render the editable amount button now — the
+      // Budgeted column is editable for any month in the window.
       const groceriesRow = screen
         .getAllByRole("row")
         .find((r) => r.getAttribute("data-cat-row") !== null && within(r).queryByText("Groceries"))!;
       const editableBtns = within(groceriesRow).getAllByRole("button", { name: /\$100\.00/ });
-      // Only one editable Budgeted button (the anchor month); the other two months show read-only spans.
-      expect(editableBtns).toHaveLength(1);
-      const readonlySpans = within(groceriesRow).getAllByText("$100.00");
-      expect(readonlySpans.length).toBeGreaterThanOrEqual(2);
+      expect(editableBtns).toHaveLength(3);
     });
 
     it("emits onAssign against the right month-key from anchor vs neighbour", () => {
@@ -426,12 +424,22 @@ describe("BudgetView", () => {
       const groceriesRow = screen
         .getAllByRole("row")
         .find((r) => r.getAttribute("data-cat-row") !== null && within(r).queryByText("Groceries"))!;
-      const editBtn = within(groceriesRow).getByRole("button", { name: "$100.00" });
-      fireEvent.click(editBtn);
-      const input = groceriesRow.querySelector("input.y-inline-amt")!;
+      // Every visible month is editable — index 1 is the anchor (Jun),
+      // index 2 is the neighbour month (Jul).
+      const editBtns = within(groceriesRow).getAllByRole("button", { name: "$100.00" });
+      expect(editBtns).toHaveLength(3);
+
+      fireEvent.click(editBtns[1]!);
+      let input = groceriesRow.querySelector("input.y-inline-amt")!;
       fireEvent.change(input, { target: { value: "250" } });
       fireEvent.keyDown(input, { key: "Enter" });
       expect(onAssign).toHaveBeenCalledWith(10, 25000, "2026-06");
+
+      fireEvent.click(editBtns[2]!);
+      input = groceriesRow.querySelector("input.y-inline-amt")!;
+      fireEvent.change(input, { target: { value: "300" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onAssign).toHaveBeenCalledWith(10, 30000, "2026-07");
     });
   });
 

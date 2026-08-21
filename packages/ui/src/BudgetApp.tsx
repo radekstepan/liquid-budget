@@ -497,6 +497,7 @@ export function BudgetApp({
       startTransition(() => {
         setAccountFilter(null);
         setView(v);
+        setShowSettingsOverlay(false);
         updateUrl(v, null, month);
       });
     },
@@ -508,6 +509,7 @@ export function BudgetApp({
       startTransition(() => {
         const next = accountFilter === id ? null : id;
         setAccountFilter(next);
+        setShowSettingsOverlay(false);
         updateUrl("transactions", next, month);
         setView("transactions");
       });
@@ -694,7 +696,7 @@ export function BudgetApp({
         dueByAccount={dueByAccount}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
+      <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
         <ErrorBoundary name={`${view.charAt(0).toUpperCase() + view.slice(1)} View`}>
           {view === "budget" && (
             <BudgetView
@@ -785,6 +787,53 @@ export function BudgetApp({
             />
           )}
         </ErrorBoundary>
+
+        {showSettingsOverlay && (
+          <div
+            className="absolute inset-0 z-50 y-scrim"
+            onClick={() => setShowSettingsOverlay(false)}
+          >
+            <div
+              className="absolute inset-0 flex flex-col"
+              style={{ background: "var(--y-row)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="flex items-center justify-between px-5 py-3"
+                style={{
+                  borderBottom: "1px solid var(--y-line)",
+                  background: "var(--y-chrome-top)",
+                }}
+              >
+                <h1 className="text-[16px] font-bold" style={{ color: "var(--y-ink)" }}>
+                  Settings
+                </h1>
+                <button
+                  className="y-icon-btn"
+                  onClick={() => setShowSettingsOverlay(false)}
+                  aria-label="Close settings"
+                  title="Close"
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <SettingsView
+                  rules={data.renameRules ?? []}
+                  onAdd={async (sourcePattern, targetPayee) => {
+                    await api.addRenameRule?.(sourcePattern, targetPayee);
+                  }}
+                  onUpdate={async (id, sourcePattern, targetPayee) => {
+                    await api.updateRenameRule?.(id, sourcePattern, targetPayee);
+                  }}
+                  onDelete={async (id) => {
+                    await api.deleteRenameRule?.(id);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       <ErrorBoundary name="Inspector">
@@ -808,53 +857,6 @@ export function BudgetApp({
           onOpenRenameRules={() => setShowSettingsOverlay(true)}
         />
       </ErrorBoundary>
-
-      {showSettingsOverlay && (
-        <div
-          className="fixed inset-0 z-50 y-scrim"
-          onClick={() => setShowSettingsOverlay(false)}
-        >
-          <div
-            className="absolute inset-0 flex flex-col"
-            style={{ background: "var(--y-row)" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="flex items-center justify-between px-5 py-3"
-              style={{
-                borderBottom: "1px solid var(--y-line)",
-                background: "var(--y-chrome-top)",
-              }}
-            >
-              <h1 className="text-[16px] font-bold" style={{ color: "var(--y-ink)" }}>
-                Settings
-              </h1>
-              <button
-                className="y-icon-btn"
-                onClick={() => setShowSettingsOverlay(false)}
-                aria-label="Close settings"
-                title="Close"
-              >
-                <Icon name="x" size={13} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <SettingsView
-                rules={data.renameRules ?? []}
-                onAdd={async (sourcePattern, targetPayee) => {
-                  await api.addRenameRule?.(sourcePattern, targetPayee);
-                }}
-                onUpdate={async (id, sourcePattern, targetPayee) => {
-                  await api.updateRenameRule?.(id, sourcePattern, targetPayee);
-                }}
-                onDelete={async (id) => {
-                  await api.deleteRenameRule?.(id);
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
       {modal.kind === "addTransaction" && (
         <TransactionModal

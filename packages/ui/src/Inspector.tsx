@@ -179,7 +179,7 @@ export const Inspector = memo(function Inspector({
                   }}
                   className="y-menu-item"
                 >
-                  <Icon name="gear" size={12} /> Rename rules
+                  <Icon name="az" size={12} /> Rename rules
                 </button>
               )}
               {onAnalyzeDuplicates && (

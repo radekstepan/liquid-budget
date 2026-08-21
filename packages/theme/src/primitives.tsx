@@ -131,14 +131,40 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
     ),
     gear: (
       <>
-        <circle cx="8" cy="8" r="2.4" strokeWidth="1.4" />
-        <path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6 11 5M5 11l-1.4 1.4" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="8" r="4.6" strokeWidth="1.5" />
+        <circle cx="8" cy="8" r="1.45" strokeWidth="1.3" />
+        <path
+          d="M13.8 8h1.5M12.1 12.1l1.1 1.1M8 13.8v1.5M3.9 12.1l-1.1 1.1M2.2 8h-1.5M3.9 3.9l-1.1-1.1M8 2.2V0.7M12.1 3.9l1.1-1.1"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+        />
       </>
     ),
     cog: (
       <>
-        <circle cx="8" cy="8" r="2.8" strokeWidth="1.5" />
-        <path d="M8 1.2v2.5M8 12.3v2.5M1.2 8h2.5M12.3 8h2.5M3.2 3.2l1.8 1.8M11 11l1.8 1.8M12.8 3.2 11 5M5 11l-1.8 1.8" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="8" cy="8" r="4.6" strokeWidth="1.5" />
+        <circle cx="8" cy="8" r="1.45" strokeWidth="1.3" />
+        <path
+          d="M13.8 8h1.5M12.1 12.1l1.1 1.1M8 13.8v1.5M3.9 12.1l-1.1 1.1M2.2 8h-1.5M3.9 3.9l-1.1-1.1M8 2.2V0.7M12.1 3.9l1.1-1.1"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+    az: (
+      <>
+        <path
+          d="M4.8 12.4 7.4 4.6l2.6 7.8M6.1 9.4h2.6"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M10.9 4.6h3.7M10.9 4.6 14.6 12.4M10.9 12.4h3.7"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </>
     ),
     reconcile: (

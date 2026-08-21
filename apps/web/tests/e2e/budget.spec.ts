@@ -182,6 +182,38 @@ test("Row 2's first Budgeted cell has a 1px hairline matching Row 1 and the body
   expect(w).toBe("1px");
 });
 
+test("multi-month header has no seam: month labels are 27px and the sub-header sticks at exactly 27px", async ({ page }) => {
+  // Default is 3 months, so the two-row header is rendered. The month-label
+  // row must be exactly 27px tall (border-box, incl. its 1px bottom border)
+  // and the Budgeted/Outflows/Balance sub-row must stick at top: 27px so
+  // nothing shines through the seam and the Category cell (rowSpan=2)
+  // bottoms out flush with the sub-row.
+  const monthLabel = page.locator("th.y-table-th--month-label").first();
+  await expect(monthLabel).toBeVisible();
+  const h = await monthLabel.evaluate((el) => el.getBoundingClientRect().height);
+  expect(h).toBe(27);
+
+  const subTop = await page
+    .locator("table.y-table thead tr:nth-child(2) th")
+    .first()
+    .evaluate((el) => getComputedStyle(el).top);
+  expect(subTop).toBe("27px");
+
+  // The rowSpan=2 Category cell ends flush with the sub-row's bottom.
+  const catCell = page
+    .locator("table.y-table thead th.y-table-td--sticky-cat")
+    .first();
+  const catBottom = await catCell.evaluate((el) => el.getBoundingClientRect().bottom);
+  const firstSub = await page
+    .locator("table.y-table thead tr:nth-child(2) th")
+    .first()
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.bottom;
+    });
+  expect(catBottom - firstSub).toBe(0);
+});
+
 test("month-count control switches the budget to N side-by-side month columns", async ({ page }) => {
   // Default is 3 months. The header shows three "Budgeted" sub-headers,
   // one per visible month, plus per-month labels (May/Jun/Jul 2026).
