@@ -207,12 +207,10 @@ test("split transactions render parent ClearedFlag and no subtransaction rows in
   // — so for a -$20 parent the children are also negative.
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-20");
-  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: /Category/i,
-  });
-  await subCategoryTriggers.nth(0).click();
+  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryTriggers.nth(0).click();
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(2).click();
   await allDecimals.nth(1).fill("-12");
   await allDecimals.nth(2).fill("-8");

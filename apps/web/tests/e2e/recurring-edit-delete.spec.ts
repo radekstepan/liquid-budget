@@ -137,8 +137,8 @@ test("adding a recurring Transfer renders the source → dest hint", async ({ pa
   // The Transfer-mode payee input is the auto-generated one
   // (Modals.tsx:834) — leave it blank so the server fills in
   // "Transfer : <dest>".
-  const destTrigger = modal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
-  await destTrigger.click();
+  const destInput = modal.locator('input[placeholder="Select account…"]').first();
+  await destInput.click();
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   const destOption = options.nth(1);
@@ -189,12 +189,10 @@ test("adding a recurring Split enables Save when children balance", async ({ pag
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-30");
 
-  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: /Category/i,
-  });
-  await subCategoryTriggers.nth(0).click();
+  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryTriggers.nth(0).click();
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Off by a cent — Save should be disabled (Modals.tsx:720).

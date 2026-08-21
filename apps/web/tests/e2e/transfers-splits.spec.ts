@@ -37,9 +37,9 @@ test("creates a transfer between two accounts", async ({ page }) => {
   await modal.locator('input[placeholder^="Transfer"]').fill(uniquePayee);
   // Negative amount = outflow from source.
   await modal.locator('input[inputmode="decimal"]').first().fill("-75.00");
-  // Pick a destination account.
-  const destTrigger = modal.locator(".y-select-trigger").filter({ hasText: /select account/i }).first();
-  await destTrigger.click();
+  // Pick a destination account (the searchable "Transfer to" field).
+  const destInput = modal.locator('input[placeholder="Select account…"]').first();
+  await destInput.click();
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   const destOption = options.nth(1);
@@ -74,12 +74,10 @@ test("creates a 2-way split and renders in register with children visible only i
   await allDecimals.nth(0).fill("-100");
 
   // Pick categories and amounts for the two sub-rows.
-  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: /Category/i,
-  });
-  await subCategoryTriggers.nth(0).click();
+  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryTriggers.nth(0).click();
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Children carry their typed sign and must sum to the signed parent
@@ -121,12 +119,10 @@ test("split editor disables save when children don't sum to the parent total", a
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-100");
 
-  const subCategoryTriggers = modal.locator(".y-select-trigger").filter({
-    hasText: /Category/i,
-  });
-  await subCategoryTriggers.nth(0).click();
+  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryTriggers.nth(0).click();
+  await subCategoryInputs.nth(0).click();
   await page.locator('.y-dropdown button[role="option"]').nth(2).click();
 
   // Off by a cent.

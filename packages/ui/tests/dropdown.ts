@@ -1,4 +1,4 @@
-import { screen, fireEvent, within } from "@testing-library/react";
+import { screen, fireEvent, within, act } from "@testing-library/react";
 
 /**
  * Test helpers for the custom <Select> dropdown component.
@@ -88,6 +88,66 @@ export function pickPlaceholderDropdownByIndexByValue(
   const target = options.find((o) => o.getAttribute("data-value") === value);
   if (!target) {
     throw new Error(`No option with value="${value}" in dropdown`);
+  }
+  fireEvent.click(target);
+}
+
+/* -------------------------------------------------- searchable <Select>
+ * A searchable select renders its search input in the field position (it is
+ * the trigger). Focus it to open the dropdown, then pick an option.
+ */
+
+/** Focus the inline search input of a searchable <Select> (opens the dropdown). */
+export function openSearchable(label: string | RegExp): HTMLInputElement {
+  const input = screen.getByRole("textbox", { name: label });
+  act(() => {
+    input.focus();
+  });
+  return input;
+}
+
+/** Open a searchable <Select> by its accessible label and pick an option by value. */
+export function pickFromOpenSearchableByValue(
+  label: string | RegExp,
+  value: string
+): void {
+  openSearchable(label);
+  const list = screen.getByRole("listbox");
+  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
+  const target = options.find((o) => o.getAttribute("data-value") === value);
+  if (!target) {
+    throw new Error(
+      `No option with value="${value}" in searchable dropdown (label=${String(label)})`
+    );
+  }
+  fireEvent.click(target);
+}
+
+/**
+ * Pick from the n-th searchable input that still shows the given placeholder
+ * (i.e. has no committed selection yet), and select an option by value.
+ * Used for split-transaction sub-row selectors.
+ */
+export function pickPlaceholderSearchableByIndexByValue(
+  placeholderLabel: string | RegExp,
+  index: number,
+  value: string
+): void {
+  const inputs = screen.getAllByPlaceholderText(placeholderLabel) as HTMLInputElement[];
+  const input = inputs[index];
+  if (!input) {
+    throw new Error(
+      `No "${String(placeholderLabel)}" searchable input at index ${index} (found ${inputs.length})`
+    );
+  }
+  act(() => {
+    input.focus();
+  });
+  const list = screen.getByRole("listbox");
+  const options = within(list).getAllByRole("option") as HTMLButtonElement[];
+  const target = options.find((o) => o.getAttribute("data-value") === value);
+  if (!target) {
+    throw new Error(`No option with value="${value}" in searchable dropdown`);
   }
   fireEvent.click(target);
 }

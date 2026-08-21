@@ -407,6 +407,7 @@ export function TransactionModal({
                 value={accountId}
                 onChange={(v) => setAccountId(Number(v))}
                 className="w-full"
+                searchable
                 disabled={mode === "transfer"}
               >
                 {availableAccounts.map((a) => (
@@ -1166,6 +1167,7 @@ export function RecurringModal({
             value={accountId}
             onChange={(v) => setAccountId(Number(v))}
             className="w-full"
+            searchable
             disabled={mode === "transfer"}
           >
             {accounts.map((a) => (

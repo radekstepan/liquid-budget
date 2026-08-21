@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReconcileModal, type ReconcileModalState } from "../src/ReconcileModal.js";
 import type { Category, CategoryGroup } from "@ynab/logic";
-import { openDropdown } from "./dropdown.js";
+import { openSearchable } from "./dropdown.js";
 
 const state: ReconcileModalState = {
   accountId: 7,
@@ -109,14 +109,15 @@ describe("ReconcileModal", () => {
     });
   });
 
-  it("renders the adjustment category dropdown searchable with group headings", () => {
+  it("renders the adjustment category search input in the field position with group headings", () => {
     renderModal();
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "1000" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /^category$/i }));
+    const input = openSearchable(/^category$/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /filter options/i })).toBeInTheDocument();
+    expect(list).not.toContainElement(input);
+    expect(input).toHaveFocus();
   });
 
   it("resets the armed state when the statement input changes again", () => {
@@ -146,7 +147,7 @@ describe("ReconcileModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
-    openDropdown(/category/i);
+    openSearchable(/category/i);
     const list = screen.getByRole("listbox");
     const optionEls = within(list).getAllByRole("option") as HTMLButtonElement[];
     const labels = optionEls.map(
@@ -160,7 +161,10 @@ describe("ReconcileModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
-    expect(screen.getByText("No categories available")).toBeInTheDocument();
+    // With no eligible categories the field shows the notice as its value.
+    expect(screen.getByRole("textbox", { name: /^category$/i })).toHaveValue(
+      "No categories available"
+    );
     expect(screen.getByRole("button", { name: /mark for adjustment/i })).toBeDisabled();
   });
 

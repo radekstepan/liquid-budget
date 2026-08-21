@@ -317,6 +317,10 @@ export const Select: React.FC<SelectProps> = ({
   const listRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // When the dropdown is closed by a commit/Escape we restore focus to the
+  // inline search input programmatically; that focus event must not reopen
+  // the dropdown, so it is suppressed for that one tick.
+  const suppressOpenRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const [query, setQuery] = useState("");
@@ -344,6 +348,15 @@ export const Select: React.FC<SelectProps> = ({
 
   const selectedLabel = items[selectedIdx]?.label ?? "";
 
+  const refocusTrigger = () => {
+    suppressOpenRef.current = true;
+    requestAnimationFrame(() => {
+      const el = searchable ? searchRef.current : triggerRef.current;
+      el?.focus();
+      suppressOpenRef.current = false;
+    });
+  };
+
   // Filter against the open-time snapshot so the visible list stays stable
   // for the lifetime of the open dropdown, even if the parent re-renders
   // (e.g. an account name is edited elsewhere).
@@ -364,9 +377,9 @@ export const Select: React.FC<SelectProps> = ({
   }, [filteredItems]);
 
   const computePos = () => {
-    const btn = triggerRef.current;
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
+    const el = searchable ? searchRef.current : triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
     const estimatedH = Math.min(280, items.length * 24 + 8);
     const spaceBelow = window.innerHeight - rect.bottom;
     const placeAbove = spaceBelow < estimatedH && rect.top > spaceBelow;
@@ -407,6 +420,8 @@ export const Select: React.FC<SelectProps> = ({
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       if (triggerRef.current?.contains(t)) return;
+      // In searchable mode the inline search input is the trigger.
+      if (searchRef.current?.contains(t)) return;
       if (listRef.current?.contains(t)) return;
       setOpen(false);
     };
@@ -414,7 +429,7 @@ export const Select: React.FC<SelectProps> = ({
       if (e.key === "Escape") {
         e.preventDefault();
         setOpen(false);
-        triggerRef.current?.focus();
+        refocusTrigger();
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -427,15 +442,12 @@ export const Select: React.FC<SelectProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    // In searchable mode the search input is the trigger and already has
+    // focus, so keep it there (the user filters by typing directly). Only
+    // rove focus to the active option for the non-searchable listbox.
+    if (searchable) return;
     const id = requestAnimationFrame(() => {
-      // When searchable, the user types into the search box first; focus it
-      // so they can immediately start filtering. Otherwise focus the first
-      // option as before so keyboard navigation is ready.
-      if (searchable) {
-        searchRef.current?.focus();
-      } else {
-        itemRefs.current[activeIdx]?.focus();
-      }
+      itemRefs.current[activeIdx]?.focus();
     });
     return () => cancelAnimationFrame(id);
   }, [open, activeIdx, searchable]);
@@ -453,7 +465,7 @@ export const Select: React.FC<SelectProps> = ({
     setOpen(false);
     // Defer focus until after React commits the close, otherwise the trigger
     // can be unmounted (parent re-rendered the whole toolbar) before we focus.
-    requestAnimationFrame(() => triggerRef.current?.focus());
+    refocusTrigger();
   };
 
   const onKeyDownTrigger = (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -464,12 +476,69 @@ export const Select: React.FC<SelectProps> = ({
     }
   };
 
+  const onFocusSearch = () => {
+    if (suppressOpenRef.current) return;
+    if (disabled) return;
+    setOpen(true);
+    setQuery("");
+  };
+
+  // Keyboard handling for the inline search input (the searchable trigger).
+  // Typing filters the options; navigation/commit keys behave like the
+  // listbox's handler for the non-searchable variant.
+  const onKeyDownSearchable = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    const list = filteredItems;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => {
+        if (list.length === 0) return 0;
+        for (let step = 0; step < list.length; step++) {
+          const next = (i + 1 + step) % list.length;
+          if (!list[next]?.disabled) return next;
+        }
+        return i;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => {
+        if (list.length === 0) return 0;
+        for (let step = 0; step < list.length; step++) {
+          const next = (i - 1 - step + list.length) % list.length;
+          if (!list[next]?.disabled) return next;
+        }
+        return i;
+      });
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(list.findIndex((it) => !it.disabled));
+    } else if (e.key === "End") {
+      e.preventDefault();
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (!list[i]?.disabled) {
+          setActiveIdx(i);
+          break;
+        }
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      commit(activeIdx);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  };
+
   const onKeyDownList = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // When focus is in the search input, only ArrowDown/Up should leave the
-    // input and move into the option list. All other printable keystrokes
-    // belong to the search field, not the listbox's letter-jump handler.
-    const inSearch = searchable && e.target === searchRef.current;
-    if (inSearch && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    // Searchable selects keep focus in the inline search input (handled by
+    // onKeyDownSearchable above), so this handler only serves the
+    // non-searchable listbox whose option buttons hold focus.
     const list = filteredItems;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -523,27 +592,46 @@ export const Select: React.FC<SelectProps> = ({
 
   return (
     <div
-      className={cx("y-select-wrap", className)}
+      className={cx("y-select-wrap", searchable && "y-select-wrap--searchable", className)}
       data-open={open ? "true" : undefined}
       {...rest}
     >
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={labelForAria}
-        disabled={disabled}
-        onClick={() => !disabled && setOpen((o) => !o)}
-        onKeyDown={onKeyDownTrigger}
-        className={cx("y-select", "y-select-trigger", sizeClass)}
-        style={{
-          opacity: disabled ? 0.5 : 1,
-          cursor: disabled ? "default" : "pointer",
-        }}
-      >
-        <span className="y-select-trigger-label">{selectedLabel}</span>
-      </button>
+      {searchable ? (
+        <input
+          ref={searchRef}
+          type="text"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={labelForAria}
+          disabled={disabled}
+          value={open ? query : selectedLabel}
+          placeholder={selectedLabel || undefined}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={onFocusSearch}
+          onKeyDown={onKeyDownSearchable}
+          autoComplete="off"
+          spellCheck={false}
+          className={cx("y-input", "y-select-search", sizeClass)}
+        />
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={labelForAria}
+          disabled={disabled}
+          onClick={() => !disabled && setOpen((o) => !o)}
+          onKeyDown={onKeyDownTrigger}
+          className={cx("y-select", "y-select-trigger", sizeClass)}
+          style={{
+            opacity: disabled ? 0.5 : 1,
+            cursor: disabled ? "default" : "pointer",
+          }}
+        >
+          <span className="y-select-trigger-label">{selectedLabel}</span>
+        </button>
+      )}
       {open && mounted &&
         createPortal(
           <div
@@ -563,20 +651,6 @@ export const Select: React.FC<SelectProps> = ({
               zIndex: 60,
             }}
           >
-            {searchable && (
-              <input
-                ref={searchRef}
-                type="text"
-                className="y-input y-search y-dropdown-search"
-                placeholder="Search…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
-                autoComplete="off"
-                spellCheck={false}
-                aria-label="Filter options"
-              />
-            )}
             {filteredItems.length === 0 && searchable ? (
               <span className="y-dropdown-empty" role="presentation">
                 No matches

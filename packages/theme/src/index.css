@@ -821,13 +821,15 @@ body::after {
   font-size: 11px;
   line-height: 1;
 }
-.y-dropdown-search {
-  display: block;
-  width: calc(100% - 6px);
-  margin: 2px 0 4px;
-  font-size: 11.5px;
-  border-bottom: 1px solid #e0e0dc;
-  border-radius: 3px 3px 0 0;
+/* Searchable selects render their search input in the field position
+   (instead of inside the dropdown popover), so it looks like the SearchList
+   combobox: a plain text input with no chevron affordance. */
+.y-select-wrap--searchable::after {
+  display: none;
+}
+.y-select-search {
+  width: 100%;
+  cursor: text;
 }
 .y-dropdown-empty {
   display: block;
