@@ -1108,18 +1108,26 @@ export const Pill: React.FC<{
 export const balanceTone = (n: number): "green" | "red" | "grey" =>
   n > 0 ? "green" : n < 0 ? "red" : "grey";
 
-/* -------------------------------------------------- Bars */
-export const Bar: React.FC<{ pct: number; tone?: "green" | "orange" | "red" | "blue" }> = ({
-  pct,
-  tone = "green",
-}) => (
-  <div className="y-bar">
-    <div
-      className={cx("y-bar-fill", tone !== "green" && `y-bar-fill--${tone}`)}
-      style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
-    />
-  </div>
-);
+export const Bar: React.FC<{
+  pct: number;
+  tone?: "green" | "orange" | "red" | "blue";
+  truncated?: boolean;
+}> = ({ pct, tone = "green", truncated = false }) => {
+  const isTruncated = truncated || pct >= 100;
+  const displayPct = isTruncated ? Math.min(96, Math.max(0, pct)) : Math.max(0, Math.min(100, pct));
+  return (
+    <div className="y-bar">
+      <div
+        className={cx(
+          "y-bar-fill",
+          tone !== "green" && `y-bar-fill--${tone}`,
+          isTruncated && "y-bar-truncated"
+        )}
+        style={{ width: `${displayPct}%` }}
+      />
+    </div>
+  );
+};
 
 /* -------------------------------------------------- Notice */
 export const Notice: React.FC<{

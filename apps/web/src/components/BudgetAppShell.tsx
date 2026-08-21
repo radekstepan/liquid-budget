@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { BudgetData, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary } from "@ynab/logic";
+import type { BudgetData, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -136,17 +136,18 @@ export function BudgetAppShell() {
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
-        const newTx = {
+        const newTx: Transaction = {
           id: tempId,
           accountId: t.accountId,
           categoryId: t.categoryId,
           date: t.date,
           payee: t.payee,
-          memo: t.memo,
+          memo: t.memo ?? "",
           amount: t.amount.toFixed(2),
           status: t.status,
+          flagColor: t.flagColor ?? null,
           transferAccountId: t.transferAccountId ?? null,
-          parentId: t.parentId ?? null,
+          parentId: null,
         };
         return { ...prev, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
       });
@@ -376,6 +377,52 @@ export function BudgetAppShell() {
           await jsonReq(url, { method: "POST" });
           await reload();
         }, { success: "Scheduled transaction entered.", failure: "Failed to post recurring transaction." })
+      );
+    },
+    bulkPostRecurring: async (ids: number[], date?: string) => {
+      return withSync(() =>
+        runMutation(async () => {
+          await jsonReq("/api/recurring", {
+            method: "POST",
+            body: JSON.stringify({ action: "bulk-post", ids, date }),
+          });
+          await reload();
+        }, { success: `Entered ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to enter scheduled transactions." })
+      );
+    },
+    bulkUpdateRecurring: async (ids: number[], patch: { flagColor?: any; active?: boolean }) => {
+      return withSync(() =>
+        runMutation(async () => {
+          await jsonReq("/api/recurring", {
+            method: "PATCH",
+            body: JSON.stringify({ action: "bulk-update", ids, patch }),
+          });
+          await reload();
+        }, { success: `Updated ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update scheduled transactions." })
+      );
+    },
+    bulkDeleteRecurring: async (ids: number[]) => {
+      let snapshot: BudgetData | null = null;
+      setData((prev) => {
+        if (!prev) return prev;
+        snapshot = prev;
+        const idSet = new Set(ids);
+        const recurring = prev.recurring.filter((r) => !idSet.has(r.id));
+        return { ...prev, recurring, budgetIndex: undefined };
+      });
+      return withSync(() =>
+        runMutation(async () => {
+          try {
+            await jsonReq("/api/recurring", {
+              method: "DELETE",
+              body: JSON.stringify({ ids }),
+            });
+            await reload();
+          } catch (e) {
+            if (snapshot) setData(snapshot);
+            throw e;
+          }
+        }, { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." })
       );
     },
     saveCategory: async (groupId, categoryId, v) => {

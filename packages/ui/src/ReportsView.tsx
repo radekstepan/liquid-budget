@@ -16,6 +16,7 @@ import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 import { SpendingTrendsReport } from "./SpendingTrendsReport.js";
+import { useLocalStorage } from "./useLocalStorage.js";
 
 type SubTab = "overview" | "trends" | "spending" | "networth";
 
@@ -58,7 +59,7 @@ export const ReportsView = memo(function ReportsView({
 
   const [startMonth, setStartMonth] = useState<string>(defaultStart);
   const [endMonth, setEndMonth] = useState<string>(defaultEnd);
-  const [sub, setSub] = useState<SubTab>("overview");
+  const [sub, setSub] = useLocalStorage<SubTab>("ynab:reports:subTab", "overview");
 
   const { year: startYear, month0: startMonth0 } = parseMonthKey(startMonth);
   const { year: endYear, month0: endMonth0 } = parseMonthKey(endMonth);

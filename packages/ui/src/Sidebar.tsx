@@ -11,6 +11,7 @@ export type View =
   | "calendar"
   | "projections"
   | "transactions"
+  | "recurring"
   | "settings";
 
 type NavItem = { key: View; label: string; icon: string };
@@ -19,6 +20,7 @@ const NAV_TOP: NavItem[] = [
   { key: "reports", label: "Reports", icon: "chart" },
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "projections", label: "Projections", icon: "projections" },
+  { key: "recurring", label: "Recurring", icon: "clock" },
   { key: "settings", label: "Settings", icon: "gear" },
 ];
 

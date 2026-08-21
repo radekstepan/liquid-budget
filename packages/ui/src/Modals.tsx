@@ -302,24 +302,32 @@ export function TransactionModal({
       footer={
         confirmingDelete ? (
           <>
-            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
-              Cancel
-            </Btn>
-            <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? "Deleting…" : "Yes, delete it"}
-            </Btn>
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                Cancel
+              </Btn>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? "Deleting…" : "Yes, delete it"}
+              </Btn>
+            </div>
           </>
         ) : (
           <>
-            <Btn onClick={onClose}>Cancel</Btn>
-            {isEdit && onDelete && (
-              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete…
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={onClose}>Cancel</Btn>
+              {isEdit && onDelete && (
+                <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                  Delete…
+                </Btn>
+              )}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn variant="primary" onClick={save} disabled={!canSave}>
+                {initial ? "Save Changes" : "Save Transaction"}
               </Btn>
-            )}
-            <Btn variant="primary" onClick={save} disabled={!canSave}>
-              {initial ? "Save Changes" : "Save Transaction"}
-            </Btn>
+            </div>
           </>
         )
       }
@@ -734,39 +742,47 @@ export function CategoryModal({
       footer={
         confirmingDelete ? (
           <>
-            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
-              Cancel
-            </Btn>
-            <Btn
-              variant="danger"
-              onClick={confirmDelete}
-              disabled={deleting || (transactionCount > 0 && !moveToCategoryId)}
-            >
-              {deleting ? "Deleting…" : "Yes, delete it"}
-            </Btn>
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                Cancel
+              </Btn>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn
+                variant="danger"
+                onClick={confirmDelete}
+                disabled={deleting || (transactionCount > 0 && !moveToCategoryId)}
+              >
+                {deleting ? "Deleting…" : "Yes, delete it"}
+              </Btn>
+            </div>
           </>
         ) : (
           <>
-            <Btn onClick={onClose}>Cancel</Btn>
-            {initial && onDelete && (
-              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete…
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={onClose}>Cancel</Btn>
+              {initial && onDelete && (
+                <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                  Delete…
+                </Btn>
+              )}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn
+                variant="primary"
+                onClick={() =>
+                  name.trim() &&
+                  onSave({
+                    name: name.trim(),
+                    goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
+                    carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
+                    overspendCarriesOver,
+                  })
+                }
+              >
+                Save
               </Btn>
-            )}
-            <Btn
-              variant="primary"
-              onClick={() =>
-                name.trim() &&
-                onSave({
-                  name: name.trim(),
-                  goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
-                  carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
-                  overspendCarriesOver,
-                })
-              }
-            >
-              Save
-            </Btn>
+            </div>
           </>
         )
       }
@@ -890,13 +906,17 @@ export function GroupModal({
       onClose={onClose}
       footer={
         <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn
-            variant="primary"
-            onClick={() => name.trim() && onSave(name.trim())}
-          >
-            Save
-          </Btn>
+          <div className="flex items-center gap-2 mr-auto">
+            <Btn onClick={onClose}>Cancel</Btn>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Btn
+              variant="primary"
+              onClick={() => name.trim() && onSave(name.trim())}
+            >
+              Save
+            </Btn>
+          </div>
         </>
       }
     >
@@ -932,10 +952,12 @@ export function RecurringModal({
     accountId: number;
     categoryId: number | null;
     payee: string;
+    memo?: string;
     amount: number;
     frequency: string;
     nextDate: string;
     active: boolean;
+    flagColor?: TransactionFlagColor | null;
     transferAccountId?: number | null;
     subTransactions?: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
   }) => void;
@@ -959,6 +981,8 @@ export function RecurringModal({
   );
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [payee, setPayee] = useState(initial?.payee ?? "");
+  const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(initial?.flagColor ?? null);
   const [amount, setAmount] = useState(initial ? initialAmt.toFixed(2) : "");
   const [frequency, setFrequency] = useState(initial?.frequency ?? "monthly");
   const [nextDate, setNextDate] = useState(initial?.nextDate ?? todayISO());
@@ -1035,10 +1059,12 @@ export function RecurringModal({
         accountId,
         categoryId: null,
         payee: payee.trim() || `Transfer : ${destName}`,
+        memo: memo.trim(),
         amount: amountCents,
         frequency,
         nextDate,
         active,
+        flagColor,
         transferAccountId: Number(transferAccountId),
       });
       return;
@@ -1052,10 +1078,12 @@ export function RecurringModal({
         accountId,
         categoryId: null,
         payee: payee.trim(),
+        memo: memo.trim(),
         amount: amountCents,
         frequency,
         nextDate,
         active,
+        flagColor,
         subTransactions: subRows.map((r) => ({
           categoryId: r.categoryId ?? null,
           transferAccountId: r.transferAccountId ?? null,
@@ -1073,10 +1101,12 @@ export function RecurringModal({
       accountId,
       categoryId: categoryId === "" ? null : Number(categoryId),
       payee: payee.trim(),
+      memo: memo.trim(),
       amount: amountCents,
       frequency,
       nextDate,
       active,
+      flagColor,
     });
   };
 
@@ -1099,10 +1129,14 @@ export function RecurringModal({
       onClose={onClose}
       footer={
         <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={save} disabled={!canSave}>
-            {initial ? "Save Changes" : "Save"}
-          </Btn>
+          <div className="flex items-center gap-2 mr-auto">
+            <Btn onClick={onClose}>Cancel</Btn>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Btn variant="primary" onClick={save} disabled={!canSave}>
+              {initial ? "Save Changes" : "Save"}
+            </Btn>
+          </div>
         </>
       }
     >
@@ -1402,6 +1436,25 @@ export function RecurringModal({
         />
       </Field>
 
+      {mode !== "split" && (
+        <Field label="Memo">
+          <TextField
+            value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            placeholder="Optional notes"
+            className={inputClass}
+          />
+        </Field>
+      )}
+
+      <div className="pt-1 flex items-center gap-2">
+        <span className="y-label">Flag</span>
+        <FlagPicker
+          value={flagColor}
+          onChange={(c) => setFlagColor(c)}
+        />
+      </div>
+
       <div className="pt-1">
         <Checkbox
           checked={active}
@@ -1516,41 +1569,53 @@ export function AccountModal({
       footer={
         confirmingDelete ? (
           <>
-            <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
-              Cancel
-            </Btn>
-            <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? "Deleting…" : "Yes, delete it"}
-            </Btn>
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                Cancel
+              </Btn>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? "Deleting…" : "Yes, delete it"}
+              </Btn>
+            </div>
           </>
         ) : confirmingArchive ? (
           <>
-            <Btn onClick={() => setConfirmingArchive(false)} disabled={archiving}>
-              Cancel
-            </Btn>
-            <Btn variant="primary" onClick={confirmArchive} disabled={archiving}>
-              {archiving ? "Archiving…" : "Yes, archive it"}
-            </Btn>
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={() => setConfirmingArchive(false)} disabled={archiving}>
+                Cancel
+              </Btn>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn variant="primary" onClick={confirmArchive} disabled={archiving}>
+                {archiving ? "Archiving…" : "Yes, archive it"}
+              </Btn>
+            </div>
           </>
         ) : (
           <>
-            <Btn onClick={onClose}>Cancel</Btn>
-            {isEdit && !isArchived && onArchive && (
-              <Btn onClick={() => setConfirmingArchive(true)}>Archive account</Btn>
-            )}
-            {isEdit && isArchived && onUnarchive && (
-              <Btn onClick={handleUnarchive} disabled={unarchiving}>
-                {unarchiving ? "Unarchiving…" : "Unarchive account"}
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={onClose}>Cancel</Btn>
+              {isEdit && !isArchived && onArchive && (
+                <Btn onClick={() => setConfirmingArchive(true)}>Archive account</Btn>
+              )}
+              {isEdit && isArchived && onUnarchive && (
+                <Btn onClick={handleUnarchive} disabled={unarchiving}>
+                  {unarchiving ? "Unarchiving…" : "Unarchive account"}
+                </Btn>
+              )}
+              {isEdit && onDelete && (
+                <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
+                  Delete account
+                </Btn>
+              )}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn variant="primary" onClick={save} disabled={!name.trim()}>
+                {isEdit ? "Save Changes" : "Add Account"}
               </Btn>
-            )}
-            {isEdit && onDelete && (
-              <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete account
-              </Btn>
-            )}
-            <Btn variant="primary" onClick={save} disabled={!name.trim()}>
-              {isEdit ? "Save Changes" : "Add Account"}
-            </Btn>
+            </div>
           </>
         )
       }

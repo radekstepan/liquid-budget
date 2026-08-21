@@ -107,23 +107,18 @@ test("year dropdown range is derived from data and includes a future cap", async
   await page.keyboard.press("Escape");
 });
 
-test("Group options menu collapses and expands all groups", async ({ page }) => {
-  // The first "Needs" group's row (Mortgage Principal) should be visible
+test("Toggling a group collapses and expands its category rows", async ({ page }) => {
+  // The first "Housing" group's row (Mortgage Principal) should be visible
   // when expanded.
   const mortgageRow = page.getByRole("row").filter({ hasText: "Mortgage Principal" });
   await expect(mortgageRow).toBeVisible();
 
-  // Open the dots-menu (aria-label="Group options" — BudgetView.tsx:147).
-  await page.getByRole("button", { name: "Group options" }).click();
-  await page.getByRole("button", { name: "Collapse all groups" }).click();
-
-  // The category rows vanish; only master rows remain. YNAB4 collapses
-  // by removing the row nodes, so the simplest assertion is that the
-  // category row is now hidden.
+  // Toggle group
+  const housingToggle = page.getByRole("button", { name: "Toggle Housing group" });
+  await housingToggle.click();
   await expect(mortgageRow).toBeHidden();
 
-  await page.getByRole("button", { name: "Group options" }).click();
-  await page.getByRole("button", { name: "Expand all groups" }).click();
+  await housingToggle.click();
   await expect(mortgageRow).toBeVisible();
 });
 

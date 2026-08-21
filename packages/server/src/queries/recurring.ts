@@ -1,17 +1,25 @@
 import { and, eq, sql } from "drizzle-orm";
-import { nextDateFor, todayISO } from "@ynab/logic";
+import { nextDateFor, todayISO, type TransactionFlagColor } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
-import { createSplitWithChildren, createTransaction, assertValidAmount, type SubTransactionInput as TxnSubTransactionInput } from "./transactions.js";
+import {
+  createSplitWithChildren,
+  createTransaction,
+  assertValidAmount,
+  sanitizeFlagColor,
+  type SubTransactionInput as TxnSubTransactionInput,
+} from "./transactions.js";
 
 export type CreateRecurringInput = {
   accountId: number;
   categoryId: number | null;
   payee: string;
+  memo?: string;
   amount: number;
   frequency: string;
   nextDate: string;
   active?: boolean;
+  flagColor?: TransactionFlagColor | null;
   /**
    * If set, this recurring entry is a transfer: it lives on `accountId`
    * and the corresponding balance movement lands on `transferAccountId`
@@ -32,10 +40,12 @@ export type UpdateRecurringInput = {
   accountId?: number;
   categoryId?: number | null;
   payee?: string;
+  memo?: string;
   amount?: number;
   frequency?: string;
   nextDate?: string;
   active?: boolean;
+  flagColor?: TransactionFlagColor | null;
   transferAccountId?: number | null;
   /**
    * If the key is present in the patch, the children of this recurring
@@ -157,10 +167,12 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         accountId: input.accountId,
         categoryId: norm.effectiveCategoryId,
         payee: input.payee,
+        memo: input.memo ?? "",
         amount: input.amount,
         frequency: input.frequency,
         nextDate: input.nextDate,
         active: input.active ?? true,
+        flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: norm.effectiveTransferAccountId,
       })
       .returning();
@@ -228,10 +240,12 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
   if ("categoryId" in patch) p.categoryId = norm.effectiveCategoryId;
   if (patch.payee != null) p.payee = String(patch.payee);
+  if ("memo" in patch) p.memo = String(patch.memo ?? "");
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
   if (patch.frequency != null) p.frequency = String(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
+  if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
 
   db.run(sql`BEGIN`);
@@ -309,9 +323,10 @@ export async function postRecurringTransaction(
         accountId: r.accountId,
         date: dateToUse,
         payee: r.payee,
-        memo: "Recurring",
+        memo: r.memo || "Recurring",
         amount: Number(r.amount),
         status: "c",
+        flagColor: sanitizeFlagColor(r.flagColor),
       },
       children.map((c) => ({
         categoryId: c.categoryId,
@@ -326,10 +341,11 @@ export async function postRecurringTransaction(
       categoryId: r.categoryId,
       date: dateToUse,
       payee: r.payee,
-      memo: "Recurring",
+      memo: r.memo || "Recurring",
       amount: Number(r.amount),
       status: "c",
       transferAccountId: r.transferAccountId,
+      flagColor: sanitizeFlagColor(r.flagColor),
     });
   }
 

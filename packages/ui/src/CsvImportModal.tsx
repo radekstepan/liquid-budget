@@ -128,14 +128,18 @@ export function CsvImportModal({
       onClose={() => !importing && onClose()}
       footer={
         <>
-          <Btn onClick={onClose} disabled={importing}>
-            Cancel
-          </Btn>
-          <Btn variant="primary" onClick={doImport} disabled={!canImport}>
-            {importing
-              ? "Importing…"
-              : `Import ${importableRows.length} transaction${importableRows.length === 1 ? "" : "s"}`}
-          </Btn>
+          <div className="flex items-center gap-2 mr-auto">
+            <Btn onClick={onClose} disabled={importing}>
+              Cancel
+            </Btn>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Btn variant="primary" onClick={doImport} disabled={!canImport}>
+              {importing
+                ? "Importing…"
+                : `Import ${importableRows.length} transaction${importableRows.length === 1 ? "" : "s"}`}
+            </Btn>
+          </div>
         </>
       }
     >

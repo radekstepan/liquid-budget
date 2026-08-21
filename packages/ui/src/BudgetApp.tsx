@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import type { BudgetData, DuplicateAnalysisResult, ImportSummary } from "@ynab/logic";
 import {
   computeBudget,
@@ -17,6 +17,7 @@ import {
   DEMO_MONTH,
   type TransactionFlagColor,
 } from "@ynab/logic";
+import { useLocalStorage } from "./useLocalStorage.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
@@ -61,17 +62,17 @@ export type BudgetAppApi = {
     categoryId: number | null;
     date: string;
     payee: string;
-    memo: string;
     amount: number;
+    memo?: string;
     status: "u" | "c" | "r";
+    flagColor?: TransactionFlagColor | null;
+    transferAccountId?: number | null;
     subTransactions?: {
       categoryId: number | null;
       amount: number;
       memo?: string;
       transferAccountId?: number | null;
     }[];
-    transferAccountId?: number | null;
-    parentId?: number | null;
   }) => Promise<void>;
   updateTransaction: (
     id: number,
@@ -80,12 +81,12 @@ export type BudgetAppApi = {
       categoryId?: number | null;
       date?: string;
       payee?: string;
-      memo?: string;
       amount?: number;
+      memo?: string;
       status?: "u" | "c" | "r";
       flagColor?: TransactionFlagColor | null;
+      transferAccountId?: number | null;
       subTransactions?: {
-        id?: number;
         categoryId: number | null;
         amount: number;
         memo?: string;
@@ -94,8 +95,8 @@ export type BudgetAppApi = {
     }
   ) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
-  bulkDeleteTransactions: (ids: number[]) => Promise<void>;
-  bulkUpdateTransactions: (
+  bulkDeleteTransactions?: (ids: number[]) => Promise<void>;
+  bulkUpdateTransactions?: (
     ids: number[],
     patch: { status?: "u" | "c" | "r"; categoryId?: number | null }
   ) => Promise<void>;
@@ -103,9 +104,11 @@ export type BudgetAppApi = {
     accountId: number;
     categoryId: number | null;
     payee: string;
+    memo?: string;
     amount: number;
     frequency: string;
     nextDate: string;
+    flagColor?: TransactionFlagColor | null;
     transferAccountId?: number | null;
     subTransactions?: {
       categoryId: number | null;
@@ -120,10 +123,12 @@ export type BudgetAppApi = {
       accountId?: number;
       categoryId?: number | null;
       payee?: string;
+      memo?: string;
       amount?: number;
       frequency?: string;
       nextDate?: string;
       active?: boolean;
+      flagColor?: TransactionFlagColor | null;
       transferAccountId?: number | null;
       subTransactions?: {
         id?: number;
@@ -136,6 +141,12 @@ export type BudgetAppApi = {
   ) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;
   postRecurring: (id: number, date?: string) => Promise<void>;
+  bulkPostRecurring?: (ids: number[], date?: string) => Promise<void>;
+  bulkUpdateRecurring?: (
+    ids: number[],
+    patch: { flagColor?: TransactionFlagColor | null; active?: boolean }
+  ) => Promise<void>;
+  bulkDeleteRecurring?: (ids: number[]) => Promise<void>;
   saveCategory: (
     groupId: number | null,
     categoryId: number | null,
@@ -193,8 +204,8 @@ export function BudgetApp({
 }) {
   const [view, setView] = useState<View>("budget");
   const [month, setMonth] = useState(DEMO_MONTH);
-  const [monthCount, setMonthCount] = useState<number>(3);
-  const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
+  const [monthCount, setMonthCount] = useLocalStorage<number>("ynab:budget:monthCount", 3);
+  const [collapsed, setCollapsed] = useLocalStorage<Record<number, boolean>>("ynab:budget:collapsed", () => {
     const init: Record<number, boolean> = {};
     const cc = data.groups.find((g) => g.isCreditCardPayments);
     if (cc) init[cc.id] = true;
@@ -207,6 +218,55 @@ export function BudgetApp({
   const [accountFilter, setAccountFilter] = useState<number | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [isPending, startTransition] = useTransition();
+
+  // URL routing synchronization
+  const updateUrl = useCallback((newView: View, newAccount: number | null, newMonth: string) => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", newView);
+    if (newAccount != null && newView === "transactions") {
+      params.set("account", String(newAccount));
+    } else {
+      params.delete("account");
+    }
+    if (newView === "budget") {
+      params.set("month", newMonth);
+    } else {
+      params.delete("month");
+    }
+    const newUrl = window.location.pathname + "?" + params.toString();
+    if (window.location.search !== "?" + params.toString()) {
+      window.history.pushState(null, "", newUrl);
+    }
+  }, []);
+
+  // Initialize from URL on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const parseUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get("view") as View | null;
+      const urlAccount = params.get("account");
+      const urlMonth = params.get("month");
+
+      if (urlView && ["budget", "reports", "calendar", "projections", "transactions", "recurring", "settings"].includes(urlView)) {
+        setView(urlView);
+      }
+      if (urlAccount) {
+        const accId = Number(urlAccount);
+        if (!Number.isNaN(accId)) setAccountFilter(accId);
+      } else if (urlView !== "transactions") {
+        setAccountFilter(null);
+      }
+      if (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) {
+        setMonth(urlMonth);
+      }
+    };
+
+    parseUrl();
+    window.addEventListener("popstate", parseUrl);
+    return () => window.removeEventListener("popstate", parseUrl);
+  }, []);
 
   const isBudgetView = view === "budget";
   const { year } = parseMonthKey(month);
@@ -417,19 +477,30 @@ export function BudgetApp({
     []
   );
 
-  const navigateView = useCallback((v: View) => {
-    startTransition(() => {
-      setAccountFilter(null);
-      setView(v);
-    });
-  }, []);
+  const navigateView = useCallback(
+    (v: View) => {
+      startTransition(() => {
+        setAccountFilter(null);
+        setView(v);
+        updateUrl(v, null, month);
+      });
+    },
+    [updateUrl, month]
+  );
 
-  const handleSelectAccount = useCallback((id: number) => {
-    startTransition(() => {
-      setAccountFilter(id);
-      setView("transactions");
-    });
-  }, []);
+  const handleSelectAccount = useCallback(
+    (id: number) => {
+      startTransition(() => {
+        setAccountFilter((cur) => {
+          const next = cur === id ? null : id;
+          updateUrl("transactions", next, month);
+          return next;
+        });
+        setView("transactions");
+      });
+    },
+    [updateUrl, month]
+  );
 
   const cycleStatus = useCallback(
     async (id: number) => {
@@ -469,9 +540,23 @@ export function BudgetApp({
     (delta: number) => {
       const { year: y, month0 } = parseMonthKey(month);
       const total = y * 12 + month0 + delta;
-      setMonth(monthKey(Math.floor(total / 12), ((total % 12) + 12) % 12));
+      const nextMonth = monthKey(Math.floor(total / 12), ((total % 12) + 12) % 12);
+      setMonth(nextMonth);
+      if (view === "budget") {
+        updateUrl(view, accountFilter, nextMonth);
+      }
     },
-    [month]
+    [month, view, accountFilter, updateUrl]
+  );
+
+  const handleSetMonth = useCallback(
+    (m: string) => {
+      setMonth(m);
+      if (view === "budget") {
+        updateUrl(view, accountFilter, m);
+      }
+    },
+    [view, accountFilter, updateUrl]
   );
 
   const { minYear, maxYear } = useMemo(() => {
@@ -560,17 +645,35 @@ export function BudgetApp({
     return map;
   }, [data.recurring]);
 
+  const otherAccounts = useMemo(
+    () => data.accounts.filter((a) => a.id !== accountFilter),
+    [data.accounts, accountFilter]
+  );
+
+  const payeesForAutocomplete: SearchListOption[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of data.transactions) {
+      const p = (t.payee || "").trim();
+      if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name]) => ({ value: name, label: name }));
+  }, [data.transactions]);
+
+  const activeAccount = useMemo(
+    () => data.accounts.find((a) => a.id === accountFilter) ?? null,
+    [data.accounts, accountFilter]
+  );
+
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: "transparent" }}>
+    <div className="flex h-screen w-screen overflow-hidden" style={{ background: "var(--y-canvas)" }}>
       <Sidebar
         view={view}
         setView={navigateView}
         accounts={data.accounts}
         selectedAccountId={accountFilter}
-        onSelectAccount={(id) => {
-          setAccountFilter((cur) => (cur === id ? null : id));
-          setView("transactions");
-        }}
+        onSelectAccount={handleSelectAccount}
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onReorderAccount={api.reorderAccount}
@@ -592,7 +695,7 @@ export function BudgetApp({
               onToggleGroup={toggleGroup}
               onAssign={assign}
               onShiftMonth={shiftMonth}
-              onSetMonth={setMonth}
+              onSetMonth={handleSetMonth}
               minYear={minYear}
               maxYear={maxYear}
               onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
@@ -631,6 +734,10 @@ export function BudgetApp({
               onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}
               onDeleteRecurring={api.deleteRecurring}
               onPostRecurring={api.postRecurring}
+              onFlagRecurring={(id, color) => api.updateRecurring(id, { flagColor: color })}
+              onBulkPostRecurring={api.bulkPostRecurring}
+              onBulkUpdateRecurring={api.bulkUpdateRecurring}
+              onBulkDeleteRecurring={api.bulkDeleteRecurring}
             />
           )}
           {view === "reports" && (
@@ -654,6 +761,16 @@ export function BudgetApp({
             />
           )}
           {view === "projections" && <ProjectionsView data={data} month={month} />}
+          {view === "recurring" && (
+            <RecurringView
+              data={data}
+              onAdd={() => setModal({ kind: "recurring", mode: "single" })}
+              onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
+              onDelete={api.deleteRecurring}
+              onPost={api.postRecurring}
+              onToggleActive={(id, active) => api.updateRecurring(id, { active })}
+            />
+          )}
           {view === "settings" && (
             <SettingsView
               rules={data.renameRules ?? []}

@@ -3,7 +3,7 @@ import type { BudgetData, ClearedStatus } from "@ynab/logic";
 import { buildBudgetIndex } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
-import { sanitizeFlagState } from "./transactions.js";
+import { sanitizeFlagColor, sanitizeFlagState } from "./transactions.js";
 import { getRenameRules } from "./rename-rules.js";
 
 export async function getBudgetData(
@@ -73,6 +73,8 @@ export async function getBudgetData(
     })),
     recurring: recur.map((r) => ({
       ...r,
+      flagColor: sanitizeFlagColor(r.flagColor),
+      memo: r.memo ?? "",
       amount: String(r.amount),
       subTransactions: (subsByRecurringId.get(r.id) ?? []).map((s) => ({
         ...s,

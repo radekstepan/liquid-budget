@@ -21,7 +21,7 @@ async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
   // Wait for the initial data fetch to complete (the sidebar renders once
   // the shell has loaded the budget) before interacting with the app.
-  await expect(page.getByText("TD Unlimited Chequing")).toBeVisible();
+  await expect(page.getByText("TD Unlimited Chequing").first()).toBeVisible();
 }
 
 /**
