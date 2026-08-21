@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { BudgetApp, type BudgetAppApi } from "../src/BudgetApp.js";
 import type { BudgetData } from "@ynab/logic";
 import { makeSeedBudgetData } from "@ynab/logic";
+import { openSearchlistByPlaceholder } from "./dropdown.js";
 
 function makeApi(overrides: Partial<BudgetAppApi> = {}): {
   api: BudgetAppApi;
@@ -140,7 +141,7 @@ describe("BudgetApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
     fireEvent.click(screen.getByRole("button", { name: /add a new transaction/i }));
 
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Coffee" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {

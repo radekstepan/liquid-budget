@@ -16,6 +16,7 @@ import type {
 } from "@ynab/logic";
 import {
   openSearchable,
+  openSearchlistByPlaceholder,
   pickFromOpenDropdownByValue,
   pickFromOpenSearchableByValue,
   pickPlaceholderDropdownByIndexByValue,
@@ -162,7 +163,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Whole Foods" },
     });
     // The only "0.00" placeholder in single mode is the amount field.
@@ -189,7 +190,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Payroll" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
@@ -233,8 +234,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    const input = screen.getByPlaceholderText("e.g. Whole Foods");
-    fireEvent.focus(input);
+    const input = openSearchlistByPlaceholder("e.g. Whole Foods");
     fireEvent.change(input, { target: { value: "iga" } });
     fireEvent.click(screen.getByRole("option", { name: "IGA" }));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-10" } });
@@ -254,7 +254,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "New Coffee Shop" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-5" } });
@@ -274,7 +274,7 @@ describe("TransactionModal", () => {
         onSave={() => {}}
       />
     );
-    const category = openSearchable(/^category$/i);
+    const category = openSearchable(/category/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();
 
@@ -323,7 +323,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    expect(screen.getByDisplayValue("IGA")).toBeInTheDocument();
+    expect(screen.getByText("IGA")).toBeInTheDocument();
     // The amount field shows the signed value.
     expect(screen.getByDisplayValue("-12.34")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -609,7 +609,7 @@ describe("TransactionModal", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
       expect(screen.queryByRole("textbox", { name: /category/i })).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: /transfer to/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /transfer to/i })).toBeInTheDocument();
     });
 
     it("renders the Transfer-to search input in the field position", () => {
@@ -730,7 +730,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "Costco" },
       });
       // Type the parent total first.
@@ -760,7 +760,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "Costco" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -807,7 +807,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "Employer Inc." },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -846,7 +846,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "X" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -876,7 +876,7 @@ describe("TransactionModal", () => {
         />
       );
       fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-      fireEvent.change(screen.getByPlaceholderText("e.g. Whole Foods"), {
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "Split with Transfer" },
       });
       const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -1007,7 +1007,7 @@ describe("RecurringModal", () => {
         onSave={onSave}
       />
     );
-    fireEvent.change(screen.getByLabelText(/^payee$/i), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Hydro" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-80" } });
@@ -1032,8 +1032,7 @@ describe("RecurringModal", () => {
         onSave={() => {}}
       />
     );
-    const input = screen.getByPlaceholderText("e.g. Whole Foods");
-    fireEvent.focus(input);
+    const input = openSearchlistByPlaceholder("e.g. Whole Foods");
     fireEvent.change(input, { target: { value: "tel" } });
     expect(screen.getByRole("option", { name: "Telus" })).toBeInTheDocument();
   });
@@ -1059,7 +1058,7 @@ describe("RecurringModal", () => {
         onSave={onSave}
       />
     );
-    expect(screen.getByDisplayValue("Spotify")).toBeInTheDocument();
+    expect(screen.getByText("Spotify")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 7, payee: "Spotify", active: true });
   });
@@ -1120,7 +1119,7 @@ describe("RecurringModal", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-    fireEvent.change(screen.getByLabelText(/^payee$/i), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Costco" },
     });
     const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
@@ -1237,7 +1236,7 @@ describe("RecurringModal", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
-    fireEvent.change(screen.getByLabelText(/^payee$/i), {
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
       target: { value: "Employer Inc." },
     });
     const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];

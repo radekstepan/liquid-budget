@@ -20,6 +20,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -50,12 +51,7 @@ test("editing a recurring updates the card", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add Recurring" }).click();
   const addModal = page.locator(".y-modal").last();
-  await addModal
-    .locator(".y-label")
-    .filter({ hasText: "Payee" })
-    .locator("..")
-    .locator("input")
-    .fill(original);
+  await fillSearchlist(addModal, "e.g. Whole Foods", original);
   await addModal.locator('input[inputmode="decimal"]').first().fill("-10.00");
   await addModal.locator('input[type="date"]').first().fill("2026-08-01");
   await addModal.getByRole("button", { name: "Save" }).click();
@@ -68,13 +64,8 @@ test("editing a recurring updates the card", async ({ page }) => {
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.getByText("Edit Recurring Transaction")).toBeVisible();
 
-  // The payee input is pre-filled; change it and the amount.
-  await editModal
-    .locator(".y-label")
-    .filter({ hasText: "Payee" })
-    .locator("..")
-    .locator("input")
-    .fill(renamed);
+  // The payee field is pre-filled; change it and the amount.
+  await fillSearchlist(editModal, "e.g. Whole Foods", renamed);
   await editModal.locator('input[inputmode="decimal"]').first().fill("-25.00");
   await editModal.getByRole("button", { name: "Save Changes" }).click();
   await expect(editModal).toBeHidden();
@@ -95,12 +86,7 @@ test("deleting a recurring removes its card", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add Recurring" }).click();
   const modal = page.locator(".y-modal").last();
-  await modal
-    .locator(".y-label")
-    .filter({ hasText: "Payee" })
-    .locator("..")
-    .locator("input")
-    .fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.locator('input[inputmode="decimal"]').first().fill("-1.00");
   await modal.locator('input[type="date"]').first().fill("2026-08-01");
   await modal.getByRole("button", { name: "Save" }).click();
@@ -137,8 +123,7 @@ test("adding a recurring Transfer renders the source → dest hint", async ({ pa
   // The Transfer-mode payee input is the auto-generated one
   // (Modals.tsx:834) — leave it blank so the server fills in
   // "Transfer : <dest>".
-  const destInput = modal.locator('input[placeholder="Select account…"]').first();
-  await destInput.click();
+  await openSearchField(modal, "Select account…");
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   const destOption = options.nth(1);
@@ -180,20 +165,12 @@ test("adding a recurring Split enables Save when children balance", async ({ pag
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
 
-  await modal
-    .locator(".y-label")
-    .filter({ hasText: "Payee" })
-    .locator("..")
-    .locator("input")
-    .fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   const allDecimals = modal.locator('input[inputmode="decimal"]');
   await allDecimals.nth(0).fill("-30");
 
-  const subCategoryInputs = modal.locator('input[placeholder="Category or Transfer…"]');
-  await subCategoryInputs.nth(0).click();
-  await page.locator('.y-dropdown button[role="option"]').nth(1).click();
-  await subCategoryInputs.nth(0).click();
-  await page.locator('.y-dropdown button[role="option"]').nth(2).click();
+  await pickSubCategory(modal, page, 1);
+  await pickSubCategory(modal, page, 2);
 
   // Off by a cent — Save should be disabled (Modals.tsx:720).
   await allDecimals.nth(1).fill("-20");
@@ -236,12 +213,7 @@ test("Monthly Income / Bills / Net math strip updates when a bill is added", asy
   // sees.
   await page.getByRole("button", { name: "Add Recurring" }).click();
   const modal = page.locator(".y-modal").last();
-  await modal
-    .locator(".y-label")
-    .filter({ hasText: "Payee" })
-    .locator("..")
-    .locator("input")
-    .fill(payee);
+  await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.locator('input[inputmode="decimal"]').first().fill("-123.45");
   await modal.locator('input[type="date"]').first().fill("2026-08-01");
   await modal.getByRole("button", { name: "Save" }).click();

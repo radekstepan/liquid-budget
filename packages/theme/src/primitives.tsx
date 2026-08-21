@@ -351,8 +351,7 @@ export const Select: React.FC<SelectProps> = ({
   const refocusTrigger = () => {
     suppressOpenRef.current = true;
     requestAnimationFrame(() => {
-      const el = searchable ? searchRef.current : triggerRef.current;
-      el?.focus();
+      triggerRef.current?.focus();
       suppressOpenRef.current = false;
     });
   };
@@ -442,10 +441,17 @@ export const Select: React.FC<SelectProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    // In searchable mode the search input is the trigger and already has
-    // focus, so keep it there (the user filters by typing directly). Only
-    // rove focus to the active option for the non-searchable listbox.
-    if (searchable) return;
+    // In searchable mode the search input is only rendered while the
+    // dropdown is open, so move focus into it as soon as it mounts.
+    // Non-searchable listboxes rove focus to the active option instead.
+    if (searchable) {
+      const id = requestAnimationFrame(() => {
+        suppressOpenRef.current = true;
+        searchRef.current?.focus();
+        suppressOpenRef.current = false;
+      });
+      return () => cancelAnimationFrame(id);
+    }
     const id = requestAnimationFrame(() => {
       itemRefs.current[activeIdx]?.focus();
     });
@@ -596,7 +602,7 @@ export const Select: React.FC<SelectProps> = ({
       data-open={open ? "true" : undefined}
       {...rest}
     >
-      {searchable ? (
+      {searchable && open ? (
         <input
           ref={searchRef}
           type="text"
@@ -604,7 +610,7 @@ export const Select: React.FC<SelectProps> = ({
           aria-expanded={open}
           aria-label={labelForAria}
           disabled={disabled}
-          value={open ? query : selectedLabel}
+          value={query}
           placeholder={selectedLabel || undefined}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={onFocusSearch}
@@ -621,7 +627,7 @@ export const Select: React.FC<SelectProps> = ({
           aria-expanded={open}
           aria-label={labelForAria}
           disabled={disabled}
-          onClick={() => !disabled && setOpen((o) => !o)}
+          onClick={() => !disabled && setOpen(searchable ? true : (o) => !o)}
           onKeyDown={onKeyDownTrigger}
           className={cx("y-select", "y-select-trigger", sizeClass)}
           style={{
@@ -768,17 +774,18 @@ export const SearchList: React.FC<SearchListProps> = ({
   );
   const [mounted, setMounted] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // When the dropdown is closed by a commit/Escape we restore focus to the
-  // input programmatically; that focus event must not immediately reopen
+  // trigger programmatically; that focus event must not immediately reopen
   // the dropdown, so it is suppressed for that one tick.
   const suppressOpenRef = useRef(false);
 
-  const refocusInput = () => {
+  const refocusButton = () => {
     suppressOpenRef.current = true;
     requestAnimationFrame(() => {
-      inputRef.current?.focus();
+      buttonRef.current?.focus();
       suppressOpenRef.current = false;
     });
   };
@@ -846,6 +853,18 @@ export const SearchList: React.FC<SearchListProps> = ({
     if (open) setActiveIdx(0);
   }, [open]);
 
+  // The input only exists while the dropdown is open; move focus into it as
+  // soon as it mounts (suppressing the one-tick reopen guard).
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      suppressOpenRef.current = true;
+      inputRef.current?.focus();
+      suppressOpenRef.current = false;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -853,12 +872,13 @@ export const SearchList: React.FC<SearchListProps> = ({
       if (inputRef.current?.contains(t)) return;
       if (listRef.current?.contains(t)) return;
       setOpen(false);
+      refocusButton();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         setOpen(false);
-        refocusInput();
+        refocusButton();
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -874,14 +894,14 @@ export const SearchList: React.FC<SearchListProps> = ({
     if (showCreate && i === 0) {
       onChange(q);
       setOpen(false);
-      refocusInput();
+      refocusButton();
       return;
     }
     const it = optionAt(i);
     if (!it) return;
     onChange(it.value ?? it.label);
     setOpen(false);
-    refocusInput();
+    refocusButton();
   };
 
   const onKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -915,26 +935,52 @@ export const SearchList: React.FC<SearchListProps> = ({
 
   return (
     <div className={cx("y-searchlist", className)}>
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => {
-          if (suppressOpenRef.current) return;
-          if (!disabled) setOpen(true);
-        }}
-        onKeyDown={onKeyDownInput}
-        placeholder={placeholder}
-        disabled={disabled}
-        autoFocus={autoFocus}
-        autoComplete="off"
-        spellCheck={false}
-        aria-label={labelForAria}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="y-input w-full"
-      />
+      {open ? (
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => {
+            if (suppressOpenRef.current) return;
+            if (!disabled) setOpen(true);
+          }}
+          onKeyDown={onKeyDownInput}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={labelForAria}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className="y-input w-full"
+        />
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={labelForAria}
+          disabled={disabled}
+          onClick={() => !disabled && setOpen(true)}
+          onKeyDown={(e) => {
+            if (disabled) return;
+            if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen(true);
+            }
+          }}
+          className={cx("y-input", "w-full", "y-searchlist-trigger")}
+          style={{
+            opacity: disabled ? 0.5 : 1,
+            cursor: disabled ? "default" : "pointer",
+          }}
+        >
+          {value || placeholder || ""}
+        </button>
+      )}
       {open &&
         mounted &&
         createPortal(

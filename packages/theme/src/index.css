@@ -831,6 +831,14 @@ body::after {
   width: 100%;
   cursor: text;
 }
+/* Closed searchlist fields render as a plain button that looks like the
+   text input it replaces; clicking it reveals the search input. */
+.y-searchlist-trigger {
+  appearance: none;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
 .y-dropdown-empty {
   display: block;
   padding: 6px 10px;

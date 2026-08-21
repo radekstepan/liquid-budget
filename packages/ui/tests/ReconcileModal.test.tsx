@@ -113,7 +113,7 @@ describe("ReconcileModal", () => {
     renderModal();
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "1000" } });
 
-    const input = openSearchable(/^category$/i);
+    const input = openSearchable(/category/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();
     expect(list).not.toContainElement(input);
@@ -161,10 +161,8 @@ describe("ReconcileModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
-    // With no eligible categories the field shows the notice as its value.
-    expect(screen.getByRole("textbox", { name: /^category$/i })).toHaveValue(
-      "No categories available"
-    );
+    // With no eligible categories the closed field shows the notice as its value.
+    expect(screen.getByText("No categories available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /mark for adjustment/i })).toBeDisabled();
   });
 

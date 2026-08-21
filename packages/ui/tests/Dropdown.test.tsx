@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { Select } from "@ynab/theme";
@@ -149,25 +150,37 @@ describe("Dropdown (Select)", () => {
       });
     }
 
-    it("shows the selected label in the field and focuses the input on open", () => {
-      renderSearchable();
+    function openSearchableControl(value = "1") {
+      const trigger = screen.getByRole("button", { name: /account/i });
+      fireEvent.click(trigger);
       const input = screen.getByRole("textbox", { name: /account/i });
-      expect(input).toHaveValue("Checking");
-      // The input lives in the field position, not inside the dropdown.
       act(() => {
-      input.focus();
-    });
+        input.focus();
+      });
+      return input;
+    }
+
+    it("shows the selected label on the closed trigger, then the input on open", () => {
+      renderSearchable();
+      // Closed: the field is a trigger button showing the selection, with no
+      // search input rendered.
+      expect(screen.queryByRole("textbox", { name: /account/i })).not.toBeInTheDocument();
+      const trigger = screen.getByRole("button", { name: /account/i });
+      expect(trigger).toHaveTextContent("Checking");
+
+      openSearchableControl();
+      const input = screen.getByRole("textbox", { name: /account/i });
+      // The input lives in the field position, not inside the dropdown, and
+      // is focused. The query starts empty (the selection is the placeholder).
       const list = screen.getByRole("listbox");
       expect(list).not.toContainElement(input);
+      expect(input).toHaveValue("");
       expect(input).toHaveFocus();
     });
 
     it("filters options by case-insensitive substring as the user types", () => {
       renderSearchable();
-      const input = screen.getByRole("textbox", { name: /account/i });
-      act(() => {
-      input.focus();
-    });
+      const input = openSearchableControl();
       fireEvent.change(input, { target: { value: "cre" } });
       expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Credit Card"]);
 
@@ -177,10 +190,7 @@ describe("Dropdown (Select)", () => {
 
     it("shows a 'No matches' placeholder when nothing matches", () => {
       renderSearchable();
-      const input = screen.getByRole("textbox", { name: /account/i });
-      act(() => {
-      input.focus();
-    });
+      const input = openSearchableControl();
       fireEvent.change(input, { target: { value: "zzz" } });
       expect(screen.queryAllByRole("option")).toHaveLength(0);
       expect(screen.getByText(/no matches/i)).toBeInTheDocument();
@@ -188,10 +198,7 @@ describe("Dropdown (Select)", () => {
 
     it("restores the full list when the query is cleared", () => {
       renderSearchable();
-      const input = screen.getByRole("textbox", { name: /account/i });
-      act(() => {
-      input.focus();
-    });
+      const input = openSearchableControl();
       fireEvent.change(input, { target: { value: "cre" } });
       expect(screen.getAllByRole("option")).toHaveLength(1);
 
@@ -199,22 +206,22 @@ describe("Dropdown (Select)", () => {
       expect(screen.getAllByRole("option")).toHaveLength(4);
     });
 
-    it("resets the query when the field is refocused", () => {
+    it("closes to the trigger and resets the query when reopened", () => {
       renderSearchable();
-      const input = screen.getByRole("textbox", { name: /account/i });
-      act(() => {
-      input.focus();
-    });
+      const input = openSearchableControl();
       fireEvent.change(input, { target: { value: "cre" } });
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+
       fireEvent.mouseDown(document.body);
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      // The input disappears; the selection is shown on the trigger again.
+      expect(screen.queryByRole("textbox", { name: /account/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /account/i })).toHaveTextContent("Checking");
 
-      // Refocusing after a blur reopens with a clean (empty) query.
-      input.blur();
-      act(() => {
-        input.focus();
-      });
+      // Reopening restores a clean (empty) query.
+      openSearchableControl();
       expect(screen.getByRole("textbox", { name: /account/i })).toHaveValue("");
+      expect(screen.getAllByRole("option")).toHaveLength(4);
     });
 
     it("commits against the filtered list, not the snapshot", () => {
@@ -228,13 +235,38 @@ describe("Dropdown (Select)", () => {
           options={accounts}
         />
       );
-      const input = screen.getByRole("textbox", { name: /account/i });
-      act(() => {
-      input.focus();
-    });
+      const input = openSearchableControl();
       fireEvent.change(input, { target: { value: "sav" } });
       fireEvent.click(screen.getByRole("option", { name: "Savings" }));
       expect(onChange).toHaveBeenCalledWith("2");
+    });
+
+    it("hides the input and shows the picked value on the trigger after committing", () => {
+      const onChange = vi.fn();
+      function Harness() {
+        const [v, setV] = useState("1");
+        return (
+          <Select
+            value={v}
+            onChange={(n) => {
+              setV(n);
+              onChange(n);
+            }}
+            searchable
+            ariaLabel="Account"
+            options={accounts}
+          />
+        );
+      }
+      render(<Harness />);
+      const input = openSearchableControl();
+      fireEvent.change(input, { target: { value: "sav" } });
+      fireEvent.click(screen.getByRole("option", { name: "Savings" }));
+      expect(onChange).toHaveBeenCalledWith("2");
+      // After committing, the input is hidden and the new value is shown on
+      // the closed trigger.
+      expect(screen.queryByRole("textbox", { name: /account/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /account/i })).toHaveTextContent("Savings");
     });
   });
 
@@ -325,6 +357,7 @@ describe("Dropdown (Select)", () => {
 
     it("keeps the heading of the matched group while filtering search results", () => {
       renderSelect({ value: "", onChange: () => {}, searchable: true, ariaLabel: "Category", children });
+      fireEvent.click(screen.getByRole("button", { name: /category/i }));
       const input = screen.getByRole("textbox", { name: /category/i });
       act(() => {
       input.focus();

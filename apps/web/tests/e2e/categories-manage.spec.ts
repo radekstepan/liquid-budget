@@ -7,6 +7,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
+import { fillSearchlist, openSearchField } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -71,11 +72,10 @@ test("deleting a category with transactions prompts for reassign target", async 
   const txModal = page.locator(".y-modal").last();
   await txModal.locator('input[inputmode="decimal"]').first().fill("15.00");
   await txModal.locator('input[type="date"]').first().fill("2026-09-01");
-  await txModal.locator('input[placeholder="e.g. Whole Foods"]').fill(`PW Tx ${stamp}`);
+  await fillSearchlist(txModal, "e.g. Whole Foods", `PW Tx ${stamp}`);
 
   // Select the newly created category in the searchable dropdown
-  const catInput = txModal.locator('input[placeholder="Income: Available this month"]').first();
-  await catInput.click();
+  await openSearchField(txModal, "Income: Available this month");
   await page.locator('.y-dropdown button[role="option"]').filter({ hasText: catName }).click();
 
   await txModal.getByRole("button", { name: "Save Transaction" }).click();
@@ -98,9 +98,9 @@ test("deleting a category with transactions prompts for reassign target", async 
   await expect(modal.getByText(/referenced by 1 transaction/i)).toBeVisible();
   await expect(modal.getByText(/Please select another category/i)).toBeVisible();
 
-  // Select replacement category (searchable input, pre-filled with the
+  // Select replacement category (searchable field, pre-filled with the
   // first other category).
-  const moveSelect = modal.locator('input[aria-haspopup="listbox"]').first();
+  const moveSelect = modal.locator('button[aria-haspopup="listbox"]').first();
   await expect(moveSelect).toBeVisible();
   await moveSelect.click();
   await page.getByRole("option", { name: "Rent", exact: true }).click();
