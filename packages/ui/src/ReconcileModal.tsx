@@ -239,15 +239,24 @@ export function ReconcileModal({
                   )
                 }
                 className="w-full"
+                searchable
               >
                 {eligibleCategories.length === 0 ? (
                   <option value="">No categories available</option>
                 ) : (
-                  eligibleCategories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))
+                  groups.map((g) => {
+                    const cats = eligibleCategories.filter((c) => c.groupId === g.id);
+                    if (cats.length === 0) return null;
+                    return (
+                      <optgroup key={g.id} label={g.name}>
+                        {cats.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })
                 )}
               </Select>
             </Field>

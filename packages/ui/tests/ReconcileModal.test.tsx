@@ -109,6 +109,16 @@ describe("ReconcileModal", () => {
     });
   });
 
+  it("renders the adjustment category dropdown searchable with group headings", () => {
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "1000" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^category$/i }));
+    const list = screen.getByRole("listbox");
+    expect(within(list).getByText("Everyday")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /filter options/i })).toBeInTheDocument();
+  });
+
   it("resets the armed state when the statement input changes again", () => {
     renderModal();
     fireEvent.change(screen.getByPlaceholderText("0.00"), {

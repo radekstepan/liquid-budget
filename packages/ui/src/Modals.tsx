@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import type { Account, Category, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
+import type { Account, Category, CategoryGroup, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
 import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox, Notice, FlagPicker } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
@@ -52,6 +52,8 @@ export type TransactionSavePayload = {
 export function TransactionModal({
   accounts,
   categories,
+  groups,
+  payees,
   defaultAccountId,
   defaultDate,
   initialMode,
@@ -63,6 +65,9 @@ export function TransactionModal({
 }: {
   accounts: Account[];
   categories: Category[];
+  groups?: CategoryGroup[];
+  /** Existing payee names for the searchable payee field. */
+  payees?: SearchListOption[];
   defaultAccountId: number | null;
   defaultDate?: string;
   initialMode?: "single" | "transfer" | "split";
@@ -385,9 +390,11 @@ export function TransactionModal({
 
           {mode !== "transfer" && (
             <Field label="Payee">
-              <TextField
+              <SearchList
                 value={payee}
-                onChange={(e) => setPayee(e.target.value)}
+                onChange={setPayee}
+                options={payees}
+                allowCreate
                 placeholder="e.g. Whole Foods"
                 className={inputClass}
               />
@@ -427,12 +434,27 @@ export function TransactionModal({
                   value={categoryId}
                   onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
                   className="w-full"
+                  searchable
                 >
                   <option value="">Income: Available this month</option>
                   <option value="__deferred__">Income: Available next month</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
+                  {groups && groups.length > 0 ? (
+                    groups.map((g) => (
+                      <optgroup key={g.id} label={g.name}>
+                        {categories
+                          .filter((c) => c.groupId === g.id)
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))
+                  ) : (
+                    categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))
+                  )}
                 </Select>
               </Field>
             )}
@@ -440,13 +462,15 @@ export function TransactionModal({
 
           {mode === "transfer" && (
             <Field label="Payee (auto-generated, override optional)">
-              <TextField
+              <SearchList
                 value={
                   payee.startsWith("Transfer : ")
                     ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
                     : payee
                 }
-                onChange={(e) => setPayee(e.target.value)}
+                onChange={setPayee}
+                options={payees}
+                allowCreate
                 placeholder={
                   transferAccountId
                     ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
@@ -504,13 +528,27 @@ export function TransactionModal({
                         searchable
                       >
                         <option value="">Category or Transfer…</option>
-                        <optgroup label="Categories">
-                          {categories.map((c) => (
-                            <option key={c.id} value={`category:${c.id}`}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </optgroup>
+                        {groups && groups.length > 0 ? (
+                          groups.map((g) => (
+                            <optgroup key={g.id} label={g.name}>
+                              {categories
+                                .filter((c) => c.groupId === g.id)
+                                .map((c) => (
+                                  <option key={c.id} value={`category:${c.id}`}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                            </optgroup>
+                          ))
+                        ) : (
+                          <optgroup label="Categories">
+                            {categories.map((c) => (
+                              <option key={c.id} value={`category:${c.id}`}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                         <optgroup label="Transfers">
                           {otherAccounts.map((a) => (
                             <option key={a.id} value={`transfer:${a.id}`}>
@@ -637,6 +675,7 @@ export function CategoryModal({
   initial,
   transactionCount = 0,
   otherCategories = [],
+  groups,
   onClose,
   onSave,
   onDelete,
@@ -644,6 +683,7 @@ export function CategoryModal({
   initial?: Category;
   transactionCount?: number;
   otherCategories?: Category[];
+  groups?: CategoryGroup[];
   onClose: () => void;
   onSave: (v: { name: string; goalTarget: number | null; carryover?: number; overspendCarriesOver?: boolean }) => void;
   onDelete?: (opts?: { moveToCategoryId?: number }) => Promise<void>;
@@ -747,13 +787,28 @@ export function CategoryModal({
                     value={moveToCategoryId}
                     onChange={(v) => setMoveToCategoryId(v === "" ? "" : Number(v))}
                     className="w-full"
+                    searchable
                   >
                     <option value="">Select replacement category…</option>
-                    {otherCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
+                    {groups && groups.length > 0 ? (
+                      groups.map((g) => (
+                        <optgroup key={g.id} label={g.name}>
+                          {otherCategories
+                            .filter((c) => c.groupId === g.id)
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))
+                    ) : (
+                      otherCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))
+                    )}
                   </Select>
                 </Field>
               </div>
@@ -854,6 +909,8 @@ export function GroupModal({
 export function RecurringModal({
   accounts,
   categories,
+  groups,
+  payees,
   defaultAccountId,
   initialMode,
   initial,
@@ -862,6 +919,9 @@ export function RecurringModal({
 }: {
   accounts: Account[];
   categories: Category[];
+  groups?: CategoryGroup[];
+  /** Existing payee names for the searchable payee field. */
+  payees?: SearchListOption[];
   defaultAccountId?: number | null;
   initialMode?: "single" | "transfer" | "split";
   initial?: Recurring & { subTransactions?: RecurringSubTransaction[] };
@@ -1089,9 +1149,11 @@ export function RecurringModal({
 
       {mode !== "transfer" && (
         <Field label="Payee">
-          <TextField
+          <SearchList
             value={payee}
-            onChange={(e) => setPayee(e.target.value)}
+            onChange={setPayee}
+            options={payees}
+            allowCreate
             placeholder="e.g. Whole Foods"
             className={inputClass}
           />
@@ -1131,11 +1193,26 @@ export function RecurringModal({
               value={categoryId}
               onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
               className="w-full"
+              searchable
             >
               <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
+              {groups && groups.length > 0 ? (
+                groups.map((g) => (
+                  <optgroup key={g.id} label={g.name}>
+                    {categories
+                      .filter((c) => c.groupId === g.id)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))
+              ) : (
+                categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))
+              )}
             </Select>
           </Field>
         )}
@@ -1143,9 +1220,11 @@ export function RecurringModal({
 
       {mode === "transfer" && (
         <Field label="Payee (auto-generated, override optional)">
-          <TextField
+          <SearchList
             value={payee}
-            onChange={(e) => setPayee(e.target.value)}
+            onChange={setPayee}
+            options={payees}
+            allowCreate
             placeholder={
               transferAccountId
                 ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
@@ -1203,13 +1282,27 @@ export function RecurringModal({
                       searchable
                     >
                       <option value="">Category or Transfer…</option>
-                      <optgroup label="Categories">
-                        {categories.map((c) => (
-                          <option key={c.id} value={`category:${c.id}`}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </optgroup>
+                      {groups && groups.length > 0 ? (
+                        groups.map((g) => (
+                          <optgroup key={g.id} label={g.name}>
+                            {categories
+                              .filter((c) => c.groupId === g.id)
+                              .map((c) => (
+                                <option key={c.id} value={`category:${c.id}`}>
+                                  {c.name}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ))
+                      ) : (
+                        <optgroup label="Categories">
+                          {categories.map((c) => (
+                            <option key={c.id} value={`category:${c.id}`}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                       <optgroup label="Transfers">
                         {otherAccounts.map((a) => (
                           <option key={a.id} value={`transfer:${a.id}`}>

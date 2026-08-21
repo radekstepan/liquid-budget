@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { Select } from "@ynab/theme";
 
 function renderSelect(props: React.ComponentProps<typeof Select>) {
@@ -238,6 +238,44 @@ describe("Dropdown (Select)", () => {
       });
       fireEvent.click(screen.getByRole("option", { name: "Savings" }));
       expect(onChange).toHaveBeenCalledWith("2");
+    });
+  });
+
+  describe("optgroup headings", () => {
+    const children = (
+      <>
+        <option value="">Pick…</option>
+        <optgroup label="Everyday">
+          <option value="a">Groceries</option>
+          <option value="b">Rent</option>
+        </optgroup>
+        <optgroup label="Fun">
+          <option value="c">Movies</option>
+        </optgroup>
+      </>
+    );
+
+    it("renders each optgroup label as a heading above its options", () => {
+      renderSelect({ value: "", onChange: () => {}, children });
+      fireEvent.click(screen.getByRole("button", { name: "Pick…" }));
+      const list = screen.getByRole("listbox");
+      expect(within(list).getByText("Everyday")).toBeInTheDocument();
+      expect(within(list).getByText("Fun")).toBeInTheDocument();
+      // Headings are presentational and must not count as options.
+      expect(within(list).getAllByRole("option")).toHaveLength(4);
+    });
+
+    it("keeps the heading of the matched group while filtering search results", () => {
+      renderSelect({ value: "", onChange: () => {}, searchable: true, children });
+      fireEvent.click(screen.getByRole("button", { name: "Pick…" }));
+      const search = screen.getByRole("textbox", { name: /filter options/i });
+      act(() => {
+        fireEvent.change(search, { target: { value: "mov" } });
+      });
+      const list = screen.getByRole("listbox");
+      expect(within(list).getByRole("option", { name: "Movies" })).toBeInTheDocument();
+      expect(within(list).getByText("Fun")).toBeInTheDocument();
+      expect(within(list).queryByText("Everyday")).not.toBeInTheDocument();
     });
   });
 });
