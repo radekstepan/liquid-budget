@@ -241,6 +241,67 @@ describe("Dropdown (Select)", () => {
     });
   });
 
+  describe("disabled options", () => {
+    it("cannot be selected by click", () => {
+      const onChange = vi.fn();
+      renderSelect({
+        value: "b",
+        onChange,
+        children: (
+          <>
+            <option value="" disabled>Select account…</option>
+            <option value="a">Chequing</option>
+            <option value="b">Savings</option>
+          </>
+        ),
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Savings" }));
+      const placeholder = screen.getByRole("option", { name: /select account/i });
+      expect(placeholder).toBeDisabled();
+      fireEvent.click(placeholder);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("is not marked as selected even when its value matches the current value", () => {
+      renderSelect({
+        value: "",
+        onChange: () => {},
+        children: (
+          <>
+            <option value="" disabled>Select account…</option>
+            <option value="a">Chequing</option>
+          </>
+        ),
+      });
+      fireEvent.click(screen.getByRole("button", { name: /select account/i }));
+      const placeholder = screen.getByRole("option", { name: /select account/i });
+      expect(placeholder).toHaveAttribute("aria-selected", "false");
+      expect(within(placeholder).queryByText("✓")).not.toBeInTheDocument();
+    });
+
+    it("is skipped by arrow-key navigation and cannot be committed with Enter", () => {
+      const onChange = vi.fn();
+      renderSelect({
+        value: "",
+        onChange,
+        children: (
+          <>
+            <option value="" disabled>Select account…</option>
+            <option value="a">Chequing</option>
+            <option value="b">Savings</option>
+          </>
+        ),
+      });
+      fireEvent.click(screen.getByRole("button", { name: /select account/i }));
+      const list = screen.getByRole("listbox");
+      // ArrowDown from the placeholder (index 0, disabled) skips to the first
+      // enabled option; Enter must commit that option, not the placeholder.
+      fireEvent.keyDown(list, { key: "ArrowDown" });
+      fireEvent.keyDown(list, { key: "Enter" });
+      expect(onChange).toHaveBeenCalledWith("a");
+    });
+  });
+
   describe("optgroup headings", () => {
     const children = (
       <>

@@ -634,6 +634,31 @@ describe("TransactionModal", () => {
       expect(visible.map((o) => o.textContent)).toEqual(["Credit"]);
     });
 
+    it("does not allow selecting the 'Select account…' placeholder", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+
+      const placeholder = screen.getByRole("option", { name: /select account/i });
+      expect(placeholder).toBeDisabled();
+      expect(screen.getByRole("option", { name: "Credit" })).toBeEnabled();
+
+      // Clicking the placeholder must not commit a destination.
+      fireEvent.click(placeholder);
+      fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
+      fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
     it("calls onSave with transferAccountId and the destination name as payee", () => {
       const onSave = vi.fn();
       render(
@@ -1064,6 +1089,24 @@ describe("RecurringModal", () => {
     expect(payload.categoryId).toBeNull();
     // Payee auto-derived as "Transfer : Credit" since blank.
     expect(payload.payee).toBe("Transfer : Credit");
+  });
+
+  it("does not allow selecting the 'Select account…' placeholder in Transfer mode", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /transfer to/i }));
+
+    const placeholder = screen.getByRole("option", { name: /select account/i });
+    expect(placeholder).toBeDisabled();
+    expect(screen.getByRole("option", { name: "Credit" })).toBeEnabled();
   });
 
   it("renders Split mode and emits subTransactions on save", () => {
