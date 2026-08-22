@@ -214,6 +214,9 @@ body::after {
   border-bottom: 1px solid var(--y-border-strong);
   background: linear-gradient(#d2d2cd, #b9b9b2);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  position: sticky;
+  top: 0;
+  z-index: 12;
 }
 .y-table-td--sticky-cat {
   position: sticky;
@@ -998,6 +1001,11 @@ button.y-pill:hover {
   background: linear-gradient(#f7f7f5, #e2e2df);
 }
 
+/* Sub-header row (Budgeted / Outflows / Balance) sits below the month labels row. */
+.y-thead-sub th {
+  top: 27px !important;
+}
+
 /* Sortable column header button (wraps the th label, inherits th styling). */
 .y-sort-btn {
   display: inline-block;
@@ -1430,23 +1438,33 @@ input.y-inline-amt {
   position: relative;
   overflow: visible !important;
 }
+/* Solid end cap (right edge) */
 .y-bar-truncated::after {
   content: "";
   position: absolute;
-  right: -3px;
-  top: -1px;
-  bottom: -1px;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 0 3px 3px 0;
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.35), 1px 0 2px rgba(0, 0, 0, 0.2);
+}
+/* Dashed continuation indicator (just left of the solid cap) */
+.y-bar-truncated::before {
+  content: "";
+  position: absolute;
+  right: 8px;
+  top: 0;
+  bottom: 0;
   width: 6px;
   background: repeating-linear-gradient(
     -45deg,
-    rgba(0, 0, 0, 0.35),
-    rgba(0, 0, 0, 0.35) 1.5px,
+    rgba(0, 0, 0, 0.3),
+    rgba(0, 0, 0, 0.3) 1.5px,
     transparent 1.5px,
     transparent 3px
   );
-  border-left: 1.5px solid #ffffff;
-  border-radius: 0 2px 2px 0;
-  box-shadow: 1px 0 2px rgba(0, 0, 0, 0.2);
 }
 
 /* ---------- notices / tooltips ---------- */
@@ -1664,25 +1682,6 @@ input.y-inline-amt {
   flex: 1;
   min-width: 0;
   line-height: 1.4;
-}
-.y-toast-close {
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.15);
-  border: 0;
-  color: inherit;
-  font-size: 16px;
-  line-height: 1;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-}
-.y-toast-close:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 @keyframes toast-in {
   from {

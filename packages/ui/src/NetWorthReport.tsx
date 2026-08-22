@@ -240,36 +240,91 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
 
             {points.map((p, i) => {
               const x = chart.xAt(i);
-              const assetH = Math.max(0, chart.zeroY - chart.y(p.assets));
-              const debtH = Math.max(0, chart.y(p.debts) - chart.zeroY);
+              const rawAssetH = chart.zeroY - chart.y(p.assets);
+              const rawDebtH = chart.y(p.debts) - chart.zeroY;
+              const maxH = chart.zeroY - chart.padT;
+              const assetH = Math.max(0, Math.min(rawAssetH, maxH));
+              const debtH = Math.max(0, Math.min(rawDebtH, chart.H - chart.padB - chart.zeroY));
+              const assetTruncated = rawAssetH > maxH;
+              const debtTruncated = rawDebtH > chart.H - chart.padB - chart.zeroY;
               const barX = x - chart.barW / 2;
               return (
                 <g key={p.month}>
                   {p.assets > 0 && (
-                    <rect
-                      x={barX}
-                      y={chart.zeroY - assetH}
-                      width={chart.barW}
-                      height={assetH}
-                      rx={1.5}
-                      fill={`url(#${gid}-assets-grad)`}
-                      stroke={ASSETS_COLOR}
-                      strokeOpacity={0.2}
-                      vectorEffect="non-scaling-stroke"
-                    />
+                    <>
+                      <rect
+                        x={barX}
+                        y={chart.zeroY - assetH}
+                        width={chart.barW}
+                        height={assetH}
+                        rx={1.5}
+                        fill={`url(#${gid}-assets-grad)`}
+                        stroke={ASSETS_COLOR}
+                        strokeOpacity={0.2}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {assetTruncated && (
+                        <>
+                          <line
+                            x1={barX + 1}
+                            x2={barX + chart.barW - 1}
+                            y1={chart.padT + 5}
+                            y2={chart.padT + 5}
+                            stroke={ASSETS_COLOR}
+                            strokeWidth={2}
+                            strokeDasharray="3 2"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <rect
+                            x={barX}
+                            y={chart.padT}
+                            width={chart.barW}
+                            height={3}
+                            rx={1.5}
+                            fill={ASSETS_COLOR}
+                            fillOpacity={0.7}
+                          />
+                        </>
+                      )}
+                    </>
                   )}
                   {p.debts < 0 && (
-                    <rect
-                      x={barX}
-                      y={chart.zeroY}
-                      width={chart.barW}
-                      height={debtH}
-                      rx={1.5}
-                      fill={`url(#${gid}-debts-grad)`}
-                      stroke={DEBTS_COLOR}
-                      strokeOpacity={0.2}
-                      vectorEffect="non-scaling-stroke"
-                    />
+                    <>
+                      <rect
+                        x={barX}
+                        y={chart.zeroY}
+                        width={chart.barW}
+                        height={debtH}
+                        rx={1.5}
+                        fill={`url(#${gid}-debts-grad)`}
+                        stroke={DEBTS_COLOR}
+                        strokeOpacity={0.2}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {debtTruncated && (
+                        <>
+                          <line
+                            x1={barX + 1}
+                            x2={barX + chart.barW - 1}
+                            y1={chart.H - chart.padB - 5}
+                            y2={chart.H - chart.padB - 5}
+                            stroke={DEBTS_COLOR}
+                            strokeWidth={2}
+                            strokeDasharray="3 2"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <rect
+                            x={barX}
+                            y={chart.H - chart.padB - 3}
+                            width={chart.barW}
+                            height={3}
+                            rx={1.5}
+                            fill={DEBTS_COLOR}
+                            fillOpacity={0.7}
+                          />
+                        </>
+                      )}
+                    </>
                   )}
                 </g>
               );

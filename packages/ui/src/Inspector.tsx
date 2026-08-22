@@ -112,7 +112,7 @@ export const Inspector = memo(function Inspector({
             aria-label="Settings"
             title="Settings"
           >
-            <Icon name="gear" size={12} />
+            <Icon name="cog" size={13} />
           </Button>
           {menuOpen && (
             <div
@@ -133,7 +133,7 @@ export const Inspector = memo(function Inspector({
                 }}
                 className="y-menu-item"
               >
-                <Icon name="import" size={12} /> Import CSV…
+                <Icon name="import" size={12} /> Import CSV
               </button>
               <button
                 onClick={() => {
@@ -179,7 +179,7 @@ export const Inspector = memo(function Inspector({
                   }}
                   className="y-menu-item"
                 >
-                  <Icon name="gear" size={12} /> Rename rules…
+                  <Icon name="gear" size={12} /> Rename rules
                 </button>
               )}
               {onAnalyzeDuplicates && (
@@ -201,7 +201,7 @@ export const Inspector = memo(function Inspector({
                   disabled={analyzing}
                 >
                   <Icon name="flag" size={12} />{" "}
-                  {analyzing ? "Analyzing…" : "Flag duplicates"}
+                  {analyzing ? "Analyzing" : "Flag duplicates"}
                 </button>
               )}
             </div>

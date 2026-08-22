@@ -39,7 +39,7 @@ test("deletes an empty category safely via modal", async ({ page }) => {
   modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("Edit Category");
 
-  // Click Delete…
+  // Click Delete
   await modal.getByRole("button", { name: /^Delete/ }).click();
   await expect(modal.locator(".y-modal-head")).toContainText("Delete");
   await expect(modal.getByText(/has no transactions and will be removed/i)).toBeVisible();
@@ -90,7 +90,7 @@ test("deleting a category with transactions prompts for reassign target", async 
   modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("Edit Category");
 
-  // 5. Click Delete…
+  // 5. Click Delete
   await modal.getByRole("button", { name: /^Delete/ }).click();
   await expect(modal.locator(".y-modal-head")).toContainText("Delete");
 

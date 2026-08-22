@@ -11,8 +11,7 @@ export type View =
   | "calendar"
   | "projections"
   | "transactions"
-  | "recurring"
-  | "settings";
+  | "recurring";
 
 type NavItem = { key: View; label: string; icon: string };
 const NAV_TOP: NavItem[] = [
@@ -21,7 +20,6 @@ const NAV_TOP: NavItem[] = [
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "projections", label: "Projections", icon: "projections" },
   { key: "recurring", label: "Recurring", icon: "clock" },
-  { key: "settings", label: "Settings", icon: "gear" },
 ];
 
 const DEFAULT_WIDTH = 214;

@@ -62,7 +62,7 @@ export function SpendingTrendsReport({
   // Hovered constituent from the legend table
   const [hoverConstituentId, setHoverConstituentId] = useState<number | null>(null);
 
-  // Category filter state
+  // Category filter state — persisted in localStorage
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -72,17 +72,35 @@ export function SpendingTrendsReport({
     return new Set(data.categories.filter((c) => !ccGroupIds.has(c.groupId)).map((c) => c.id));
   }, [data.categories, data.groups]);
 
-  const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(allCategoryIds);
+  const [persistedIds, setPersistedIds] = useLocalStorage<number[] | null>("ynab:reports:trendsActiveCategories", null);
+  const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(() => {
+    if (persistedIds != null) return new Set(persistedIds);
+    return allCategoryIds;
+  });
 
-  // Keep activeCategoryIds in sync when categories are added
+  // Sync to localStorage when activeCategoryIds changes
   useEffect(() => {
+    const arr = Array.from(activeCategoryIds);
+    setPersistedIds(arr);
+  }, [activeCategoryIds, setPersistedIds]);
+
+  // On mount, apply persisted filter; on category changes, prune removed categories
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      if (persistedIds != null) {
+        const valid = persistedIds.filter((id) => allCategoryIds.has(id));
+        if (valid.length > 0) {
+          setActiveCategoryIds(new Set(valid));
+          return;
+        }
+      }
+    }
     setActiveCategoryIds((prev) => {
       const next = new Set<number>();
       for (const id of allCategoryIds) {
         if (prev.has(id)) next.add(id);
-      }
-      if (next.size === 0 && allCategoryIds.size > 0 && prev.size === 0) {
-        return new Set(allCategoryIds);
       }
       return next.size > 0 ? next : new Set(allCategoryIds);
     });
@@ -774,34 +792,68 @@ export function SpendingTrendsReport({
                     {/* Stack segments wrapped in whole-bar clipPath for unified smooth rounded corners */}
                     <g clipPath={`url(#${gid}-bar-${mIdx})`}>
                       {mBar.segments.map((seg) => (
-                        <rect
-                          key={seg.id}
-                          x={seg.x}
-                          y={seg.y}
-                          width={seg.width}
-                          height={Math.max(1, seg.height)}
-                          fill={seg.color}
-                          fillOpacity={seg.isDimmed ? 0.3 : seg.isHovered ? 1 : 0.88}
-                          style={{
-                            cursor: trends.drillLevel !== "category" ? "pointer" : "default",
-                            transition: "fill-opacity 100ms",
-                          }}
-                          onMouseMove={(e) => {
-                            setHover({
-                              monthIdx: mIdx,
-                              segmentId: seg.id,
-                              x: e.clientX,
-                              y: e.clientY,
-                            });
-                          }}
-                          onClick={() => {
-                            if (trends.drillLevel !== "category") {
-                              handleDrillSegment(seg.id);
-                            } else {
-                              setSelectedMonth(selectedMonth === mBar.month ? null : mBar.month);
-                            }
-                          }}
-                        />
+                        <g key={seg.id}>
+                          <rect
+                            x={seg.x}
+                            y={seg.y}
+                            width={seg.width}
+                            height={Math.max(1, seg.height)}
+                            fill={seg.color}
+                            fillOpacity={seg.isDimmed ? 0.3 : seg.isHovered ? 1 : 0.88}
+                            style={{
+                              cursor: trends.drillLevel !== "category" ? "pointer" : "default",
+                              transition: "fill-opacity 100ms",
+                            }}
+                            onMouseMove={(e) => {
+                              setHover({
+                                monthIdx: mIdx,
+                                segmentId: seg.id,
+                                x: e.clientX,
+                                y: e.clientY,
+                              });
+                            }}
+                            onClick={() => {
+                              if (trends.drillLevel !== "category") {
+                                handleDrillSegment(seg.id);
+                              } else {
+                                setSelectedMonth(selectedMonth === mBar.month ? null : mBar.month);
+                              }
+                            }}
+                          />
+                          {seg.y <= chart.padT + 1 && (
+                            <>
+                              <line
+                                x1={seg.x + 1}
+                                x2={seg.x + seg.width - 1}
+                                y1={chart.padT + 4}
+                                y2={chart.padT + 4}
+                                stroke="rgba(0,0,0,0.35)"
+                                strokeWidth={2}
+                                strokeDasharray="3 2"
+                                vectorEffect="non-scaling-stroke"
+                              />
+                              <line
+                                x1={seg.x + 1}
+                                x2={seg.x + seg.width - 1}
+                                y1={chart.padT + 8}
+                                y2={chart.padT + 8}
+                                stroke="rgba(0,0,0,0.35)"
+                                strokeWidth={2}
+                                strokeDasharray="3 2"
+                                vectorEffect="non-scaling-stroke"
+                              />
+                              <rect
+                                x={seg.x}
+                                y={chart.padT}
+                                width={seg.width}
+                                height={3}
+                                rx={1}
+                                fill={seg.color}
+                                fillOpacity={0.7}
+                              />
+                            </>
+                          )}
+                        </g>
                       ))}
                     </g>
 

@@ -97,7 +97,7 @@ describe("CategoryModal", () => {
     );
 
     // Click delete
-    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
     expect(screen.getByText(/Delete "Groceries"\?/i)).toBeInTheDocument();
     expect(screen.getByText(/This category is referenced by 5 transaction\(s\)/i)).toBeInTheDocument();
 
@@ -121,7 +121,7 @@ describe("CategoryModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
     expect(screen.getByText(/This category has no transactions and will be removed/i)).toBeInTheDocument();
 
     await act(async () => {
@@ -144,7 +144,7 @@ describe("CategoryModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /delete…/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
     openSearchable(/move transactions to/i);
     const list = screen.getByRole("listbox");
     expect(within(list).getByText("Everyday")).toBeInTheDocument();

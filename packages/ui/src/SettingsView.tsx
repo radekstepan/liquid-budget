@@ -24,7 +24,7 @@ export function SettingsView({
 }) {
   const [editing, setEditing] = useState<RenameRule | null>(null);
   const [creating, setCreating] = useState(false);
-  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,17 +57,17 @@ export function SettingsView({
     }
   };
 
-  const remove = async (id: number) => {
-    if (confirmId !== id) {
-      setConfirmId(id);
-      return;
-    }
-    setConfirmId(null);
+  const confirmDelete = async () => {
+    if (deletingId == null) return;
     setError(null);
+    setBusy(true);
     try {
-      await onDelete(id);
+      await onDelete(deletingId);
+      setDeletingId(null);
     } catch (e: any) {
       setError(e?.message ? String(e.message) : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -129,7 +129,6 @@ export function SettingsView({
                           aria-label={`Edit rule ${r.sourcePattern}`}
                           onClick={() => {
                             setError(null);
-                            setConfirmId(null);
                             setCreating(false);
                             setEditing(r);
                           }}
@@ -140,13 +139,9 @@ export function SettingsView({
                           className="y-icon-btn"
                           title="Delete rule"
                           aria-label={`Delete rule ${r.sourcePattern}`}
-                          onClick={() => remove(r.id)}
+                          onClick={() => setDeletingId(r.id)}
                         >
-                          {confirmId === r.id ? (
-                            <span className="text-[10px] font-bold px-0.5">Confirm?</span>
-                          ) : (
-                            <Icon name="trash" size={12} />
-                          )}
+                          <Icon name="trash" size={12} />
                         </button>
                       </div>
                     </td>
@@ -157,6 +152,30 @@ export function SettingsView({
           </div>
         )}
       </div>
+
+      {deletingId != null && (
+        <Modal
+          title="Delete rename rule"
+          onClose={() => setDeletingId(null)}
+          footer={
+            <>
+              <Btn onClick={() => setDeletingId(null)} disabled={busy}>
+                Cancel
+              </Btn>
+              <Btn variant="danger" onClick={confirmDelete} disabled={busy}>
+                {busy ? "Deleting" : "Yes, delete it"}
+              </Btn>
+            </>
+          }
+        >
+          <div className="text-[12.5px]" style={{ color: "var(--y-ink)" }}>
+            <p>
+              Are you sure you want to delete this rename rule? It will no longer be applied
+              during CSV imports.
+            </p>
+          </div>
+        </Modal>
+      )}
 
       {(creating || editing) && (
         <RuleFormModal

@@ -309,7 +309,7 @@ export function TransactionModal({
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
-                {deleting ? "Deleting…" : "Yes, delete it"}
+                {deleting ? "Deleting" : "Yes, delete it"}
               </Btn>
             </div>
           </>
@@ -319,7 +319,7 @@ export function TransactionModal({
               <Btn onClick={onClose}>Cancel</Btn>
               {isEdit && onDelete && (
                 <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                  Delete…
+                  Delete
                 </Btn>
               )}
             </div>
@@ -753,7 +753,7 @@ export function CategoryModal({
                 onClick={confirmDelete}
                 disabled={deleting || (transactionCount > 0 && !moveToCategoryId)}
               >
-                {deleting ? "Deleting…" : "Yes, delete it"}
+                {deleting ? "Deleting" : "Yes, delete it"}
               </Btn>
             </div>
           </>
@@ -763,7 +763,7 @@ export function CategoryModal({
               <Btn onClick={onClose}>Cancel</Btn>
               {initial && onDelete && (
                 <Btn variant="danger" onClick={() => setConfirmingDelete(true)}>
-                  Delete…
+                  Delete
                 </Btn>
               )}
             </div>
@@ -937,6 +937,7 @@ export function RecurringModal({
   initial,
   onClose,
   onSave,
+  onPost,
 }: {
   accounts: Account[];
   categories: Category[];
@@ -961,6 +962,7 @@ export function RecurringModal({
     transferAccountId?: number | null;
     subTransactions?: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
   }) => void;
+  onPost?: (id: number, date?: string) => Promise<void>;
 }) {
   const initialAmt = initial ? num(initial.amount) / 100 : 0;
   const initialChildren = initial?.subTransactions ?? [];
@@ -1131,6 +1133,17 @@ export function RecurringModal({
         <>
           <div className="flex items-center gap-2 mr-auto">
             <Btn onClick={onClose}>Cancel</Btn>
+            {initial && onPost && (
+              <Btn
+                variant="primary"
+                onClick={async () => {
+                  await onPost(initial.id);
+                  onClose();
+                }}
+              >
+                Enter Now
+              </Btn>
+            )}
           </div>
           <div className="flex items-center gap-2 ml-auto">
             <Btn variant="primary" onClick={save} disabled={!canSave}>
@@ -1576,7 +1589,7 @@ export function AccountModal({
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
-                {deleting ? "Deleting…" : "Yes, delete it"}
+                {deleting ? "Deleting" : "Yes, delete it"}
               </Btn>
             </div>
           </>
@@ -1589,7 +1602,7 @@ export function AccountModal({
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <Btn variant="primary" onClick={confirmArchive} disabled={archiving}>
-                {archiving ? "Archiving…" : "Yes, archive it"}
+                {archiving ? "Archiving" : "Yes, archive it"}
               </Btn>
             </div>
           </>
@@ -1602,7 +1615,7 @@ export function AccountModal({
               )}
               {isEdit && isArchived && onUnarchive && (
                 <Btn onClick={handleUnarchive} disabled={unarchiving}>
-                  {unarchiving ? "Unarchiving…" : "Unarchive account"}
+                  {unarchiving ? "Unarchiving" : "Unarchive account"}
                 </Btn>
               )}
               {isEdit && onDelete && (
