@@ -423,6 +423,45 @@ export function zigZagVertical(y1: number, y2: number, x0: number, step = 9, amp
 }
 
 /**
+ * SVG mask that cuts a transparent jagged band through bars at `breaks[i].y`.
+ * Place bars inside `<g mask={`url(#${maskId})`}>` and draw thin boundary
+ * lines on top via `<AxisBreakMark>`.
+ */
+export function AxisBreakMask({
+  maskId,
+  x1,
+  x2,
+  breaks,
+  band = 14,
+}: {
+  maskId: string;
+  x1: number;
+  x2: number;
+  breaks: Array<{ y: number }>;
+  band?: number;
+}) {
+  const lo = Math.min(x1, x2);
+  const hi = Math.max(x1, x2);
+  return (
+    <mask id={maskId}>
+      <rect width="100%" height="100%" fill="white" />
+      {breaks.map((b, i) => (
+        <path
+          key={i}
+          data-testid="axis-break"
+          d={zigZagHorizontal(lo, hi, b.y, 12, 3.5)}
+          fill="none"
+          stroke="black"
+          strokeWidth={band}
+          strokeLinejoin="miter"
+          strokeMiterlimit={3}
+        />
+      ))}
+    </mask>
+  );
+}
+
+/**
  * Cutout + double squiggle marking where the scale changes.
  * `vertical` renders a vertical break at x = `y` spanning [min(x1,x2), max(x1,x2)].
  */

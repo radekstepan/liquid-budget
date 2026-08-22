@@ -14,6 +14,7 @@ import {
 import { Button, Panel, Icon } from "@ynab/theme";
 import {
   AxisBreakMark,
+  AxisBreakMask,
   ChartTip,
   colorAt,
   computeOutlierBreak,
@@ -779,35 +780,47 @@ export function SpendingTrendsReport({
                   </clipPath>
                 ))}
                 <TruncHatchPattern id={`${gid}-hatch`} />
+                {chart.hasTrendBreak && chart.breakY != null && (
+                  <AxisBreakMask
+                    maskId={`${gid}-break`}
+                    x1={chart.padL}
+                    x2={chart.W - chart.padR}
+                    breaks={[{ y: chart.breakY }]}
+                  />
+                )}
               </defs>
 
-              {/* Horizontal Grid lines and Y-axis Ticks */}
-              {chart.ticks.map((t, i) => (
-                <g key={i}>
-                  {t.grid && (
-                    <line
-                      x1={chart.padL}
-                      x2={chart.W - chart.padR}
-                      y1={chart.y(t.v)}
-                      y2={chart.y(t.v)}
-                      stroke={GRID_LINE}
-                      strokeWidth={1}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  )}
-                  <text
-                    x={chart.padL - 8}
-                    y={chart.y(t.v)}
-                    fill="var(--y-ink-faint)"
-                    fontSize={10}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    className="y-num"
-                  >
-                    {fmtShort(t.v)}
-                  </text>
-                </g>
-              ))}
+              {/* Horizontal Grid lines and Y-axis Ticks (hide any inside break band) */}
+              {chart.ticks.map((t, i) => {
+                const ty = chart.y(t.v);
+                if (chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7) return null;
+                return (
+                  <g key={i}>
+                    {t.grid && (
+                      <line
+                        x1={chart.padL}
+                        x2={chart.W - chart.padR}
+                        y1={ty}
+                        y2={ty}
+                        stroke={GRID_LINE}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    )}
+                    <text
+                      x={chart.padL - 8}
+                      y={ty}
+                      fill="var(--y-ink-faint)"
+                      fontSize={10}
+                      textAnchor="end"
+                      dominantBaseline="middle"
+                      className="y-num"
+                    >
+                      {fmtShort(t.v)}
+                    </text>
+                  </g>
+                );
+              })}
 
               {/* Zero baseline */}
               <line
@@ -834,8 +847,9 @@ export function SpendingTrendsReport({
                 />
               )}
 
-              {/* Stacked Bars */}
-              {chart.monthBars.map((mBar, mIdx) => {
+              {/* Stacked Bars (masked to cut a transparent break band) */}
+              <g mask={chart.hasTrendBreak && chart.breakY != null ? `url(#${gid}-break)` : undefined}>
+                {chart.monthBars.map((mBar, mIdx) => {
                 const isMonthHovered = hover?.monthIdx === mIdx;
                 const isMonthSelected = selectedMonth === mBar.month;
 
@@ -976,14 +990,14 @@ export function SpendingTrendsReport({
                   </g>
                 );
               })}
+              </g>
 
-              {/* Axis break cutout over spike months */}
+              {/* Axis break boundary lines on top of masked bars */}
               {chart.hasTrendBreak && chart.breakY != null && (
                 <AxisBreakMark
                   x1={chart.padL}
                   x2={chart.W - chart.padR}
                   y={chart.breakY}
-                  erase="#ffffff"
                 />
               )}
 
