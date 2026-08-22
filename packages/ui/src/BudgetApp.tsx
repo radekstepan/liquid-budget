@@ -534,13 +534,6 @@ export function BudgetApp({
     [api]
   );
 
-  const clearOverdraft = useCallback(
-    async (categoryIds: number[]): Promise<void> => {
-      await Promise.all(categoryIds.map((id) => api.assign(id, 0, month)));
-    },
-    [api, month]
-  );
-
   const toggleGroup = useCallback((id: number) => {
     setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   }, []);
@@ -723,7 +716,6 @@ export function BudgetApp({
               onExpandAll={expandAll}
               onReorderCategory={api.reorderCategory}
               onReorderGroup={api.reorderGroup}
-              onClearOverdraft={clearOverdraft}
               lastMonthAssignments={lastMonthAssignments}
               spentLastMonthByCategory={spentLastMonthByCategory}
               avgSpentByCategory={avgSpentByCategory}
@@ -846,6 +838,9 @@ export function BudgetApp({
           tbb={budget.tbb}
           overBudgeted={budget.overBudgeted}
           priorSurplus={budget.priorSurplus}
+          totalIncome={budget.totalIncome}
+          totalAssigned={budget.totalAssigned}
+          overspentPrevious={budget.overspentPrevious}
           cashFlow={cashFlow}
           trailingNetWorth={trailingNetWorth}
           insights={insights}
@@ -853,7 +848,6 @@ export function BudgetApp({
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
-          onClearOverdraft={clearOverdraft}
           onOpenRenameRules={() => setShowSettingsOverlay(true)}
         />
       </ErrorBoundary>

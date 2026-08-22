@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo, Fragment } from "react";
 import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
-import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, previousMonthKey, todayISO } from "@ynab/logic";
+import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -11,7 +11,6 @@ import {
   ToolbarSep,
   cx,
 } from "@ynab/theme";
-import type { BudgetHeaderPart } from "@ynab/theme";
 
 /* ------------------------------------------------------------ helpers */
 
@@ -73,7 +72,6 @@ export const BudgetView = memo(function BudgetView({
   onExpandAll,
   onReorderCategory,
   onReorderGroup,
-  onClearOverdraft,
   lastMonthAssignments,
   spentLastMonthByCategory,
   avgSpentByCategory,
@@ -103,7 +101,6 @@ export const BudgetView = memo(function BudgetView({
   onExpandAll: () => void;
   onReorderCategory?: (id: number, sort: number) => void;
   onReorderGroup?: (id: number, sort: number) => void;
-  onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
   lastMonthAssignments?: Map<number, number>;
   spentLastMonthByCategory?: Map<number, number>;
   avgSpentByCategory?: Map<number, number>;
@@ -171,19 +168,6 @@ export const BudgetView = memo(function BudgetView({
     });
   }, [resolvedBudgets]);
 
-  const headerParts: BudgetHeaderPart[] = [
-    {
-      label: `Not Budgeted in ${formatMonthLong(previousMonthKey(currentMonth))}`,
-      value: budget.priorSurplus,
-    },
-    {
-      label: "Overspent in Previous",
-      value: budget.overspentPrevious,
-    },
-    { label: `Income for ${formatMonthLong(currentMonth)}`, value: budget.totalIncome },
-    { label: `Budgeted in ${formatMonthLong(currentMonth)}`, value: budget.totalAssigned },
-  ];
-
   const todayMonth = todayISO().slice(0, 7);
   const isOnThisMonth = currentMonth === todayMonth;
 
@@ -214,38 +198,6 @@ export const BudgetView = memo(function BudgetView({
           />
         )}
       </Toolbar>
-
-      <HeroBudgetStrip parts={headerParts} atb={budget.tbb} />
-
-      {budget.overBudgeted && onClearOverdraft && (
-        <div
-          className="px-3 py-1.5 flex items-center gap-2"
-          style={{
-            background: "var(--y-red-pale)",
-            borderBottom: "1px solid var(--y-border-strong)",
-          }}
-        >
-          <span className="text-[11.5px]" style={{ color: "var(--y-red-dk)" }}>
-            You've overbudgeted by{" "}
-            <strong className="y-num">{fmt(Math.abs(budget.tbb))}</strong> this month.
-          </span>
-          <Button
-            onClick={() =>
-              onClearOverdraft(
-                budget.groups
-                  .flatMap((g) => g.rows)
-                  .filter((r) => r.available < 0)
-                  .map((r) => r.category.id)
-              )
-            }
-            size="sm"
-            variant="danger"
-            className="ml-auto"
-          >
-            Zero out overdrafts
-          </Button>
-        </div>
-      )}
 
       <div className="flex-1 overflow-auto y-scroll">
         <table className="y-table">
@@ -380,43 +332,6 @@ export const BudgetView = memo(function BudgetView({
     </div>
   );
 });
-
-/* ------------------------------------------------------------ hero strip */
-
-function HeroBudgetStrip({ parts, atb }: { parts: BudgetHeaderPart[]; atb: number }) {
-  const tone = atb > 0 ? "green" : atb < 0 ? "red" : "orange";
-  const opSymbols = ["+", "+", "+", "−"];
-  return (
-    <div
-      className="y-budget-header flex items-center gap-3 px-3 py-3 flex-wrap"
-      style={{ borderBottom: "1px solid var(--y-border-strong)" }}
-    >
-      {parts.map((p, i) => (
-        <div key={i} className="flex items-center gap-3">
-          {i > 0 && <span className="y-math-op">{opSymbols[i - 1] ?? "+"}</span>}
-          <div className="y-mathbox">
-            <div className="y-math-label">{p.label}</div>
-            <div className="y-math-val">{fmt(p.value)}</div>
-          </div>
-        </div>
-      ))}
-      <span className="y-math-op">=</span>
-      <div
-        className={cx("y-atb", `y-atb--${tone}`)}
-        style={{ minWidth: 168, padding: "9px 22px" }}
-        role="status"
-        aria-label="Available to Budget"
-      >
-        <div className="text-[26px] font-extrabold leading-[1.05] y-num tracking-tight">
-          {fmt(atb)}
-        </div>
-        <div className="text-[9.5px] font-bold tracking-[.11em] uppercase opacity-95 mt-[2px]">
-          Available to Budget
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------ month-count control */
 
@@ -721,6 +636,27 @@ function GroupBlock({
                           aria-label="Red arrow: carry over"
                         >
                           ➔
+                        </span>
+                      )}
+                      {r.available < 0 && r.assigned > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onAssign(r.category.id, 0, currentMonth)}
+                          className="ml-1.5 text-[10px] underline cursor-pointer"
+                          style={{ color: "var(--y-red)" }}
+                          aria-label={`Unassign ${fmt(r.assigned)} from ${r.category.name}`}
+                          title="Set assigned to 0"
+                        >
+                          Unassign {fmt(r.assigned)}
+                        </button>
+                      )}
+                      {r.available < 0 && r.assigned === 0 && (
+                        <span
+                          className="ml-1.5 text-[10px]"
+                          style={{ color: "var(--y-ink-faint)" }}
+                          title={`This category has ${fmt(-r.outflow)} in outflows with $0 assigned. Assign more to cover it, or the overspending will be absorbed into next month's TBB.`}
+                        >
+                          overspent
                         </span>
                       )}
                     </td>

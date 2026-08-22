@@ -260,23 +260,55 @@ describe("BudgetView", () => {
     });
   });
 
-  describe("overdraft banner", () => {
-    it("renders when overBudgeted and calls onClearOverdraft with negative-available category ids", () => {
-      const onClearOverdraft = vi.fn();
-      renderView({ onClearOverdraft });
-      expect(screen.getByText(/overbudgeted by/)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /zero out overdrafts/i }));
-      expect(onClearOverdraft).toHaveBeenCalledWith([11]);
+  describe("inline overdraft fix", () => {
+    it("shows Unassign button on overdrafted category with assigned > 0", () => {
+      const onAssign = vi.fn();
+      renderView({ onAssign });
+      const btn = screen.getByRole("button", { name: /unassign.*from rent/i });
+      expect(btn).toBeInTheDocument();
     });
 
-    it("is hidden when not overbudgeted", () => {
-      renderView({ budget: makeBudget({ tbb: 1000, overBudgeted: false }) });
-      expect(screen.queryByText(/overbudgeted by/)).not.toBeInTheDocument();
+    it("calls onAssign with 0 when Unassign is clicked", () => {
+      const onAssign = vi.fn();
+      renderView({ onAssign });
+      const btn = screen.getByRole("button", { name: /unassign.*from rent/i });
+      fireEvent.click(btn);
+      expect(onAssign).toHaveBeenCalledWith(11, 0, "2026-06");
     });
 
-    it("is hidden when onClearOverdraft is not provided", () => {
-      renderView({ onClearOverdraft: undefined });
-      expect(screen.queryByText(/overbudgeted by/)).not.toBeInTheDocument();
+    it("shows overspent text on overdrafted category with assigned === 0", () => {
+      const budgetWithZeroAssigned = makeBudget({
+        groups: [
+          {
+            group: { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            assigned: 0,
+            outflow: -5000,
+            available: -5000,
+            rows: [
+              {
+                category: { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+                carryoverIn: 0,
+                assigned: 0,
+                outflow: -5000,
+                ccBuffer: 0,
+                available: -5000,
+                fundedPct: 0,
+              },
+            ],
+          },
+        ],
+      });
+      renderView({ budget: budgetWithZeroAssigned, budgets: [budgetWithZeroAssigned] });
+      expect(screen.getByText("overspent")).toBeInTheDocument();
+    });
+
+    it("does not show fix text on non-overdrafted categories", () => {
+      renderView();
+      const groceriesRow = screen
+        .getAllByRole("row")
+        .find((r) => within(r).queryByText("Groceries"))!;
+      expect(within(groceriesRow).queryByText(/unassign/i)).not.toBeInTheDocument();
+      expect(within(groceriesRow).queryByText("overspent")).not.toBeInTheDocument();
     });
   });
 
