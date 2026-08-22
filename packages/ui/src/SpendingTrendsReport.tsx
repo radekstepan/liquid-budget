@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useMemo, useState, useRef, useEffect, type ReactNode } from "react";
-import type { BudgetData, Transaction } from "@ynab/logic";
+import { useId, useMemo, useState, useRef, useEffect, useCallback, memo, type ReactNode } from "react";
+import type { BudgetData, Transaction, SpendingTrendsConstituent } from "@ynab/logic";
 import {
   fmt,
   MONTHS,
@@ -28,11 +28,373 @@ import {
   TruncHatchPattern,
   TruncMarker,
   useElementSize,
+  useRafThrottledSet,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
 const GRID_LINE = "#e3e3df";
 const AXIS_LINE = "#b6b6b1";
+
+interface SegmentLayout {
+  id: number;
+  name: string;
+  amount: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+}
+
+interface MonthBarLayout {
+  month: string;
+  monthTotal: number;
+  totalH: number;
+  barTopY: number;
+  truncated: boolean;
+  cx: number;
+  barX: number;
+  barW: number;
+  colW: number;
+  colX: number;
+  segments: SegmentLayout[];
+}
+
+interface ChartLayout {
+  W: number;
+  H: number;
+  padL: number;
+  padR: number;
+  padT: number;
+  padB: number;
+  innerW: number;
+  innerH: number;
+  y: (v: number) => number;
+  zeroY: number;
+  ticks: { v: number; grid: boolean }[];
+  colW: number;
+  barW: number;
+  cornerRadius: number;
+  n: number;
+  monthBars: MonthBarLayout[];
+  avgY: number | null;
+  breakY: number | null;
+  hasTrendBreak: boolean;
+  tickSet: Set<number>;
+}
+
+const StaticChart = memo(function StaticChart({
+  chart,
+  gid,
+  selectedMonth,
+  trends,
+  colorMap,
+  onDrillSegment,
+  onToggleMonth,
+}: {
+  chart: ChartLayout;
+  gid: string;
+  selectedMonth: string | null;
+  trends: SpendingTrendsResult;
+  colorMap: Map<number, string>;
+  onDrillSegment: (id: number) => void;
+  onToggleMonth: (month: string) => void;
+}) {
+  return (
+    <svg width={chart.W} height={chart.H} className="overflow-visible select-none">
+      <defs>
+        {chart.monthBars.map((mBar, mIdx) => (
+          <clipPath key={`clip-${mIdx}`} id={`${gid}-bar-${mIdx}`}>
+            <rect
+              x={mBar.barX}
+              y={mBar.barTopY}
+              width={mBar.barW}
+              height={mBar.totalH}
+              rx={chart.cornerRadius}
+            />
+          </clipPath>
+        ))}
+        <TruncHatchPattern id={`${gid}-hatch`} />
+        {chart.hasTrendBreak && chart.breakY != null && (
+          <AxisBreakMask
+            maskId={`${gid}-break`}
+            x1={chart.padL}
+            x2={chart.W - chart.padR}
+            breaks={[{ y: chart.breakY }]}
+          />
+        )}
+      </defs>
+
+      {chart.ticks.map((t, i) => {
+        const ty = chart.y(t.v);
+        const inBreak = chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7;
+        return (
+          <g key={i}>
+            {t.grid && !inBreak && (
+              <line
+                x1={chart.padL}
+                x2={chart.W - chart.padR}
+                y1={ty}
+                y2={ty}
+                stroke={GRID_LINE}
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            <text
+              x={chart.padL - 8}
+              y={ty}
+              fill="var(--y-ink-faint)"
+              fontSize={10}
+              textAnchor="end"
+              dominantBaseline="middle"
+              className="y-num"
+            >
+              {fmtShort(t.v)}
+            </text>
+          </g>
+        );
+      })}
+
+      <line
+        x1={chart.padL}
+        x2={chart.W - chart.padR}
+        y1={chart.zeroY}
+        y2={chart.zeroY}
+        stroke={AXIS_LINE}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
+        <line
+          x1={chart.padL}
+          x2={chart.W - chart.padR}
+          y1={chart.avgY}
+          y2={chart.avgY}
+          stroke="#8a99a8"
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+
+      <g mask={chart.hasTrendBreak && chart.breakY != null ? `url(#${gid}-break)` : undefined}>
+        {chart.monthBars.map((mBar, mIdx) => {
+        const isMonthSelected = selectedMonth === mBar.month;
+
+        return (
+          <g key={mBar.month}>
+            {isMonthSelected && (
+              <rect
+                x={mBar.colX}
+                y={chart.padT}
+                width={mBar.colW}
+                height={chart.innerH}
+                fill="rgba(47, 127, 176, 0.08)"
+                rx={2}
+              />
+            )}
+
+            <g clipPath={`url(#${gid}-bar-${mIdx})`}>
+              {mBar.segments.map((seg, sIdx) => {
+              const segTruncated = mBar.truncated && sIdx === mBar.segments.length - 1;
+              return (
+                <g key={seg.id}>
+                  <rect
+                    x={seg.x}
+                    y={seg.y}
+                    width={seg.width}
+                    height={Math.max(1, seg.height)}
+                    fill={seg.color}
+                    fillOpacity={0.88}
+                    onClick={() => {
+                      if (trends.drillLevel !== "category") {
+                        onDrillSegment(seg.id);
+                      } else {
+                        onToggleMonth(mBar.month);
+                      }
+                    }}
+                  />
+                  {segTruncated && (
+                    <>
+                      {chart.barW >= 8 ? (
+                        <TruncMarker
+                          x={seg.x}
+                          y={mBar.barTopY}
+                          width={seg.width}
+                          fill={seg.color}
+                          hatchId={`url(#${gid}-hatch)`}
+                          rx={chart.cornerRadius}
+                        />
+                      ) : (
+                        <rect
+                          data-testid="trunc-cap"
+                          x={seg.x}
+                          y={mBar.barTopY}
+                          width={seg.width}
+                          height={TRUNC_CAP_H}
+                          rx={1}
+                          fill={seg.color}
+                        />
+                      )}
+                    </>
+                  )}
+                </g>
+              );
+              })}
+            </g>
+
+            <rect
+              x={mBar.colX}
+              y={chart.padT}
+              width={mBar.colW}
+              height={chart.innerH}
+              fill="transparent"
+              onClick={() => {
+                if (trends.drillLevel === "category") {
+                  onToggleMonth(mBar.month);
+                } else if (mBar.segments.length === 1 && mBar.segments[0]) {
+                  onDrillSegment(mBar.segments[0].id);
+                }
+              }}
+            />
+
+            {chart.tickSet.has(mIdx) &&
+              (() => {
+                const { month0, year } = parseMonthKey(mBar.month);
+                const monthName = MONTHS[month0] ?? "";
+                let label: string;
+                if (chart.n <= 12) {
+                  label = `${monthName} ${year}`;
+                } else if (chart.n <= 48) {
+                  label = `${monthName} '${String(year).slice(2)}`;
+                } else {
+                  label = `${year}`;
+                }
+
+                return (
+                  <text
+                    x={mBar.cx}
+                    y={chart.H - chart.padB + 18}
+                    fill={isMonthSelected ? "var(--y-blue)" : "var(--y-ink-soft)"}
+                    fontWeight={isMonthSelected ? 700 : 400}
+                    fontSize={10}
+                    textAnchor="middle"
+                    className="y-num cursor-pointer"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => onToggleMonth(mBar.month)}
+                  >
+                    {label}
+                  </text>
+                );
+              })()}
+          </g>
+        );
+        })}
+      </g>
+
+      {chart.hasTrendBreak && chart.breakY != null && (
+        <AxisBreakMark
+          x1={chart.padL}
+          x2={chart.W - chart.padR}
+          y={chart.breakY}
+        />
+      )}
+
+      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
+        <g pointerEvents="none">
+          <text
+            x={chart.W - chart.padR - 4}
+            y={chart.avgY - 5}
+            fill="#2d3340"
+            stroke="#ffffff"
+            strokeWidth={3}
+            strokeLinejoin="round"
+            paintOrder="stroke fill"
+            fontSize={9.5}
+            fontWeight={700}
+            textAnchor="end"
+            className="y-num"
+          >
+            Avg: {fmtShort(trends.avgPerMonth)}
+          </text>
+        </g>
+      )}
+    </svg>
+  );
+});
+
+const ConstituentTable = memo(function ConstituentTable({
+  constituents,
+  colorMap,
+  onDrill,
+}: {
+  constituents: SpendingTrendsConstituent[];
+  colorMap: Map<number, string>;
+  onDrill: (id: number) => void;
+}) {
+  const [hoverId, setHoverId] = useState<number | null>(null);
+
+  return (
+    <table className="y-table">
+      <thead className="y-thead y-thead--sticky">
+        <tr>
+          <th>Master Category</th>
+          <th className="num" style={{ width: 110 }}>Average/Mo</th>
+          <th className="num" style={{ width: 110 }}>Total Spent</th>
+          <th className="num" style={{ width: 80 }}>% Share</th>
+          <th style={{ width: 28 }}></th>
+        </tr>
+      </thead>
+      <tbody>
+        {constituents.map((c, idx) => {
+          const color = colorMap.get(c.id) ?? "#888";
+          const isHovered = hoverId === c.id;
+
+          return (
+            <tr
+              key={c.id}
+              className={`y-row ${idx % 2 === 1 ? "alt" : ""} ${isHovered ? "is-sel" : ""} cursor-pointer group`}
+              onMouseEnter={() => setHoverId(c.id)}
+              onMouseLeave={() => setHoverId(null)}
+              onClick={() => onDrill(c.id)}
+              title={`Click to drill down into ${c.name}`}
+            >
+              <td>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="inline-block h-3 w-3 shrink-0 rounded-sm"
+                    style={{
+                      background: color,
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.4), 0 0 0 1px rgba(0,0,0,0.1)",
+                    }}
+                  />
+                  <span className="truncate font-medium text-[var(--y-ink)]">
+                    {c.name}
+                  </span>
+                </div>
+              </td>
+              <td className="num y-num font-medium text-[var(--y-ink-soft)]">
+                {fmt(c.avgPerMonth)}
+              </td>
+              <td className="num y-num font-semibold text-[var(--y-ink)]">
+                {fmt(c.total)}
+              </td>
+              <td className="num y-num text-[var(--y-ink-faint)]">
+                {c.pctOfTotal}%
+              </td>
+              <td className="text-center text-[var(--y-blue)] opacity-0 group-hover:opacity-100">
+                <Icon name="chevronRight" size={10} />
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+});
 
 export function SpendingTrendsReport({
   data,
@@ -61,13 +423,9 @@ export function SpendingTrendsReport({
   // Hover state for chart
   const [hover, setHover] = useState<{
     monthIdx: number;
-    segmentId?: number;
     x: number;
     y: number;
   } | null>(null);
-
-  // Hovered constituent from the legend table
-  const [hoverConstituentId, setHoverConstituentId] = useState<number | null>(null);
 
   // Category filter state — persisted in localStorage
   const [filterOpen, setFilterOpen] = useState(false);
@@ -282,12 +640,6 @@ export function SpendingTrendsReport({
         currentBottom = segY;
 
         const color = colorMap.get(seg.id) ?? colorAt(sIdx);
-        const isHovered =
-          (hover?.monthIdx === i && (hover.segmentId == null || hover.segmentId === seg.id)) ||
-          hoverConstituentId === seg.id;
-        const isDimmed =
-          (hover != null && (hover.monthIdx !== i || (hover.segmentId != null && hover.segmentId !== seg.id))) ||
-          (hoverConstituentId != null && hoverConstituentId !== seg.id);
 
         return {
           id: seg.id,
@@ -298,8 +650,6 @@ export function SpendingTrendsReport({
           width: barW,
           height: segHeight,
           color,
-          isHovered,
-          isDimmed,
         };
       });
 
@@ -360,7 +710,7 @@ export function SpendingTrendsReport({
       hasTrendBreak: useTrendBreak,
       tickSet,
     };
-  }, [size, trends, colorMap, hover, hoverConstituentId, scaleMode]);
+  }, [size, trends, colorMap, scaleMode]);
 
   // Breadcrumb navigation handlers
   const handleGoToAll = () => {
@@ -376,7 +726,7 @@ export function SpendingTrendsReport({
     setHover(null);
   };
 
-  const handleDrillSegment = (constituentId: number) => {
+  const handleDrillSegment = useCallback((constituentId: number) => {
     if (trends.drillLevel === "all") {
       setDrillGroupId(constituentId);
       setDrillCategoryId(null);
@@ -387,7 +737,23 @@ export function SpendingTrendsReport({
       setSelectedMonth(null);
       setHover(null);
     }
-  };
+  }, [trends.drillLevel]);
+
+  const pushHover = useRafThrottledSet(setHover);
+
+  const handleMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!chart) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const idx = Math.max(0, Math.min(chart.n - 1, Math.floor((relX - chart.padL) / chart.colW)));
+    pushHover({ monthIdx: idx, x: e.clientX, y: e.clientY });
+  }, [chart, pushHover]);
+
+  const handleMouseLeave = useCallback(() => setHover(null), []);
+
+  const handleToggleMonth = useCallback((month: string) => {
+    setSelectedMonth(prev => prev === month ? null : month);
+  }, []);
 
   // Hover tip content
   const tipContent: ReactNode | null = (() => {
@@ -411,22 +777,15 @@ export function SpendingTrendsReport({
             {mPoint.segments.map((s, idx) => {
               const color = colorMap.get(s.id) ?? colorAt(idx);
               const pct = mPoint.total > 0 ? `${Math.round((s.amount / mPoint.total) * 100)}%` : "0%";
-              const isTarget = hover.segmentId === s.id;
               return (
                 <div
                   key={s.id}
                   className="flex items-center justify-between gap-2 text-[11px]"
-                  style={{ fontWeight: isTarget ? 700 : 400 }}
                 >
                   <TipLabel color={color} label={s.name} value={fmt(s.amount)} pct={pct} />
                 </div>
               );
             })}
-          </div>
-        )}
-        {trends.drillLevel !== "category" && mPoint.segments.length > 0 && (
-          <div className="mt-1 text-[10px] text-[rgba(242,245,247,0.55)]">
-            Click bar to drill down
           </div>
         )}
       </div>
@@ -756,7 +1115,8 @@ export function SpendingTrendsReport({
           ref={chartContainerRef}
           className="relative min-h-[220px] flex-[1.4] w-full border-b border-[var(--y-line-soft)]"
           style={{ background: "linear-gradient(#ffffff, #f7f7f4)" }}
-          onMouseLeave={() => setHover(null)}
+          onMouseMove={handleMove}
+          onMouseLeave={handleMouseLeave}
         >
           {empty && (
             <div className="grid h-full place-items-center y-hint text-[12px]">
@@ -765,262 +1125,36 @@ export function SpendingTrendsReport({
           )}
 
           {chart && !empty && (
-            <svg width={chart.W} height={chart.H} className="overflow-visible select-none">
-              <defs>
-                {/* Individual clip paths around each whole composite bar */}
-                {chart.monthBars.map((mBar, mIdx) => (
-                  <clipPath key={`clip-${mIdx}`} id={`${gid}-bar-${mIdx}`}>
-                    <rect
-                      x={mBar.barX}
-                      y={mBar.barTopY}
-                      width={mBar.barW}
-                      height={mBar.totalH}
-                      rx={chart.cornerRadius}
-                    />
-                  </clipPath>
-                ))}
-                <TruncHatchPattern id={`${gid}-hatch`} />
-                {chart.hasTrendBreak && chart.breakY != null && (
-                  <AxisBreakMask
-                    maskId={`${gid}-break`}
-                    x1={chart.padL}
-                    x2={chart.W - chart.padR}
-                    breaks={[{ y: chart.breakY }]}
-                  />
-                )}
-              </defs>
+            <StaticChart
+              chart={chart}
+              gid={gid}
+              selectedMonth={selectedMonth}
+              trends={trends}
+              colorMap={colorMap}
+              onDrillSegment={handleDrillSegment}
+              onToggleMonth={handleToggleMonth}
+            />
+          )}
 
-              {/* Horizontal Grid lines and Y-axis Ticks (hide grid line inside break band) */}
-              {chart.ticks.map((t, i) => {
-                const ty = chart.y(t.v);
-                const inBreak = chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7;
-                return (
-                  <g key={i}>
-                    {t.grid && !inBreak && (
-                      <line
-                        x1={chart.padL}
-                        x2={chart.W - chart.padR}
-                        y1={ty}
-                        y2={ty}
-                        stroke={GRID_LINE}
-                        strokeWidth={1}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    )}
-                    <text
-                      x={chart.padL - 8}
-                      y={ty}
-                      fill="var(--y-ink-faint)"
-                      fontSize={10}
-                      textAnchor="end"
-                      dominantBaseline="middle"
-                      className="y-num"
-                    >
-                      {fmtShort(t.v)}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* Zero baseline */}
+          {/* Hover dashed vertical line overlay */}
+          {hover && chart && (
+            <svg
+              width={chart.W}
+              height={chart.H}
+              className="absolute inset-0 overflow-visible pointer-events-none"
+              style={{ top: 0, left: 0 }}
+            >
               <line
-                x1={chart.padL}
-                x2={chart.W - chart.padR}
-                y1={chart.zeroY}
-                y2={chart.zeroY}
-                stroke={AXIS_LINE}
-                strokeWidth={1}
+                x1={chart.padL + chart.colW * (hover.monthIdx + 0.5)}
+                x2={chart.padL + chart.colW * (hover.monthIdx + 0.5)}
+                y1={chart.padT}
+                y2={chart.H - chart.padB}
+                stroke="var(--y-blue)"
+                strokeOpacity={0.4}
+                strokeWidth={1.5}
                 vectorEffect="non-scaling-stroke"
+                strokeDasharray="3 3"
               />
-
-              {/* Average reference dashed line (behind bars) */}
-              {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
-                <line
-                  x1={chart.padL}
-                  x2={chart.W - chart.padR}
-                  y1={chart.avgY}
-                  y2={chart.avgY}
-                  stroke="#8a99a8"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 3"
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
-
-              {/* Stacked Bars (masked to cut a transparent break band) */}
-              <g mask={chart.hasTrendBreak && chart.breakY != null ? `url(#${gid}-break)` : undefined}>
-                {chart.monthBars.map((mBar, mIdx) => {
-                const isMonthHovered = hover?.monthIdx === mIdx;
-                const isMonthSelected = selectedMonth === mBar.month;
-
-                return (
-                  <g key={mBar.month}>
-                    {/* Hover column background highlight */}
-                    {(isMonthHovered || isMonthSelected) && (
-                      <rect
-                        x={mBar.colX}
-                        y={chart.padT}
-                        width={mBar.colW}
-                        height={chart.innerH}
-                        fill="rgba(47, 127, 176, 0.08)"
-                        rx={2}
-                      />
-                    )}
-
-                    {/* Stack segments wrapped in whole-bar clipPath for unified smooth rounded corners */}
-                    <g clipPath={`url(#${gid}-bar-${mIdx})`}>
-                      {mBar.segments.map((seg, sIdx) => {
-                      const segTruncated = mBar.truncated && sIdx === mBar.segments.length - 1;
-                      return (
-                        <g key={seg.id}>
-                          <rect
-                            x={seg.x}
-                            y={seg.y}
-                            width={seg.width}
-                            height={Math.max(1, seg.height)}
-                            fill={seg.color}
-                            fillOpacity={seg.isDimmed ? 0.3 : seg.isHovered ? 1 : 0.88}
-                            style={{
-                              cursor: trends.drillLevel !== "category" ? "pointer" : "default",
-                              transition: "fill-opacity 100ms",
-                            }}
-                            onMouseMove={(e) => {
-                              setHover({
-                                monthIdx: mIdx,
-                                segmentId: seg.id,
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            }}
-                            onClick={() => {
-                              if (trends.drillLevel !== "category") {
-                                handleDrillSegment(seg.id);
-                              } else {
-                                setSelectedMonth(selectedMonth === mBar.month ? null : mBar.month);
-                              }
-                            }}
-                          />
-                          {segTruncated && (
-                            <>
-                              {chart.barW >= 8 ? (
-                                <TruncMarker
-                                  x={seg.x}
-                                  y={mBar.barTopY}
-                                  width={seg.width}
-                                  fill={seg.color}
-                                  hatchId={`url(#${gid}-hatch)`}
-                                  rx={chart.cornerRadius}
-                                />
-                              ) : (
-                                <rect
-                                  data-testid="trunc-cap"
-                                  x={seg.x}
-                                  y={mBar.barTopY}
-                                  width={seg.width}
-                                  height={TRUNC_CAP_H}
-                                  rx={1}
-                                  fill={seg.color}
-                                />
-                              )}
-                            </>
-                          )}
-                        </g>
-                      );
-                    })}
-                    </g>
-
-                    {/* Transparent overlay for full column click & hover */}
-                    <rect
-                      x={mBar.colX}
-                      y={chart.padT}
-                      width={mBar.colW}
-                      height={chart.innerH}
-                      fill="transparent"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) => {
-                        if (!hover || hover.monthIdx !== mIdx) {
-                          setHover({
-                            monthIdx: mIdx,
-                            x: e.clientX,
-                            y: e.clientY,
-                          });
-                        }
-                      }}
-                      onClick={() => {
-                        if (trends.drillLevel === "category") {
-                          setSelectedMonth(selectedMonth === mBar.month ? null : mBar.month);
-                        } else if (mBar.segments.length === 1 && mBar.segments[0]) {
-                          handleDrillSegment(mBar.segments[0].id);
-                        }
-                      }}
-                    />
-
-                    {/* Month X-Axis Label with smart stride */}
-                    {chart.tickSet.has(mIdx) &&
-                      (() => {
-                        const { month0, year } = parseMonthKey(mBar.month);
-                        const monthName = MONTHS[month0] ?? "";
-                        let label: string;
-                        if (chart.n <= 12) {
-                          label = `${monthName} ${year}`;
-                        } else if (chart.n <= 48) {
-                          label = `${monthName} '${String(year).slice(2)}`;
-                        } else {
-                          label = `${year}`;
-                        }
-
-                        return (
-                          <text
-                            x={mBar.cx}
-                            y={chart.H - chart.padB + 18}
-                            fill={isMonthSelected ? "var(--y-blue)" : "var(--y-ink-soft)"}
-                            fontWeight={isMonthSelected || isMonthHovered ? 700 : 400}
-                            fontSize={10}
-                            textAnchor="middle"
-                            className="y-num cursor-pointer"
-                            style={{ cursor: "pointer" }}
-                            onClick={() => {
-                              setSelectedMonth(selectedMonth === mBar.month ? null : mBar.month);
-                            }}
-                          >
-                            {label}
-                          </text>
-                        );
-                      })()}
-                  </g>
-                );
-              })}
-              </g>
-
-              {/* Axis break boundary lines on top of masked bars */}
-              {chart.hasTrendBreak && chart.breakY != null && (
-                <AxisBreakMark
-                  x1={chart.padL}
-                  x2={chart.W - chart.padR}
-                  y={chart.breakY}
-                />
-              )}
-
-              {/* Foreground: Average text label (on top of bars, always readable with white halo) */}
-              {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
-                <g pointerEvents="none">
-                  <text
-                    x={chart.W - chart.padR - 4}
-                    y={chart.avgY - 5}
-                    fill="#2d3340"
-                    stroke="#ffffff"
-                    strokeWidth={3}
-                    strokeLinejoin="round"
-                    paintOrder="stroke fill"
-                    fontSize={9.5}
-                    fontWeight={700}
-                    textAnchor="end"
-                    className="y-num"
-                  >
-                    Avg: {fmtShort(trends.avgPerMonth)}
-                  </text>
-                </g>
-              )}
             </svg>
           )}
 
@@ -1110,77 +1244,18 @@ export function SpendingTrendsReport({
               </div>
             </div>
           ) : (
-            /* Constituents Breakdown Table with cohesive y-table styling */
+            /* Constituents Breakdown Table */
             <div className="flex flex-col h-full">
               {trends.constituents.length === 0 ? (
                 <div className="py-8 text-center y-hint text-[11.5px]">
                   No spending recorded in this category for the selected timeframe.
                 </div>
               ) : (
-                <table className="y-table">
-                  <thead className="y-thead y-thead--sticky">
-                    <tr>
-                      <th>
-                        {trends.drillLevel === "all" ? "Master Category" : "Subcategory"}
-                      </th>
-                      <th className="num" style={{ width: 110 }}>
-                        Average/Mo
-                      </th>
-                      <th className="num" style={{ width: 110 }}>
-                        Total Spent
-                      </th>
-                      <th className="num" style={{ width: 80 }}>
-                        % Share
-                      </th>
-                      <th style={{ width: 28 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trends.constituents.map((c, idx) => {
-                      const color = colorMap.get(c.id) ?? "#888";
-                      const isHovered = hoverConstituentId === c.id;
-
-                      return (
-                        <tr
-                          key={c.id}
-                          className={`y-row ${idx % 2 === 1 ? "alt" : ""} ${isHovered ? "is-sel" : ""} cursor-pointer group`}
-                          onMouseEnter={() => setHoverConstituentId(c.id)}
-                          onMouseLeave={() => setHoverConstituentId(null)}
-                          onClick={() => handleDrillSegment(c.id)}
-                          title={`Click to drill down into ${c.name}`}
-                        >
-                          <td>
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                className="inline-block h-3 w-3 shrink-0 rounded-sm"
-                                style={{
-                                  background: color,
-                                  boxShadow:
-                                    "inset 0 1px 0 rgba(255,255,255,0.4), 0 0 0 1px rgba(0,0,0,0.1)",
-                                }}
-                              />
-                              <span className="truncate font-medium text-[var(--y-ink)]">
-                                {c.name}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="num y-num font-medium text-[var(--y-ink-soft)]">
-                            {fmt(c.avgPerMonth)}
-                          </td>
-                          <td className="num y-num font-semibold text-[var(--y-ink)]">
-                            {fmt(c.total)}
-                          </td>
-                          <td className="num y-num text-[var(--y-ink-faint)]">
-                            {c.pctOfTotal}%
-                          </td>
-                          <td className="text-center text-[var(--y-blue)] opacity-0 group-hover:opacity-100">
-                            <Icon name="chevronRight" size={10} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <ConstituentTable
+                  constituents={trends.constituents}
+                  colorMap={colorMap}
+                  onDrill={handleDrillSegment}
+                />
               )}
             </div>
           )}

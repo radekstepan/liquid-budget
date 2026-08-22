@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@ynab/logic";
 
 export const PALETTE = [
@@ -133,6 +133,33 @@ export function useElementSize<T extends HTMLElement>() {
   }, []);
 
   return { ref, size };
+}
+
+// Throttle frequent state updates (e.g. mousemove-hover) to at most one per
+// animation frame. Always delivers the latest value (coalesced), so no
+// intermediate cursor positions are lost during fast sweeps.
+export function useRafThrottledSet<T>(set: (v: T) => void): (v: T) => void {
+  const rafRef = useRef<number | null>(null);
+  const pendingRef = useRef<T | null>(null);
+  const setRef = useRef(set);
+  setRef.current = set;
+
+  const push = useCallback((value: T) => {
+    pendingRef.current = value;
+    if (rafRef.current == null) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        const v = pendingRef.current;
+        if (v !== null) setRef.current(v);
+      });
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  return push;
 }
 
 export function ChartTip({
