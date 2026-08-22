@@ -782,8 +782,8 @@ function MonthCells({
 
   return (
     <>
-      <td className={cx("num", COL_A, divCls, readOnlyCls)}>
-        {onAssign && !isOtherMonth ? (
+      <td className={cx("num", COL_A, divCls)}>
+        {onAssign ? (
           <CategoryMonthCell
             value={row.assigned}
             onAssign={onAssign}
@@ -792,7 +792,7 @@ function MonthCells({
             available={row.available}
           />
         ) : (
-          <span className="y-num">{fmt(row.assigned)}</span>
+          <span className={cx("y-num", readOnlyCls)}>{fmt(row.assigned)}</span>
         )}
       </td>
       <td

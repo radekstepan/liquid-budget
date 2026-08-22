@@ -123,6 +123,19 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
   });
 
+  it("closes the settings overlay when a sidebar nav item is clicked (sidebar stays live)", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    fireEvent.click(screen.getByTitle("Settings"));
+    fireEvent.click(screen.getByText("Rename rules"));
+    expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
+    // The sidebar remains interactive while Settings is open — clicking a
+    // nav item navigates away and dismisses the overlay.
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+    expect(screen.getByText("Spending by Category")).toBeInTheDocument();
+    expect(screen.queryByText("Payee Rename Rules")).not.toBeInTheDocument();
+  });
+
   it("opens the Add Transaction and Schedule Transaction modals from the Transactions view", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
