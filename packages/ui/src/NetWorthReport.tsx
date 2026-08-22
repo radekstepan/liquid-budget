@@ -5,13 +5,19 @@ import type { ReactNode } from "react";
 import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@ynab/logic";
 import { Button, Panel } from "@ynab/theme";
 import {
+  AxisBreakMark,
   ChartTip,
   colorAt,
+  computeOutlierBreak,
   fmtShort,
   niceTicks,
+  NO_BREAK,
   symlog,
   symlogTicks,
   TipLabel,
+  TRUNC_RATIO,
+  TruncHatchPattern,
+  TruncMarker,
   useElementSize,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
@@ -42,6 +48,11 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
+    const isLog = scaleMode === "log";
+    const assetBreak = isLog ? NO_BREAK : computeOutlierBreak(points.map((p) => p.assets));
+    const debtBreak = isLog ? NO_BREAK : computeOutlierBreak(points.map((p) => -p.debts));
+    const hasBreak = assetBreak.hasBreak || debtBreak.hasBreak;
+
     let maxVal = 1;
     let minVal = 0;
     for (const p of points) {
@@ -51,33 +62,102 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
       if (p.net < minVal) minVal = p.net;
     }
 
-    const isLog = scaleMode === "log";
-    const rawTicks = isLog ? symlogTicks(minVal, maxVal) : niceTicks(minVal, maxVal);
-    const ticks = rawTicks.filter((t) => t >= minVal && t <= maxVal);
-    if (!ticks.includes(0) && minVal <= 0 && maxVal >= 0) {
-      ticks.push(0);
-      ticks.sort((a, b) => a - b);
-    }
+    const posTopVal = Math.max(1, maxVal);
+    const negTopVal = Math.max(1, -minVal);
+    // Zero-line placement follows the pre-break domain so inliers keep their
+    // fair share of the vertical space (the compressed zone only extends upward).
+    const fracZero =
+      Math.max(1, maxVal) / (Math.max(1, maxVal) + Math.max(1, -minVal));
+    let zeroY = padT + innerH * (1 - fracZero);
 
-    const valToNorm = (v: number) => {
-      if (isLog) {
-        const sMin = symlog(minVal);
-        const sMax = symlog(maxVal);
-        const sRange = sMax - sMin || 1;
-        return (symlog(v) - sMin) / sRange;
+    // value -> 0..1 distance from the zero line (0 = baseline, 1 = domain top)
+    const posNorm = (v: number) => {
+      if (v <= 0) return 0;
+      if (assetBreak.hasBreak) {
+        if (v <= assetBreak.breakTop) return (v / assetBreak.breakTop) * assetBreak.split;
+        return assetBreak.split + ((v - assetBreak.breakTop) / (assetBreak.topVal - assetBreak.breakTop)) * (1 - assetBreak.split);
       }
-      const range = maxVal - minVal || 1;
-      return (v - minVal) / range;
+      return v / posTopVal;
+    };
+    const negNorm = (d: number) => {
+      if (d <= 0) return 0;
+      if (debtBreak.hasBreak) {
+        if (d <= debtBreak.breakTop) return (d / debtBreak.breakTop) * debtBreak.split;
+        return debtBreak.split + ((d - debtBreak.breakTop) / (debtBreak.topVal - debtBreak.breakTop)) * (1 - debtBreak.split);
+      }
+      return d / negTopVal;
     };
 
-    const y = (v: number) => padT + innerH * (1 - valToNorm(v));
-    const zeroY = y(0);
+    // value -> y pixel
+    let y: (v: number) => number;
+
+    // ---- ticks ---------------------------------------------------------
+    // grid: false => label-only tick for the top of a compressed zone.
+    let ticks: { v: number; grid: boolean }[];
+
+    if (isLog) {
+      const rawTicks = symlogTicks(minVal, maxVal);
+      const filtered = rawTicks.filter((t) => t >= minVal && t <= maxVal);
+      if (!filtered.includes(0) && minVal <= 0 && maxVal >= 0) {
+        filtered.push(0);
+        filtered.sort((a, b) => a - b);
+      }
+      ticks = filtered.map((v) => ({ v, grid: true }));
+      const sMin = symlog(minVal);
+      const sMax = symlog(maxVal);
+      const sRange = sMax - sMin || 1;
+      y = (v) => padT + innerH * (1 - (symlog(v) - sMin) / sRange);
+      zeroY = y(0);
+    } else if (hasBreak) {
+      ticks = [];
+      y = (v: number) => {
+        if (v > 0) return zeroY - posNorm(v) * (zeroY - padT);
+        if (v < 0) return zeroY + negNorm(-v) * (H - padB - zeroY);
+        return zeroY;
+      };
+      if (assetBreak.hasBreak) {
+        for (const t of assetBreak.ticks) ticks.push({ v: t, grid: true });
+        ticks.push({ v: assetBreak.topVal, grid: false });
+      } else {
+        for (const t of niceTicks(0, posTopVal, 4)) {
+          if (t > 0) ticks.push({ v: t, grid: true });
+        }
+      }
+      if (debtBreak.hasBreak) {
+        for (const t of debtBreak.ticks) ticks.push({ v: -t, grid: true });
+        ticks.push({ v: -debtBreak.topVal, grid: false });
+      } else {
+        for (const t of niceTicks(0, negTopVal, 4)) {
+          if (t > 0) ticks.push({ v: -t, grid: true });
+        }
+      }
+      ticks.sort((a, b) => a.v - b.v);
+    } else {
+      const rawTicks = niceTicks(minVal, maxVal);
+      if (!rawTicks.includes(0) && minVal <= 0 && maxVal >= 0) {
+        rawTicks.push(0);
+        rawTicks.sort((a, b) => a - b);
+      }
+      ticks = rawTicks.map((v) => ({ v, grid: true }));
+      y = (v) => {
+        const range = maxVal - minVal || 1;
+        return padT + innerH * (1 - (v - minVal) / range);
+      };
+      zeroY = y(0);
+    }
 
     const n = points.length;
     const xAt = (i: number) =>
       n === 1 ? padL + innerW / 2 : padL + (i * innerW) / (n - 1);
 
     const barW = Math.max(4, Math.min(28, (innerW / Math.max(1, n)) * 0.42));
+
+    // Bars scale against the largest asset/debt values so the tallest bars
+    // always reach the visual cap; the axis keeps its own data-derived domain.
+    const barScaleAssets = Math.max(1, ...points.map((p) => p.assets));
+    const barScaleDebts = Math.max(1, ...points.map((p) => -p.debts));
+    const maxBarH = Math.max(0, (zeroY - padT) * TRUNC_RATIO);
+    const maxBarHD = Math.max(0, (H - padB - zeroY) * TRUNC_RATIO);
 
     let linePath = "";
     for (let i = 0; i < n; i++) {
@@ -94,7 +174,13 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
         " L " + xAt(0) + "," + zeroY + " Z";
     }
 
-    return { W, H, padL, padR, padT, padB, innerW, innerH, y, zeroY, ticks, linePath, areaPath, barW, n, xAt };
+    return {
+      W, H, padL, padR, padT, padB, innerW, innerH, y, hasBreak,
+      assetBreak: assetBreak.hasBreak ? assetBreak : null,
+      debtBreak: debtBreak.hasBreak ? debtBreak : null,
+      zeroY, ticks, linePath, areaPath, barW, n, xAt,
+      barScaleAssets, barScaleDebts, maxBarH, maxBarHD, isLog,
+    };
   }, [size, points, scaleMode]);
 
   const empty = points.length === 0;
@@ -201,29 +287,32 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                 <stop offset="0%" stopColor={DEBTS_COLOR} stopOpacity={0.45} />
                 <stop offset="100%" stopColor={DEBTS_COLOR} stopOpacity={0.85} />
               </linearGradient>
+              <TruncHatchPattern id={`${gid}-hatch`} />
             </defs>
 
             {chart.ticks.map((t, i) => (
               <g key={i}>
-                <line
-                  x1={chart.padL}
-                  x2={chart.W - chart.padR}
-                  y1={chart.y(t)}
-                  y2={chart.y(t)}
-                  stroke={GRID}
-                  strokeWidth={1}
-                  vectorEffect="non-scaling-stroke"
-                />
+                {t.grid && (
+                  <line
+                    x1={chart.padL}
+                    x2={chart.W - chart.padR}
+                    y1={chart.y(t.v)}
+                    y2={chart.y(t.v)}
+                    stroke={GRID}
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
                 <text
                   x={chart.padL - 8}
-                  y={chart.y(t)}
+                  y={chart.y(t.v)}
                   fill="var(--y-ink-faint)"
                   fontSize={10}
                   textAnchor="end"
                   dominantBaseline="middle"
                   className="y-num"
                 >
-                  {fmtShort(t)}
+                  {fmtShort(t.v)}
                 </text>
               </g>
             ))}
@@ -240,13 +329,13 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
 
             {points.map((p, i) => {
               const x = chart.xAt(i);
-              const rawAssetH = chart.zeroY - chart.y(p.assets);
-              const rawDebtH = chart.y(p.debts) - chart.zeroY;
-              const maxH = chart.zeroY - chart.padT;
-              const assetH = Math.max(0, Math.min(rawAssetH, maxH));
-              const debtH = Math.max(0, Math.min(rawDebtH, chart.H - chart.padB - chart.zeroY));
-              const assetTruncated = rawAssetH > maxH;
-              const debtTruncated = rawDebtH > chart.H - chart.padB - chart.zeroY;
+              const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
+              const debtH = Math.max(0, chart.y(Math.max(0, -p.debts)) - chart.zeroY);
+              const useBreakBars = chart.hasBreak;
+              const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
+              const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
+              const assetHNorm = useBreakBars ? assetH : Math.max(0, chart.maxBarH * Math.min(1, Math.max(0, p.assets) / chart.barScaleAssets));
+              const debtHNorm = useBreakBars ? debtH : Math.max(0, chart.maxBarHD * Math.min(1, Math.max(0, -p.debts) / chart.barScaleDebts));
               const barX = x - chart.barW / 2;
               return (
                 <g key={p.month}>
@@ -254,9 +343,9 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                     <>
                       <rect
                         x={barX}
-                        y={chart.zeroY - assetH}
+                        y={chart.zeroY - assetHNorm}
                         width={chart.barW}
-                        height={assetH}
+                        height={assetHNorm}
                         rx={1.5}
                         fill={`url(#${gid}-assets-grad)`}
                         stroke={ASSETS_COLOR}
@@ -264,27 +353,14 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                         vectorEffect="non-scaling-stroke"
                       />
                       {assetTruncated && (
-                        <>
-                          <line
-                            x1={barX + 1}
-                            x2={barX + chart.barW - 1}
-                            y1={chart.padT + 5}
-                            y2={chart.padT + 5}
-                            stroke={ASSETS_COLOR}
-                            strokeWidth={2}
-                            strokeDasharray="3 2"
-                            vectorEffect="non-scaling-stroke"
-                          />
-                          <rect
-                            x={barX}
-                            y={chart.padT}
-                            width={chart.barW}
-                            height={3}
-                            rx={1.5}
-                            fill={ASSETS_COLOR}
-                            fillOpacity={0.7}
-                          />
-                        </>
+                        <TruncMarker
+                          x={barX}
+                          y={chart.zeroY - assetHNorm}
+                          width={chart.barW}
+                          fill={ASSETS_COLOR}
+                          hatchId={`url(#${gid}-hatch)`}
+                          rx={1.5}
+                        />
                       )}
                     </>
                   )}
@@ -294,7 +370,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                         x={barX}
                         y={chart.zeroY}
                         width={chart.barW}
-                        height={debtH}
+                        height={debtHNorm}
                         rx={1.5}
                         fill={`url(#${gid}-debts-grad)`}
                         stroke={DEBTS_COLOR}
@@ -302,27 +378,15 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                         vectorEffect="non-scaling-stroke"
                       />
                       {debtTruncated && (
-                        <>
-                          <line
-                            x1={barX + 1}
-                            x2={barX + chart.barW - 1}
-                            y1={chart.H - chart.padB - 5}
-                            y2={chart.H - chart.padB - 5}
-                            stroke={DEBTS_COLOR}
-                            strokeWidth={2}
-                            strokeDasharray="3 2"
-                            vectorEffect="non-scaling-stroke"
-                          />
-                          <rect
-                            x={barX}
-                            y={chart.H - chart.padB - 3}
-                            width={chart.barW}
-                            height={3}
-                            rx={1.5}
-                            fill={DEBTS_COLOR}
-                            fillOpacity={0.7}
-                          />
-                        </>
+                        <TruncMarker
+                          dir="down"
+                          x={barX}
+                          y={chart.zeroY + debtHNorm}
+                          width={chart.barW}
+                          fill={DEBTS_COLOR}
+                          hatchId={`url(#${gid}-hatch)`}
+                          rx={1.5}
+                        />
                       )}
                     </>
                   )}
@@ -340,6 +404,27 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
             />
+
+            {chart.hasBreak && (
+              <>
+                {chart.assetBreak && (
+                  <AxisBreakMark
+                    x1={chart.padL}
+                    x2={chart.W - chart.padR}
+                    y={chart.y(chart.assetBreak.breakTop)}
+                    erase="#ffffff"
+                  />
+                )}
+                {chart.debtBreak && (
+                  <AxisBreakMark
+                    x1={chart.padL}
+                    x2={chart.W - chart.padR}
+                    y={chart.y(-chart.debtBreak.breakTop)}
+                    erase="#ffffff"
+                  />
+                )}
+              </>
+            )}
 
             {points.map((p, i) => (
               <circle

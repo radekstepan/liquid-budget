@@ -359,6 +359,42 @@ describe("ReportsView", () => {
     }
   });
 
+  it("Spending by Category shows an axis break when one category dwarfs the rest", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 11, groupId: 1, name: "Rent", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 12, groupId: 1, name: "Fuel", sort: 2, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 13, groupId: 1, name: "Fees", sort: 3, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 14, groupId: 1, name: "Taxes", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      transactions: [
+        txn("2026-04", 1, "Payroll", 3000),
+        txn("2026-04", 5, "Groceries", -350, 10),
+        txn("2026-04", 10, "Rent", -300, 11),
+        txn("2026-04", 12, "Gas", -120, 12),
+        txn("2026-04", 15, "Stamps", -80, 13),
+        txn("2026-04", 20, "Gov", -5000, 14),
+      ],
+    };
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const scope = within(panel);
+
+    // The break overlay is rendered on every bar track.
+    expect(panel.querySelectorAll('[data-testid="axis-break"]').length).toBe(5);
+
+    // The outlier category bar is drawn at the compressed-zone max (95%).
+    const taxRow = scope.getByText("$5,000.00").closest(".group")!;
+    const track = taxRow.querySelector(".y-bar-track")!;
+    const fill = Array.from(track.children).find(
+      (el) => el instanceof HTMLElement && el.style.width === "95%"
+    )!;
+    expect(fill).toBeTruthy();
+  });
+
   it("shows the empty state when there are no transactions", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
     expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);

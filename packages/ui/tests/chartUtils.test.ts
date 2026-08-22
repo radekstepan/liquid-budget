@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { niceTicks, symlogTicks, symlog, fmtShort, colorAt } from "../src/chartUtils.js";
+import {
+  niceTicks,
+  symlogTicks,
+  symlog,
+  fmtShort,
+  colorAt,
+  computeOutlierBreak,
+  iqrFence,
+  niceScale,
+  quantile,
+  zigZagHorizontal,
+  zigZagVertical,
+} from "../src/chartUtils.js";
 
 describe("niceTicks", () => {
   it("always spans min and max (tMin <= min and tMax >= max)", () => {
@@ -89,5 +101,70 @@ describe("colorAt", () => {
     expect(top3[0]).toBe("#2f7fb0"); // Steel Blue
     expect(top3[1]).toBe("#5c8f2c"); // Forest Green
     expect(top3[2]).toBe("#e8a33d"); // Amber/Gold
+  });
+});
+
+describe("quantile / iqrFence", () => {
+  it("computes linear-interpolated quartiles", () => {
+    expect(quantile([1, 2, 3, 4], 0.25)).toBeCloseTo(1.75);
+    expect(quantile([1, 2, 3, 4], 0.5)).toBeCloseTo(2.5);
+    expect(quantile([1, 2, 3, 4], 0.75)).toBeCloseTo(3.25);
+  });
+
+  it("returns 0 for empty input", () => {
+    expect(quantile([], 0.5)).toBe(0);
+  });
+
+  it("flags values above Q3 + k*IQR as outliers", () => {
+    const fence = iqrFence([48, 61, 39, 72, 55, 44, 67, 51, 940], 1.5);
+    expect(fence.upper).toBeLessThan(940);
+    expect(fence.upper).toBeGreaterThan(72);
+  });
+});
+
+describe("niceScale", () => {
+  it("returns a rounded top spanning the max", () => {
+    const s = niceScale(1550, 3);
+    expect(s.top).toBeGreaterThanOrEqual(1550);
+    expect(s.ticks[s.ticks.length - 1]).toBe(s.top);
+  });
+});
+
+describe("computeOutlierBreak", () => {
+  it("returns NO_BREAK for fewer than 5 points", () => {
+    expect(computeOutlierBreak([100, 5000]).hasBreak).toBe(false);
+  });
+
+  it("returns NO_BREAK for flat data", () => {
+    expect(computeOutlierBreak([10, 10, 10, 10, 10]).hasBreak).toBe(false);
+  });
+
+  it("returns NO_BREAK when the tall bar is not a statistical outlier", () => {
+    // 7 is within Q3 + 1.5*IQR of the rest.
+    expect(computeOutlierBreak([2, 3, 4, 5, 7]).hasBreak).toBe(false);
+  });
+
+  it("detects an outlier and places the break above the tallest inlier", () => {
+    const b = computeOutlierBreak([48, 61, 39, 72, 55, 44, 67, 51, 940]);
+    expect(b.hasBreak).toBe(true);
+    expect(b.breakTop).toBeGreaterThanOrEqual(72);
+    expect(b.topVal).toBeGreaterThanOrEqual(940);
+    expect(b.ticks.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the compressed zone meaningful: topVal > breakTop * 1.1", () => {
+    const b = computeOutlierBreak([48, 61, 39, 72, 55, 44, 67, 51, 940]);
+    expect(b.topVal).toBeGreaterThan(b.breakTop * 1.1);
+  });
+});
+
+describe("zigZag generators", () => {
+  it("produce well-formed SVG path data", () => {
+    const h = zigZagHorizontal(0, 100, 50);
+    expect(h.startsWith("M 0 50")).toBe(true);
+    expect(h).toContain("l ");
+    const v = zigZagVertical(0, 100, 50);
+    expect(v.startsWith("M 50 0")).toBe(true);
+    expect(v).toContain("l ");
   });
 });

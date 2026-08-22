@@ -1437,21 +1437,23 @@ input.y-inline-amt {
 
 .y-bar-truncated {
   position: relative;
-  overflow: visible !important;
 }
-/* Solid end cap (right edge) */
+/* Solid end cap (right edge) — the truncated bar is "cut" here */
 .y-bar-truncated::after {
   content: "";
   position: absolute;
   right: 0;
   top: 0;
   bottom: 0;
-  width: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  border-radius: 0 3px 3px 0;
-  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.35), 1px 0 2px rgba(0, 0, 0, 0.2);
+  width: 7px;
+  background: var(--y-trunc-cap, rgba(0, 0, 0, 0.28));
+  border-radius: 2px;
+  box-shadow:
+    -1px 0 0 rgba(0, 0, 0, 0.14),
+    0 1px 0 rgba(0, 0, 0, 0.18) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.18) inset;
 }
-/* Dashed continuation indicator (just left of the solid cap) */
+/* Dashed continuation indicator (hatched strip just left of the solid cap) */
 .y-bar-truncated::before {
   content: "";
   position: absolute;
@@ -1459,10 +1461,18 @@ input.y-inline-amt {
   top: 0;
   bottom: 0;
   width: 6px;
-  background: repeating-linear-gradient(
+  background: var(--y-trunc-dash, rgba(0, 0, 0, 0.3));
+  -webkit-mask-image: repeating-linear-gradient(
     -45deg,
-    rgba(0, 0, 0, 0.3),
-    rgba(0, 0, 0, 0.3) 1.5px,
+    #000 0,
+    #000 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+  mask-image: repeating-linear-gradient(
+    -45deg,
+    #000 0,
+    #000 1.5px,
     transparent 1.5px,
     transparent 3px
   );
