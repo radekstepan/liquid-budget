@@ -460,12 +460,14 @@ export function AxisBreakMask({
   x2,
   breaks,
   band = 14,
+  vertical = false,
 }: {
   maskId: string;
   x1: number;
   x2: number;
   breaks: Array<{ y: number }>;
   band?: number;
+  vertical?: boolean;
 }) {
   const lo = Math.min(x1, x2);
   const hi = Math.max(x1, x2);
@@ -476,7 +478,11 @@ export function AxisBreakMask({
         <path
           key={i}
           data-testid="axis-break"
-          d={zigZagHorizontal(lo, hi, b.y, 12, 3.5)}
+          d={
+            vertical
+              ? zigZagVertical(lo, hi, b.y, 8, 2.5)
+              : zigZagHorizontal(lo, hi, b.y, 12, 3.5)
+          }
           fill="none"
           stroke="black"
           strokeWidth={band}
@@ -525,13 +531,13 @@ export function AxisBreakMark({
           />
         )}
         <path
-          d={zigZagVertical(lo + band / 2, hi - band / 2, y - 2.5, 8, 2.5)}
+          d={zigZagVertical(lo, hi, y - 2.5, 8, 2.5)}
           fill="none"
           stroke={stroke}
           strokeWidth={1.3}
         />
         <path
-          d={zigZagVertical(lo + band / 2, hi - band / 2, y + 2.5, 8, 2.5)}
+          d={zigZagVertical(lo, hi, y + 2.5, 8, 2.5)}
           fill="none"
           stroke={stroke}
           strokeWidth={1.3}
