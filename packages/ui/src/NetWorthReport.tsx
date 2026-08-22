@@ -309,10 +309,9 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                 chart.hasBreak &&
                 ((chart.assetBreak && Math.abs(ty - chart.y(chart.assetBreak.breakTop)) < 7) ||
                   (chart.debtBreak && Math.abs(ty - chart.y(-chart.debtBreak.breakTop)) < 7));
-              if (inBreak) return null;
               return (
                 <g key={i}>
-                  {t.grid && (
+                  {t.grid && !inBreak && (
                     <line
                       x1={chart.padL}
                       x2={chart.W - chart.padR}

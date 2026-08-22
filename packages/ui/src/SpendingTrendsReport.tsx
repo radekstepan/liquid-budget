@@ -790,13 +790,13 @@ export function SpendingTrendsReport({
                 )}
               </defs>
 
-              {/* Horizontal Grid lines and Y-axis Ticks (hide any inside break band) */}
+              {/* Horizontal Grid lines and Y-axis Ticks (hide grid line inside break band) */}
               {chart.ticks.map((t, i) => {
                 const ty = chart.y(t.v);
-                if (chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7) return null;
+                const inBreak = chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7;
                 return (
                   <g key={i}>
-                    {t.grid && (
+                    {t.grid && !inBreak && (
                       <line
                         x1={chart.padL}
                         x2={chart.W - chart.padR}
