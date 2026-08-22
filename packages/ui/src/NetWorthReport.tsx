@@ -447,18 +447,32 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
               </>
             )}
 
-            {points.map((p, i) => (
-              <circle
-                key={`pt-${i}`}
-                cx={chart.xAt(i)}
-                cy={chart.y(p.net)}
-                r={hover?.idx === i ? 5.5 : 3.5}
-                fill={hover?.idx === i ? NET_COLOR : "#fff"}
-                stroke={NET_COLOR}
-                strokeWidth={hover?.idx === i ? 2 : 1.5}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
+            {points.map((p, i) => {
+              const isHovered = hover?.idx === i;
+              return (
+                <g key={`pt-${i}`}>
+                  {isHovered && (
+                    <circle
+                      cx={chart.xAt(i)}
+                      cy={chart.y(p.net)}
+                      r={6.5}
+                      fill={NET_COLOR}
+                      fillOpacity={0.25}
+                    />
+                  )}
+                  <circle
+                    cx={chart.xAt(i)}
+                    cy={chart.y(p.net)}
+                    r={isHovered ? 4.5 : 2.5}
+                    fill={NET_COLOR}
+                    stroke={isHovered ? "#ffffff" : "none"}
+                    strokeWidth={isHovered ? 1.5 : 0}
+                    vectorEffect="non-scaling-stroke"
+                    opacity={hover && !isHovered ? 0.45 : 1}
+                  />
+                </g>
+              );
+            })}
 
             {hover && (
               <line
