@@ -22,6 +22,9 @@ export const Inspector = memo(function Inspector({
   tbb,
   overBudgeted,
   priorSurplus,
+  totalIncome,
+  totalAssigned,
+  overspentPrevious,
   cashFlow,
   trailingNetWorth,
   insights,
@@ -29,7 +32,6 @@ export const Inspector = memo(function Inspector({
   onImportYnab4,
   onImportCsv,
   onAnalyzeDuplicates,
-  onClearOverdraft,
   onOpenRenameRules,
 }: {
   groups: GroupRow[];
@@ -40,6 +42,9 @@ export const Inspector = memo(function Inspector({
   tbb: number;
   overBudgeted: boolean;
   priorSurplus?: number;
+  totalIncome?: number;
+  totalAssigned?: number;
+  overspentPrevious?: number;
   cashFlow?: CashFlowSummary;
   trailingNetWorth?: TrailingNetWorthSummary;
   insights?: SpendingInsight[];
@@ -47,7 +52,6 @@ export const Inspector = memo(function Inspector({
   onImportYnab4?: (file: File) => Promise<ImportSummary | void>;
   onImportCsv?: (file: File) => void;
   onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
-  onClearOverdraft?: (categoryIds: number[]) => Promise<void> | void;
   onOpenRenameRules?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -72,11 +76,6 @@ export const Inspector = memo(function Inspector({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
-
-  const overdraftCats = groups
-    .flatMap((g) => g.rows)
-    .filter((r) => r.available < 0)
-    .map((r) => r.category.id);
 
   // Fallback defaults if not provided
   const effectiveCashFlow: CashFlowSummary = cashFlow ?? {
@@ -250,21 +249,16 @@ export const Inspector = memo(function Inspector({
           "y-atb",
           overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange"
         )}
+        title={
+          overBudgeted
+            ? `Prior surplus: ${money(priorSurplus ?? 0)}\nOverspent last month: ${money(overspentPrevious ?? 0)}\nIncome this month: ${money(totalIncome ?? 0)}\nAssigned this month: ${money(totalAssigned ?? 0)}\n─────────────────\n= TBB: ${money(tbb)}`
+            : undefined
+        }
       >
         <div className="text-[20px] font-bold leading-[1.1] y-num">{money(tbb)}</div>
         <div className="text-[9px] font-bold tracking-[.09em] uppercase opacity-90">
           {overBudgeted ? "Overbudgeted" : "To Be Budgeted"}
         </div>
-        {overBudgeted && onClearOverdraft && overdraftCats.length > 0 && (
-          <Button
-            onClick={() => onClearOverdraft(overdraftCats)}
-            size="sm"
-            variant="danger"
-            className="mt-2 w-full"
-          >
-            Zero out {overdraftCats.length} overdrafted
-          </Button>
-        )}
       </div>
 
       {/* Card 1: Net Monthly (Cash Flow & Savings Rate) */}
