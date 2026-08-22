@@ -160,6 +160,8 @@ export const recurring = sqliteTable(
     amount: integer("amount").notNull().default(0),
     frequency: text("frequency").notNull().default("monthly"),
     nextDate: text("next_date").notNull(),
+    memo: text("memo").notNull().default(""),
+    flagColor: text("flag_color"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
   },

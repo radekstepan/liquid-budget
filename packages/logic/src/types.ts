@@ -129,11 +129,13 @@ export type Recurring = {
   accountId: number;
   categoryId: number | null;
   payee: string;
+  memo?: string;
   amount: string;
   frequency: string;
   nextDate: string;
   active: boolean;
   transferAccountId?: number | null;
+  flagColor?: TransactionFlagColor | null;
 };
 
 export type RecurringSubTransaction = {

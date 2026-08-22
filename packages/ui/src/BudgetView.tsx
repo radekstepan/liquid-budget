@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useMemo, Fragment } from "react";
 import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
 import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, previousMonthKey, todayISO } from "@ynab/logic";
 import {
@@ -114,19 +114,6 @@ export const BudgetView = memo(function BudgetView({
 
   const resolvedVisibleMonths = visibleMonths && visibleMonths.length ? visibleMonths : [currentMonth];
   const resolvedBudgets = budgets && budgets.length ? budgets : [budget];
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
 
   const dragGroupId = useRef<number | null>(null);
   const [groupOverId, setGroupOverId] = useState<number | null>(null);
@@ -226,48 +213,6 @@ export const BudgetView = memo(function BudgetView({
             onChange={onSetMonthCount}
           />
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative" ref={menuRef}>
-            <Button
-              onClick={() => setMenuOpen((o) => !o)}
-              size="sm"
-              aria-label="Group options"
-            >
-              <Icon name="dots" size={14} />
-            </Button>
-            {menuOpen && (
-              <div
-                className="absolute right-0 top-[28px] z-20 min-w-[180px] overflow-hidden"
-                style={{
-                  background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
-                  border: "1px solid var(--y-chrome-line)",
-                  borderRadius: 4,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-                  padding: 4,
-                }}
-              >
-                <button
-                  onClick={() => {
-                    onCollapseAll();
-                    setMenuOpen(false);
-                  }}
-                  className="y-menu-item"
-                >
-                  Collapse all groups
-                </button>
-                <button
-                  onClick={() => {
-                    onExpandAll();
-                    setMenuOpen(false);
-                  }}
-                  className="y-menu-item"
-                >
-                  Expand all groups
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
       </Toolbar>
 
       <HeroBudgetStrip parts={headerParts} atb={budget.tbb} />
@@ -309,12 +254,12 @@ export const BudgetView = memo(function BudgetView({
               <>
                 <tr>
                   <th rowSpan={2} className="y-table-td--sticky-cat">Category</th>
-                    {resolvedVisibleMonths.map((m, idx) => (
+                  {resolvedVisibleMonths.map((m, idx) => (
                     <th
                       key={m}
                       colSpan={3}
                       className={cx(
-                        "y-table-th--month-label",
+                        "y-table-th--month-label text-center",
                         idx > 0 && "y-table-colgroup-divider"
                       )}
                     >
@@ -324,20 +269,24 @@ export const BudgetView = memo(function BudgetView({
                 </tr>
                 <tr>
                   {resolvedVisibleMonths.map((m, idx) => (
-                    <th
-                      key={m}
-                      colSpan={3}
-                      className={cx(
-                        idx === 0 && "y-table-cell--month-first",
-                        idx > 0 && "y-table-colgroup-divider"
-                      )}
-                    >
-                      <span className="flex justify-around text-[10.5px] font-normal">
-                        <span>Budgeted</span>
-                        <span>Outflows</span>
-                        <span>Balance</span>
-                      </span>
-                    </th>
+                    <Fragment key={m}>
+                      <th
+                        className={cx(
+                          "num text-right",
+                          COL_A,
+                          idx === 0 && "y-table-cell--month-first",
+                          idx > 0 && "y-table-colgroup-divider"
+                        )}
+                      >
+                        Budgeted
+                      </th>
+                      <th className={cx("num text-right", COL_O)}>
+                        Outflows
+                      </th>
+                      <th className={cx("num text-right", COL_V)}>
+                        Balance
+                      </th>
+                    </Fragment>
                   ))}
                 </tr>
               </>
@@ -599,14 +548,19 @@ function GroupBlock({
       >
         <td className="y-table-td--sticky-cat">
           <div className="flex items-center gap-[7px]">
-            <button onClick={onToggle} className="flex items-center gap-[6px]">
-              <span className={cx("y-tri", !collapsed && "is-open")} />
+            <span className="flex items-center gap-[6px]">
+              <span
+                onClick={onToggle}
+                className={cx("y-tri", !collapsed && "is-open", "cursor-pointer")}
+                role="button"
+                tabIndex={0}
+                aria-label={`Toggle ${group.group.name} group`}
+              />
               <span
                 role="button"
                 tabIndex={0}
                 onClick={(e) => {
                   if (isSpecialGroup) return;
-                  e.stopPropagation();
                   onEditGroup();
                 }}
                 className={cx("cursor-text", !isSpecialGroup && "hover:underline")}
@@ -618,7 +572,7 @@ function GroupBlock({
               >
                 {group.group.name}
               </span>
-            </button>
+            </span>
             <span className="y-group-actions">
               <button
                 onClick={() => onAddCategory()}
@@ -646,14 +600,14 @@ function GroupBlock({
           })
         ) : (
           <>
-            <td className="num y-num text-right">{fmt(gRow.assigned)}</td>
+            <td className={cx("num y-num text-right", COL_A)}>{fmt(gRow.assigned)}</td>
             <td
-              className="num y-num text-right"
+              className={cx("num y-num text-right", COL_O)}
               style={{ color: gRow.outflow < 0 ? "var(--y-ink)" : "var(--y-ink-soft)" }}
             >
               {fmt(gRow.outflow)}
             </td>
-            <td className="num y-num text-right" style={{ color: balanceColor(gRow.available) }}>
+            <td className={cx("num y-num text-right", COL_V)} style={{ color: balanceColor(gRow.available) }}>
               {fmt(gRow.available)}
             </td>
           </>
@@ -741,7 +695,7 @@ function GroupBlock({
                   })
                 : (
                   <>
-                    <td className="num">
+                    <td className={cx("num", COL_A)}>
                       <CategoryMonthCell
                         value={r.assigned}
                         onAssign={(val) => onAssign(r.category.id, val, currentMonth)}
@@ -751,14 +705,14 @@ function GroupBlock({
                       />
                     </td>
                     <td
-                      className="num y-num"
+                      className={cx("num y-num", COL_O)}
                       style={{
                         color: r.outflow < 0 ? "var(--y-ink-soft)" : "var(--y-ink-faint)",
                       }}
                     >
                       {fmt(r.outflow)}
                     </td>
-                    <td className="num y-num" style={{ color: balanceColor(r.available) }}>
+                    <td className={cx("num y-num", COL_V)} style={{ color: balanceColor(r.available) }}>
                       {fmt(r.available)}
                       {r.available < 0 && r.category.overspendCarriesOver && (
                         <span
@@ -806,18 +760,18 @@ function MonthCells({
   if (isRowForGroup && group) {
     return (
       <>
-        <td className={`num y-num text-right ${divCls} ${readOnlyCls}`}>
+        <td className={cx("num y-num text-right", COL_A, divCls, readOnlyCls)}>
           {fmt(group.assigned)}
         </td>
         <td
-          className={`num y-num text-right ${readOnlyCls}`}
+          className={cx("num y-num text-right", COL_O, readOnlyCls)}
           style={{
             color: !isOtherMonth && group.outflow < 0 ? "var(--y-ink)" : "var(--y-ink-soft)",
           }}
         >
           {fmt(group.outflow)}
         </td>
-        <td className="num y-num text-right" style={{ color: balanceColor(group.available) }}>
+        <td className={cx("num y-num text-right", COL_V)} style={{ color: balanceColor(group.available) }}>
           {fmt(group.available)}
         </td>
       </>
@@ -828,7 +782,7 @@ function MonthCells({
 
   return (
     <>
-      <td className={`num ${divCls} ${readOnlyCls}`}>
+      <td className={cx("num", COL_A, divCls, readOnlyCls)}>
         {isOtherMonth || !onAssign ? (
           <span className="y-num">{fmt(row.assigned)}</span>
         ) : (
@@ -842,14 +796,14 @@ function MonthCells({
         )}
       </td>
       <td
-        className={`num y-num ${readOnlyCls}`}
+        className={cx("num y-num", COL_O, readOnlyCls)}
         style={{
           color: row.outflow < 0 ? "var(--y-ink-soft)" : "var(--y-ink-faint)",
         }}
       >
         {fmt(row.outflow)}
       </td>
-      <td className="num y-num" style={{ color: balanceColor(row.available) }}>
+      <td className={cx("num y-num", COL_V)} style={{ color: balanceColor(row.available) }}>
         {fmt(row.available)}
         {row.available < 0 && row.category.overspendCarriesOver && (
           <span
@@ -884,15 +838,10 @@ type CategoryMonthCellProps = {
 function CategoryMonthCell({
   value,
   onAssign,
-  quickFill,
-  categoryId,
-  available,
 }: CategoryMonthCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [showQuickFill, setShowQuickFill] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -901,38 +850,17 @@ function CategoryMonthCell({
     }
   }, [editing]);
 
-  useEffect(() => {
-    if (!showQuickFill) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowQuickFill(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showQuickFill]);
-
   const commit = () => {
     const v = evalAmount(draft);
     if (v != null) onAssign(Math.round(v * 100));
     setEditing(false);
   };
 
-  const hasQuickFill =
-    quickFill &&
-    categoryId != null &&
-    (Boolean(quickFill.lastMonthAssignments?.has(categoryId)) ||
-      Boolean(quickFill.spentLastMonthByCategory?.has(categoryId)) ||
-      Boolean(quickFill.avgSpentByCategory?.has(categoryId)) ||
-      Boolean(quickFill.avgBudgetedByCategory?.has(categoryId)) ||
-      Boolean(quickFill.underfundedByCategory?.has(categoryId)) ||
-      value !== 0 ||
-      (available !== undefined && available < 0));
-
   if (editing) {
     return (
       <input
         ref={inputRef}
+        size={1}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -955,146 +883,16 @@ function CategoryMonthCell({
   }
 
   return (
-    <div className="relative inline-flex items-center gap-1">
-      <button
-        type="button"
-        onClick={() => {
-          setDraft((value / 100).toFixed(2));
-          setEditing(true);
-        }}
-        className="y-inline-amt cursor-text"
-        style={{ color: "var(--y-ink)" }}
-      >
-        {fmt(value)}
-      </button>
-      {hasQuickFill && (
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowQuickFill((o) => !o);
-            }}
-            className="grid h-[16px] w-[16px] place-items-center rounded opacity-50 hover:!opacity-100"
-            style={{ color: "var(--y-ink-faint)" }}
-            aria-label="Quick budget options"
-            title="Quick budget"
-          >
-            <Icon name="dots" size={10} />
-          </button>
-          {showQuickFill && (
-            <div
-              className="absolute right-0 top-[18px] z-30 min-w-[170px] overflow-hidden"
-              style={{
-                background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
-                border: "1px solid var(--y-chrome-line)",
-                borderRadius: 4,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-                padding: 4,
-              }}
-            >
-              {quickFill?.lastMonthAssignments?.has(categoryId!) && (
-                <button
-                  onClick={() => {
-                    onAssign(quickFill.lastMonthAssignments!.get(categoryId!)!);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Budgeted Last Month</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(quickFill.lastMonthAssignments!.get(categoryId!)!)}
-                  </span>
-                </button>
-              )}
-              {quickFill?.spentLastMonthByCategory?.has(categoryId!) && (
-                <button
-                  onClick={() => {
-                    onAssign(quickFill.spentLastMonthByCategory!.get(categoryId!)!);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Spent Last Month</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(quickFill.spentLastMonthByCategory!.get(categoryId!)!)}
-                  </span>
-                </button>
-              )}
-              {quickFill?.avgBudgetedByCategory?.has(categoryId!) && (
-                <button
-                  onClick={() => {
-                    onAssign(quickFill.avgBudgetedByCategory!.get(categoryId!)!);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Average Budgeted</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(quickFill.avgBudgetedByCategory!.get(categoryId!)!)}
-                  </span>
-                </button>
-              )}
-              {quickFill?.avgSpentByCategory?.has(categoryId!) && (
-                <button
-                  onClick={() => {
-                    onAssign(quickFill.avgSpentByCategory!.get(categoryId!)!);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Average Spent</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(quickFill.avgSpentByCategory!.get(categoryId!)!)}
-                  </span>
-                </button>
-              )}
-              {quickFill?.underfundedByCategory?.has(categoryId!) && (
-                <button
-                  onClick={() => {
-                    onAssign(quickFill.underfundedByCategory!.get(categoryId!)!);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Underfunded</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(quickFill.underfundedByCategory!.get(categoryId!)!)}
-                  </span>
-                </button>
-              )}
-              {available !== undefined && available < 0 && (
-                <button
-                  onClick={() => {
-                    onAssign(value + Math.max(0, -available));
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Balance to Zero</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    {fmt(value + Math.max(0, -available))}
-                  </span>
-                </button>
-              )}
-              {value !== 0 && (
-                <button
-                  onClick={() => {
-                    onAssign(0);
-                    setShowQuickFill(false);
-                  }}
-                  className="y-menu-item text-left"
-                >
-                  <span className="flex-1">Set to Zero</span>
-                  <span className="y-num" style={{ color: "var(--y-ink-faint)" }}>
-                    $0.00
-                  </span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => {
+        setDraft((value / 100).toFixed(2));
+        setEditing(true);
+      }}
+      className="y-inline-amt cursor-text"
+      style={{ color: "var(--y-ink)" }}
+    >
+      {fmt(value)}
+    </button>
   );
 }

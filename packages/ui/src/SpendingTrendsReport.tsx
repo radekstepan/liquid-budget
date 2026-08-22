@@ -22,6 +22,7 @@ import {
   TipLabel,
   useElementSize,
 } from "./chartUtils.js";
+import { useLocalStorage } from "./useLocalStorage.js";
 
 const GRID_LINE = "#e3e3df";
 const AXIS_LINE = "#b6b6b1";
@@ -30,16 +31,18 @@ export function SpendingTrendsReport({
   data,
   startMonth,
   endMonth,
+  activeCategoryIds: initialActiveCategoryIds,
 }: {
   data: BudgetData;
   startMonth: string;
   endMonth: string;
+  activeCategoryIds?: Set<number>;
 }) {
   const gid = useId();
   const { ref: chartContainerRef, size } = useElementSize<HTMLDivElement>();
 
   // Scale mode (linear vs logarithmic)
-  const [scaleMode, setScaleMode] = useState<"linear" | "log">("linear");
+  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">("ynab:reports:trendsScaleMode", "linear");
 
   // Drilldown hierarchy state
   const [drillGroupId, setDrillGroupId] = useState<number | null>(null);

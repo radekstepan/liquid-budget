@@ -92,6 +92,13 @@
       "when": 1787202980924,
       "tag": "0012_little_rictor",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1787203000000,
+      "tag": "0013_add_recurring_memo_flag",
+      "breakpoints": true
     }
   ]
 }

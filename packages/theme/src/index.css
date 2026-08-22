@@ -1147,7 +1147,12 @@ button.y-pill:hover {
 }
 
 .y-inline-amt {
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  line-height: 20px;
   text-align: right;
   font-family: var(--y-num);
   font-variant-numeric: tabular-nums;
@@ -1155,18 +1160,25 @@ button.y-pill:hover {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 2px;
-  padding: 1px 3px;
+  padding: 0 4px;
+  margin: 0;
   outline: none;
   white-space: nowrap;
+  display: block;
 }
 .y-inline-amt:hover {
   border-color: #c3cad0;
   background: #fff;
 }
-.y-inline-amt:focus {
+.y-inline-amt:focus,
+input.y-inline-amt {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border-color: var(--y-blue);
   background: #fff;
-  box-shadow: 0 0 0 2px rgba(47, 127, 176, 0.25);
+  box-shadow: 0 0 0 1px var(--y-blue);
 }
 
 /* cleared flag */
@@ -1409,8 +1421,32 @@ button.y-pill:hover {
   border-top: 1px solid #c4c4bf;
   border-radius: 0 0 5px 5px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+}
+
+.y-bar-truncated {
+  position: relative;
+  overflow: visible !important;
+}
+.y-bar-truncated::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -1px;
+  bottom: -1px;
+  width: 6px;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.35),
+    rgba(0, 0, 0, 0.35) 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+  border-left: 1.5px solid #ffffff;
+  border-radius: 0 2px 2px 0;
+  box-shadow: 1px 0 2px rgba(0, 0, 0, 0.2);
 }
 
 /* ---------- notices / tooltips ---------- */

@@ -134,14 +134,18 @@ export function ReconcileModal({
       onClose={onClose}
       footer={
         <>
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn
-            variant="primary"
-            onClick={onSubmit}
-            disabled={!canSubmit || busy}
-          >
-            Reconcile
-          </Btn>
+          <div className="flex items-center gap-2 mr-auto">
+            <Btn onClick={onClose}>Cancel</Btn>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Btn
+              variant="primary"
+              onClick={onSubmit}
+              disabled={!canSubmit || busy}
+            >
+              Reconcile
+            </Btn>
+          </div>
         </>
       }
     >

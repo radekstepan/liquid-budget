@@ -129,6 +129,7 @@ export const RecurringCreateSchema = z.object({
   amount: z.number().int(),
   frequency: z.string().min(1).max(50),
   nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
 
@@ -143,6 +144,7 @@ export const RecurringPatchSchema = z.object({
   frequency: z.string().min(1).max(50).optional(),
   nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   active: z.boolean().optional(),
+  flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
 

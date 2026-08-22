@@ -486,8 +486,8 @@ export const Inspector = memo(function Inspector({
 
                     return (
                       <g key={p.month} className="pointer-events-none">
-                        {/* Current month outer ring when not hovered */}
-                        {isCurrent && !isHovered && (
+                        {/* Current month outer ring when not hovering any month */}
+                        {isCurrent && !hoveredPoint && (
                           <circle
                             cx={cxCoord}
                             cy={cyCoord}

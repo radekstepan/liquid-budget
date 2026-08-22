@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { fmt } from "@ynab/logic";
 import { Button, Panel } from "@ynab/theme";
 import { ChartTip, colorAt, TipLabel, useElementSize } from "./chartUtils.js";
+import { useLocalStorage } from "./useLocalStorage.js";
 
 export type SpendingItem = { name: string; value: number };
 
@@ -16,7 +17,7 @@ export function SpendingReport({
   total: number;
   initialView?: "bars" | "donut";
 }) {
-  const [viewMode, setViewMode] = useState<"bars" | "donut">(initialView);
+  const [viewMode, setViewMode] = useLocalStorage<"bars" | "donut">("ynab:reports:spendingViewMode", initialView);
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
   const { ref: donutRef, size: donutSize } = useElementSize<HTMLDivElement>();
 
@@ -261,14 +262,22 @@ export function SpendingReport({
                         "inset 0 1px 2px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.6)",
                     }}
                   >
-                    <div
-                      className="relative h-full rounded-[3px] transition-[width] duration-150"
-                      style={{
-                        width: `${Math.max(r.pctOfMax, r.value > 0 ? 1 : 0)}%`,
-                        background: `linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0)) , ${r.color}`,
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.18)",
-                      }}
-                    />
+                    {(() => {
+                      const isTruncated = r.pctOfMax >= 95;
+                      const displayWidth = isTruncated ? 95 : Math.max(r.pctOfMax, r.value > 0 ? 1 : 0);
+                      return (
+                        <div
+                          className={`relative h-full rounded-[3px] transition-[width] duration-150 ${
+                            isTruncated ? "y-bar-truncated" : ""
+                          }`}
+                          style={{
+                            width: `${displayWidth}%`,
+                            background: `linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0)) , ${r.color}`,
+                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.18)",
+                          }}
+                        />
+                      );
+                    })()}
                   </div>
                   <span
                     className="y-num w-[110px] shrink-0 text-right text-[12px] font-semibold"

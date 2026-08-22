@@ -94,6 +94,24 @@ export async function POST(req: Request) {
     }
   }
 
+  if (typeof json === "object" && json !== null && (json as any).action === "bulk-post") {
+    const ids = (json as any).ids;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return Response.json({ error: "ids must be a non-empty array" }, { status: 400 });
+    }
+    const postDate = (json as any).date ? String((json as any).date) : undefined;
+    try {
+      const results = [];
+      for (const id of ids) {
+        const res = await postRecurringTransaction(db, Number(id), postDate);
+        results.push(res);
+      }
+      return Response.json({ postedCount: results.length, results });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   if (typeof json === "object" && json !== null && (json as any).action === "autopost") {
     try {
       const posted = await autoPostDueRecurringTransactions(db, (json as any).asOfDate ? String((json as any).asOfDate) : undefined);
@@ -114,9 +132,11 @@ export async function POST(req: Request) {
       accountId: body.accountId,
       categoryId: body.categoryId ?? null,
       payee: body.payee,
+      memo: body.memo,
       amount: body.amount,
       frequency: body.frequency,
       nextDate: body.nextDate,
+      flagColor: body.flagColor,
       transferAccountId: body.transferAccountId ?? null,
       subTransactions: body.subTransactions?.map((c) => ({
         categoryId: c.categoryId ?? null,
@@ -134,6 +154,28 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   let json: unknown;
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  if (typeof json === "object" && json !== null && (json as any).action === "bulk-update") {
+    const ids = (json as any).ids;
+    const patch = (json as any).patch;
+    if (!Array.isArray(ids) || ids.length === 0 || !patch || typeof patch !== "object") {
+      return Response.json({ error: "invalid bulk-update payload" }, { status: 400 });
+    }
+    try {
+      const db = getDefaultDb();
+      for (const id of ids) {
+        await updateRecurring(db, Number(id), {
+          flagColor: patch.flagColor,
+          active: patch.active,
+          categoryId: patch.categoryId,
+        });
+      }
+      return Response.json({ updatedCount: ids.length });
+    } catch (e) {
+      return errorResponse(e);
+    }
+  }
+
   const parseResult = RecurringPatchSchema.safeParse(json);
   if (!parseResult.success) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -145,10 +187,12 @@ export async function PATCH(req: Request) {
       accountId: body.accountId,
       categoryId: body.categoryId !== undefined ? body.categoryId : undefined,
       payee: body.payee,
+      memo: body.memo !== undefined ? (body.memo ?? undefined) : undefined,
       amount: body.amount,
       frequency: body.frequency,
       nextDate: body.nextDate,
       active: body.active,
+      flagColor: body.flagColor !== undefined ? body.flagColor : undefined,
       transferAccountId: body.transferAccountId !== undefined ? body.transferAccountId : undefined,
       subTransactions: body.subTransactions?.map((c) => ({
         categoryId: c.categoryId ?? null,
@@ -167,11 +211,26 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-  try {
-    await deleteRecurring(getDefaultDb(), id);
-    return Response.json({ ok: true });
-  } catch (e) {
-    return errorResponse(e);
+  const db = getDefaultDb();
+
+  if (id) {
+    try {
+      await deleteRecurring(db, id);
+      return Response.json({ ok: true });
+    } catch (e) {
+      return errorResponse(e);
+    }
   }
+
+  try {
+    const json = await req.json();
+    if (typeof json === "object" && json !== null && Array.isArray((json as any).ids)) {
+      for (const singleId of (json as any).ids) {
+        await deleteRecurring(db, Number(singleId));
+      }
+      return Response.json({ ok: true, deletedCount: (json as any).ids.length });
+    }
+  } catch {}
+
+  return Response.json({ error: "invalid id or ids" }, { status: 400 });
 }

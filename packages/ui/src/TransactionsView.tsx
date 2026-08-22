@@ -10,6 +10,7 @@ import {
   todayISO,
 } from "@ynab/logic";
 import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
+import { useLocalStorage } from "./useLocalStorage.js";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
 
@@ -107,6 +108,10 @@ export const TransactionsView = memo(function TransactionsView({
   onEditRecurring,
   onDeleteRecurring,
   onPostRecurring,
+  onFlagRecurring,
+  onBulkPostRecurring,
+  onBulkUpdateRecurring,
+  onBulkDeleteRecurring,
 }: {
   data: BudgetData;
   accountFilter: number | null;
@@ -124,12 +129,18 @@ export const TransactionsView = memo(function TransactionsView({
   onEditRecurring?: (id: number) => void;
   onDeleteRecurring?: (id: number) => void;
   onPostRecurring?: (id: number, date?: string) => void;
+  onFlagRecurring?: (id: number, color: TransactionFlagColor | null) => void;
+  onBulkPostRecurring?: (ids: number[], date?: string) => Promise<void> | void;
+  onBulkUpdateRecurring?: (ids: number[], patch: { flagColor?: TransactionFlagColor | null; active?: boolean }) => Promise<void> | void;
+  onBulkDeleteRecurring?: (ids: number[]) => Promise<void> | void;
 }) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [sort, setSort] = useState<SortState>({ key: "date", dir: "desc" });
+  const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
+  const [scheduledFlagMenuOpen, setScheduledFlagMenuOpen] = useState(false);
+  const [sort, setSort] = useLocalStorage<SortState>("ynab:transactions:sort", { key: "date", dir: "desc" });
 
   const toggleSort = useCallback((key: SortKey) => {
     setSort((prev) => {
@@ -138,25 +149,13 @@ export const TransactionsView = memo(function TransactionsView({
       }
       return { key, dir: key === "date" ? "desc" : "asc" };
     });
-  }, []);
+  }, [setSort]);
 
   // Scheduled drawer state
-  const [showScheduledDrawer, setShowScheduledDrawer] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("ynab_show_scheduled_drawer");
-      if (saved !== null) return saved === "true";
-    }
-    return true;
-  });
+  const [showScheduledDrawer, setShowScheduledDrawer] = useLocalStorage<boolean>("ynab:transactions:showScheduledDrawer", true);
 
   const toggleScheduledDrawer = () => {
-    setShowScheduledDrawer((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("ynab_show_scheduled_drawer", String(next));
-      } catch {}
-      return next;
-    });
+    setShowScheduledDrawer((prev) => !prev);
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -893,22 +892,138 @@ export const TransactionsView = memo(function TransactionsView({
       {/* Scheduled Transactions Drawer (Bottom Table) */}
       {showScheduledDrawer && (
         <div className="y-scheduled-drawer">
-          {/* Drawer Header Bar */}
+          {/* Drawer Header Bar / Bulk Actions Bar */}
           <div className="y-scheduled-header">
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-bold text-[var(--y-ink)]">
-                Scheduled Transactions
-              </span>
-              <span className="text-[11px] text-gray-500 font-medium">
-                ({scheduledRows.length} scheduled{dueScheduledCount > 0 ? ` · ${dueScheduledCount} due` : ""})
-              </span>
-            </div>
+            {selectedRecurringIds.size > 0 ? (
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="y-caps font-bold" style={{ color: "var(--y-ink)" }}>
+                  {selectedRecurringIds.size} scheduled selected
+                </span>
+                <div className="y-tb-sep mx-1" style={{ height: 14 }} />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="!py-0.5 !px-2 text-[11px] font-bold"
+                  title="Enter selected scheduled transactions into register"
+                  onClick={async () => {
+                    const ids = Array.from(selectedRecurringIds);
+                    setSelectedRecurringIds(new Set());
+                    if (onBulkPostRecurring) {
+                      await onBulkPostRecurring(ids, today);
+                    } else if (onPostRecurring) {
+                      for (const id of ids) onPostRecurring(id, today);
+                    }
+                  }}
+                >
+                  Enter Now ({selectedRecurringIds.size})
+                </Button>
+                <div className="relative">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="!py-0.5 !px-2 text-[11px]"
+                    onClick={() => setScheduledFlagMenuOpen((o) => !o)}
+                  >
+                    Set Flag
+                  </Button>
+                  {scheduledFlagMenuOpen && (
+                    <div
+                      className="absolute left-0 top-[24px] z-30 flex gap-1 p-1.5 rounded shadow-lg"
+                      style={{
+                        background: "#fff",
+                        border: "1px solid var(--y-border-strong)",
+                      }}
+                    >
+                      {(["red", "orange", "yellow", "green", "blue", "purple"] as TransactionFlagColor[]).map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className="h-4 w-4 rounded-full border border-black/20 hover:scale-110 transition-transform"
+                          style={{
+                            background:
+                              c === "red"
+                                ? "#e53935"
+                                : c === "orange"
+                                ? "#fb8c00"
+                                : c === "yellow"
+                                ? "#fdd835"
+                                : c === "green"
+                                ? "#43a047"
+                                : c === "blue"
+                                ? "#1e88e5"
+                                : "#8e24aa",
+                          }}
+                          onClick={async () => {
+                            const ids = Array.from(selectedRecurringIds);
+                            setSelectedRecurringIds(new Set());
+                            setScheduledFlagMenuOpen(false);
+                            if (onBulkUpdateRecurring) {
+                              await onBulkUpdateRecurring(ids, { flagColor: c });
+                            } else if (onFlagRecurring) {
+                              for (const id of ids) onFlagRecurring(id, c);
+                            }
+                          }}
+                          title={`Set flag to ${c}`}
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="text-[10px] px-1 rounded hover:bg-gray-100 text-gray-500"
+                        onClick={async () => {
+                          const ids = Array.from(selectedRecurringIds);
+                          setSelectedRecurringIds(new Set());
+                          setScheduledFlagMenuOpen(false);
+                          if (onBulkUpdateRecurring) {
+                            await onBulkUpdateRecurring(ids, { flagColor: null });
+                          } else if (onFlagRecurring) {
+                            for (const id of ids) onFlagRecurring(id, null);
+                          }
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {onBulkDeleteRecurring && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="!py-0.5 !px-2 text-[11px]"
+                    onClick={async () => {
+                      const ids = Array.from(selectedRecurringIds);
+                      setSelectedRecurringIds(new Set());
+                      await onBulkDeleteRecurring(ids);
+                    }}
+                  >
+                    Delete ({selectedRecurringIds.size})
+                  </Button>
+                )}
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="ml-auto !py-0.5 !px-2 text-[11px]"
+                  onClick={() => setSelectedRecurringIds(new Set())}
+                >
+                  Deselect All
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-bold text-[var(--y-ink)]">
+                  Scheduled Transactions
+                </span>
+                <span className="text-[11px] text-gray-500 font-medium">
+                  ({scheduledRows.length} scheduled{dueScheduledCount > 0 ? ` · ${dueScheduledCount} due` : ""})
+                </span>
+              </div>
+            )}
 
             <Button
               variant="default"
               size="sm"
               onClick={toggleScheduledDrawer}
-              className="text-[11px] !py-0.5 !px-1.5 text-gray-500"
+              className="text-[11px] !py-0.5 !px-1.5 text-gray-500 ml-2"
               title="Close drawer"
             >
               <span>✕</span>
@@ -920,6 +1035,22 @@ export const TransactionsView = memo(function TransactionsView({
             <table className="y-table y-scheduled-table w-full text-left bg-white" style={{ background: "#ffffff" }}>
               <thead className="y-thead--sticky">
                 <tr>
+                  <th style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all scheduled transactions"
+                      checked={scheduledRows.length > 0 && selectedRecurringIds.size === scheduledRows.length}
+                      onChange={() => {
+                        if (selectedRecurringIds.size === scheduledRows.length) {
+                          setSelectedRecurringIds(new Set());
+                        } else {
+                          setSelectedRecurringIds(new Set(scheduledRows.map((r) => r.id)));
+                        }
+                      }}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
+                    />
+                  </th>
+                  <th style={{ width: 32 }} className="text-center">Flag</th>
                   <th style={{ width: 85 }}>Date</th>
                   <th style={{ width: 110 }}>Frequency</th>
                   {!accountFilter && <th style={{ width: 120 }}>Account</th>}
@@ -941,7 +1072,7 @@ export const TransactionsView = memo(function TransactionsView({
                 {scheduledRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={accountFilter ? 8 : 9}
+                      colSpan={accountFilter ? 10 : 11}
                       className="text-center py-8 text-[12px]"
                       style={{ color: "var(--y-ink-faint)", background: "#ffffff" }}
                     >
@@ -950,6 +1081,7 @@ export const TransactionsView = memo(function TransactionsView({
                   </tr>
                 ) : (
                   scheduledRows.map((r, idx) => {
+                    const isScheduledSelected = selectedRecurringIds.has(r.id);
                     const flavour = recurringFlavour(r, r.subTransactions ?? []);
                     const sourceName = accountById.get(r.accountId)?.name ?? "";
                     const destName =
@@ -991,12 +1123,41 @@ export const TransactionsView = memo(function TransactionsView({
                         key={r.id}
                         className={cx(
                           "y-row hover:bg-blue-50/60 cursor-pointer",
-                          idx % 2 === 1 && "alt"
+                          isScheduledSelected && "y-row--selected is-sel",
+                          idx % 2 === 1 && !isScheduledSelected && "alt"
                         )}
                         onClick={() => {
                           if (onEditRecurring) onEditRecurring(r.id);
                         }}
                       >
+                        <td
+                          style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}
+                          className="text-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select scheduled transaction ${r.payee || r.id}`}
+                            checked={isScheduledSelected}
+                            onChange={() => {}}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedRecurringIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(r.id)) next.delete(r.id);
+                                else next.add(r.id);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
+                          />
+                        </td>
+                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                          <FlagCell
+                            color={r.flagColor ?? null}
+                            onChange={(color) => onFlagRecurring?.(r.id, color)}
+                          />
+                        </td>
                         <td className="y-num font-medium">
                           <span
                             style={{
@@ -1027,7 +1188,7 @@ export const TransactionsView = memo(function TransactionsView({
                           {displayCat}
                         </td>
                         <td className="truncate italic text-[11px]" style={{ color: "var(--y-ink-faint)" }}>
-                          {children.length > 0 ? children.map((c) => c.memo).filter(Boolean).join("; ") : ""}
+                          {r.memo || (children.length > 0 ? children.map((c) => c.memo).filter(Boolean).join("; ") : "")}
                         </td>
                         <td className="num y-num">{outflow ? money(outflow) : ""}</td>
                         <td

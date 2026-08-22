@@ -14,6 +14,7 @@ import {
   TipLabel,
   useElementSize,
 } from "./chartUtils.js";
+import { useLocalStorage } from "./useLocalStorage.js";
 
 export type { NetWorthPoint };
 
@@ -28,7 +29,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
   const gid = useId();
   const { ref, size } = useElementSize<HTMLDivElement>();
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
-  const [scaleMode, setScaleMode] = useState<"linear" | "log">("linear");
+  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">("ynab:reports:scaleMode", "linear");
 
   const chart = useMemo(() => {
     if (size.width === 0 || size.height === 0 || points.length === 0) return null;

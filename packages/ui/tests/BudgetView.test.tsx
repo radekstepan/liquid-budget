@@ -187,37 +187,38 @@ describe("BudgetView", () => {
     expect(onAddCategory).toHaveBeenCalledWith(1);
   });
 
-  it("collapses and expands all groups from the options menu", () => {
-    const onCollapseAll = vi.fn();
-    const onExpandAll = vi.fn();
-    renderView({ onCollapseAll, onExpandAll });
-    fireEvent.click(screen.getByRole("button", { name: /group options/i }));
-    fireEvent.click(screen.getByText("Collapse all groups"));
-    expect(onCollapseAll).toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /group options/i }));
-    fireEvent.click(screen.getByText("Expand all groups"));
-    expect(onExpandAll).toHaveBeenCalled();
+  it("does not render the dots menu in the toolbar", () => {
+    renderView();
+    expect(screen.queryByRole("button", { name: /group options/i })).not.toBeInTheDocument();
   });
 
   it("calls onToggleGroup when a group header is toggled", () => {
     const onToggleGroup = vi.fn();
     renderView({ onToggleGroup });
-    const toggleBtn = screen.getByText("Everyday").closest("button")!;
-    fireEvent.click(toggleBtn);
+    fireEvent.click(screen.getByRole("button", { name: /toggle everyday/i }));
     expect(onToggleGroup).toHaveBeenCalledWith(1);
   });
 
   it("calls onEditGroup when the group name span is clicked", () => {
     const onEditGroup = vi.fn();
     renderView({ onEditGroup });
-    const nameSpan = screen
-      .getAllByRole("button", { name: /everyday/i })
-      .find((b) => b.tagName === "SPAN")!;
-    fireEvent.click(nameSpan);
+    fireEvent.click(screen.getByRole("button", { name: /^everyday$/i }));
     expect(onEditGroup).toHaveBeenCalledWith(1);
   });
 
   describe("inline assignment editing", () => {
+    it("renders input with size=1 in fixed width column without resizing", () => {
+      renderView();
+      const cellBtn = screen.getByRole("button", { name: "$100.00" });
+      const parentTd = cellBtn.closest("td");
+      expect(parentTd).toHaveClass("w-[120px]");
+      fireEvent.click(cellBtn);
+      const input = document.querySelector("input.y-inline-amt");
+      expect(input).toBeInTheDocument();
+      expect(input).toHaveAttribute("size", "1");
+      expect(input?.closest("td")).toHaveClass("w-[120px]");
+    });
+
     it("commits the typed amount on Enter", () => {
       const onAssign = vi.fn();
       renderView({ onAssign });
@@ -565,39 +566,24 @@ describe("BudgetView", () => {
       expect(onEditCategory).toHaveBeenCalledWith(10);
     });
 
-    it("renders and triggers all quick budget options (UNI-19)", () => {
+    it("allows clicking budget cell to edit amount without popover (UNI-19)", () => {
       const onAssign = vi.fn();
-      const lastMonthAssignments = new Map([[10, 12000]]);
-      const spentLastMonthByCategory = new Map([[10, 8500]]);
-      const avgSpentByCategory = new Map([[10, 9500]]);
-      const avgBudgetedByCategory = new Map([[10, 11000]]);
-      const underfundedByCategory = new Map([[10, 3000]]);
 
       renderView({
         onAssign,
-        lastMonthAssignments,
-        spentLastMonthByCategory,
-        avgSpentByCategory,
-        avgBudgetedByCategory,
-        underfundedByCategory,
       });
 
-      const dotsBtns = screen.getAllByRole("button", { name: /quick budget options/i });
-      expect(dotsBtns.length).toBeGreaterThan(0);
+      // No popover dots button should exist in the cell
+      const dotsBtns = screen.queryAllByRole("button", { name: /quick budget options/i });
+      expect(dotsBtns.length).toBe(0);
 
-      // Open quick budget menu for Groceries
-      fireEvent.click(dotsBtns[0]!);
+      // Clicking an amount button shows input field
+      const cellBtn = screen.getByRole("button", { name: "$100.00" });
+      fireEvent.click(cellBtn);
 
-      expect(screen.getByRole("button", { name: /budgeted last month/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /spent last month/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /average budgeted/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /average spent/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /underfunded/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /set to zero/i })).toBeInTheDocument();
-
-      // Click Spent Last Month
-      fireEvent.click(screen.getByRole("button", { name: /spent last month/i }));
-      expect(onAssign).toHaveBeenCalledWith(10, 8500, "2026-06");
+      const input = screen.getByRole("textbox");
+      expect(input).toBeInTheDocument();
+      expect(input).toHaveValue("100.00");
     });
 
     it("renders Red Arrow indicator when negative category available carries over (UNI-20)", () => {
