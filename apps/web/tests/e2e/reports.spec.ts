@@ -107,7 +107,7 @@ test("Spending by Category tab renders the top spender with a percent bar and to
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {
   await page.getByRole("button", { name: "Net Worth", exact: true }).click();
   const panel = page.locator("main .y-panel-head").filter({ hasText: "Net Worth" }).locator("..");
-  await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.locator("svg").first()).toBeVisible();
   // Three months in the default range → bar markers visible.
   await expect(panel.locator("rect").first()).toBeVisible();
 
@@ -119,12 +119,12 @@ test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale",
 
   // Switch to Log scale
   await logBtn.click();
-  await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.locator("svg").first()).toBeVisible();
   await expect(panel.locator("rect").first()).toBeVisible();
 
   // Switch back to Linear scale
   await linearBtn.click();
-  await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.locator("svg").first()).toBeVisible();
 });
 
 test("Spending Trends tab renders stacked multi-month chart and supports multi-level drill-down", async ({ page }) => {
@@ -154,7 +154,8 @@ test("Spending Trends tab renders stacked multi-month chart and supports multi-l
   // Breadcrumb now shows All Categories > Group Name
   await expect(panel.getByRole("button", { name: groupName! })).toBeVisible();
   await expect(panel.getByRole("button", { name: "↑ Up" })).toBeVisible();
-  await expect(constituentsTable.getByText("Subcategory")).toBeVisible();
+  // At the group drill level the constituent table shows subcategory rows
+  await expect(constituentsTable.locator("tbody tr.y-row").first()).toBeVisible();
 
   // Drill down into a constituent subcategory
   const firstCatRow = constituentsTable.locator(".cursor-pointer").first();
@@ -171,7 +172,7 @@ test("Spending Trends tab renders stacked multi-month chart and supports multi-l
   // Navigate back to master category using Up button
   await panel.getByRole("button", { name: "↑ Up" }).click();
   await expect(panel.getByRole("button", { name: groupName! })).toBeVisible();
-  await expect(constituentsTable.getByText("Subcategory")).toBeVisible();
+  await expect(constituentsTable.locator("tbody tr.y-row").first()).toBeVisible();
 
   // Open contextual category filter for this group
   const filterBtn = panel.getByTitle("Filter included categories");

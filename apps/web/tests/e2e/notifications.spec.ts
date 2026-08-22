@@ -203,7 +203,7 @@ test.describe("success notifications", () => {
 });
 
 test.describe("failure notifications", () => {
-  test("failing to add a transaction shows a single danger toast and keeps the modal open", async ({
+  test("failing to add a transaction shows a single danger toast, keeps the modal open, and rolls back the optimistic update", async ({
     page,
   }) => {
     await page.route("**/api/transactions", (route) => {
@@ -214,6 +214,10 @@ test.describe("failure notifications", () => {
     });
 
     await gotoAllTransactions(page);
+
+    // Count rows before the failed attempt
+    const rowCountBefore = await page.locator("tbody tr.y-row").count();
+
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
@@ -223,6 +227,10 @@ test.describe("failure notifications", () => {
 
     await expect(page.getByText("Failed to add transaction. Please try again.")).toBeVisible();
     await expect(page.getByText("Add Transaction", { exact: true }).first()).toBeVisible();
+
+    // Assert optimistic row was rolled back — row count unchanged
+    const rowCountAfter = await page.locator("tbody tr.y-row").count();
+    expect(rowCountAfter).toBe(rowCountBefore);
   });
 
   test("failing to reconcile shows a danger toast and keeps the modal open", async ({
@@ -261,6 +269,34 @@ test.describe("failure notifications", () => {
 
     await expect(page.getByText("Rule not saved")).toBeVisible();
     await expect(page.locator(".y-toast").filter({ hasText: "rename" })).toHaveCount(0);
+  });
+
+  test("failing to save a budget assignment rolls back the optimistic inline edit", async ({
+    page,
+  }) => {
+    await page.route("**/api/assignments", (route) => {
+      if (route.request().method() === "PUT") {
+        return route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"boom"}' });
+      }
+      return route.continue();
+    });
+
+    // "Home Insurance" has a zero June assignment in the demo seed.
+    const row = page.locator("tr[data-cat-row]").filter({ hasText: "Home Insurance" }).first();
+    await expect(row).toBeVisible();
+    const originalText = await row.locator(".y-inline-amt").first().textContent();
+
+    // Attempt to change the assignment — optimistic update fires.
+    const assignedBtn = row.locator(".y-inline-amt").first();
+    await assignedBtn.click();
+    const input = row.locator("input.y-inline-amt");
+    await input.fill("5.00");
+    await input.press("Enter");
+
+    // Failure toast appears
+    await expect(page.getByText("Failed to save assignment. Please try again.")).toBeVisible();
+    // Value rolls back to original
+    await expect(row.locator(".y-inline-amt").first()).toContainText(originalText!.trim());
   });
 });
 
