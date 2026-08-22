@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { fmt } from "@ynab/logic";
 import { Button, Panel } from "@ynab/theme";
-import { ChartTip, colorAt, TipLabel, useElementSize } from "./chartUtils.js";
+import { ChartTip, colorAt, computeOutlierBreak, TipLabel, useElementSize, zigZagVertical } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
 export type SpendingItem = { name: string; value: number };
@@ -34,6 +34,11 @@ export function SpendingReport({
 
   const empty = rows.length === 0;
   const growRows = rows.length > 0 && rows.length <= 14;
+
+  const barBreak = useMemo(
+    () => computeOutlierBreak(rows.map((r) => r.value)),
+    [rows]
+  );
 
   const side = Math.max(0, Math.min(donutSize.width * 0.45, donutSize.height * 0.92, 380));
   const cx = side / 2;
@@ -256,26 +261,80 @@ export function SpendingReport({
                     {r.name}
                   </span>
                   <div
-                    className="y-bar-track h-[14px] flex-1 overflow-hidden rounded-[3px]"
+                    className="y-bar-track relative h-[14px] flex-1 overflow-hidden rounded-[3px]"
                     style={{
                       boxShadow:
                         "inset 0 1px 2px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.6)",
                     }}
                   >
                     {(() => {
-                      const isTruncated = r.pctOfMax >= 95;
-                      const displayWidth = isTruncated ? 95 : Math.max(r.pctOfMax, r.value > 0 ? 1 : 0);
+                      const useBreak = barBreak.hasBreak;
+                      const isOutlier = useBreak && r.value > barBreak.breakTop;
+                      const isTruncated = !useBreak && r.pctOfMax >= 95;
+                      const displayWidth = Math.round(
+                      (useBreak
+                        ? isOutlier
+                          ? barBreak.split * 100 +
+                            ((r.value - barBreak.breakTop) / (barBreak.topVal - barBreak.breakTop)) *
+                              (95 - barBreak.split * 100)
+                          : Math.max(
+                              r.value > 0 ? 1 : 0,
+                              (r.value / barBreak.breakTop) * barBreak.split * 100
+                            )
+                        : isTruncated
+                          ? 95
+                          : Math.max(r.pctOfMax, r.value > 0 ? 1 : 0)) * 100) / 100;
                       return (
-                        <div
-                          className={`relative h-full rounded-[3px] transition-[width] duration-150 ${
-                            isTruncated ? "y-bar-truncated" : ""
-                          }`}
-                          style={{
-                            width: `${displayWidth}%`,
-                            background: `linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0)) , ${r.color}`,
-                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.18)",
-                          }}
-                        />
+                        <>
+                          <div
+                            className={`relative h-full rounded-[3px] transition-[width] duration-150 ${
+                              isTruncated ? "y-bar-truncated" : ""
+                            }`}
+                            style={{
+                              width: `${displayWidth}%`,
+                              background: `linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0)) , ${r.color}`,
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.18)",
+                              ...(isTruncated
+                                ? {
+                                    "--y-trunc-cap": r.color,
+                                    "--y-trunc-dash": "rgba(0,0,0,0.35)",
+                                  }
+                                : {}),
+                            }}
+                          />
+                          {useBreak && (
+                            <div
+                              className="pointer-events-none absolute inset-y-0"
+                              data-testid="axis-break"
+                              style={{
+                                left: `${barBreak.split * 100}%`,
+                                width: 12,
+                                transform: "translateX(-6px)",
+                              }}
+                            >
+                              <svg
+                                width={12}
+                                height="100%"
+                                viewBox="0 0 12 14"
+                                preserveAspectRatio="none"
+                              >
+                                <rect x="0" y="0" width="12" height="14" fill="#ffffff" />
+                                <path
+                                  d={zigZagVertical(2, 12, 3, 4, 2.5)}
+                                  fill="none"
+                                  stroke="#8a99a8"
+                                  strokeWidth="1.4"
+                                />
+                                <path
+                                  d={zigZagVertical(2, 12, 9, 4, 2.5)}
+                                  fill="none"
+                                  stroke="#8a99a8"
+                                  strokeWidth="1.4"
+                                />
+                              </svg>
+                            </div>
+                          )}
+                        </>
                       );
                     })()}
                   </div>

@@ -13,13 +13,19 @@ import {
 } from "@ynab/logic";
 import { Button, Panel, Icon } from "@ynab/theme";
 import {
+  AxisBreakMark,
   ChartTip,
   colorAt,
+  computeOutlierBreak,
   fmtShort,
   niceTicks,
   symlog,
   symlogTicks,
   TipLabel,
+  TRUNC_CAP_H,
+  TRUNC_RATIO,
+  TruncHatchPattern,
+  TruncMarker,
   useElementSize,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
@@ -163,15 +169,18 @@ export function SpendingTrendsReport({
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
-    let ticks: number[];
+    let ticks: { v: number; grid: boolean }[];
     let y: (v: number) => number;
     let zeroY: number;
+
+    const trendBreak = computeOutlierBreak(trends.months.map((m) => m.total));
+    const useTrendBreak = scaleMode === "linear" && trendBreak.hasBreak;
 
     if (scaleMode === "log") {
       const maxVal = Math.max(1000, trends.maxMonthSpend);
       const rawTicks = symlogTicks(0, maxVal);
-      ticks = rawTicks.filter((t) => t >= 0);
-      if (!ticks.includes(0)) ticks.unshift(0);
+      ticks = rawTicks.filter((t) => t >= 0).map((v) => ({ v, grid: true }));
+      if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
 
       const maxLog = symlog(maxVal);
       zeroY = padT + innerH;
@@ -180,13 +189,34 @@ export function SpendingTrendsReport({
         const norm = maxLog > 0 ? symlog(v) / maxLog : 0;
         return padT + innerH * (1 - Math.min(1, Math.max(0, norm)));
       };
+    } else if (useTrendBreak) {
+      ticks = [
+        ...trendBreak.ticks.map((v) => ({ v, grid: true })),
+        { v: trendBreak.topVal, grid: false },
+      ];
+      zeroY = padT + innerH;
+      y = (v: number) => {
+        if (v <= 0) return zeroY;
+        if (v <= trendBreak.breakTop) {
+          return zeroY - (v / trendBreak.breakTop) * trendBreak.split * innerH;
+        }
+        return (
+          zeroY -
+          (trendBreak.split +
+            ((v - trendBreak.breakTop) / (trendBreak.topVal - trendBreak.breakTop)) *
+              (1 - trendBreak.split)) *
+            innerH
+        );
+      };
     } else {
       const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
       const rawTicks = niceTicks(0, maxVal, 4);
-      ticks = rawTicks.filter((t) => t >= 0 && t <= maxVal * 1.05);
-      if (!ticks.includes(0)) ticks.unshift(0);
+      ticks = rawTicks
+        .filter((t) => t >= 0 && t <= maxVal * 1.05)
+        .map((v) => ({ v, grid: true }));
+      if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
 
-      const maxTick = ticks[ticks.length - 1] || maxVal;
+      const maxTick = ticks[ticks.length - 1]?.v || maxVal;
       y = (v: number) => padT + innerH * (1 - Math.min(1, Math.max(0, v / maxTick)));
       zeroY = y(0);
     }
@@ -209,11 +239,38 @@ export function SpendingTrendsReport({
 
     const cornerRadius = Math.min(3, Math.max(1, Math.floor(barW / 3)));
 
+    // Bars scale against the largest month so the tallest bar always reaches
+    // the visual cap; the axis keeps its own ticks computed from maxMonthSpend.
+    const barScaleMax = Math.max(1, trends.maxMonthSpend);
+    const maxBarH = (zeroY - padT) * TRUNC_RATIO;
+    const barNorm = (v: number) =>
+      v <= 0
+        ? 0
+        : scaleMode === "log"
+          ? symlog(v) / Math.max(1e-9, symlog(barScaleMax))
+          : v / barScaleMax;
+    const barFrac = (v: number) => {
+      if (v <= 0) return 0;
+      if (useTrendBreak) {
+        if (v <= trendBreak.breakTop) return (v / trendBreak.breakTop) * trendBreak.split;
+        return (
+          trendBreak.split +
+          ((v - trendBreak.breakTop) / (trendBreak.topVal - trendBreak.breakTop)) *
+            (1 - trendBreak.split)
+        );
+      }
+      return barNorm(v);
+    };
+
     const monthBars = trends.months.map((mPoint, i) => {
       const cx = padL + colW * (i + 0.5);
       const barX = cx - barW / 2;
 
-      const totalH = Math.max(0, zeroY - y(mPoint.total));
+      const truncated =
+        !useTrendBreak && mPoint.total > 0 && mPoint.total >= barScaleMax * TRUNC_RATIO;
+      const totalH = useTrendBreak
+        ? Math.max(0, (zeroY - padT) * Math.min(1, barFrac(mPoint.total)))
+        : Math.max(0, maxBarH * Math.min(1, barNorm(mPoint.total)));
       const barTopY = zeroY - totalH;
 
       let currentBottom = zeroY;
@@ -250,6 +307,7 @@ export function SpendingTrendsReport({
         monthTotal: mPoint.total,
         totalH,
         barTopY,
+        truncated,
         cx,
         barX,
         barW,
@@ -260,6 +318,7 @@ export function SpendingTrendsReport({
     });
 
     const avgY = trends.avgPerMonth > 0 ? y(trends.avgPerMonth) : null;
+    const breakY = useTrendBreak ? y(trendBreak.breakTop) : null;
 
     // Smart X-axis label stride calculation to prevent overlap over multi-year spans
     const maxLabels = Math.max(2, Math.min(10, Math.floor(innerW / 65)));
@@ -296,6 +355,8 @@ export function SpendingTrendsReport({
       n,
       monthBars,
       avgY,
+      breakY,
+      hasTrendBreak: useTrendBreak,
       tickSet,
     };
   }, [size, trends, colorMap, hover, hoverConstituentId, scaleMode]);
@@ -717,30 +778,33 @@ export function SpendingTrendsReport({
                     />
                   </clipPath>
                 ))}
+                <TruncHatchPattern id={`${gid}-hatch`} />
               </defs>
 
               {/* Horizontal Grid lines and Y-axis Ticks */}
               {chart.ticks.map((t, i) => (
                 <g key={i}>
-                  <line
-                    x1={chart.padL}
-                    x2={chart.W - chart.padR}
-                    y1={chart.y(t)}
-                    y2={chart.y(t)}
-                    stroke={GRID_LINE}
-                    strokeWidth={1}
-                    vectorEffect="non-scaling-stroke"
-                  />
+                  {t.grid && (
+                    <line
+                      x1={chart.padL}
+                      x2={chart.W - chart.padR}
+                      y1={chart.y(t.v)}
+                      y2={chart.y(t.v)}
+                      stroke={GRID_LINE}
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
                   <text
                     x={chart.padL - 8}
-                    y={chart.y(t)}
+                    y={chart.y(t.v)}
                     fill="var(--y-ink-faint)"
                     fontSize={10}
                     textAnchor="end"
                     dominantBaseline="middle"
                     className="y-num"
                   >
-                    {fmtShort(t)}
+                    {fmtShort(t.v)}
                   </text>
                 </g>
               ))}
@@ -791,7 +855,9 @@ export function SpendingTrendsReport({
 
                     {/* Stack segments wrapped in whole-bar clipPath for unified smooth rounded corners */}
                     <g clipPath={`url(#${gid}-bar-${mIdx})`}>
-                      {mBar.segments.map((seg) => (
+                      {mBar.segments.map((seg, sIdx) => {
+                      const segTruncated = mBar.truncated && sIdx === mBar.segments.length - 1;
+                      return (
                         <g key={seg.id}>
                           <rect
                             x={seg.x}
@@ -820,41 +886,33 @@ export function SpendingTrendsReport({
                               }
                             }}
                           />
-                          {seg.y <= chart.padT + 1 && (
+                          {segTruncated && (
                             <>
-                              <line
-                                x1={seg.x + 1}
-                                x2={seg.x + seg.width - 1}
-                                y1={chart.padT + 4}
-                                y2={chart.padT + 4}
-                                stroke="rgba(0,0,0,0.35)"
-                                strokeWidth={2}
-                                strokeDasharray="3 2"
-                                vectorEffect="non-scaling-stroke"
-                              />
-                              <line
-                                x1={seg.x + 1}
-                                x2={seg.x + seg.width - 1}
-                                y1={chart.padT + 8}
-                                y2={chart.padT + 8}
-                                stroke="rgba(0,0,0,0.35)"
-                                strokeWidth={2}
-                                strokeDasharray="3 2"
-                                vectorEffect="non-scaling-stroke"
-                              />
-                              <rect
-                                x={seg.x}
-                                y={chart.padT}
-                                width={seg.width}
-                                height={3}
-                                rx={1}
-                                fill={seg.color}
-                                fillOpacity={0.7}
-                              />
+                              {chart.barW >= 8 ? (
+                                <TruncMarker
+                                  x={seg.x}
+                                  y={mBar.barTopY}
+                                  width={seg.width}
+                                  fill={seg.color}
+                                  hatchId={`url(#${gid}-hatch)`}
+                                  rx={chart.cornerRadius}
+                                />
+                              ) : (
+                                <rect
+                                  data-testid="trunc-cap"
+                                  x={seg.x}
+                                  y={mBar.barTopY}
+                                  width={seg.width}
+                                  height={TRUNC_CAP_H}
+                                  rx={1}
+                                  fill={seg.color}
+                                />
+                              )}
                             </>
                           )}
                         </g>
-                      ))}
+                      );
+                    })}
                     </g>
 
                     {/* Transparent overlay for full column click & hover */}
@@ -918,6 +976,16 @@ export function SpendingTrendsReport({
                   </g>
                 );
               })}
+
+              {/* Axis break cutout over spike months */}
+              {chart.hasTrendBreak && chart.breakY != null && (
+                <AxisBreakMark
+                  x1={chart.padL}
+                  x2={chart.W - chart.padR}
+                  y={chart.breakY}
+                  erase="#ffffff"
+                />
+              )}
 
               {/* Foreground: Average text label (on top of bars, always readable with white halo) */}
               {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (

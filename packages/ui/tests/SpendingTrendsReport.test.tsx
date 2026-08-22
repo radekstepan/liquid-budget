@@ -211,6 +211,46 @@ describe("SpendingTrendsReport", () => {
     expect(screen.getByText("No spending data for this timeframe and filter selection.")).toBeInTheDocument();
   });
 
+  it("caps an outsized month bar with a solid cap and a dashed hatch", () => {
+    const data = makeTestData();
+    data.transactions.push(txn("2026-05", 28, "Landlord", -10000, 20));
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    // Only the dominant May bar (11200 vs ~1550) is truncated: one hatch + one cap.
+    const hatches = svg.querySelectorAll('[data-testid="trunc-hatch"]');
+    const caps = svg.querySelectorAll('[data-testid="trunc-cap"]');
+    expect(hatches.length).toBe(1);
+    expect(caps.length).toBe(1);
+
+    // Cap sits immediately above the hatch, at the top of the bar.
+    const hatchY = Number(hatches[0]!.getAttribute("y"));
+    const capY = Number(caps[0]!.getAttribute("y"));
+    expect(capY).toBe(hatchY - 5);
+    expect(Number(caps[0]!.getAttribute("height"))).toBe(5);
+    // The cap color is a solid hex (not a gradient/pattern reference).
+    expect(caps[0]!.getAttribute("fill")).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  it("caps only the tallest bar with ordinary proportional data", () => {
+    const data = makeTestData();
+    // Adding 200 in Jun makes Jun 1640 the max: Apr 1450 and May 1550 sit
+    // below 95% of 1640, so only the Jun bar is capped.
+    data.transactions.push(txn("2026-06", 20, "Safeway", -200, 10));
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    const caps = svg.querySelectorAll('[data-testid="trunc-cap"]');
+    expect(caps.length).toBe(1);
+    // The starred month label lives above the capped bar: Jun 2026.
+    const capX = Number(caps[0]!.getAttribute("x"));
+    const junLabel = Array.from(svg.querySelectorAll("text")).find(
+      (t) => t.textContent === "Jun 2026"
+    );
+    expect(junLabel).not.toBeNull();
+    expect(Math.abs(Number(junLabel!.getAttribute("x")) - (capX + 21))).toBeLessThan(30);
+  });
+
   it("handles 12-year (144 months) wide timeframe without overlapping axis labels or bars", () => {
     const data = makeTestData();
     // Add transactions spanning 2014 to 2026 (12 years)
@@ -225,7 +265,7 @@ describe("SpendingTrendsReport", () => {
     // Verify clipPaths exist for whole-bar rounded corners
     const defs = svg.querySelector("defs");
     expect(defs).not.toBeNull();
-    expect(defs!.children.length).toBe(145);
+    expect(Array.from(defs!.children).filter((el) => el.tagName === "clipPath").length).toBe(145);
 
     // Verify that X-axis labels use smart stride (at most 10-12 labels, not all 145)
     const textLabels = Array.from(svg.querySelectorAll("text")).filter(
@@ -281,6 +321,25 @@ describe("SpendingTrendsReport", () => {
     expect(rows.length).toBe(3);
     // Second row has alt class for alternating row colors
     expect(rows[1]!.classList.contains("alt")).toBe(true);
+  });
+
+  it("renders an axis break when a single month spikes far above the rest", () => {
+    const data = makeTestData();
+    data.transactions.push(txn("2026-01", 1, "Landlord", -1200, 20));
+    data.transactions.push(txn("2026-02", 1, "Landlord", -1200, 20));
+    data.transactions.push(txn("2026-03", 1, "Landlord", -1200, 20));
+    data.transactions.push(txn("2026-04", 1, "Landlord", -1200, 20));
+    data.transactions.push(txn("2026-05", 28, "Landlord", -50000, 20));
+    data.transactions.push(txn("2026-06", 1, "Landlord", -1200, 20));
+    render(<SpendingTrendsReport data={data} startMonth="2026-01" endMonth="2026-06" />);
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    // One horizontal break cutout over the max spike.
+    expect(svg.querySelectorAll('[data-testid="axis-break"]').length).toBe(1);
+    // Compressed top tick label for the spike month.
+    expect(screen.getByText("$100K")).toBeInTheDocument();
+    // No truncation caps when the axis break is active.
+    expect(svg.querySelectorAll('[data-testid="trunc-cap"]').length).toBe(0);
   });
 
   it("toggles between Linear and Logarithmic chart scale modes", () => {
