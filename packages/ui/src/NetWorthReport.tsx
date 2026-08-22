@@ -6,6 +6,7 @@ import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@yna
 import { Button, Panel } from "@ynab/theme";
 import {
   AxisBreakMark,
+  AxisBreakMask,
   ChartTip,
   colorAt,
   computeOutlierBreak,
@@ -288,34 +289,54 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                 <stop offset="100%" stopColor={DEBTS_COLOR} stopOpacity={0.85} />
               </linearGradient>
               <TruncHatchPattern id={`${gid}-hatch`} />
+              {chart.hasBreak && (
+                <AxisBreakMask
+                  maskId={`${gid}-break`}
+                  x1={chart.padL}
+                  x2={chart.W - chart.padR}
+                  breaks={[
+                    ...(chart.assetBreak ? [{ y: chart.y(chart.assetBreak.breakTop) }] : []),
+                    ...(chart.debtBreak ? [{ y: chart.y(-chart.debtBreak.breakTop) }] : []),
+                  ]}
+                />
+              )}
             </defs>
 
-            {chart.ticks.map((t, i) => (
-              <g key={i}>
-                {t.grid && (
-                  <line
-                    x1={chart.padL}
-                    x2={chart.W - chart.padR}
-                    y1={chart.y(t.v)}
-                    y2={chart.y(t.v)}
-                    stroke={GRID}
-                    strokeWidth={1}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                )}
-                <text
-                  x={chart.padL - 8}
-                  y={chart.y(t.v)}
-                  fill="var(--y-ink-faint)"
-                  fontSize={10}
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                  className="y-num"
-                >
-                  {fmtShort(t.v)}
-                </text>
-              </g>
-            ))}
+            {chart.ticks.map((t, i) => {
+              const ty = chart.y(t.v);
+              const inBreak =
+                t.grid &&
+                chart.hasBreak &&
+                ((chart.assetBreak && Math.abs(ty - chart.y(chart.assetBreak.breakTop)) < 7) ||
+                  (chart.debtBreak && Math.abs(ty - chart.y(-chart.debtBreak.breakTop)) < 7));
+              if (inBreak) return null;
+              return (
+                <g key={i}>
+                  {t.grid && (
+                    <line
+                      x1={chart.padL}
+                      x2={chart.W - chart.padR}
+                      y1={ty}
+                      y2={ty}
+                      stroke={GRID}
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                  <text
+                    x={chart.padL - 8}
+                    y={ty}
+                    fill="var(--y-ink-faint)"
+                    fontSize={10}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    className="y-num"
+                  >
+                    {fmtShort(t.v)}
+                  </text>
+                </g>
+              );
+            })}
 
             <line
               x1={chart.padL}
@@ -327,74 +348,77 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
               vectorEffect="non-scaling-stroke"
             />
 
-            {points.map((p, i) => {
-              const x = chart.xAt(i);
-              const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
-              const debtH = Math.max(0, chart.y(Math.max(0, -p.debts)) - chart.zeroY);
-              const useBreakBars = chart.hasBreak;
-              const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
-              const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
-              const assetHNorm = useBreakBars ? assetH : Math.max(0, chart.maxBarH * Math.min(1, Math.max(0, p.assets) / chart.barScaleAssets));
-              const debtHNorm = useBreakBars ? debtH : Math.max(0, chart.maxBarHD * Math.min(1, Math.max(0, -p.debts) / chart.barScaleDebts));
-              const barX = x - chart.barW / 2;
-              return (
-                <g key={p.month}>
-                  {p.assets > 0 && (
-                    <>
-                      <rect
-                        x={barX}
-                        y={chart.zeroY - assetHNorm}
-                        width={chart.barW}
-                        height={assetHNorm}
-                        rx={1.5}
-                        fill={`url(#${gid}-assets-grad)`}
-                        stroke={ASSETS_COLOR}
-                        strokeOpacity={0.2}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      {assetTruncated && (
-                        <TruncMarker
+            {/* Bars + area fill — masked to cut a transparent break band */}
+            <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
+              {points.map((p, i) => {
+                const x = chart.xAt(i);
+                const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
+                const debtH = Math.max(0, chart.y(Math.max(0, -p.debts)) - chart.zeroY);
+                const useBreakBars = chart.hasBreak;
+                const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
+                const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
+                const assetHNorm = useBreakBars ? assetH : Math.max(0, chart.maxBarH * Math.min(1, Math.max(0, p.assets) / chart.barScaleAssets));
+                const debtHNorm = useBreakBars ? debtH : Math.max(0, chart.maxBarHD * Math.min(1, Math.max(0, -p.debts) / chart.barScaleDebts));
+                const barX = x - chart.barW / 2;
+                return (
+                  <g key={p.month}>
+                    {p.assets > 0 && (
+                      <>
+                        <rect
                           x={barX}
                           y={chart.zeroY - assetHNorm}
                           width={chart.barW}
-                          fill={ASSETS_COLOR}
-                          hatchId={`url(#${gid}-hatch)`}
+                          height={assetHNorm}
                           rx={1.5}
+                          fill={`url(#${gid}-assets-grad)`}
+                          stroke={ASSETS_COLOR}
+                          strokeOpacity={0.2}
+                          vectorEffect="non-scaling-stroke"
                         />
-                      )}
-                    </>
-                  )}
-                  {p.debts < 0 && (
-                    <>
-                      <rect
-                        x={barX}
-                        y={chart.zeroY}
-                        width={chart.barW}
-                        height={debtHNorm}
-                        rx={1.5}
-                        fill={`url(#${gid}-debts-grad)`}
-                        stroke={DEBTS_COLOR}
-                        strokeOpacity={0.2}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      {debtTruncated && (
-                        <TruncMarker
-                          dir="down"
+                        {assetTruncated && (
+                          <TruncMarker
+                            x={barX}
+                            y={chart.zeroY - assetHNorm}
+                            width={chart.barW}
+                            fill={ASSETS_COLOR}
+                            hatchId={`url(#${gid}-hatch)`}
+                            rx={1.5}
+                          />
+                        )}
+                      </>
+                    )}
+                    {p.debts < 0 && (
+                      <>
+                        <rect
                           x={barX}
-                          y={chart.zeroY + debtHNorm}
+                          y={chart.zeroY}
                           width={chart.barW}
-                          fill={DEBTS_COLOR}
-                          hatchId={`url(#${gid}-hatch)`}
+                          height={debtHNorm}
                           rx={1.5}
+                          fill={`url(#${gid}-debts-grad)`}
+                          stroke={DEBTS_COLOR}
+                          strokeOpacity={0.2}
+                          vectorEffect="non-scaling-stroke"
                         />
-                      )}
-                    </>
-                  )}
-                </g>
-              );
-            })}
+                        {debtTruncated && (
+                          <TruncMarker
+                            dir="down"
+                            x={barX}
+                            y={chart.zeroY + debtHNorm}
+                            width={chart.barW}
+                            fill={DEBTS_COLOR}
+                            hatchId={`url(#${gid}-hatch)`}
+                            rx={1.5}
+                          />
+                        )}
+                      </>
+                    )}
+                  </g>
+                );
+              })}
 
-            <path d={chart.areaPath} fill={`url(#${gid}-net-grad)`} />
+              <path d={chart.areaPath} fill={`url(#${gid}-net-grad)`} />
+            </g>
             <path
               d={chart.linePath}
               fill="none"
@@ -412,7 +436,6 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                     x1={chart.padL}
                     x2={chart.W - chart.padR}
                     y={chart.y(chart.assetBreak.breakTop)}
-                    erase="#ffffff"
                   />
                 )}
                 {chart.debtBreak && (
@@ -420,7 +443,6 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
                     x1={chart.padL}
                     x2={chart.W - chart.padR}
                     y={chart.y(-chart.debtBreak.breakTop)}
-                    erase="#ffffff"
                   />
                 )}
               </>
