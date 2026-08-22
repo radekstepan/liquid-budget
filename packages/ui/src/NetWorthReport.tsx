@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, useCallback, memo } from "react";
 import type { ReactNode } from "react";
 import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@ynab/logic";
 import { Button, Panel } from "@ynab/theme";
@@ -8,7 +8,6 @@ import {
   AxisBreakMark,
   AxisBreakMask,
   ChartTip,
-  colorAt,
   computeOutlierBreak,
   fmtShort,
   niceTicks,
@@ -20,6 +19,8 @@ import {
   TruncHatchPattern,
   TruncMarker,
   useElementSize,
+  useRafThrottledSet,
+  type OutlierBreak,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -31,6 +32,269 @@ const GRID = "#dcdcd8";
 const ASSETS_COLOR = "#2f7fb0";
 const DEBTS_COLOR = "#c0483a";
 const NET_COLOR = "#2d3340";
+
+interface NetWorthChartLayout {
+  W: number;
+  H: number;
+  padL: number;
+  padR: number;
+  padT: number;
+  padB: number;
+  innerW: number;
+  innerH: number;
+  y: (v: number) => number;
+  hasBreak: boolean;
+  assetBreak: OutlierBreak | null;
+  debtBreak: OutlierBreak | null;
+  zeroY: number;
+  ticks: { v: number; grid: boolean }[];
+  linePath: string;
+  areaPath: string;
+  barW: number;
+  n: number;
+  xAt: (i: number) => number;
+  barScaleAssets: number;
+  barScaleDebts: number;
+  maxBarH: number;
+  maxBarHD: number;
+  isLog: boolean;
+}
+
+// Static SVG content: gradients, grid, lines, bars, and labels. None of this
+// depends on hover state, so it is intentionally excluded from the parent's
+// hover re-renders (React.memo + stable props).
+const NetWorthStaticChart = memo(function NetWorthStaticChart({
+  chart,
+  points,
+  gid,
+}: {
+  chart: NetWorthChartLayout;
+  points: NetWorthPoint[];
+  gid: string;
+}) {
+  return (
+    <svg width={chart.W} height={chart.H}>
+      <defs>
+        <linearGradient id={`${gid}-net-grad`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={NET_COLOR} stopOpacity={0.28} />
+          <stop offset="100%" stopColor={NET_COLOR} stopOpacity={0} />
+        </linearGradient>
+        <linearGradient id={`${gid}-assets-grad`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={ASSETS_COLOR} stopOpacity={0.85} />
+          <stop offset="100%" stopColor={ASSETS_COLOR} stopOpacity={0.45} />
+        </linearGradient>
+        <linearGradient id={`${gid}-debts-grad`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={DEBTS_COLOR} stopOpacity={0.45} />
+          <stop offset="100%" stopColor={DEBTS_COLOR} stopOpacity={0.85} />
+        </linearGradient>
+        <TruncHatchPattern id={`${gid}-hatch`} />
+        {chart.hasBreak && (
+          <AxisBreakMask
+            maskId={`${gid}-break`}
+            x1={chart.padL}
+            x2={chart.W - chart.padR}
+            breaks={[
+              ...(chart.assetBreak ? [{ y: chart.y(chart.assetBreak.breakTop) }] : []),
+              ...(chart.debtBreak ? [{ y: chart.y(-chart.debtBreak.breakTop) }] : []),
+            ]}
+          />
+        )}
+      </defs>
+
+      {chart.ticks.map((t, i) => {
+        const ty = chart.y(t.v);
+        const inBreak =
+          t.grid &&
+          chart.hasBreak &&
+          ((chart.assetBreak && Math.abs(ty - chart.y(chart.assetBreak.breakTop)) < 7) ||
+            (chart.debtBreak && Math.abs(ty - chart.y(-chart.debtBreak.breakTop)) < 7));
+        return (
+          <g key={i}>
+            {t.grid && !inBreak && (
+              <line
+                x1={chart.padL}
+                x2={chart.W - chart.padR}
+                y1={ty}
+                y2={ty}
+                stroke={GRID}
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            <text
+              x={chart.padL - 8}
+              y={ty}
+              fill="var(--y-ink-faint)"
+              fontSize={10}
+              textAnchor="end"
+              dominantBaseline="middle"
+              className="y-num"
+            >
+              {fmtShort(t.v)}
+            </text>
+          </g>
+        );
+      })}
+
+      <line
+        x1={chart.padL}
+        x2={chart.W - chart.padR}
+        y1={chart.zeroY}
+        y2={chart.zeroY}
+        stroke={AXIS_LINE}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {/* Bars + area fill — masked to cut a transparent break band */}
+      <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
+        {points.map((p, i) => {
+          const x = chart.xAt(i);
+          const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
+          const debtH = Math.max(0, chart.y(Math.min(0, p.debts)) - chart.zeroY);
+          const useBreakBars = chart.hasBreak;
+          const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
+          const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
+          const assetHNorm = useBreakBars ? assetH : Math.max(0, chart.maxBarH * Math.min(1, Math.max(0, p.assets) / chart.barScaleAssets));
+          const debtHNorm = useBreakBars ? debtH : Math.max(0, chart.maxBarHD * Math.min(1, Math.max(0, -p.debts) / chart.barScaleDebts));
+          const barX = x - chart.barW / 2;
+          return (
+            <g key={p.month}>
+              {p.assets > 0 && (
+                <>
+                  <rect
+                    x={barX}
+                    y={chart.zeroY - assetHNorm}
+                    width={chart.barW}
+                    height={assetHNorm}
+                    rx={1.5}
+                    fill={`url(#${gid}-assets-grad)`}
+                    stroke={ASSETS_COLOR}
+                    strokeOpacity={0.2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {assetTruncated && (
+                    <TruncMarker
+                      x={barX}
+                      y={chart.zeroY - assetHNorm}
+                      width={chart.barW}
+                      fill={ASSETS_COLOR}
+                      hatchId={`url(#${gid}-hatch)`}
+                      rx={1.5}
+                    />
+                  )}
+                </>
+              )}
+              {p.debts < 0 && (
+                <>
+                  <rect
+                    x={barX}
+                    y={chart.zeroY}
+                    width={chart.barW}
+                    height={debtHNorm}
+                    rx={1.5}
+                    fill={`url(#${gid}-debts-grad)`}
+                    stroke={DEBTS_COLOR}
+                    strokeOpacity={0.2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {debtTruncated && (
+                    <TruncMarker
+                      dir="down"
+                      x={barX}
+                      y={chart.zeroY + debtHNorm}
+                      width={chart.barW}
+                      fill={DEBTS_COLOR}
+                      hatchId={`url(#${gid}-hatch)`}
+                      rx={1.5}
+                    />
+                  )}
+                </>
+              )}
+            </g>
+          );
+        })}
+
+        <path d={chart.areaPath} fill={`url(#${gid}-net-grad)`} />
+      </g>
+      <path
+        d={chart.linePath}
+        fill="none"
+        stroke={NET_COLOR}
+        strokeWidth={2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {chart.hasBreak && (
+        <>
+          {chart.assetBreak && (
+            <AxisBreakMark
+              x1={chart.padL}
+              x2={chart.W - chart.padR}
+              y={chart.y(chart.assetBreak.breakTop)}
+            />
+          )}
+          {chart.debtBreak && (
+            <AxisBreakMark
+              x1={chart.padL}
+              x2={chart.W - chart.padR}
+              y={chart.y(-chart.debtBreak.breakTop)}
+            />
+          )}
+        </>
+      )}
+
+      {(() => {
+        if (chart.n === 0) return null;
+        const maxTicks = Math.max(2, Math.min(12, Math.floor(chart.innerW / 65)));
+        const stride = chart.n <= maxTicks ? 1 : Math.ceil((chart.n - 1) / (maxTicks - 1));
+        const tickIndices: number[] = [];
+        for (let i = 0; i < chart.n; i += stride) {
+          tickIndices.push(i);
+        }
+        const lastIdx = chart.n - 1;
+        const prevIdx = tickIndices[tickIndices.length - 1]!;
+        if (lastIdx !== prevIdx) {
+          if (lastIdx - prevIdx < Math.max(2, Math.round(stride * 0.75))) {
+            tickIndices[tickIndices.length - 1] = lastIdx;
+          } else {
+            tickIndices.push(lastIdx);
+          }
+        }
+        const tickSet = new Set(tickIndices);
+
+        return points.map((p, i) => {
+          if (!tickSet.has(i)) return null;
+          const { month0, year } = parseMonthKey(p.month);
+          const label = `${MONTHS[month0] ?? ""} ${year}`;
+          const anchor =
+            chart.n === 1
+              ? "middle"
+              : i === 0
+              ? "start"
+              : i === chart.n - 1
+              ? "end"
+              : "middle";
+          return (
+            <text
+              key={`lbl-${i}`}
+              x={chart.xAt(i)}
+              y={chart.H - chart.padB + 18}
+              fill="var(--y-ink-soft)"
+              fontSize={10.5}
+              textAnchor={anchor}
+              className="y-num"
+            >
+              {label}
+            </text>
+          );
+        });
+      })()}
+    </svg>
+  );
+});
 
 export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
   const gid = useId();
@@ -202,18 +466,22 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
     );
   })();
 
-  const handleMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const pushHover = useRafThrottledSet(setHover);
+
+  const handleMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!chart) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = e.clientX - rect.left;
     if (chart.n === 1) {
-      setHover({ idx: 0, x: e.clientX, y: e.clientY });
+      pushHover({ idx: 0, x: e.clientX, y: e.clientY });
       return;
     }
     const stride = chart.innerW / (chart.n - 1);
     const idx = Math.max(0, Math.min(chart.n - 1, Math.round((relX - chart.padL) / stride)));
-    setHover({ idx, x: e.clientX, y: e.clientY });
-  };
+    pushHover({ idx, x: e.clientX, y: e.clientY });
+  }, [chart, pushHover]);
+
+  const handleMouseLeave = useCallback(() => setHover(null), []);
 
   return (
     <Panel
@@ -237,7 +505,12 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
         </span>
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>Scale</span>
+            <span
+              className="y-caps text-[10px]"
+              style={{ color: "var(--y-ink-faint)" }}
+            >
+              Scale
+            </span>
             <div className="y-seg">
               <Button
                 size="sm"
@@ -267,274 +540,65 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
         ref={ref}
         className="relative min-h-0 flex-1 w-full"
         onMouseMove={handleMove}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={handleMouseLeave}
         style={{ background: "linear-gradient(#ffffff, #f7f7f4)" }}
       >
         {empty && (
           <div className="grid h-full place-items-center y-hint">No data for this timeframe.</div>
         )}
         {chart && !empty && (
-          <svg width={chart.W} height={chart.H}>
-            <defs>
-              <linearGradient id={`${gid}-net-grad`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={NET_COLOR} stopOpacity={0.28} />
-                <stop offset="100%" stopColor={NET_COLOR} stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id={`${gid}-assets-grad`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={ASSETS_COLOR} stopOpacity={0.85} />
-                <stop offset="100%" stopColor={ASSETS_COLOR} stopOpacity={0.45} />
-              </linearGradient>
-              <linearGradient id={`${gid}-debts-grad`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={DEBTS_COLOR} stopOpacity={0.45} />
-                <stop offset="100%" stopColor={DEBTS_COLOR} stopOpacity={0.85} />
-              </linearGradient>
-              <TruncHatchPattern id={`${gid}-hatch`} />
-              {chart.hasBreak && (
-                <AxisBreakMask
-                  maskId={`${gid}-break`}
-                  x1={chart.padL}
-                  x2={chart.W - chart.padR}
-                  breaks={[
-                    ...(chart.assetBreak ? [{ y: chart.y(chart.assetBreak.breakTop) }] : []),
-                    ...(chart.debtBreak ? [{ y: chart.y(-chart.debtBreak.breakTop) }] : []),
-                  ]}
-                />
-              )}
-            </defs>
+          <>
+            <NetWorthStaticChart chart={chart} points={points} gid={gid} />
 
-            {chart.ticks.map((t, i) => {
-              const ty = chart.y(t.v);
-              const inBreak =
-                t.grid &&
-                chart.hasBreak &&
-                ((chart.assetBreak && Math.abs(ty - chart.y(chart.assetBreak.breakTop)) < 7) ||
-                  (chart.debtBreak && Math.abs(ty - chart.y(-chart.debtBreak.breakTop)) < 7));
-              return (
-                <g key={i}>
-                  {t.grid && !inBreak && (
-                    <line
-                      x1={chart.padL}
-                      x2={chart.W - chart.padR}
-                      y1={ty}
-                      y2={ty}
-                      stroke={GRID}
-                      strokeWidth={1}
+            {/* Hover overlay: data-point circles + dashed guide line. Only this
+                layer re-renders on hover, not the static chart above. */}
+            <svg
+              width={chart.W}
+              height={chart.H}
+              className="absolute inset-0 overflow-visible pointer-events-none"
+              style={{ top: 0, left: 0 }}
+            >
+              {points.map((p, i) => {
+                const isHovered = hover?.idx === i;
+                return (
+                  <g key={`pt-${i}`} opacity={hover && !isHovered ? 0.45 : 1}>
+                    {isHovered && (
+                      <circle
+                        cx={chart.xAt(i)}
+                        cy={chart.y(p.net)}
+                        r={6.5}
+                        fill={NET_COLOR}
+                        fillOpacity={0.25}
+                      />
+                    )}
+                    <circle
+                      cx={chart.xAt(i)}
+                      cy={chart.y(p.net)}
+                      r={isHovered ? 4.5 : 2.5}
+                      fill={NET_COLOR}
+                      stroke={isHovered ? "#ffffff" : "none"}
+                      strokeWidth={isHovered ? 1.5 : 0}
                       vectorEffect="non-scaling-stroke"
                     />
-                  )}
-                  <text
-                    x={chart.padL - 8}
-                    y={ty}
-                    fill="var(--y-ink-faint)"
-                    fontSize={10}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    className="y-num"
-                  >
-                    {fmtShort(t.v)}
-                  </text>
-                </g>
-              );
-            })}
-
-            <line
-              x1={chart.padL}
-              x2={chart.W - chart.padR}
-              y1={chart.zeroY}
-              y2={chart.zeroY}
-              stroke={AXIS_LINE}
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-
-            {/* Bars + area fill — masked to cut a transparent break band */}
-            <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
-              {points.map((p, i) => {
-                const x = chart.xAt(i);
-                const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
-                const debtH = Math.max(0, chart.y(Math.min(0, p.debts)) - chart.zeroY);
-                const useBreakBars = chart.hasBreak;
-                const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
-                const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
-                const assetHNorm = useBreakBars ? assetH : Math.max(0, chart.maxBarH * Math.min(1, Math.max(0, p.assets) / chart.barScaleAssets));
-                const debtHNorm = useBreakBars ? debtH : Math.max(0, chart.maxBarHD * Math.min(1, Math.max(0, -p.debts) / chart.barScaleDebts));
-                const barX = x - chart.barW / 2;
-                return (
-                  <g key={p.month}>
-                    {p.assets > 0 && (
-                      <>
-                        <rect
-                          x={barX}
-                          y={chart.zeroY - assetHNorm}
-                          width={chart.barW}
-                          height={assetHNorm}
-                          rx={1.5}
-                          fill={`url(#${gid}-assets-grad)`}
-                          stroke={ASSETS_COLOR}
-                          strokeOpacity={0.2}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        {assetTruncated && (
-                          <TruncMarker
-                            x={barX}
-                            y={chart.zeroY - assetHNorm}
-                            width={chart.barW}
-                            fill={ASSETS_COLOR}
-                            hatchId={`url(#${gid}-hatch)`}
-                            rx={1.5}
-                          />
-                        )}
-                      </>
-                    )}
-                    {p.debts < 0 && (
-                      <>
-                        <rect
-                          x={barX}
-                          y={chart.zeroY}
-                          width={chart.barW}
-                          height={debtHNorm}
-                          rx={1.5}
-                          fill={`url(#${gid}-debts-grad)`}
-                          stroke={DEBTS_COLOR}
-                          strokeOpacity={0.2}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        {debtTruncated && (
-                          <TruncMarker
-                            dir="down"
-                            x={barX}
-                            y={chart.zeroY + debtHNorm}
-                            width={chart.barW}
-                            fill={DEBTS_COLOR}
-                            hatchId={`url(#${gid}-hatch)`}
-                            rx={1.5}
-                          />
-                        )}
-                      </>
-                    )}
                   </g>
                 );
               })}
 
-              <path d={chart.areaPath} fill={`url(#${gid}-net-grad)`} />
-            </g>
-            <path
-              d={chart.linePath}
-              fill="none"
-              stroke={NET_COLOR}
-              strokeWidth={2}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-
-            {chart.hasBreak && (
-              <>
-                {chart.assetBreak && (
-                  <AxisBreakMark
-                    x1={chart.padL}
-                    x2={chart.W - chart.padR}
-                    y={chart.y(chart.assetBreak.breakTop)}
-                  />
-                )}
-                {chart.debtBreak && (
-                  <AxisBreakMark
-                    x1={chart.padL}
-                    x2={chart.W - chart.padR}
-                    y={chart.y(-chart.debtBreak.breakTop)}
-                  />
-                )}
-              </>
-            )}
-
-            {points.map((p, i) => {
-              const isHovered = hover?.idx === i;
-              return (
-                <g key={`pt-${i}`}>
-                  {isHovered && (
-                    <circle
-                      cx={chart.xAt(i)}
-                      cy={chart.y(p.net)}
-                      r={6.5}
-                      fill={NET_COLOR}
-                      fillOpacity={0.25}
-                    />
-                  )}
-                  <circle
-                    cx={chart.xAt(i)}
-                    cy={chart.y(p.net)}
-                    r={isHovered ? 4.5 : 2.5}
-                    fill={NET_COLOR}
-                    stroke={isHovered ? "#ffffff" : "none"}
-                    strokeWidth={isHovered ? 1.5 : 0}
-                    vectorEffect="non-scaling-stroke"
-                    opacity={hover && !isHovered ? 0.45 : 1}
-                  />
-                </g>
-              );
-            })}
-
-            {hover && (
-              <line
-                x1={chart.xAt(hover.idx)}
-                x2={chart.xAt(hover.idx)}
-                y1={chart.padT}
-                y2={chart.H - chart.padB}
-                stroke={NET_COLOR}
-                strokeOpacity={0.4}
-                strokeWidth={1.5}
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="3 3"
-              />
-            )}
-
-            {(() => {
-              if (chart.n === 0) return null;
-              const maxTicks = Math.max(2, Math.min(12, Math.floor(chart.innerW / 65)));
-              const stride = chart.n <= maxTicks ? 1 : Math.ceil((chart.n - 1) / (maxTicks - 1));
-              const tickIndices: number[] = [];
-              for (let i = 0; i < chart.n; i += stride) {
-                tickIndices.push(i);
-              }
-              const lastIdx = chart.n - 1;
-              const prevIdx = tickIndices[tickIndices.length - 1]!;
-              if (lastIdx !== prevIdx) {
-                if (lastIdx - prevIdx < Math.max(2, Math.round(stride * 0.75))) {
-                  tickIndices[tickIndices.length - 1] = lastIdx;
-                } else {
-                  tickIndices.push(lastIdx);
-                }
-              }
-              const tickSet = new Set(tickIndices);
-
-              return points.map((p, i) => {
-                if (!tickSet.has(i)) return null;
-                const { month0, year } = parseMonthKey(p.month);
-                const label = `${MONTHS[month0] ?? ""} ${year}`;
-                const anchor =
-                  chart.n === 1
-                    ? "middle"
-                    : i === 0
-                    ? "start"
-                    : i === chart.n - 1
-                    ? "end"
-                    : "middle";
-                return (
-                  <text
-                    key={`lbl-${i}`}
-                    x={chart.xAt(i)}
-                    y={chart.H - chart.padB + 18}
-                    fill="var(--y-ink-soft)"
-                    fontSize={10.5}
-                    textAnchor={anchor}
-                    className="y-num"
-                  >
-                    {label}
-                  </text>
-                );
-              });
-            })()}
-          </svg>
+              {hover && (
+                <line
+                  x1={chart.xAt(hover.idx)}
+                  x2={chart.xAt(hover.idx)}
+                  y1={chart.padT}
+                  y2={chart.H - chart.padB}
+                  stroke={NET_COLOR}
+                  strokeOpacity={0.4}
+                  strokeWidth={1.5}
+                  vectorEffect="non-scaling-stroke"
+                  strokeDasharray="3 3"
+                />
+              )}
+            </svg>
+          </>
         )}
       </div>
 
