@@ -359,7 +359,7 @@ describe("ReportsView", () => {
     }
   });
 
-  it("Spending by Category shows an axis break when one category dwarfs the rest", () => {
+  it("Spending by Category renders proportional bars with no truncation breaks", () => {
     const data: BudgetData = {
       ...makeData(),
       categories: [
@@ -381,18 +381,20 @@ describe("ReportsView", () => {
     renderView({ data });
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
-    const scope = within(panel);
 
-    // The break overlay is rendered on every bar track.
-    expect(panel.querySelectorAll('[data-testid="axis-break"]').length).toBe(5);
+    // No truncation / break UI on any bar: no masks, markers, or caps.
+    expect(panel.querySelector('[data-testid="axis-break"]')).toBeNull();
+    expect(panel.querySelector(".y-bar-truncated")).toBeNull();
+    expect(panel.querySelector(".y-bar-track svg")).toBeNull();
 
-    // The outlier category bar is drawn at the compressed-zone max (95%).
-    const taxRow = scope.getByText("$5,000.00").closest(".group")!;
-    const track = taxRow.querySelector(".y-bar-track")!;
-    const fill = Array.from(track.children).find(
-      (el) => el instanceof HTMLElement && el.style.width === "95%"
-    )!;
-    expect(fill).toBeTruthy();
+    // Bars scale linearly against the largest category (5000 = 100%,
+    // Groceries 350 = 7%) regardless of how dominant the top spender is.
+    const taxRow = screen.getByText("$5,000.00").closest(".group")!;
+    const groceriesRow = screen.getByText("$350.00").closest(".group")!;
+    const taxFill = taxRow.querySelector(".y-bar-track > div") as HTMLElement;
+    const groceriesFill = groceriesRow.querySelector(".y-bar-track > div") as HTMLElement;
+    expect(taxFill.style.width).toBe("100%");
+    expect(groceriesFill.style.width).toBe("7%");
   });
 
   it("shows the empty state when there are no transactions", () => {
