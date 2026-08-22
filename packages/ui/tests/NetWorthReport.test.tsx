@@ -68,6 +68,24 @@ describe("NetWorthReport", () => {
     expect(Number(debtCap.getAttribute("y"))).toBe(Number(debtHatch.getAttribute("y")) + 5);
   });
 
+  it("renders debt bars with non-zero height when asset axis break is active", () => {
+    // Asset outlier triggers break mode; debt bars must still render with height.
+    const points = [
+      point("2026-01", 100000, -10000),
+      point("2026-02", 150000, -12000),
+      point("2026-03", 120000, -11000),
+      point("2026-04", 130000, -13000),
+      point("2026-05", 5000000, -15000),
+    ];
+    render(<NetWorthReport points={points} />);
+
+    const svg = document.querySelector("svg")!;
+    const debtBars = svg.querySelectorAll('[fill*="debts-grad"]');
+    expect(debtBars.length).toBeGreaterThan(0);
+    const heights = Array.from(debtBars).map((el) => Number(el.getAttribute("height")));
+    expect(heights.every((h) => h > 0)).toBe(true);
+  });
+
   it("renders an axis break when a month's assets are a statistical outlier (>= 5 points)", () => {
     const points = [
       point("2026-01", 100000, -10000),

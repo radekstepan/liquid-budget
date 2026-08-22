@@ -352,7 +352,7 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
               {points.map((p, i) => {
                 const x = chart.xAt(i);
                 const assetH = Math.max(0, chart.zeroY - chart.y(Math.max(0, p.assets)));
-                const debtH = Math.max(0, chart.y(Math.max(0, -p.debts)) - chart.zeroY);
+                const debtH = Math.max(0, chart.y(Math.min(0, p.debts)) - chart.zeroY);
                 const useBreakBars = chart.hasBreak;
                 const assetTruncated = !useBreakBars && p.assets > 0 && p.assets >= chart.barScaleAssets * TRUNC_RATIO;
                 const debtTruncated = !useBreakBars && p.debts < 0 && -p.debts >= chart.barScaleDebts * TRUNC_RATIO;
