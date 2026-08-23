@@ -525,4 +525,39 @@ describe("SpendingTrendsReport", () => {
     const svg = document.querySelector("svg.overflow-visible")!;
     expect(svg.querySelectorAll('[data-testid="axis-break"]').length).toBeGreaterThan(0);
   });
+
+  it("hides the average dashed line and label when it falls within the axis break band", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "10000000", onBudget: true, sort: 0 },
+      ],
+      groups: [
+        { id: 1, name: "Housing", sort: 0, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Rent", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // 5 months of $350 spending, 1 month of $650 spending => inliers: $350 (breakTop: $400), avg = $400 (falls in break)
+        { id: 1, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-01-15", payee: "Landlord", memo: "", amount: "-35000", status: "c" },
+        { id: 2, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-02-15", payee: "Landlord", memo: "", amount: "-35000", status: "c" },
+        { id: 3, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-03-15", payee: "Landlord", memo: "", amount: "-35000", status: "c" },
+        { id: 4, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-04-15", payee: "Landlord", memo: "", amount: "-35000", status: "c" },
+        { id: 5, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-05-15", payee: "Landlord", memo: "", amount: "-35000", status: "c" },
+        { id: 6, accountId: 1, transferAccountId: null, categoryId: 10, date: "2026-06-15", payee: "Landlord", memo: "", amount: "-65000", status: "c" },
+      ],
+      recurring: [],
+    };
+    render(<SpendingTrendsReport data={data} startMonth="2026-01" endMonth="2026-06" />);
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    // Axis break exists
+    expect(svg.querySelectorAll('[data-testid="axis-break"]').length).toBeGreaterThan(0);
+    // Average dashed line is hidden because it falls into the jagged break section
+    const avgLine = svg.querySelector('line[stroke-dasharray="4 3"]');
+    expect(avgLine).toBeNull();
+    // Avg text label inside chart is still shown
+    expect(svg.textContent).toContain("Avg: $400");
+  });
 });

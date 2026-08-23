@@ -81,6 +81,7 @@ interface ChartLayout {
   n: number;
   monthBars: MonthBarLayout[];
   avgY: number | null;
+  avgInBreak: boolean;
   hasBreak: boolean;
   posBreak: OutlierBreak | null;
   negBreak: OutlierBreak | null;
@@ -177,18 +178,21 @@ const StaticChart = memo(function StaticChart({
         vectorEffect="non-scaling-stroke"
       />
 
-      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.H - chart.padB && (
-        <line
-          x1={chart.padL}
-          x2={chart.W - chart.padR}
-          y1={chart.avgY}
-          y2={chart.avgY}
-          stroke="#8a99a8"
-          strokeWidth={1.5}
-          strokeDasharray="4 3"
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
+      {chart.avgY != null &&
+        !chart.avgInBreak &&
+        chart.avgY >= chart.padT &&
+        chart.avgY <= chart.H - chart.padB && (
+          <line
+            x1={chart.padL}
+            x2={chart.W - chart.padR}
+            y1={chart.avgY}
+            y2={chart.avgY}
+            stroke="#8a99a8"
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
 
       <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
         {chart.monthBars.map((mBar, mIdx) => {
@@ -834,6 +838,11 @@ export function SpendingTrendsReport({
     });
 
     const avgY = trends.avgPerMonth !== 0 ? y(trends.avgPerMonth) : null;
+    const avgInBreak =
+      hasBreak &&
+      avgY != null &&
+      ((posBreak.hasBreak && Math.abs(avgY - y(posBreak.breakTop)) < 7) ||
+        (negBreak.hasBreak && Math.abs(avgY - y(-negBreak.breakTop)) < 7));
 
     // Smart X-axis label stride calculation to prevent overlap over multi-year spans
     const maxLabels = Math.max(2, Math.min(10, Math.floor(innerW / 65)));
@@ -870,6 +879,7 @@ export function SpendingTrendsReport({
       n,
       monthBars,
       avgY,
+      avgInBreak,
       hasBreak,
       posBreak: posBreak.hasBreak ? posBreak : null,
       negBreak: negBreak.hasBreak ? negBreak : null,
