@@ -357,10 +357,12 @@ const ConstituentTable = memo(function ConstituentTable({
   constituents,
   colorMap,
   onDrill,
+  drillLevel = "all",
 }: {
   constituents: SpendingTrendsConstituent[];
   colorMap: Map<number, string>;
   onDrill: (id: number) => void;
+  drillLevel?: "all" | "group" | "category";
 }) {
   const [hoverId, setHoverId] = useState<number | null>(null);
 
@@ -368,7 +370,7 @@ const ConstituentTable = memo(function ConstituentTable({
     <table className="y-table">
       <thead className="y-thead y-thead--sticky">
         <tr>
-          <th>Master Category</th>
+          <th>{drillLevel === "group" ? "Category" : "Master Category"}</th>
           <th className="num" style={{ width: 110 }}>Average/Mo</th>
           <th className="num" style={{ width: 110 }}>Total Spent</th>
           <th className="num" style={{ width: 80 }}>% Share</th>
@@ -421,6 +423,108 @@ const ConstituentTable = memo(function ConstituentTable({
         })}
       </tbody>
     </table>
+  );
+});
+
+const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
+  categoryName,
+  transactions,
+  selectedMonth,
+  onClearMonth,
+  accountMap,
+}: {
+  categoryName: string | null | undefined;
+  transactions: Transaction[];
+  selectedMonth: string | null;
+  onClearMonth: () => void;
+  accountMap: Map<number, string>;
+}) {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="y-subbar flex items-center justify-between px-3 py-1.5 text-[11px]">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[var(--y-ink)]">
+            {categoryName} Transactions
+          </span>
+          <span className="y-caps text-[var(--y-ink-faint)]">
+            {transactions.length} {transactions.length === 1 ? "entry" : "entries"}
+          </span>
+        </div>
+
+        {selectedMonth ? (
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="font-medium text-[var(--y-blue)]">
+              Showing: {monthLabel(selectedMonth)}
+            </span>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={onClearMonth}
+              title="Show all months"
+            >
+              Show All Months
+            </Button>
+          </div>
+        ) : (
+          <span className="text-[11px] text-[var(--y-ink-faint)]">
+            Click any month bar to filter
+          </span>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-auto y-scroll">
+        {transactions.length === 0 ? (
+          <div className="py-8 text-center y-hint text-[11.5px]">
+            No transactions found for this timeframe.
+          </div>
+        ) : (
+          <table className="y-table">
+            <thead className="y-thead y-thead--sticky">
+              <tr>
+                <th style={{ width: 85 }}>Date</th>
+                <th>Payee</th>
+                <th style={{ width: 140 }}>Account</th>
+                <th>Memo</th>
+                <th className="num" style={{ width: 100 }}>
+                  Spending
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {transactions.map((t, idx) => {
+                const spend = -num(t.amount);
+                return (
+                  <tr
+                    key={t.id}
+                    className={`y-row ${idx % 2 === 1 ? "alt" : ""}`}
+                  >
+                    <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
+                      {t.date}
+                    </td>
+                    <td className="font-medium text-[var(--y-ink)] truncate max-w-[200px]">
+                      {t.payee || "—"}
+                    </td>
+                    <td className="text-[var(--y-ink-soft)] truncate max-w-[150px]">
+                      {accountMap.get(t.accountId) ?? "Account"}
+                    </td>
+                    <td className="text-[var(--y-ink-faint)] truncate max-w-[200px]">
+                      {t.memo || ""}
+                    </td>
+                    <td
+                      className={`num font-semibold y-num whitespace-nowrap ${
+                        spend < 0 ? "text-[var(--y-green-dk)]" : "text-[var(--y-ink)]"
+                      }`}
+                    >
+                      {fmt(spend)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   );
 });
 
@@ -547,7 +651,7 @@ export function SpendingTrendsReport({
     if (size.width === 0 || size.height === 0 || trends.months.length === 0) return null;
 
     const W = size.width;
-    const H = Math.max(180, size.height);
+    const H = size.height;
     const padL = 58;
     const padR = 18;
     const padT = 16;
@@ -888,18 +992,22 @@ export function SpendingTrendsReport({
   }, [size, trends, colorMap, scaleMode]);
 
   // Breadcrumb navigation handlers
-  const handleGoToAll = () => {
+  const handleGoToAll = useCallback(() => {
     setDrillGroupId(null);
     setDrillCategoryId(null);
     setSelectedMonth(null);
     setHover(null);
-  };
+  }, []);
 
-  const handleGoToGroup = () => {
+  const handleGoToGroup = useCallback(() => {
     setDrillCategoryId(null);
     setSelectedMonth(null);
     setHover(null);
-  };
+  }, []);
+
+  const handleClearMonth = useCallback(() => {
+    setSelectedMonth(null);
+  }, []);
 
   const handleDrillSegment = useCallback((constituentId: number) => {
     if (trends.drillLevel === "all") {
@@ -1291,7 +1399,7 @@ export function SpendingTrendsReport({
         {/* SVG Chart Area */}
         <div
           ref={chartContainerRef}
-          className="relative min-h-[220px] flex-[1.4] w-full border-b border-[var(--y-line-soft)]"
+          className="relative min-h-[220px] flex-[1.4] w-full overflow-hidden border-b border-[var(--y-line-soft)]"
           style={{ background: "linear-gradient(#ffffff, #f7f7f4)" }}
           onMouseMove={handleMove}
           onMouseLeave={handleMouseLeave}
@@ -1342,92 +1450,13 @@ export function SpendingTrendsReport({
         {/* Lower Panel: Breakdown List OR Transaction Register (when in single category) */}
         <div className="flex-1 min-h-0 overflow-y-auto y-scroll bg-white">
           {trends.drillLevel === "category" ? (
-            /* Subcategory Transaction Detail Table with standard y-table and y-row.alt styling */
-            <div className="flex flex-col h-full">
-              <div className="y-subbar flex items-center justify-between px-3 py-1.5 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-[var(--y-ink)]">
-                    {trends.currentCategoryName} Transactions
-                  </span>
-                  <span className="y-caps text-[var(--y-ink-faint)]">
-                    {transactions.length} {transactions.length === 1 ? "entry" : "entries"}
-                  </span>
-                </div>
-
-                {selectedMonth ? (
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="font-medium text-[var(--y-blue)]">
-                      Showing: {monthLabel(selectedMonth)}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => setSelectedMonth(null)}
-                      title="Show all months"
-                    >
-                      Show All Months
-                    </Button>
-                  </div>
-                ) : (
-                  <span className="text-[11px] text-[var(--y-ink-faint)]">
-                    Click any month bar to filter
-                  </span>
-                )}
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-auto y-scroll">
-                {transactions.length === 0 ? (
-                  <div className="py-8 text-center y-hint text-[11.5px]">
-                    No transactions found for this timeframe.
-                  </div>
-                ) : (
-                  <table className="y-table">
-                    <thead className="y-thead y-thead--sticky">
-                      <tr>
-                        <th style={{ width: 85 }}>Date</th>
-                        <th>Payee</th>
-                        <th style={{ width: 140 }}>Account</th>
-                        <th>Memo</th>
-                        <th className="num" style={{ width: 100 }}>
-                          Spending
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {transactions.map((t, idx) => {
-                        const spend = -num(t.amount);
-                        return (
-                          <tr
-                            key={t.id}
-                            className={`y-row ${idx % 2 === 1 ? "alt" : ""}`}
-                          >
-                            <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
-                              {t.date}
-                            </td>
-                            <td className="font-medium text-[var(--y-ink)] truncate max-w-[200px]">
-                              {t.payee || "—"}
-                            </td>
-                            <td className="text-[var(--y-ink-soft)] truncate max-w-[150px]">
-                              {accountMap.get(t.accountId) ?? "Account"}
-                            </td>
-                            <td className="text-[var(--y-ink-faint)] truncate max-w-[200px]">
-                              {t.memo || ""}
-                            </td>
-                            <td
-                              className={`num font-semibold y-num whitespace-nowrap ${
-                                spend < 0 ? "text-[var(--y-green-dk)]" : "text-[var(--y-ink)]"
-                              }`}
-                            >
-                              {fmt(spend)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <CategoryTransactionsTable
+              categoryName={trends.currentCategoryName}
+              transactions={transactions}
+              selectedMonth={selectedMonth}
+              onClearMonth={handleClearMonth}
+              accountMap={accountMap}
+            />
           ) : (
             /* Constituents Breakdown Table */
             <div className="flex flex-col h-full">
@@ -1440,6 +1469,7 @@ export function SpendingTrendsReport({
                   constituents={trends.constituents}
                   colorMap={colorMap}
                   onDrill={handleDrillSegment}
+                  drillLevel={trends.drillLevel}
                 />
               )}
             </div>

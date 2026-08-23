@@ -172,7 +172,6 @@ export function ChartTip({
   content: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
 
   useLayoutEffect(() => {
     if (x == null || y == null || !ref.current) return;
@@ -184,8 +183,9 @@ export function ChartTip({
     left = Math.max(pad, Math.min(window.innerWidth - w - pad, left));
     let top = y - h - 12;
     if (top < 8) top = y + 16;
-    setPos({ left, top });
-  }, [x, y]);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, [x, y, content]);
 
   if (x == null || y == null || content == null) return null;
 
@@ -193,7 +193,7 @@ export function ChartTip({
     <div
       ref={ref}
       className="y-tip pointer-events-none fixed z-40"
-      style={{ left: pos.left, top: pos.top, textAlign: "left" }}
+      style={{ left: 0, top: 0, textAlign: "left" }}
     >
       {content}
     </div>
