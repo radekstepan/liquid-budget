@@ -6,6 +6,7 @@ import {
   createSplitWithChildren,
   createTransaction,
   assertValidAmount,
+  isAccountOnBudget,
   sanitizeFlagColor,
   type SubTransactionInput as TxnSubTransactionInput,
 } from "./transactions.js";
@@ -161,11 +162,13 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
 
   db.run(sql`BEGIN`);
   try {
+    const onBudget = await isAccountOnBudget(db, input.accountId);
+    const categoryId = onBudget ? norm.effectiveCategoryId : null;
     const [parent] = await db
       .insert(recurring)
       .values({
         accountId: input.accountId,
-        categoryId: norm.effectiveCategoryId,
+        categoryId,
         payee: input.payee,
         memo: input.memo ?? "",
         amount: input.amount,
@@ -181,7 +184,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       let sort = 0;
       for (const c of norm.subTransactions!) {
         const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-        const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+        const categoryId = transferAccountId ? null : (onBudget && c.categoryId ? Number(c.categoryId) : null);
         await db.insert(recurringSubTransactions).values({
           recurringId: parent.id,
           categoryId,
@@ -250,6 +253,12 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
 
   db.run(sql`BEGIN`);
   try {
+    const targetAccountId = (p.accountId as number | undefined) ?? existing.accountId;
+    const onBudget = await isAccountOnBudget(db, targetAccountId);
+    if (!onBudget) {
+      p.categoryId = null;
+    }
+
     if (Object.keys(p).length > 0) {
       await db.update(recurring).set(p).where(eq(recurring.id, id));
     }
@@ -262,7 +271,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         let sort = 0;
         for (const c of norm.subTransactions!) {
           const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-          const categoryId = transferAccountId ? null : (c.categoryId ? Number(c.categoryId) : null);
+          const categoryId = transferAccountId ? null : (onBudget && c.categoryId ? Number(c.categoryId) : null);
           await db.insert(recurringSubTransactions).values({
             recurringId: id,
             categoryId,

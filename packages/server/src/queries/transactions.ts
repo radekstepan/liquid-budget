@@ -131,7 +131,7 @@ async function getAccountName(db: Database, accountId: number): Promise<string |
   return row?.name ?? null;
 }
 
-async function isAccountOnBudget(db: Database, accountId: number): Promise<boolean> {
+export async function isAccountOnBudget(db: Database, accountId: number): Promise<boolean> {
   const [row] = await db
     .select({ onBudget: accounts.onBudget })
     .from(accounts)
@@ -234,13 +234,19 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const onBudget = await isAccountOnBudget(db, input.accountId);
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
-    const isIncome = input.isIncome !== undefined ? input.isIncome : (!isTransfer && !isSplitParent && input.parentId == null && input.categoryId == null && input.amount > 0 && onBudget);
+    const categoryId = onBudget ? (input.categoryId ?? null) : null;
+    const isIncome = onBudget
+      ? (input.isIncome !== undefined
+          ? input.isIncome
+          : (!isTransfer && !isSplitParent && input.parentId == null && categoryId == null && input.amount > 0))
+      : false;
+    const incomeMonth = onBudget ? (input.incomeMonth ?? null) : null;
 
     const [row] = await db
       .insert(transactions)
       .values({
         accountId: input.accountId,
-        categoryId: input.categoryId ?? null,
+        categoryId,
         date: input.date,
         payee,
         memo: input.memo,
@@ -250,7 +256,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         transferAccountId: input.transferAccountId ?? null,
         parentId: input.parentId ?? null,
         isIncome,
-        incomeMonth: input.incomeMonth ?? null,
+        incomeMonth,
       })
       .returning();
 
@@ -295,11 +301,17 @@ export async function createTransfer(
 
   db.run(sql`BEGIN`);
   try {
+    let categoryId: number | null = null;
+    if (baseInput.categoryId != null) {
+      const onBudget = await isAccountOnBudget(db, baseInput.accountId);
+      categoryId = onBudget ? baseInput.categoryId : null;
+    }
+
     const [row] = await db
       .insert(transactions)
       .values({
         accountId: baseInput.accountId,
-        categoryId: baseInput.categoryId ?? null,
+        categoryId,
         date: baseInput.date,
         payee,
         memo: baseInput.memo,
@@ -374,7 +386,7 @@ export async function createSplitWithChildren(
     for (const c of children) {
       let payee = parent.payee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = c.categoryId ? Number(c.categoryId) : null;
+      const categoryId = onBudget && c.categoryId ? Number(c.categoryId) : null;
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
@@ -513,16 +525,21 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
 
     const onBudget = await isAccountOnBudget(db, newAccountId);
-    const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
-    const isIncome = "isIncome" in p ? p.isIncome : (
-      existing.transferAccountId == null &&
-      !isSplitParent &&
-      existing.parentId == null &&
-      finalCatId == null &&
-      newAmount > 0 &&
-      onBudget
-    );
-    p.isIncome = isIncome;
+    if (!onBudget) {
+      p.categoryId = null;
+      p.incomeMonth = null;
+      p.isIncome = false;
+    } else {
+      const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
+      const isIncome = "isIncome" in p ? p.isIncome : (
+        existing.transferAccountId == null &&
+        !isSplitParent &&
+        existing.parentId == null &&
+        finalCatId == null &&
+        newAmount > 0
+      );
+      p.isIncome = isIncome;
+    }
 
     const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
 
@@ -637,7 +654,7 @@ export async function updateSplit(
     for (const c of children) {
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = c.categoryId ? Number(c.categoryId) : null;
+      const categoryId = onBudget && c.categoryId ? Number(c.categoryId) : null;
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
@@ -902,16 +919,19 @@ export async function bulkUpdateTransactions(
       if (patch.accountId != null) setFields.accountId = newAccountId;
       if ("incomeMonth" in patch) setFields.incomeMonth = patch.incomeMonth ?? null;
 
-      if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
-        const onBudget = await isAccountOnBudget(db, newAccountId);
+      const onBudget = await isAccountOnBudget(db, newAccountId);
+      if (!onBudget) {
+        setFields.categoryId = null;
+        setFields.incomeMonth = null;
+        setFields.isIncome = false;
+      } else if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
         const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
         const isIncome = (
           existing.transferAccountId == null &&
           !isSplitParent &&
           existing.parentId == null &&
           finalCatId == null &&
-          newAmount > 0 &&
-          onBudget
+          newAmount > 0
         );
         setFields.isIncome = isIncome;
       }

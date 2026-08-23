@@ -1168,4 +1168,64 @@ describe("computeBudget", () => {
       }
     });
   });
+
+  describe("off-budget account transactions", () => {
+    it("ignores category on off-budget account transactions in outflow and budget calculations", () => {
+      const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Off Budget", balance: "500000", onBudget: false, sort: 1 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const incomeTx = {
+        id: 1,
+        accountId: onBudgetAccount.id,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Employer",
+        memo: "Salary",
+        amount: "100000", // $1,000 on-budget income
+        status: "c" as const,
+      };
+
+      const offBudgetCategorizedSpend = {
+        id: 2,
+        accountId: offBudgetAccount.id,
+        categoryId: category.id, // Groceries category tagged on off-budget brokerage
+        date: "2026-07-05",
+        payee: "Stock Buy",
+        memo: "Investment",
+        amount: "-25000", // -$250
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [onBudgetAccount, offBudgetAccount],
+        groups: [group],
+        categories: [category],
+        assignments: [
+          { id: 1, categoryId: category.id, month: "2026-07", amount: "50000" }, // Assign $500 to Groceries
+        ],
+        transactions: [incomeTx, offBudgetCategorizedSpend],
+        recurring: [],
+      };
+
+      const res = computeBudget(data, "2026-07");
+      // Groceries available should be the full $500 assigned since off-budget -$250 is ignored
+      const catRow = res.groups[0]?.rows[0];
+      expect(catRow?.outflow).toBe(0);
+      expect(catRow?.available).toBe(50000);
+      // TBB = $1,000 income - $500 assigned = $500
+      expect(res.tbb).toBe(50000);
+
+      // Verify pre-indexed mode also ignores off-budget category outflows
+      const index = buildBudgetIndex(data);
+      expect(index.outflowByMonth["2026-07"]?.[category.id]).toBeUndefined();
+      const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+      expect(indexedRes.groups[0]?.rows[0]?.outflow).toBe(0);
+      expect(indexedRes.groups[0]?.rows[0]?.available).toBe(50000);
+      expect(indexedRes.tbb).toBe(50000);
+    });
+  });
 });
+
+

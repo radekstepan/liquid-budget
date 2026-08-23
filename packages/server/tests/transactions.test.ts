@@ -130,6 +130,29 @@ describe("transactions queries", () => {
       const ops = mock.calls.map((c) => c.op);
       expect(ops).toEqual(["run", "select", "insert", "update", "run"]);
     });
+
+    it("forces categoryId to null and isIncome to false for off-budget accounts", async () => {
+      mock.respondWith("select:accounts", [{ id: 2, onBudget: false }]);
+      mock.respondWith("insert:transactions", [{ id: 6 }]);
+      mock.respondWith("update:accounts", [{}]);
+
+      await createTransaction(mock.db, {
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-07-01",
+        payee: "Brokerage",
+        memo: "",
+        amount: 50000,
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({
+        accountId: 2,
+        categoryId: null,
+        isIncome: false,
+        incomeMonth: null,
+      });
+    });
   });
 
   describe("createTransfer", () => {
@@ -577,8 +600,22 @@ describe("transactions queries", () => {
       await expect(updateTransaction(mock.db, 1, { amount: -6000 })).rejects.toMatchObject({
         status: 422,
         name: "TransactionError",
-        message: /reconciled and locked/,
+        message: /reconciled and locked/i,
       });
+    });
+
+    it("forces categoryId to null and isIncome to false when updating transaction on off-budget account", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 2, amount: 5000, payee: "Brokerage", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c" },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWith("select:accounts", [{ id: 2, onBudget: false }]);
+      mock.respondWith("update:transactions", [{ id: 1, categoryId: null, isIncome: false }]);
+
+      await updateTransaction(mock.db, 1, { categoryId: 10 });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ categoryId: null, isIncome: false, incomeMonth: null });
     });
   });
 
@@ -891,6 +928,21 @@ describe("transactions queries", () => {
       await expect(
         bulkUpdateTransactions(mock.db, [1], { flagColor: "red" })
       ).rejects.toMatchObject({ status: 422, name: "TransactionError", message: /duplicate/ });
+    });
+
+    it("forces categoryId to null and isIncome to false when bulk updating transactions on off-budget accounts", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 2, amount: 10000, payee: "Brokerage", status: "c", categoryId: null, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWithNth("select:accounts", 1, [{ id: 2, onBudget: false }]);
+      mock.respondWith("update:transactions", [
+        { id: 1, categoryId: null, isIncome: false },
+      ]);
+
+      const res = await bulkUpdateTransactions(mock.db, [1], { categoryId: 5 });
+      expect(res).toHaveLength(1);
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ categoryId: null, isIncome: false, incomeMonth: null });
     });
   });
 });
