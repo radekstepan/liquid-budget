@@ -479,6 +479,159 @@ describe("computeBudget", () => {
       expect(ccRow.available).toBe(10000); // 5000 assigned + 5000 buffer
     });
 
+    it("CC payment recorded as inflow on CC account draws down the buffer identically (Issue 1.1)", () => {
+      const data = ccData();
+      // Payment of $150 recorded from Visa perspective: inflow +15000 from Checking
+      data.transactions.push({
+        id: 4,
+        accountId: 2,
+        categoryId: null,
+        transferAccountId: 1,
+        date: "2025-07-20",
+        payee: "Transfer : Checking",
+        memo: "Card payment",
+        amount: "15000",
+        status: "c",
+      });
+      const result = computeBudget(data, "2025-07");
+      const ccRow = result.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.category.name === "Visa Payment")!;
+      // Buffer = charges (20000) - payment (15000) = 5000
+      expect(ccRow.ccBuffer).toBe(5000);
+      expect(ccRow.available).toBe(10000); // 5000 assigned + 5000 buffer
+
+      // Also verify via buildBudgetIndex
+      data.budgetIndex = buildBudgetIndex(data);
+      const indexedResult = computeBudget(data, "2025-07");
+      const indexedCcRow = indexedResult.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.category.name === "Visa Payment")!;
+      expect(indexedCcRow.ccBuffer).toBe(5000);
+      expect(indexedCcRow.available).toBe(10000);
+    });
+
+    it("cash advance from CC to checking does not draw down CC buffer (Issue 1.1)", () => {
+      // 1. Recorded as inflow in Checking from Visa: accountId=1, transferAccountId=2, amount=+10000
+      const dataInflow = ccData();
+      dataInflow.transactions.push({
+        id: 4,
+        accountId: 1,
+        categoryId: null,
+        transferAccountId: 2,
+        date: "2025-07-20",
+        payee: "Transfer : Visa",
+        memo: "Cash advance",
+        amount: "10000",
+        status: "c",
+      });
+      const resultInflow = computeBudget(dataInflow, "2025-07");
+      const ccRowInflow = resultInflow.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.category.name === "Visa Payment")!;
+      expect(ccRowInflow.ccBuffer).toBe(20000);
+      expect(ccRowInflow.available).toBe(25000);
+
+      // 2. Recorded as outflow in Visa to Checking: accountId=2, transferAccountId=1, amount=-10000
+      const dataOutflow = ccData();
+      dataOutflow.transactions.push({
+        id: 4,
+        accountId: 2,
+        categoryId: null,
+        transferAccountId: 1,
+        date: "2025-07-20",
+        payee: "Transfer : Checking",
+        memo: "Cash advance",
+        amount: "-10000",
+        status: "c",
+      });
+      const resultOutflow = computeBudget(dataOutflow, "2025-07");
+      const ccRowOutflow = resultOutflow.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.category.name === "Visa Payment")!;
+      expect(ccRowOutflow.ccBuffer).toBe(20000);
+      expect(ccRowOutflow.available).toBe(25000);
+    });
+
+    it("CC to CC balance transfer draws down receiving card buffer and leaves source card untouched (Issue 1.1)", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "300000", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa 1", kind: "credit", groupLabel: "Credit Cards", balance: "-50000", onBudget: true, sort: 1 },
+          { id: 3, name: "Visa 2", kind: "credit", groupLabel: "Credit Cards", balance: "-50000", onBudget: true, sort: 2 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa 1 Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          { id: 3, groupId: 2, name: "Visa 2 Payment", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 3 },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2025-07", amount: "40000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2025-07-01", payee: "Payroll", memo: "", amount: "300000", status: "c", isIncome: true },
+          // Spending on both cards
+          { id: 2, accountId: 2, categoryId: 1, date: "2025-07-05", payee: "Store 1", memo: "", amount: "-10000", status: "c" },
+          { id: 3, accountId: 3, categoryId: 1, date: "2025-07-05", payee: "Store 2", memo: "", amount: "-10000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      // Case A: recorded from Visa 1 perspective (outflow -5000 to Visa 2)
+      const dataA: BudgetData = {
+        ...data,
+        transactions: [
+          ...data.transactions,
+          {
+            id: 4,
+            accountId: 2,
+            categoryId: null,
+            transferAccountId: 3,
+            date: "2025-07-10",
+            payee: "Transfer : Visa 2",
+            memo: "Balance transfer",
+            amount: "-5000",
+            status: "c",
+          },
+        ],
+      };
+
+      const resultA = computeBudget(dataA, "2025-07");
+      const v1RowA = resultA.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa 1 Payment")!;
+      const v2RowA = resultA.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa 2 Payment")!;
+      expect(v1RowA.ccBuffer).toBe(10000); // untouched
+      expect(v2RowA.ccBuffer).toBe(5000);  // 10000 - 5000 = 5000
+
+      // Case B: recorded from Visa 2 perspective (inflow +5000 from Visa 1)
+      const dataB: BudgetData = {
+        ...data,
+        transactions: [
+          ...data.transactions,
+          {
+            id: 4,
+            accountId: 3,
+            categoryId: null,
+            transferAccountId: 2,
+            date: "2025-07-10",
+            payee: "Transfer : Visa 1",
+            memo: "Balance transfer",
+            amount: "5000",
+            status: "c",
+          },
+        ],
+      };
+
+      const resultB = computeBudget(dataB, "2025-07");
+      const v1RowB = resultB.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa 1 Payment")!;
+      const v2RowB = resultB.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa 2 Payment")!;
+      expect(v1RowB.ccBuffer).toBe(10000); // untouched
+      expect(v2RowB.ccBuffer).toBe(5000);  // 10000 - 5000 = 5000
+    });
+
     it("CC refund decreases the buffer (Issue #1)", () => {
       const data = ccData();
       // Refund of $30 on Visa
