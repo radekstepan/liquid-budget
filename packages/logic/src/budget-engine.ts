@@ -441,6 +441,16 @@ export function getMonthsWithData(data: BudgetData): string[] {
 // Helpers (internal)
 // ---------------------------------------------------------------------------
 
+function getPreviousCalendarMonth(month: string): string {
+  const parts = month.split("-");
+  const year = parseInt(parts[0] ?? "0", 10);
+  const m = parseInt(parts[1] ?? "1", 10);
+  if (m === 1) {
+    return `${year - 1}-12`;
+  }
+  return `${year}-${String(m - 1).padStart(2, "0")}`;
+}
+
 /**
  * Build a Map<categoryId, carryoverIn> for the target month by walking all
  * prior months in chronological order with memoization.
@@ -460,11 +470,15 @@ function buildCarryoverMap(
   ccPayCatToAccount: Map<number, number>,
   ccGroupIds: Set<number>
 ): { carryoverMap: Map<number, number>; overspentPrevious: number } {
+  const prevCalendarMonth = getPreviousCalendarMonth(targetMonth);
   const cached = index.carryoverByMonth.get(targetMonth);
   if (cached) {
     const priorMonths = orderedMonths.filter((m) => m < targetMonth);
     const mostRecentPrior = priorMonths.length > 0 ? priorMonths[priorMonths.length - 1] : null;
-    const overspentPrevious = mostRecentPrior ? (index.overspentByMonth.get(mostRecentPrior) ?? 0) : 0;
+    const overspentPrevious =
+      mostRecentPrior === prevCalendarMonth
+        ? (index.overspentByMonth.get(mostRecentPrior) ?? 0)
+        : 0;
     return { carryoverMap: cached, overspentPrevious };
   }
 
@@ -527,7 +541,7 @@ function buildCarryoverMap(
 
     index.overspentByMonth.set(month, monthOverspent);
 
-    if (month === mostRecentPrior) {
+    if (month === mostRecentPrior && month === prevCalendarMonth) {
       overspentPrevious = monthOverspent;
     }
 
