@@ -117,6 +117,11 @@ export function TransactionModal({
   const [accountId, setAccountId] = useState(
     initial?.accountId ?? defaultAccountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
+  const selectedAccount = useMemo(() => {
+    return accounts.find((a) => a.id === accountId);
+  }, [accounts, accountId]);
+  const isOffBudget = selectedAccount ? !selectedAccount.onBudget : false;
+
   const isInitialDeferred = initial?.categoryId == null && !!initial?.incomeMonth && initial.incomeMonth > (initial.date ? initial.date.slice(0, 7) : "");
   const [categoryId, setCategoryId] = useState<number | "" | "__deferred__">(
     initial?.categoryId ?? (isInitialDeferred ? "__deferred__" : "")
@@ -247,7 +252,7 @@ export function TransactionModal({
         status: cleared ? "c" : "u",
         flagColor: savedFlagColor,
         subTransactions: subRows.map((r) => ({
-          categoryId: r.categoryId ?? null,
+          categoryId: isOffBudget ? null : (r.categoryId ?? null),
           transferAccountId: r.transferAccountId ?? null,
           amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
           memo: r.memo,
@@ -258,8 +263,8 @@ export function TransactionModal({
 
     // single
     if (!payee.trim()) return;
-    const isDeferred = categoryId === "__deferred__";
-    const finalCatId = categoryId === "" || isDeferred ? null : Number(categoryId);
+    const isDeferred = !isOffBudget && categoryId === "__deferred__";
+    const finalCatId = isOffBudget || categoryId === "" || isDeferred ? null : Number(categoryId);
     const incMonth = isDeferred ? nextMonthKey(date.slice(0, 7)) : null;
 
     onSave({
@@ -411,7 +416,7 @@ export function TransactionModal({
             </Field>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className={mode === "single" && isOffBudget ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
             <Field label="Account">
               <Select
                 value={accountId}
@@ -439,7 +444,7 @@ export function TransactionModal({
                   ))}
                 </Select>
               </Field>
-            ) : mode === "split" ? null : (
+            ) : mode === "split" ? null : isOffBudget ? null : (
               <Field label="Category">
                 <Select
                   value={categoryId}
@@ -539,7 +544,7 @@ export function TransactionModal({
                         searchable
                       >
                         <option value="">Category or Transfer…</option>
-                        {groups && groups.length > 0 ? (
+                        {!isOffBudget && (groups && groups.length > 0 ? (
                           groups.map((g) => (
                             <optgroup key={g.id} label={g.name}>
                               {categories
@@ -559,7 +564,7 @@ export function TransactionModal({
                               </option>
                             ))}
                           </optgroup>
-                        )}
+                        ))}
                         <optgroup label="Transfers">
                           {otherAccounts.map((a) => (
                             <option key={a.id} value={`transfer:${a.id}`}>
@@ -983,6 +988,10 @@ export function RecurringModal({
   const [accountId, setAccountId] = useState(
     initial?.accountId ?? defaultAccountId ?? availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
+  const selectedAccount = useMemo(() => {
+    return accounts.find((a) => a.id === accountId);
+  }, [accounts, accountId]);
+  const isOffBudget = selectedAccount ? !selectedAccount.onBudget : false;
   const [categoryId, setCategoryId] = useState<number | "">(initial?.categoryId ?? "");
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
@@ -1089,7 +1098,7 @@ export function RecurringModal({
         active,
         flagColor,
         subTransactions: subRows.map((r) => ({
-          categoryId: r.categoryId ?? null,
+          categoryId: isOffBudget ? null : (r.categoryId ?? null),
           transferAccountId: r.transferAccountId ?? null,
           amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
           memo: r.memo,
@@ -1103,7 +1112,7 @@ export function RecurringModal({
     onSave({
       id: initial?.id,
       accountId,
-      categoryId: categoryId === "" ? null : Number(categoryId),
+      categoryId: isOffBudget || categoryId === "" ? null : Number(categoryId),
       payee: payee.trim(),
       memo: memo.trim(),
       amount: amountCents,
@@ -1210,7 +1219,7 @@ export function RecurringModal({
         </Field>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className={mode === "single" && isOffBudget ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
         <Field label="Account">
           <Select
             value={accountId}
@@ -1238,7 +1247,7 @@ export function RecurringModal({
               ))}
             </Select>
           </Field>
-        ) : mode === "split" ? null : (
+        ) : mode === "split" ? null : isOffBudget ? null : (
           <Field label="Category">
             <Select
               value={categoryId}
@@ -1333,7 +1342,7 @@ export function RecurringModal({
                       searchable
                     >
                       <option value="">Category or Transfer…</option>
-                      {groups && groups.length > 0 ? (
+                      {!isOffBudget && (groups && groups.length > 0 ? (
                         groups.map((g) => (
                           <optgroup key={g.id} label={g.name}>
                             {categories
@@ -1353,7 +1362,7 @@ export function RecurringModal({
                             </option>
                           ))}
                         </optgroup>
-                      )}
+                      ))}
                       <optgroup label="Transfers">
                         {otherAccounts.map((a) => (
                           <option key={a.id} value={`transfer:${a.id}`}>

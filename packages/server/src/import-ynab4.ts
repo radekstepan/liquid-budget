@@ -337,7 +337,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         if (insertedT) {
           for (const st of t.subTransactions) {
             if (st.isTombstone) continue;
-            let subCatId = categoryIdMap.get(st.categoryId) || null;
+            const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
+            let subCatId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
             let subPayee = "";
             let subTransferAccountId: number | null = null;
 
@@ -360,6 +361,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
             const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
             const isChildIncome =
+              accIsOnBudget &&
               (st.categoryId === "Category/__ImmediateIncome__" ||
                 isChildDeferred ||
                 (subCatId === null && subTransferAccountId === null)) &&
@@ -519,7 +521,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee = payeeMap.get(t.payeeId) || "";
           }
 
-          let catId = categoryIdMap.get(t.categoryId) || null;
+          const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
+          let catId = (accIsOnBudget && categoryIdMap.get(t.categoryId)) || null;
           const isTxDeferred = t.categoryId === "Category/__DeferredIncome__";
           const isSpecialIncomeCat =
             t.categoryId === "Category/__ImmediateIncome__" ||
@@ -532,6 +535,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           }
 
           const isTxIncome =
+            accIsOnBudget &&
             (isSpecialIncomeCat || (catId === null && destAccId === null)) &&
             (t.amount || 0) > 0;
           const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
@@ -634,7 +638,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         }
       }
 
-      let catId = categoryIdMap.get(st.categoryId) || null;
+      const accIsOnBudget = accOnBudgetMap.get(st.accountId) ?? true;
+      let catId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
       if (
         st.categoryId === "Category/__ImmediateIncome__" ||
         st.categoryId === "Category/__DeferredIncome__" ||
@@ -688,7 +693,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         let sort = 0;
         for (const sub of st.subTransactions) {
           if (sub.isTombstone) continue;
-          let subCatId = categoryIdMap.get(sub.categoryId) || null;
+          let subCatId = (accIsOnBudget && categoryIdMap.get(sub.categoryId)) || null;
           if (
             sub.categoryId === "Category/__ImmediateIncome__" ||
             sub.categoryId === "Category/__DeferredIncome__" ||

@@ -26,6 +26,7 @@ import {
 const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
   { id: 2, name: "Credit", kind: "credit", groupLabel: "Cards", balance: "-5000", onBudget: true, sort: 1 },
+  { id: 3, name: "Brokerage", kind: "offbudget", groupLabel: "Off Budget", balance: "50000", onBudget: false, sort: 2 },
 ];
 
 const categories: Category[] = [
@@ -299,6 +300,37 @@ describe("TransactionModal", () => {
     const dateInput = screen.getByDisplayValue("2026-07-15") as HTMLInputElement;
     expect(dateInput).toBeInTheDocument();
     expect(dateInput.type).toBe("date");
+  });
+
+  it("hides category picker and saves categoryId null when account is off-budget", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={3} // Brokerage (off-budget)
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    // Category dropdown trigger should not be in the document
+    expect(screen.queryByRole("button", { name: /category/i })).not.toBeInTheDocument();
+
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Stock Dividend" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "250.00" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      accountId: 3,
+      payee: "Stock Dividend",
+      amount: 25000,
+      categoryId: null,
+      incomeMonth: null,
+    });
   });
 
   it("edits an existing transaction with the initial values", () => {
@@ -1018,6 +1050,34 @@ describe("RecurringModal", () => {
       payee: "Hydro",
       amount: -8000,
       frequency: "everyotherweek",
+    });
+  });
+
+  it("hides category picker and saves categoryId null in recurring modal when account is off-budget", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={3} // Brokerage (off-budget)
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    // Category dropdown trigger should not be in the document
+    expect(screen.queryByRole("button", { name: /category/i })).not.toBeInTheDocument();
+
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Monthly Dividend" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "150" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      accountId: 3,
+      payee: "Monthly Dividend",
+      amount: 15000,
+      categoryId: null,
     });
   });
 

@@ -180,8 +180,10 @@ function buildRawIndex(
     if (splitParentIds.has(t.id)) continue;
     const mk = t.date.slice(0, 7);
     const amt = num(t.amount);
+    const acc = accountMap.get(t.accountId);
+    const isOnBudget = acc ? acc.onBudget : true;
 
-    if (t.categoryId != null) {
+    if (t.categoryId != null && isOnBudget) {
       let m = outflowByMonth.get(mk);
       if (!m) {
         m = new Map();
@@ -196,7 +198,7 @@ function buildRawIndex(
     }
 
     // 1. Categorised spending/refunds on credit card accounts
-    if (t.categoryId != null) {
+    if (t.categoryId != null && isOnBudget) {
       let s = spendByAccountMonth.get(mk);
       if (!s) {
         s = new Map();
