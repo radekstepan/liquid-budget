@@ -150,13 +150,11 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex): IndexedBudgetData {
   };
 }
 
-export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
-  const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
-
+function buildRawIndex(
+  data: BudgetData,
+  splitParentIds: Set<number>,
+  accountMap: Map<number, Account>
+): IndexedBudgetData {
   const assignedByMonth = new Map<string, Map<number, number>>();
   const assignedTotalByMonth = new Map<string, number>();
 
@@ -214,18 +212,16 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
         s = new Map();
         spendByAccountMonth.set(mk, s);
       }
+      const receiving = amt < 0 ? t.transferAccountId : t.accountId;
       const paymentAmount = Math.abs(amt);
       s.set(
-        t.transferAccountId,
-        Math.round((s.get(t.transferAccountId) ?? 0) - paymentAmount)
+        receiving,
+        Math.round((s.get(receiving) ?? 0) - paymentAmount)
       );
-      if (amt > 0) {
-        s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) - amt));
-      }
     }
   }
 
-  const index: IndexedBudgetData = {
+  return {
     assignedByMonth,
     assignedTotalByMonth,
     outflowByMonth,
@@ -235,6 +231,16 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     overspentByMonth: new Map(),
     surplusByMonth: new Map(),
   };
+}
+
+export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+  const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
+
+  const index = buildRawIndex(data, splitParentIds, accountMap);
 
   const months = getMonthsWithData(data);
   const ccGroupIds = new Set(
@@ -295,85 +301,7 @@ function getOrBuildIndex(
     return cached;
   }
 
-  const assignedByMonth = new Map<string, Map<number, number>>();
-  const assignedTotalByMonth = new Map<string, number>();
-
-  for (const a of data.assignments) {
-    const amt = num(a.amount);
-    let m = assignedByMonth.get(a.month);
-    if (!m) {
-      m = new Map();
-      assignedByMonth.set(a.month, m);
-    }
-    m.set(a.categoryId, Math.round((m.get(a.categoryId) ?? 0) + amt));
-    assignedTotalByMonth.set(
-      a.month,
-      Math.round((assignedTotalByMonth.get(a.month) ?? 0) + amt)
-    );
-  }
-
-  const outflowByMonth = new Map<string, Map<number, number>>();
-  const spendByAccountMonth = new Map<string, Map<number, number>>();
-  const incomeByMonth = new Map<string, number>();
-
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    const mk = t.date.slice(0, 7);
-    const amt = num(t.amount);
-
-    if (t.categoryId != null) {
-      let m = outflowByMonth.get(mk);
-      if (!m) {
-        m = new Map();
-        outflowByMonth.set(mk, m);
-      }
-      m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + amt));
-    }
-
-    if (isIncomeTransaction(t, accountMap)) {
-      const incMonth = t.incomeMonth || mk;
-      incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + amt));
-    }
-
-    // 1. Categorised spending/refunds on credit card accounts
-    if (t.categoryId != null) {
-      let s = spendByAccountMonth.get(mk);
-      if (!s) {
-        s = new Map();
-        spendByAccountMonth.set(mk, s);
-      }
-      s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) + -amt));
-    }
-
-    // 2. Payments to credit cards
-    if (t.transferAccountId != null) {
-      let s = spendByAccountMonth.get(mk);
-      if (!s) {
-        s = new Map();
-        spendByAccountMonth.set(mk, s);
-      }
-      const paymentAmount = Math.abs(amt);
-      s.set(
-        t.transferAccountId,
-        Math.round((s.get(t.transferAccountId) ?? 0) - paymentAmount)
-      );
-      if (amt > 0) {
-        s.set(t.accountId, Math.round((s.get(t.accountId) ?? 0) - amt));
-      }
-    }
-  }
-
-  cached = {
-    assignedByMonth,
-    assignedTotalByMonth,
-    outflowByMonth,
-    spendByAccountMonth,
-    incomeByMonth,
-    carryoverByMonth: new Map(),
-    overspentByMonth: new Map(),
-    surplusByMonth: new Map(),
-  };
-
+  cached = buildRawIndex(data, splitParentIds, accountMap);
   budgetDataIndexCache.set(data, cached);
   return cached;
 }
