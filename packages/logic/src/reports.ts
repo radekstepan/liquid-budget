@@ -385,6 +385,8 @@ export type SpendingTrendsResult = {
   total: number;
   avgPerMonth: number;
   maxMonthSpend: number;
+  /** Most negative month net (withdrawal) in cents, <= 0. */
+  minMonthSpend: number;
   drillLevel: "all" | "group" | "category";
   currentGroupId: number | null;
   currentGroupName: string | null;
@@ -511,14 +513,15 @@ export function computeSpendingTrends(
   const monthPoints: SpendingTrendsMonthPoint[] = [];
   let overallTotal = 0;
   let maxMonthSpend = 0;
+  let minMonthSpend = 0;
 
   for (const m of monthList) {
     const mCatMap = spendByMonthCat.get(m) ?? new Map<number, number>();
     const segmentSums = new Map<number, number>();
 
     for (const [catId, rawSpend] of mCatMap.entries()) {
-      const spend = Math.max(0, Math.round(rawSpend));
-      if (spend <= 0) continue;
+      const spend = Math.round(rawSpend);
+      if (spend === 0) continue;
 
       if (drillLevel === "all") {
         const cat = catMap.get(catId);
@@ -536,7 +539,7 @@ export function computeSpendingTrends(
 
     for (const [id, constituent] of constituentsMap.entries()) {
       const amt = segmentSums.get(id) ?? 0;
-      if (amt > 0) {
+      if (amt !== 0) {
         segments.push({
           id,
           name: constituent.name,
@@ -552,6 +555,9 @@ export function computeSpendingTrends(
 
     if (monthTotal > maxMonthSpend) {
       maxMonthSpend = monthTotal;
+    }
+    if (monthTotal < minMonthSpend) {
+      minMonthSpend = monthTotal;
     }
     overallTotal += monthTotal;
 
@@ -569,7 +575,7 @@ export function computeSpendingTrends(
       name: c.name,
       total: c.total,
       avgPerMonth: Math.round(c.total / numMonths),
-      pctOfTotal: overallTotal > 0 ? Math.round((c.total / overallTotal) * 100) : 0,
+      pctOfTotal: overallTotal !== 0 ? Math.round((c.total / overallTotal) * 100) : 0,
     }))
     .sort((a, b) => b.total - a.total);
 
@@ -581,6 +587,7 @@ export function computeSpendingTrends(
     total: overallTotal,
     avgPerMonth,
     maxMonthSpend,
+    minMonthSpend,
     drillLevel,
     currentGroupId,
     currentGroupName,

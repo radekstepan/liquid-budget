@@ -4,6 +4,7 @@ import { useId, useMemo, useState, useRef, useEffect, useCallback, memo, type Re
 import type { BudgetData, Transaction, SpendingTrendsConstituent } from "@ynab/logic";
 import {
   fmt,
+  num,
   MONTHS,
   monthLabel,
   parseMonthKey,
@@ -20,6 +21,7 @@ import {
   computeOutlierBreak,
   fmtShort,
   niceTicks,
+  NO_BREAK,
   symlog,
   symlogTicks,
   TipLabel,
@@ -29,6 +31,7 @@ import {
   TruncMarker,
   useElementSize,
   useRafThrottledSet,
+  type OutlierBreak,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -78,8 +81,9 @@ interface ChartLayout {
   n: number;
   monthBars: MonthBarLayout[];
   avgY: number | null;
-  breakY: number | null;
-  hasTrendBreak: boolean;
+  hasBreak: boolean;
+  posBreak: OutlierBreak | null;
+  negBreak: OutlierBreak | null;
   tickSet: Set<number>;
 }
 
@@ -115,19 +119,26 @@ const StaticChart = memo(function StaticChart({
           </clipPath>
         ))}
         <TruncHatchPattern id={`${gid}-hatch`} />
-        {chart.hasTrendBreak && chart.breakY != null && (
+        {chart.hasBreak && (
           <AxisBreakMask
             maskId={`${gid}-break`}
             x1={chart.padL}
             x2={chart.W - chart.padR}
-            breaks={[{ y: chart.breakY }]}
+            breaks={[
+              ...(chart.posBreak ? [{ y: chart.y(chart.posBreak.breakTop) }] : []),
+              ...(chart.negBreak ? [{ y: chart.y(-chart.negBreak.breakTop) }] : []),
+            ]}
           />
         )}
       </defs>
 
       {chart.ticks.map((t, i) => {
         const ty = chart.y(t.v);
-        const inBreak = chart.hasTrendBreak && chart.breakY != null && Math.abs(ty - chart.breakY) < 7;
+        const inBreak =
+          t.grid &&
+          chart.hasBreak &&
+          ((chart.posBreak && Math.abs(ty - chart.y(chart.posBreak.breakTop)) < 7) ||
+            (chart.negBreak && Math.abs(ty - chart.y(-chart.negBreak.breakTop)) < 7));
         return (
           <g key={i}>
             {t.grid && !inBreak && (
@@ -166,7 +177,7 @@ const StaticChart = memo(function StaticChart({
         vectorEffect="non-scaling-stroke"
       />
 
-      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
+      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.H - chart.padB && (
         <line
           x1={chart.padL}
           x2={chart.W - chart.padR}
@@ -179,9 +190,10 @@ const StaticChart = memo(function StaticChart({
         />
       )}
 
-      <g mask={chart.hasTrendBreak && chart.breakY != null ? `url(#${gid}-break)` : undefined}>
+      <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
         {chart.monthBars.map((mBar, mIdx) => {
         const isMonthSelected = selectedMonth === mBar.month;
+        const isNeg = mBar.monthTotal < 0;
 
         return (
           <g key={mBar.month}>
@@ -221,17 +233,18 @@ const StaticChart = memo(function StaticChart({
                       {chart.barW >= 8 ? (
                         <TruncMarker
                           x={seg.x}
-                          y={mBar.barTopY}
+                          y={isNeg ? mBar.barTopY + mBar.totalH : mBar.barTopY}
                           width={seg.width}
                           fill={seg.color}
                           hatchId={`url(#${gid}-hatch)`}
+                          dir={isNeg ? "down" : "up"}
                           rx={chart.cornerRadius}
                         />
                       ) : (
                         <rect
                           data-testid="trunc-cap"
                           x={seg.x}
-                          y={mBar.barTopY}
+                          y={isNeg ? mBar.barTopY + mBar.totalH - TRUNC_CAP_H : mBar.barTopY}
                           width={seg.width}
                           height={TRUNC_CAP_H}
                           rx={1}
@@ -294,15 +307,26 @@ const StaticChart = memo(function StaticChart({
         })}
       </g>
 
-      {chart.hasTrendBreak && chart.breakY != null && (
-        <AxisBreakMark
-          x1={chart.padL}
-          x2={chart.W - chart.padR}
-          y={chart.breakY}
-        />
+      {chart.hasBreak && (
+        <>
+          {chart.posBreak && (
+            <AxisBreakMark
+              x1={chart.padL}
+              x2={chart.W - chart.padR}
+              y={chart.y(chart.posBreak.breakTop)}
+            />
+          )}
+          {chart.negBreak && (
+            <AxisBreakMark
+              x1={chart.padL}
+              x2={chart.W - chart.padR}
+              y={chart.y(-chart.negBreak.breakTop)}
+            />
+          )}
+        </>
       )}
 
-      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.zeroY && (
+      {chart.avgY != null && chart.avgY >= chart.padT && chart.avgY <= chart.H - chart.padB && (
         <g pointerEvents="none">
           <text
             x={chart.W - chart.padR - 4}
@@ -528,56 +552,175 @@ export function SpendingTrendsReport({
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
+    const hasNegData = trends.minMonthSpend < 0;
+    const hasPosData = trends.maxMonthSpend > 0;
+
+    const isLog = scaleMode === "log";
+    const posBreak = isLog
+      ? NO_BREAK
+      : computeOutlierBreak(trends.months.map((m) => m.total).filter((v) => v > 0));
+    const negBreak = isLog
+      ? NO_BREAK
+      : computeOutlierBreak(trends.months.map((m) => -m.total).filter((v) => v > 0));
+    const hasBreak = posBreak.hasBreak || negBreak.hasBreak;
+
+    const MIN_SIDE = 0.22;
     let ticks: { v: number; grid: boolean }[];
     let y: (v: number) => number;
     let zeroY: number;
 
-    const trendBreak = computeOutlierBreak(trends.months.map((m) => m.total));
-    const useTrendBreak = scaleMode === "linear" && trendBreak.hasBreak;
+    const posTopVal = Math.max(1, trends.maxMonthSpend);
+    const negTopVal = Math.max(1, Math.abs(trends.minMonthSpend));
 
-    if (scaleMode === "log") {
-      const maxVal = Math.max(1000, trends.maxMonthSpend);
-      const rawTicks = symlogTicks(0, maxVal);
-      ticks = rawTicks.filter((t) => t >= 0).map((v) => ({ v, grid: true }));
-      if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
+    let posShare = hasNegData ? posTopVal / (posTopVal + negTopVal) : 1;
+    if (hasNegData) {
+      if (posShare < MIN_SIDE) posShare = MIN_SIDE;
+      if (posShare > 1 - MIN_SIDE) posShare = 1 - MIN_SIDE;
+    }
+    zeroY = padT + innerH * posShare;
 
-      const maxLog = symlog(maxVal);
-      zeroY = padT + innerH;
-      y = (v: number) => {
-        if (v <= 0) return zeroY;
-        const norm = maxLog > 0 ? symlog(v) / maxLog : 0;
-        return padT + innerH * (1 - Math.min(1, Math.max(0, norm)));
-      };
-    } else if (useTrendBreak) {
-      ticks = [
-        ...trendBreak.ticks.map((v) => ({ v, grid: true })),
-        { v: trendBreak.topVal, grid: false },
-      ];
-      zeroY = padT + innerH;
-      y = (v: number) => {
-        if (v <= 0) return zeroY;
-        if (v <= trendBreak.breakTop) {
-          return zeroY - (v / trendBreak.breakTop) * trendBreak.split * innerH;
-        }
+    const posNorm = (v: number) => {
+      if (v <= 0) return 0;
+      if (posBreak.hasBreak) {
+        if (v <= posBreak.breakTop) return (v / posBreak.breakTop) * posBreak.split;
         return (
-          zeroY -
-          (trendBreak.split +
-            ((v - trendBreak.breakTop) / (trendBreak.topVal - trendBreak.breakTop)) *
-              (1 - trendBreak.split)) *
-            innerH
+          posBreak.split +
+          ((v - posBreak.breakTop) / (posBreak.topVal - posBreak.breakTop)) *
+            (1 - posBreak.split)
         );
-      };
-    } else {
-      const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
-      const rawTicks = niceTicks(0, maxVal, 4);
-      ticks = rawTicks
-        .filter((t) => t >= 0 && t <= maxVal * 1.05)
-        .map((v) => ({ v, grid: true }));
-      if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
+      }
+      return v / posTopVal;
+    };
 
-      const maxTick = ticks[ticks.length - 1]?.v || maxVal;
-      y = (v: number) => padT + innerH * (1 - Math.min(1, Math.max(0, v / maxTick)));
-      zeroY = y(0);
+    const negNorm = (d: number) => {
+      if (d <= 0) return 0;
+      if (negBreak.hasBreak) {
+        if (d <= negBreak.breakTop) return (d / negBreak.breakTop) * negBreak.split;
+        return (
+          negBreak.split +
+          ((d - negBreak.breakTop) / (negBreak.topVal - negBreak.breakTop)) *
+            (1 - negBreak.split)
+        );
+      }
+      return d / negTopVal;
+    };
+
+    if (isLog) {
+      if (hasNegData) {
+        const minVal = trends.minMonthSpend;
+        const maxVal = trends.maxMonthSpend;
+        const rawTicks = symlogTicks(minVal, maxVal);
+        ticks = rawTicks.map((v) => ({ v, grid: true }));
+
+        const minLog = symlog(Math.abs(minVal));
+        const maxLog = symlog(Math.max(1000, maxVal));
+        const totalLog = minLog + maxLog;
+        let logPosShare = totalLog > 0 ? maxLog / totalLog : 0.5;
+        if (logPosShare < MIN_SIDE) logPosShare = MIN_SIDE;
+        if (logPosShare > 1 - MIN_SIDE) logPosShare = 1 - MIN_SIDE;
+
+        zeroY = padT + innerH * logPosShare;
+        y = (v: number) => {
+          if (v > 0) {
+            const norm = maxLog > 0 ? symlog(v) / maxLog : 0;
+            return zeroY - (zeroY - padT) * Math.min(1, Math.max(0, norm));
+          } else if (v < 0) {
+            const norm = minLog > 0 ? symlog(Math.abs(v)) / minLog : 0;
+            return zeroY + (padT + innerH - zeroY) * Math.min(1, Math.max(0, norm));
+          }
+          return zeroY;
+        };
+      } else {
+        const maxVal = Math.max(1000, trends.maxMonthSpend);
+        const rawTicks = symlogTicks(0, maxVal);
+        ticks = rawTicks.filter((t) => t >= 0).map((v) => ({ v, grid: true }));
+        if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
+
+        const maxLog = symlog(maxVal);
+        zeroY = padT + innerH;
+        y = (v: number) => {
+          if (v <= 0) return zeroY;
+          const norm = maxLog > 0 ? symlog(v) / maxLog : 0;
+          return padT + innerH * (1 - Math.min(1, Math.max(0, norm)));
+        };
+      }
+    } else if (hasBreak) {
+      ticks = [];
+      y = (v: number) => {
+        if (v > 0) return zeroY - posNorm(v) * (zeroY - padT);
+        if (v < 0) return zeroY + negNorm(-v) * (padT + innerH - zeroY);
+        return zeroY;
+      };
+
+      if (posBreak.hasBreak) {
+        for (const t of posBreak.ticks) ticks.push({ v: t, grid: true });
+        ticks.push({ v: posBreak.topVal, grid: false });
+      } else if (hasPosData) {
+        const rawPosTicks = niceTicks(0, posTopVal * 1.1, 3).filter((t) => t > 0);
+        for (const t of rawPosTicks) ticks.push({ v: t, grid: true });
+      }
+
+      ticks.push({ v: 0, grid: true });
+
+      if (negBreak.hasBreak) {
+        for (const t of negBreak.ticks) ticks.push({ v: -t, grid: true });
+        ticks.push({ v: -negBreak.topVal, grid: false });
+      } else if (hasNegData) {
+        const rawNegTicks = niceTicks(-negTopVal * 1.1, 0, 3).filter((t) => t < 0);
+        for (const t of rawNegTicks) ticks.push({ v: t, grid: true });
+      }
+
+      ticks.sort((a, b) => b.v - a.v);
+    } else {
+      // Linear scale without outlier break
+      if (hasNegData) {
+        const posPt = Math.max(100, trends.maxMonthSpend * 1.1);
+        const negPt = Math.max(100, Math.abs(trends.minMonthSpend) * 1.1);
+        let linearPosShare = posPt / (posPt + negPt);
+        if (linearPosShare < MIN_SIDE) linearPosShare = MIN_SIDE;
+        if (linearPosShare > 1 - MIN_SIDE) linearPosShare = 1 - MIN_SIDE;
+
+        const posTop = padT;
+        const posBot = padT + innerH * linearPosShare;
+        const negBot = padT + innerH;
+        zeroY = posBot;
+
+        const rawPosTicks = niceTicks(0, posPt, 3);
+        const posTicks = rawPosTicks.filter((t) => t > 0 && t <= posPt * 1.05);
+        const maxPosTick = posTicks[posTicks.length - 1] ?? posPt;
+
+        const rawNegTicks = niceTicks(-negPt, 0, 3);
+        const negTicks = rawNegTicks.filter((t) => t < 0 && t >= -negPt * 1.05);
+        const minNegTick = negTicks[0] ?? -negPt;
+
+        ticks = [
+          ...posTicks.map((v) => ({ v, grid: true })),
+          { v: 0, grid: true },
+          ...negTicks.map((v) => ({ v, grid: true })),
+        ].sort((a, b) => b.v - a.v);
+
+        y = (v: number) => {
+          if (v > 0) {
+            const norm = Math.min(1, Math.max(0, v / maxPosTick));
+            return zeroY - (zeroY - posTop) * norm;
+          } else if (v < 0) {
+            const norm = Math.min(1, Math.max(0, Math.abs(v) / Math.abs(minNegTick)));
+            return zeroY + (negBot - zeroY) * norm;
+          }
+          return zeroY;
+        };
+      } else {
+        const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
+        const rawTicks = niceTicks(0, maxVal, 4);
+        ticks = rawTicks
+          .filter((t) => t >= 0 && t <= maxVal * 1.05)
+          .map((v) => ({ v, grid: true }));
+        if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
+
+        const maxTick = ticks[ticks.length - 1]?.v || maxVal;
+        y = (v: number) => padT + innerH * (1 - Math.min(1, Math.max(0, v / maxTick)));
+        zeroY = y(0);
+      }
     }
 
     const n = trends.months.length;
@@ -601,43 +744,65 @@ export function SpendingTrendsReport({
     // Bars scale against the largest month so the tallest bar always reaches
     // the visual cap; the axis keeps its own ticks computed from maxMonthSpend.
     const barScaleMax = Math.max(1, trends.maxMonthSpend);
+    const barScaleNegMax = Math.max(1, Math.abs(trends.minMonthSpend));
     const maxBarH = (zeroY - padT) * TRUNC_RATIO;
-    const barNorm = (v: number) =>
-      v <= 0
-        ? 0
-        : scaleMode === "log"
-          ? symlog(v) / Math.max(1e-9, symlog(barScaleMax))
-          : v / barScaleMax;
-    const barFrac = (v: number) => {
-      if (v <= 0) return 0;
-      if (useTrendBreak) {
-        if (v <= trendBreak.breakTop) return (v / trendBreak.breakTop) * trendBreak.split;
-        return (
-          trendBreak.split +
-          ((v - trendBreak.breakTop) / (trendBreak.topVal - trendBreak.breakTop)) *
-            (1 - trendBreak.split)
-        );
-      }
-      return barNorm(v);
-    };
+    const maxBarHNeg = (padT + innerH - zeroY) * TRUNC_RATIO;
 
     const monthBars = trends.months.map((mPoint, i) => {
       const cx = padL + colW * (i + 0.5);
       const barX = cx - barW / 2;
+      const isNeg = mPoint.total < 0;
+      const isPos = mPoint.total > 0;
 
+      const useBreakBars = hasBreak;
       const truncated =
-        !useTrendBreak && mPoint.total > 0 && mPoint.total >= barScaleMax * TRUNC_RATIO;
-      const totalH = useTrendBreak
-        ? Math.max(0, (zeroY - padT) * Math.min(1, barFrac(mPoint.total)))
-        : Math.max(0, maxBarH * Math.min(1, barNorm(mPoint.total)));
-      const barTopY = zeroY - totalH;
+        !useBreakBars &&
+        ((isPos && mPoint.total >= barScaleMax * TRUNC_RATIO) ||
+          (isNeg && Math.abs(mPoint.total) >= barScaleNegMax * TRUNC_RATIO));
 
-      let currentBottom = zeroY;
+      let totalH = 0;
+      let barTopY = zeroY;
+
+      if (isPos) {
+        if (useBreakBars) {
+          totalH = Math.max(0, zeroY - y(mPoint.total));
+        } else if (isLog) {
+          const maxLog = symlog(Math.max(1000, barScaleMax));
+          totalH = Math.max(0, (zeroY - padT) * (maxLog > 0 ? symlog(mPoint.total) / maxLog : 0));
+        } else {
+          totalH = Math.max(0, maxBarH * (mPoint.total / barScaleMax));
+        }
+        barTopY = zeroY - totalH;
+      } else if (isNeg) {
+        if (useBreakBars) {
+          totalH = Math.max(0, y(mPoint.total) - zeroY);
+        } else if (isLog) {
+          const minLog = symlog(Math.max(1000, barScaleNegMax));
+          totalH = Math.max(0, (padT + innerH - zeroY) * (minLog > 0 ? symlog(Math.abs(mPoint.total)) / minLog : 0));
+        } else {
+          totalH = Math.max(0, maxBarHNeg * (Math.abs(mPoint.total) / barScaleNegMax));
+        }
+        barTopY = zeroY;
+      }
+
+      const denom =
+        mPoint.segments.reduce((acc, s) => acc + Math.abs(s.amount), 0) ||
+        Math.abs(mPoint.total) ||
+        1;
+
+      let currentOffset = zeroY;
       const renderedSegments = mPoint.segments.map((seg, sIdx) => {
-        const segRatio = mPoint.total > 0 ? seg.amount / mPoint.total : 0;
+        const segRatio = Math.abs(seg.amount) / denom;
         const segHeight = Math.max(0, totalH * segRatio);
-        const segY = currentBottom - segHeight;
-        currentBottom = segY;
+
+        let segY = zeroY;
+        if (isPos) {
+          segY = currentOffset - segHeight;
+          currentOffset = segY;
+        } else if (isNeg) {
+          segY = currentOffset;
+          currentOffset = segY + segHeight;
+        }
 
         const color = colorMap.get(seg.id) ?? colorAt(sIdx);
 
@@ -668,8 +833,7 @@ export function SpendingTrendsReport({
       };
     });
 
-    const avgY = trends.avgPerMonth > 0 ? y(trends.avgPerMonth) : null;
-    const breakY = useTrendBreak ? y(trendBreak.breakTop) : null;
+    const avgY = trends.avgPerMonth !== 0 ? y(trends.avgPerMonth) : null;
 
     // Smart X-axis label stride calculation to prevent overlap over multi-year spans
     const maxLabels = Math.max(2, Math.min(10, Math.floor(innerW / 65)));
@@ -706,8 +870,9 @@ export function SpendingTrendsReport({
       n,
       monthBars,
       avgY,
-      breakY,
-      hasTrendBreak: useTrendBreak,
+      hasBreak,
+      posBreak: posBreak.hasBreak ? posBreak : null,
+      negBreak: negBreak.hasBreak ? negBreak : null,
       tickSet,
     };
   }, [size, trends, colorMap, scaleMode]);
@@ -763,6 +928,8 @@ export function SpendingTrendsReport({
 
     const { month0, year } = parseMonthKey(mPoint.month);
     const title = `${MONTHS[month0]} ${year}`;
+    const isWithdrawal = mPoint.total < 0;
+    const totalLabel = isWithdrawal ? "Net withdrawal:" : "Total:";
 
     return (
       <div className="space-y-[3px]" style={{ minWidth: 140 }}>
@@ -770,13 +937,14 @@ export function SpendingTrendsReport({
           {title}
         </div>
         <div className="mb-1 text-[12px] font-bold text-white">
-          Total: {fmt(mPoint.total)}
+          {totalLabel} {fmt(mPoint.total)}
         </div>
         {mPoint.segments.length > 0 && (
           <div className="mt-1 border-t border-[rgba(255,255,255,0.15)] pt-1 space-y-[2px]">
             {mPoint.segments.map((s, idx) => {
               const color = colorMap.get(s.id) ?? colorAt(idx);
-              const pct = mPoint.total > 0 ? `${Math.round((s.amount / mPoint.total) * 100)}%` : "0%";
+              const denom = Math.abs(mPoint.total);
+              const pct = denom > 0 ? `${Math.round((Math.abs(s.amount) / denom) * 100)}%` : "0%";
               return (
                 <div
                   key={s.id}
@@ -792,7 +960,7 @@ export function SpendingTrendsReport({
     );
   })();
 
-  const empty = trends.total === 0;
+  const empty = !trends.months.some((m) => m.total !== 0);
 
   // Filter helpers
   const handleToggleCategory = (catId: number) => {
@@ -1211,33 +1379,40 @@ export function SpendingTrendsReport({
                         <th style={{ width: 140 }}>Account</th>
                         <th>Memo</th>
                         <th className="num" style={{ width: 100 }}>
-                          Amount
+                          Spending
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {transactions.map((t, idx) => (
-                        <tr
-                          key={t.id}
-                          className={`y-row ${idx % 2 === 1 ? "alt" : ""}`}
-                        >
-                          <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
-                            {t.date}
-                          </td>
-                          <td className="font-medium text-[var(--y-ink)] truncate max-w-[200px]">
-                            {t.payee || "—"}
-                          </td>
-                          <td className="text-[var(--y-ink-soft)] truncate max-w-[150px]">
-                            {accountMap.get(t.accountId) ?? "Account"}
-                          </td>
-                          <td className="text-[var(--y-ink-faint)] truncate max-w-[200px]">
-                            {t.memo || ""}
-                          </td>
-                          <td className="num font-semibold text-[var(--y-ink)] y-num whitespace-nowrap">
-                            {fmt(Math.abs(Number(t.amount)))}
-                          </td>
-                        </tr>
-                      ))}
+                      {transactions.map((t, idx) => {
+                        const spend = -num(t.amount);
+                        return (
+                          <tr
+                            key={t.id}
+                            className={`y-row ${idx % 2 === 1 ? "alt" : ""}`}
+                          >
+                            <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
+                              {t.date}
+                            </td>
+                            <td className="font-medium text-[var(--y-ink)] truncate max-w-[200px]">
+                              {t.payee || "—"}
+                            </td>
+                            <td className="text-[var(--y-ink-soft)] truncate max-w-[150px]">
+                              {accountMap.get(t.accountId) ?? "Account"}
+                            </td>
+                            <td className="text-[var(--y-ink-faint)] truncate max-w-[200px]">
+                              {t.memo || ""}
+                            </td>
+                            <td
+                              className={`num font-semibold y-num whitespace-nowrap ${
+                                spend < 0 ? "text-[var(--y-green-dk)]" : "text-[var(--y-ink)]"
+                              }`}
+                            >
+                              {fmt(spend)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
