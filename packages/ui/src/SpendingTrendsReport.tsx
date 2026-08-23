@@ -367,14 +367,13 @@ const ConstituentTable = memo(function ConstituentTable({
   const [hoverId, setHoverId] = useState<number | null>(null);
 
   return (
-    <table className="y-table">
+    <table className="y-table w-full min-w-full" style={{ minWidth: 450 }}>
       <thead className="y-thead y-thead--sticky">
         <tr>
           <th>{drillLevel === "group" ? "Category" : "Master Category"}</th>
-          <th className="num" style={{ width: 110 }}>Average/Mo</th>
-          <th className="num" style={{ width: 110 }}>Total Spent</th>
-          <th className="num" style={{ width: 80 }}>% Share</th>
-          <th style={{ width: 28 }}></th>
+          <th className="num" style={{ width: 110, minWidth: 110 }}>Average/Mo</th>
+          <th className="num" style={{ width: 110, minWidth: 110 }}>Total Spent</th>
+          <th className="num" style={{ width: 80, minWidth: 80 }}>% Share</th>
         </tr>
       </thead>
       <tbody>
@@ -406,17 +405,14 @@ const ConstituentTable = memo(function ConstituentTable({
                   </span>
                 </div>
               </td>
-              <td className="num y-num font-medium text-[var(--y-ink-soft)]">
+              <td className="num y-num font-medium text-[var(--y-ink-soft)] whitespace-nowrap">
                 {fmt(c.avgPerMonth)}
               </td>
-              <td className="num y-num font-semibold text-[var(--y-ink)]">
+              <td className="num y-num font-semibold text-[var(--y-ink)] whitespace-nowrap">
                 {fmt(c.total)}
               </td>
-              <td className="num y-num text-[var(--y-ink-faint)]">
+              <td className="num y-num text-[var(--y-ink-faint)] whitespace-nowrap">
                 {c.pctOfTotal}%
-              </td>
-              <td className="text-center text-[var(--y-blue)] opacity-0 group-hover:opacity-100">
-                <Icon name="chevronRight" size={10} />
               </td>
             </tr>
           );
@@ -442,8 +438,8 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
   onSelectTransaction?: (transaction: Transaction) => void;
 }) {
   return (
-    <div className="flex flex-col h-full">
-      <div className="y-subbar flex items-center justify-between px-3 py-1.5 text-[11px]">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="y-subbar flex items-center justify-between px-3 py-1.5 text-[11px] shrink-0">
         <div className="flex items-center gap-2">
           <span className="font-bold text-[var(--y-ink)]">
             {categoryName} Transactions
@@ -480,14 +476,14 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
             No transactions found for this timeframe.
           </div>
         ) : (
-          <table className="y-table">
+          <table className="y-table w-full min-w-full" style={{ minWidth: 560 }}>
             <thead className="y-thead y-thead--sticky">
               <tr>
-                <th style={{ width: 85 }}>Date</th>
-                <th>Payee</th>
-                <th style={{ width: 140 }}>Account</th>
-                <th>Memo</th>
-                <th className="num" style={{ width: 100 }}>
+                <th style={{ width: 85, minWidth: 85 }}>Date</th>
+                <th style={{ minWidth: 120 }}>Payee</th>
+                <th style={{ width: 140, minWidth: 120 }}>Account</th>
+                <th style={{ minWidth: 120 }}>Memo</th>
+                <th className="num" style={{ width: 100, minWidth: 90 }}>
                   Spending
                 </th>
               </tr>
@@ -505,14 +501,14 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
                     <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
                       {t.date}
                     </td>
-                    <td className="font-medium text-[var(--y-ink)] truncate max-w-[200px]">
-                      {t.payee || "—"}
+                    <td className="font-medium text-[var(--y-ink)]">
+                      <div className="truncate">{t.payee || "—"}</div>
                     </td>
-                    <td className="text-[var(--y-ink-soft)] truncate max-w-[150px]">
-                      {accountMap.get(t.accountId) ?? "Account"}
+                    <td className="text-[var(--y-ink-soft)]">
+                      <div className="truncate">{accountMap.get(t.accountId) ?? "Account"}</div>
                     </td>
-                    <td className="text-[var(--y-ink-faint)] truncate max-w-[200px]">
-                      {t.memo || ""}
+                    <td className="text-[var(--y-ink-faint)]">
+                      <div className="truncate">{t.memo || ""}</div>
                     </td>
                     <td
                       className={`num font-semibold y-num whitespace-nowrap ${
@@ -1464,8 +1460,8 @@ export function SpendingTrendsReport({
         </div>
 
         {/* Lower Panel: Breakdown List OR Transaction Register (when in single category) */}
-        <div className="flex-1 min-h-0 overflow-y-auto y-scroll bg-white">
-          {trends.drillLevel === "category" ? (
+        {trends.drillLevel === "category" ? (
+          <div className="flex-1 min-h-0 flex flex-col bg-white">
             <CategoryTransactionsTable
               categoryName={trends.currentCategoryName}
               transactions={transactions}
@@ -1474,24 +1470,23 @@ export function SpendingTrendsReport({
               accountMap={accountMap}
               onSelectTransaction={onSelectTransaction}
             />
-          ) : (
-            /* Constituents Breakdown Table */
-            <div className="flex flex-col h-full">
-              {trends.constituents.length === 0 ? (
-                <div className="py-8 text-center y-hint text-[11.5px]">
-                  No spending recorded in this category for the selected timeframe.
-                </div>
-              ) : (
-                <ConstituentTable
-                  constituents={trends.constituents}
-                  colorMap={colorMap}
-                  onDrill={handleDrillSegment}
-                  drillLevel={trends.drillLevel}
-                />
-              )}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-auto y-scroll bg-white">
+            {trends.constituents.length === 0 ? (
+              <div className="py-8 text-center y-hint text-[11.5px]">
+                No spending recorded in this category for the selected timeframe.
+              </div>
+            ) : (
+              <ConstituentTable
+                constituents={trends.constituents}
+                colorMap={colorMap}
+                onDrill={handleDrillSegment}
+                drillLevel={trends.drillLevel}
+              />
+            )}
+          </div>
+        )}
       </div>
     </Panel>
   );
