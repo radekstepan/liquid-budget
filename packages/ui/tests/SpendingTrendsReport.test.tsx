@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { SpendingTrendsReport } from "../src/SpendingTrendsReport.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
@@ -612,5 +612,35 @@ describe("SpendingTrendsReport", () => {
     expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
     expect(screen.getByText("Everyday Expenses")).toBeInTheDocument();
     expect(screen.getByText("Monthly Bills")).toBeInTheDocument();
+  });
+
+  it("calls onSelectTransaction when clicking a transaction row in CategoryTransactionsTable", () => {
+    const data = makeTestData();
+    const onSelectTransaction = vi.fn();
+    render(
+      <SpendingTrendsReport
+        data={data}
+        startMonth="2026-04"
+        endMonth="2026-06"
+        onSelectTransaction={onSelectTransaction}
+      />
+    );
+
+    // Drill down: Everyday Expenses -> Groceries
+    fireEvent.click(screen.getByText("Everyday Expenses"));
+    fireEvent.click(screen.getByText("Groceries"));
+
+    // Find and click Whole Foods transaction row
+    const row = screen.getByText("Whole Foods").closest("tr")!;
+    expect(row).toBeInTheDocument();
+    fireEvent.click(row);
+
+    expect(onSelectTransaction).toHaveBeenCalledTimes(1);
+    expect(onSelectTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payee: "Whole Foods",
+        categoryId: 10,
+      })
+    );
   });
 });

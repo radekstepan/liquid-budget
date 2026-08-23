@@ -231,3 +231,32 @@ test("clicking Reports in sidebar when drilled down in Spending Trends resets ba
   await expect(constituentsTable.getByText("Master Category")).toBeVisible();
 });
 
+test("clicking a transaction in Spending Trends category view navigates to relevant account and checks the transaction", async ({ page }) => {
+  await page.getByRole("button", { name: "Spending Trends", exact: true }).click();
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+
+  // Drill down: Master Category -> Category
+  const constituentsTable = panel.locator(".bg-white");
+  const firstGroupRow = constituentsTable.locator(".cursor-pointer").first();
+  await firstGroupRow.click();
+
+  const firstCatRow = constituentsTable.locator(".cursor-pointer").first();
+  await firstCatRow.click();
+
+  // Transactions list is visible
+  const txnRow = panel.locator("table.y-table tbody tr.y-row").first();
+  await expect(txnRow).toBeVisible();
+
+  // Click transaction row
+  await txnRow.click();
+
+  // Should navigate to Transactions view
+  await expect(page.locator("main .y-toolbar")).toBeVisible();
+  await expect(page.getByText("1 selected")).toBeVisible();
+
+  // The focused transaction row is checked
+  const checkedCheckbox = page.locator("main table.y-table tbody tr input[type='checkbox']:checked");
+  await expect(checkedCheckbox).toHaveCount(1);
+});
+
+

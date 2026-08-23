@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
-import type { BudgetData } from "@ynab/logic";
+import type { BudgetData, Transaction } from "@ynab/logic";
 import {
   fmt,
   num,
@@ -33,6 +33,7 @@ export const ReportsView = memo(function ReportsView({
   minYear,
   maxYear,
   resetKey,
+  onSelectTransaction,
 }: {
   data: BudgetData;
   month: string;
@@ -42,6 +43,7 @@ export const ReportsView = memo(function ReportsView({
   minYear?: number;
   maxYear?: number;
   resetKey?: number;
+  onSelectTransaction?: (transaction: Transaction) => void;
 }) {
   const allMonths = useMemo(() => {
     const thisMonth = todayISO().slice(0, 7);
@@ -299,6 +301,7 @@ export const ReportsView = memo(function ReportsView({
               startMonth={actualStart}
               endMonth={actualEnd}
               resetKey={resetKey}
+              onSelectTransaction={onSelectTransaction}
             />
           </div>
         )}

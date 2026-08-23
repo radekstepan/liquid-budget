@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, DuplicateAnalysisResult, ImportSummary } from "@ynab/logic";
+import type { BudgetData, DuplicateAnalysisResult, ImportSummary, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -228,6 +228,7 @@ export function BudgetApp({
   });
   const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
   const [reportsResetKey, setReportsResetKey] = useState(0);
+  const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [isPending, startTransition] = useTransition();
@@ -521,6 +522,23 @@ export function BudgetApp({
     [updateUrl, month, accountFilter]
   );
 
+  const handleSelectTransactionFromReport = useCallback(
+    (t: Transaction) => {
+      const parentTxn = t.parentId != null ? data.transactions.find((x) => x.id === t.parentId) : null;
+      const targetAccountId = parentTxn ? parentTxn.accountId : t.accountId;
+      const targetTxnId = t.parentId ?? t.id;
+
+      startTransition(() => {
+        setAccountFilter(targetAccountId);
+        setView("transactions");
+        setFocusTransaction({ id: targetTxnId, nonce: Date.now() });
+        setShowSettingsOverlay(false);
+        updateUrl("transactions", targetAccountId, month);
+      });
+    },
+    [data.transactions, updateUrl, month]
+  );
+
   const cycleStatus = useCallback(
     async (id: number) => {
       const t = data.transactions.find((x) => x.id === id);
@@ -731,6 +749,7 @@ export function BudgetApp({
             <TransactionsView
               data={data}
               accountFilter={accountFilter}
+              focusTransaction={focusTransaction}
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
@@ -758,6 +777,7 @@ export function BudgetApp({
               minYear={minYear}
               maxYear={maxYear}
               resetKey={reportsResetKey}
+              onSelectTransaction={handleSelectTransactionFromReport}
             />
           )}
           {view === "calendar" && (

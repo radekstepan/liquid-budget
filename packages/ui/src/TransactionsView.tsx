@@ -94,6 +94,7 @@ const OVERSCAN = 15;
 export const TransactionsView = memo(function TransactionsView({
   data,
   accountFilter,
+  focusTransaction,
   onAdd,
   onAddTransfer,
   onEdit,
@@ -115,6 +116,7 @@ export const TransactionsView = memo(function TransactionsView({
 }: {
   data: BudgetData;
   accountFilter: number | null;
+  focusTransaction?: { id: number; nonce: number } | null;
   onAdd: () => void;
   onAddTransfer?: () => void;
   onEdit: (id: number) => void;
@@ -140,6 +142,7 @@ export const TransactionsView = memo(function TransactionsView({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
   const [sort, setSort] = useLocalStorage<SortState>("ynab:transactions:sort", { key: "date", dir: "desc" });
+  const lastHandledNonce = useRef<number | null>(null);
 
   const toggleSort = useCallback((key: SortKey) => {
     setSort((prev) => {
@@ -519,6 +522,27 @@ export const TransactionsView = memo(function TransactionsView({
     [filtered, selectedId, onEdit, onCycleStatus, onDelete]
   );
 
+  // Handle focusing/selecting a transaction from external navigation (e.g. Reports)
+  useEffect(() => {
+    if (!focusTransaction || focusTransaction.nonce === lastHandledNonce.current) return;
+    lastHandledNonce.current = focusTransaction.nonce;
+
+    const targetId = focusTransaction.id;
+    if (search) setSearch("");
+    setSelectedIds(new Set([targetId]));
+    setSelectedId(targetId);
+
+    const targetIndex = filtered.findIndex((r) => r.id === targetId);
+    if (targetIndex !== -1) {
+      const effH = containerHeight > 0 ? containerHeight : 500;
+      const targetScroll = Math.max(0, targetIndex * ROW_HEIGHT - Math.floor(effH / 2));
+      if (containerRef.current) {
+        containerRef.current.scrollTop = targetScroll;
+      }
+      setScrollTop(targetScroll);
+    }
+  }, [focusTransaction, filtered, containerHeight, search]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white" onKeyDown={handleKeyDown} tabIndex={0}>
       {/* Top Register Header Toolbar */}
@@ -754,6 +778,7 @@ export const TransactionsView = memo(function TransactionsView({
                   return (
                     <tr
                       key={t.id}
+                      data-txn-id={t.id}
                       className={cx("group y-row", isSelected && "y-row--selected is-sel", globalIndex % 2 === 1 && !isSelected && "alt")}
                       onClick={() => {
                         setSelectedId(null);
