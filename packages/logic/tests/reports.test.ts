@@ -410,6 +410,71 @@ describe("computeSpendingTrends", () => {
       { id: 2, name: "Monthly Bills", amount: 100000 },
     ]);
   });
+
+  it("counts a liquidation transfer (off-budget -> on-budget) as negative spending", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "EQ Bank", kind: "liquid", groupLabel: "Budget", balance: "50000000", onBudget: true, sort: 0 },
+        { id: 2, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [{ id: 4, name: "Savings, Investments", sort: 0, isCreditCardPayments: false }],
+      categories: [{ id: 30, groupId: 4, name: "Other Investments", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      transactions: [
+        // Feb: contribution $3,000 out of budget -> positive spending
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-02-15", payee: "Transfer : Wealthsimple Trade", memo: "deposit", amount: "-300000", status: "c" },
+        // Mar: withdrawal/liquidation $338,269.92 into budget -> negative spending
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-03-06", payee: "Transfer : Wealthsimple Trade", memo: "sell all", amount: "33826992", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const result = computeSpendingTrends(data, "2026-02", "2026-03");
+    expect(result.months).toHaveLength(2);
+
+    // Feb: +$3,000.00
+    expect(result.months[0]?.month).toBe("2026-02");
+    expect(result.months[0]?.total).toBe(300000);
+    expect(result.months[0]?.segments).toEqual([
+      { id: 4, name: "Savings, Investments", amount: 300000 },
+    ]);
+
+    // Mar: -$338,269.92
+    expect(result.months[1]?.month).toBe("2026-03");
+    expect(result.months[1]?.total).toBe(-33826992);
+    expect(result.months[1]?.segments).toEqual([
+      { id: 4, name: "Savings, Investments", amount: -33826992 },
+    ]);
+
+    expect(result.maxMonthSpend).toBe(300000);
+    expect(result.minMonthSpend).toBe(-33826992);
+    expect(result.total).toBe(300000 - 33826992);
+  });
+
+  it("nets deposit + immediate withdrawal in the same month to zero", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+        { id: 2, name: "Savings Account", kind: "offbudget", groupLabel: "Savings", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [{ id: 1, name: "Savings", sort: 0, isCreditCardPayments: false }],
+      categories: [{ id: 10, groupId: 1, name: "Emergency Fund", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-04-05", payee: "Transfer : Savings", memo: "deposit", amount: "-100000", status: "c" },
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-04-10", payee: "Transfer : Savings", memo: "withdraw", amount: "100000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const result = computeSpendingTrends(data, "2026-04", "2026-04");
+    expect(result.months).toHaveLength(1);
+    expect(result.months[0]?.total).toBe(0);
+    expect(result.months[0]?.segments).toEqual([]);
+    expect(result.maxMonthSpend).toBe(0);
+    expect(result.minMonthSpend).toBe(0);
+    expect(result.total).toBe(0);
+  });
 });
 
 describe("getSpendingTransactions", () => {

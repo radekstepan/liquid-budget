@@ -370,4 +370,159 @@ describe("SpendingTrendsReport", () => {
     expect(linearBtn.classList.contains("is-on")).toBe(true);
     expect(logBtn.classList.contains("is-on")).toBe(false);
   });
+
+  it("renders negative bars below the zero line and prevents crushing small positive side", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "EQ Bank", kind: "liquid", groupLabel: "Liquid", balance: "50000000", onBudget: true, sort: 0 },
+        { id: 2, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [
+        { id: 4, name: "Savings, Investments", sort: 0, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 30, groupId: 4, name: "Other Investments", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // Apr: +$300 spending (contribution)
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-04-10", payee: "Transfer : Wealthsimple Trade", memo: "deposit", amount: "-30000", status: "c" },
+        // May: -$338,269.92 spending (liquidation)
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-05-15", payee: "Transfer : Wealthsimple Trade", memo: "sell all", amount: "33826992", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-05" />);
+
+    expect(screen.queryByText("No spending data for this timeframe and filter selection.")).not.toBeInTheDocument();
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    expect(svg).not.toBeNull();
+
+    // Check zero line (stroke="#b6b6b1")
+    const zeroLine = svg.querySelector('line[stroke="#b6b6b1"]')!;
+    expect(zeroLine).not.toBeNull();
+    const zeroY = parseFloat(zeroLine.getAttribute("y1") || "0");
+    // zeroY should be positioned proportionally (not at padT = 16)
+    expect(zeroY).toBeGreaterThan(20);
+    expect(zeroY).toBeLessThan(350);
+
+    // Negative tick label exists
+    const tickTexts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent?.trim());
+    expect(tickTexts.some((t) => t?.startsWith("-$"))).toBe(true);
+
+    // Apr positive bar height is clearly visible (> 1px)
+    const rects = Array.from(svg.querySelectorAll("rect"));
+    const aprBar = rects.find((r) => {
+      const y = parseFloat(r.getAttribute("y") || "0");
+      const h = parseFloat(r.getAttribute("height") || "0");
+      return Math.abs(y + h - zeroY) < 0.75 && h > 1;
+    });
+    expect(aprBar).toBeDefined();
+
+    // May negative bar hangs downward from zeroY
+    const mayBar = rects.find((r) => {
+      const y = parseFloat(r.getAttribute("y") || "0");
+      const h = parseFloat(r.getAttribute("height") || "0");
+      return Math.abs(y - zeroY) < 0.75 && h > 1;
+    });
+    expect(mayBar).toBeDefined();
+  });
+
+  it("renders signed values under Spending column in category drilldown table", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "EQ Bank", kind: "liquid", groupLabel: "Liquid", balance: "50000000", onBudget: true, sort: 0 },
+        { id: 2, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [
+        { id: 4, name: "Savings, Investments", sort: 0, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 30, groupId: 4, name: "Other Investments", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // Apr: +$300 contribution
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-04-10", payee: "Transfer : Wealthsimple Trade", memo: "deposit", amount: "-30000", status: "c" },
+        // May: -$338,269.92 liquidation
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-05-15", payee: "Transfer : Wealthsimple Trade", memo: "sell all", amount: "33826992", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-05" />);
+
+    // Drill down: Savings, Investments -> Other Investments
+    fireEvent.click(screen.getByText("Savings, Investments"));
+    fireEvent.click(screen.getByText("Other Investments"));
+
+    // Table header should be Spending, not Amount
+    expect(screen.getByRole("columnheader", { name: "Spending" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Amount" })).not.toBeInTheDocument();
+
+    // Table cells should show signed values
+    expect(screen.getByText("$300.00")).toBeInTheDocument();
+    expect(screen.getByText("-$338,269.92")).toBeInTheDocument();
+    expect(screen.queryByText("$338,269.92")).not.toBeInTheDocument();
+  });
+
+  it("handles net-zero deposit and withdrawal in a multi-month period without false empty state", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 0 },
+        { id: 2, name: "Savings Account", kind: "offbudget", groupLabel: "Savings", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [
+        { id: 1, name: "Savings", sort: 0, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Emergency Fund", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // Apr: +$500 contribution
+        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-04-01", payee: "Transfer : Savings", memo: "", amount: "-50000", status: "c" },
+        // May: net zero ($200 deposit, $200 withdrawal)
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-05-05", payee: "Transfer : Savings", memo: "", amount: "-20000", status: "c" },
+        { id: 3, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-05-10", payee: "Transfer : Savings", memo: "", amount: "20000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-05" />);
+
+    expect(screen.queryByText("No spending data for this timeframe and filter selection.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("$500.00").length).toBeGreaterThan(0);
+  });
+
+  it("renders an axis break with jagged lines for negative withdrawal spikes", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "EQ Bank", kind: "liquid", groupLabel: "Liquid", balance: "50000000", onBudget: true, sort: 0 },
+        { id: 2, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [
+        { id: 4, name: "Savings, Investments", sort: 0, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 30, groupId: 4, name: "Other Investments", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        { id: 101, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-01-01", payee: "Transfer", memo: "", amount: "10000", status: "c" },
+        { id: 102, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-02-01", payee: "Transfer", memo: "", amount: "10000", status: "c" },
+        { id: 103, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-03-01", payee: "Transfer", memo: "", amount: "10000", status: "c" },
+        { id: 104, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-04-01", payee: "Transfer", memo: "", amount: "10000", status: "c" },
+        { id: 105, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-05-01", payee: "Transfer", memo: "", amount: "5000000", status: "c" },
+        { id: 106, accountId: 1, transferAccountId: 2, categoryId: 30, date: "2026-06-01", payee: "Transfer", memo: "", amount: "10000", status: "c" },
+      ],
+      recurring: [],
+    };
+    render(<SpendingTrendsReport data={data} startMonth="2026-01" endMonth="2026-06" />);
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    expect(svg.querySelectorAll('[data-testid="axis-break"]').length).toBeGreaterThan(0);
+  });
 });

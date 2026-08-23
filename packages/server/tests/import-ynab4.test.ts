@@ -361,6 +361,95 @@ describe("importYnab4 transaction wrapping", () => {
       amount: -50000,
     });
   });
+
+  it("orients liquidation transfers (off-budget→on-budget) to the on-budget account as source", async () => {
+    // Regression test for the bug where an off-budget→on-budget transfer
+    // (liquidation/sale) was stored with the off-budget account as the
+    // source and a negative amount, causing spending trends to count it
+    // as positive spending. The fix should orient the single stored row
+    // so the on-budget account is the source with a positive amount.
+    //
+    // YNAB4 transfer pair (off-budget side encountered FIRST):
+    //   t1: RRSP (off-budget) → Chequing (on-budget), amount=-300, categoryId=null
+    //   t2: Chequing (on-budget) → RRSP (off-budget), amount=+300, categoryId="sc1"
+    const ynabData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "RRSP", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Savings, Investments",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Retirement" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc2",
+          targetAccountId: "acc1",
+          transferTransactionId: "t2",
+          date: "2026-01-15",
+          amount: -300,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc1",
+          categoryId: null,
+        },
+        {
+          entityId: "t2",
+          accountId: "acc1",
+          targetAccountId: "acc2",
+          transferTransactionId: "t1",
+          date: "2026-01-15",
+          amount: 300,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc2",
+          categoryId: "sc1",
+        },
+      ],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    mock.respondWith("select:accounts", []);
+    mock.respondWith("insert:accounts#1", [{ id: 1 }]);
+    mock.respondWith("insert:accounts#2", [{ id: 2 }]);
+    mock.respondWith("insert:category_groups", [{ id: 1 }]);
+    mock.respondWith("insert:categories", [{ id: 10 }]);
+    mock.respondWith("insert:category_groups#2", [{ id: 2 }]);
+    mock.respondWith("select:accounts#2", []);
+    mock.respondWith("select:accounts#3", [
+      { id: 1, name: "Chequing" },
+      { id: 2, name: "RRSP" },
+    ]);
+    mock.respondWith("insert:transactions", [{ id: 1 }]);
+    mock.respondWith("select:accounts#4", [
+      { id: 1, name: "Chequing" },
+      { id: 2, name: "RRSP" },
+    ]);
+    mock.respondWith("select:transactions#1", [{ sum: 30000 }]);
+    mock.respondWith("select:transactions#2", [{ sum: 0 }]);
+    mock.respondWith("update:accounts#1", [{}]);
+    mock.respondWith("select:transactions#3", [{ sum: 0 }]);
+    mock.respondWith("select:transactions#4", [{ sum: 30000 }]);
+    mock.respondWith("update:accounts#2", [{}]);
+    mock.respondWith("select:accounts#5", []);
+
+    await importYnab4(mock.db, ynabData);
+
+    const txInsert = mock.calls.find(
+      (c) => c.op === "insert" && ((c as any).table === "transactions" || ((c.values as any)?.amount === 30000))
+    );
+    expect(txInsert?.values).toMatchObject({
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: 10,
+      amount: 30000,
+    });
+  });
 });
 
 describe("parseYnab4SettingsXml (UNI-26 / BUG-30)", () => {

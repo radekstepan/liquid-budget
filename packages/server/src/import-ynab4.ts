@@ -126,12 +126,14 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     // 2. Insert Accounts
     const accountIdMap = new Map<string, number>();
+    const accOnBudgetMap = new Map<string, boolean>();
     let accountSort = 0;
     const nonTombstoneAccounts = yAccounts
       .filter((a: any) => !a.isTombstone)
       .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
     for (const acc of nonTombstoneAccounts) {
+      accOnBudgetMap.set(acc.entityId, !!acc.onBudget);
       const kind =
         acc.accountType === "CreditCard" || acc.accountType === "LineofCredit"
           ? "credit"
@@ -429,16 +431,47 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           let cleared = t.cleared;
           let catEntityId = t.categoryId;
 
-          // Normalize so source is outflow (negative amount) if counterpart exists and is negative
-          if (rawAmount > 0 && partner && (partner.amount || 0) < 0) {
-            sourceAccEntityId = partner.accountId;
-            destAccEntityId = t.accountId;
-            rawAmount = partner.amount || 0;
-            if (!memo && partner.memo) memo = partner.memo;
-            cleared = partner.cleared;
-            catEntityId = partner.categoryId || t.categoryId;
-          } else if (partner && partner.categoryId && !catEntityId) {
-            catEntityId = partner.categoryId;
+          // Normalize transfer orientation:
+          // - Cross-budget-boundary (one on-budget, one off-budget):
+          //   always use the on-budget account as the source so the amount sign
+          //   is meaningful relative to the budget (negative = spending,
+          //   positive = inflow to budget).
+          // - Same-budget (both on or both off):
+          //   use the negative-amount (outflow) side as the source.
+          if (partner) {
+            const tOnBudget = accOnBudgetMap.get(t.accountId);
+            const pOnBudget = accOnBudgetMap.get(partner.accountId);
+            const isCrossBoundary =
+              tOnBudget !== undefined && pOnBudget !== undefined && tOnBudget !== pOnBudget;
+
+            if (isCrossBoundary) {
+              if (!tOnBudget && pOnBudget) {
+                // Source is off-budget, partner is on-budget (liquidation/sale).
+                // Flip to use the on-budget side as source with its sign.
+                sourceAccEntityId = partner.accountId;
+                destAccEntityId = t.accountId;
+                rawAmount = partner.amount || 0;
+                if (!memo && partner.memo) memo = partner.memo;
+                cleared = partner.cleared;
+                catEntityId = partner.categoryId || t.categoryId;
+              }
+              // If source is already on-budget, no flip needed.
+            } else {
+              // Same budget: normalize to negative-amount (outflow) side as source.
+              if (rawAmount > 0 && (partner.amount || 0) < 0) {
+                sourceAccEntityId = partner.accountId;
+                destAccEntityId = t.accountId;
+                rawAmount = partner.amount || 0;
+                if (!memo && partner.memo) memo = partner.memo;
+                cleared = partner.cleared;
+                catEntityId = partner.categoryId || t.categoryId;
+              }
+            }
+
+            // Pull category from partner if current side has none.
+            if (partner.categoryId && !catEntityId) {
+              catEntityId = partner.categoryId;
+            }
           }
 
           const sourceAccId = accountIdMap.get(sourceAccEntityId);

@@ -296,6 +296,71 @@ describe("importYnab4 full import", () => {
     expect(splitR.subTransactions[1]!.transferAccountId).toBeTruthy();
   });
 
+  it("orients liquidation transfers (off-budget→on-budget) to the on-budget account as source", async () => {
+    // Regression: a liquidation/sale from an off-budget account to an
+    // on-budget account should be stored with the on-budget account as
+    // the source and a positive amount, so spending trends doesn't
+    // count it as positive spending.
+    const data = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "RRSP", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Savings, Investments",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Retirement" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc2",
+          targetAccountId: "acc1",
+          transferTransactionId: "t2",
+          date: "2026-01-15",
+          amount: -300,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc1",
+          categoryId: null,
+        },
+        {
+          entityId: "t2",
+          accountId: "acc1",
+          targetAccountId: "acc2",
+          transferTransactionId: "t1",
+          date: "2026-01-15",
+          amount: 300,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:acc2",
+          categoryId: "sc1",
+        },
+      ],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    await importYnab4(db, data);
+    const budget = await getBudgetData(db);
+
+    // Should be exactly 1 transaction (the deduplicated transfer row)
+    expect(budget.transactions).toHaveLength(1);
+    const tx = budget.transactions[0]!;
+
+    // The on-budget account (Chequing) should be the source with a
+    // positive amount, and the category should be preserved.
+    const chequing = budget.accounts.find((a) => a.name === "Chequing")!;
+    const rrsp = budget.accounts.find((a) => a.name === "RRSP")!;
+    expect(tx.accountId).toBe(chequing.id);
+    expect(tx.transferAccountId).toBe(rrsp.id);
+    expect(Number(tx.amount)).toBe(30000);
+    expect(tx.categoryId).not.toBeNull();
+    expect(tx.payee).toBe("Transfer : RRSP");
+  });
+
   it("recomputes balances correctly without double-counting transfers or split parents", async () => {
     await importYnab4(db, ynabData);
     const { accounts } = await getBudgetData(db);
