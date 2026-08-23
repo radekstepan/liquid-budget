@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, Transaction, TransactionFlagColor } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
   computeRunningBalances,
   frequencyLabel,
@@ -98,6 +98,7 @@ export const TransactionsView = memo(function TransactionsView({
   onAdd,
   onAddTransfer,
   onEdit,
+  onBulkEdit,
   onDelete,
   onReconcile,
   onCycleStatus,
@@ -120,12 +121,13 @@ export const TransactionsView = memo(function TransactionsView({
   onAdd: () => void;
   onAddTransfer?: () => void;
   onEdit: (id: number) => void;
+  onBulkEdit?: (ids: number[]) => void;
   onDelete: (id: number) => void;
   onReconcile: (accountId: number) => void;
   onCycleStatus: (id: number) => void;
   onFlag: (id: number, color: TransactionFlagColor | null) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
-  onBulkUpdate?: (ids: number[], patch: { status?: "u" | "c" | "r"; categoryId?: number | null }) => Promise<void> | void;
+  onBulkUpdate?: (ids: number[], patch: BulkUpdateTransactionPatch) => Promise<void> | void;
   onAddRecurring?: () => void;
   onAddRecurringTransfer?: () => void;
   onEditRecurring?: (id: number) => void;
@@ -587,27 +589,18 @@ export const TransactionsView = memo(function TransactionsView({
               variant="default"
               size="sm"
               className="!py-0.5 !px-2 text-[11px]"
-              onClick={async () => {
+              onClick={() => {
                 const ids = Array.from(selectedIds);
-                setSelectedIds(new Set());
-                if (onBulkUpdate) await onBulkUpdate(ids, { status: "c" });
-                else for (const id of ids) onCycleStatus(id);
+                if (ids.length === 1 && ids[0] !== undefined) {
+                  onEdit(ids[0]);
+                } else if (onBulkEdit) {
+                  onBulkEdit(ids);
+                } else if (ids.length > 0 && ids[0] !== undefined) {
+                  onEdit(ids[0]);
+                }
               }}
             >
-              Mark Cleared
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="!py-0.5 !px-2 text-[11px]"
-              onClick={async () => {
-                const ids = Array.from(selectedIds);
-                setSelectedIds(new Set());
-                if (onBulkUpdate) await onBulkUpdate(ids, { status: "u" });
-                else for (const id of ids) onCycleStatus(id);
-              }}
-            >
-              Mark Uncleared
+              Edit{selectedIds.size > 1 ? ` (${selectedIds.size})` : ""}
             </Button>
             <Button
               variant="danger"

@@ -262,6 +262,8 @@ describe("TransactionsView", () => {
 
   it("supports multi-selection and bulk actions", async () => {
     const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    const onBulkEdit = vi.fn();
     const onBulkDelete = vi.fn();
     const onBulkUpdate = vi.fn();
 
@@ -270,7 +272,8 @@ describe("TransactionsView", () => {
         data={data}
         accountFilter={null}
         onAdd={() => {}}
-        onEdit={() => {}}
+        onEdit={onEdit}
+        onBulkEdit={onBulkEdit}
         onDelete={() => {}}
         onReconcile={() => {}}
         onCycleStatus={() => {}}
@@ -281,19 +284,31 @@ describe("TransactionsView", () => {
 
     const rowCheckboxes = screen.getAllByRole("checkbox");
     const firstRowCheckbox = rowCheckboxes[1]!;
+    const secondRowCheckbox = rowCheckboxes[2]!;
     fireEvent.click(firstRowCheckbox);
 
     expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /mark cleared/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /mark uncleared/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /mark cleared/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /mark uncleared/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /delete \(1\)/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /mark cleared/i }));
-    expect(onBulkUpdate).toHaveBeenCalledWith(expect.any(Array), { status: "c" });
+    // Clicking Edit with 1 selected calls onEdit
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    expect(onEdit).toHaveBeenCalledWith(expect.any(Number));
 
-    fireEvent.click(firstRowCheckbox);
-    expect(screen.getByRole("button", { name: /delete \(1\)/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /delete \(1\)/i }));
+    // Select second row -> Edit (2)
+    fireEvent.click(secondRowCheckbox);
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    const editMultipleBtn = screen.getByRole("button", { name: /edit \(2\)/i });
+    expect(editMultipleBtn).toBeInTheDocument();
+
+    // Clicking Edit with >1 calls onBulkEdit
+    fireEvent.click(editMultipleBtn);
+    expect(onBulkEdit).toHaveBeenCalledWith(expect.any(Array));
+
+    expect(screen.getByRole("button", { name: /delete \(2\)/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /delete \(2\)/i }));
     expect(onBulkDelete).toHaveBeenCalledWith(expect.any(Array));
   });
 

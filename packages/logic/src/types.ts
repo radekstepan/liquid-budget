@@ -114,6 +114,18 @@ export type Transaction = {
   reconciledAt?: string | null;
 };
 
+export type BulkUpdateTransactionPatch = {
+  status?: ClearedStatus;
+  categoryId?: number | null;
+  flagColor?: TransactionFlagColor | null;
+  date?: string;
+  payee?: string;
+  memo?: string | null;
+  amount?: number;
+  accountId?: number;
+  incomeMonth?: string | null;
+};
+
 export type SubTransaction = {
   /**
    * Nullable when the subtransaction is a transfer to another account.

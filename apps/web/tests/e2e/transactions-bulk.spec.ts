@@ -67,52 +67,64 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
   await expect(cb2).not.toBeChecked();
 });
 
-test("bulk marks selected rows as Cleared and Uncleared", async ({ page }) => {
+test("bulk edits selected rows with field isolation and confirmation step", async ({ page }) => {
   const stamp = Date.now();
-  const payee1 = `PW BulkClr 1 ${stamp}`;
-  const payee2 = `PW BulkClr 2 ${stamp}`;
+  const payee1 = `PW BulkEdit 1 ${stamp}`;
+  const payee2 = `PW BulkEdit 2 ${stamp}`;
+  const commonPayee = `PW Common Bulk ${stamp}`;
 
-  // Create two uncleared transactions
-  for (const p of [payee1, payee2]) {
+  // Create two distinct transactions with different amounts
+  const txConfigs = [
+    { payee: payee1, amount: "20.00", date: "2026-09-01" },
+    { payee: payee2, amount: "40.00", date: "2026-09-02" },
+  ];
+
+  for (const cfg of txConfigs) {
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
-    await modal.locator('input[inputmode="decimal"]').first().fill("20.00");
-    await modal.locator('input[type="date"]').first().fill("2026-09-01");
-    await fillSearchlist(modal, "e.g. Whole Foods", p);
-    // Uncheck cleared to create uncleared transaction
-    await modal.getByText("Cleared (bank has processed this)").click();
+    await modal.locator('input[inputmode="decimal"]').first().fill(cfg.amount);
+    await modal.locator('input[type="date"]').first().fill(cfg.date);
+    await fillSearchlist(modal, "e.g. Whole Foods", cfg.payee);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
-  await expect(row1.locator(".y-cleared")).toHaveText("U");
-  await expect(row2.locator(".y-cleared")).toHaveText("U");
+  await expect(row1).toBeVisible();
+  await expect(row2).toBeVisible();
 
   // Select both rows
   await row1.locator('input[type="checkbox"]').click();
   await row2.locator('input[type="checkbox"]').click();
   await expect(page.getByText("2 selected")).toBeVisible();
 
-  // Bulk mark cleared
-  await page.getByRole("button", { name: "Mark Cleared" }).click();
-  await expect(page.getByText("2 selected")).toBeHidden();
+  // Click Edit (2) button
+  await page.getByRole("button", { name: "Edit (2)" }).click();
 
-  // Verify both are now cleared
-  await expect(row1.locator(".y-cleared")).toHaveText("C");
-  await expect(row2.locator(".y-cleared")).toHaveText("C");
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit 2 Transactions")).toBeVisible();
 
-  // Re-select both rows and mark uncleared
-  await row1.locator('input[type="checkbox"]').click();
-  await row2.locator('input[type="checkbox"]').click();
-  await expect(page.getByText("2 selected")).toBeVisible();
-  await page.getByRole("button", { name: "Mark Uncleared" }).click();
-  await expect(page.getByText("2 selected")).toBeHidden();
+  // Enable Payee field only
+  await editModal.getByText("Payee", { exact: true }).click();
+  await fillSearchlist(editModal, "e.g. Target", commonPayee);
 
-  // Verify both are uncleared
-  await expect(row1.locator(".y-cleared")).toHaveText("U");
-  await expect(row2.locator(".y-cleared")).toHaveText("U");
+  // Review Changes
+  await editModal.getByRole("button", { name: /Review Changes/i }).click();
+
+  // Confirm step
+  await expect(editModal.getByText("Confirm Changes (2 Transactions)")).toBeVisible();
+  await expect(editModal.getByText(commonPayee)).toBeVisible();
+
+  // Apply Changes
+  await editModal.getByRole("button", { name: /Confirm & Update 2 Transactions/i }).click();
+  await expect(editModal).toBeHidden();
+
+  // Verify both rows now have the updated payee while keeping their original amounts
+  const updatedRows = page.getByRole("row").filter({ hasText: commonPayee });
+  await expect(updatedRows).toHaveCount(2);
+  await expect(page.getByRole("row").filter({ hasText: "20.00" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "40.00" })).toBeVisible();
 });
 
 test("bulk deletes selected transactions", async ({ page }) => {

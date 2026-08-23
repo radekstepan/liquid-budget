@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, DuplicateAnalysisResult, ImportSummary, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -31,6 +31,7 @@ import { ProjectionsView } from "./ProjectionsView.js";
 import { SettingsView } from "./SettingsView.js";
 import {
   TransactionModal,
+  BulkEditTransactionsModal,
   CategoryModal,
   GroupModal,
   RecurringModal,
@@ -44,6 +45,7 @@ type ModalState =
   | { kind: "none" }
   | { kind: "addTransaction"; defaultDate?: string; mode?: "single" | "transfer" }
   | { kind: "editTransaction"; transactionId: number }
+  | { kind: "bulkEditTransactions"; transactionIds: number[] }
   | { kind: "recurring"; mode?: "single" | "transfer" }
   | { kind: "editRecurring"; recurringId: number }
   | { kind: "account" }
@@ -99,7 +101,7 @@ export type BudgetAppApi = {
   bulkDeleteTransactions?: (ids: number[]) => Promise<void>;
   bulkUpdateTransactions?: (
     ids: number[],
-    patch: { status?: "u" | "c" | "r"; categoryId?: number | null }
+    patch: BulkUpdateTransactionPatch
   ) => Promise<void>;
   addRecurring: (v: {
     accountId: number;
@@ -753,6 +755,7 @@ export function BudgetApp({
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
+              onBulkEdit={(ids) => setModal({ kind: "bulkEditTransactions", transactionIds: ids })}
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
               onCycleStatus={cycleStatus}
@@ -912,6 +915,23 @@ export function BudgetApp({
           }}
           onDelete={async () => {
             await api.deleteTransaction(editingTransaction.id);
+            setModal({ kind: "none" });
+          }}
+        />
+      )}
+      {modal.kind === "bulkEditTransactions" && (
+        <BulkEditTransactionsModal
+          accounts={data.accounts}
+          categories={data.categories}
+          groups={data.groups}
+          payees={payeeOptions}
+          transactionIds={modal.transactionIds}
+          transactions={data.transactions.filter((t) => modal.transactionIds.includes(t.id))}
+          onClose={() => setModal({ kind: "none" })}
+          onSave={async (patch) => {
+            if (api.bulkUpdateTransactions) {
+              await api.bulkUpdateTransactions(modal.transactionIds, patch);
+            }
             setModal({ kind: "none" });
           }}
         />

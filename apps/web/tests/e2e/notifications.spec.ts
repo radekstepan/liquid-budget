@@ -317,14 +317,13 @@ test.describe("excluded operations", () => {
     await expect(page.locator(".y-toast").filter({ hasText: /updated|added|created/ })).toHaveCount(0);
   });
 
-  test("status-only bulk update does not emit a success toast", async ({ page }) => {
+  test("status-only update does not emit a success toast", async ({ page }) => {
     await gotoAllTransactions(page);
     const row = page.getByRole("row").filter({ hasText: "SAP Concur" }).first();
-    // Select via the row checkbox (a plain row click opens the edit modal).
-    await row.getByRole("checkbox").first().check();
-    await page.getByRole("button", { name: /Mark Cleared/ }).click();
+    // Toggle cleared flag directly on row
+    await row.locator(".y-cleared").click();
 
-    // The status-only bulk update is excluded from success notifications.
+    // The status-only update is excluded from success notifications.
     await expect(page.getByText("Updated 1 transaction.")).toHaveCount(0);
     await expect(page.locator(".y-toast").filter({ hasText: "Updated" })).toHaveCount(0);
   });

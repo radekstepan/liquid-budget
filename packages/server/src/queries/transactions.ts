@@ -1,11 +1,13 @@
 import { eq, sql } from "drizzle-orm";
 import type {
+  BulkUpdateTransactionPatch,
   ClearedStatus,
   TransactionDuplicateFlag,
   TransactionFlagColor,
   TransactionFlagState,
 } from "@ynab/logic";
-import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";import type { Database } from "../client.js";
+import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
+import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
@@ -818,12 +820,6 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
   }
 }
 
-export type BulkUpdateTransactionPatch = {
-  status?: "u" | "c" | "r";
-  categoryId?: number | null;
-  flagColor?: TransactionFlagColor | null;
-};
-
 /**
  * Bulk update transactions in an atomic transaction.
  */
@@ -834,6 +830,8 @@ export async function bulkUpdateTransactions(
 ) {
   if (!ids || ids.length === 0) return [];
   const updated: any[] = [];
+  const renameRulesToLearn: { from: string; to: string }[] = [];
+
   db.run(sql`BEGIN`);
   try {
     for (const id of ids) {
@@ -851,14 +849,73 @@ export async function bulkUpdateTransactions(
           422
         );
       }
+
+      let isSplitParent = false;
+      if (patch.accountId != null || patch.amount != null) {
+        const isParent = existing.parentId == null && existing.transferAccountId == null;
+        const hasChildren = isParent && (await childCount(db, id)) > 0;
+        isSplitParent = isParent && hasChildren;
+
+        if (isSplitParent) {
+          if ("amount" in patch && patch.amount !== undefined) {
+            throw new TransactionError("cannot change amount of a split parent; edit children");
+          }
+          if ("accountId" in patch && patch.accountId !== undefined) {
+            throw new TransactionError("cannot change account of a split parent");
+          }
+        }
+      }
+
+      const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
+      const newAmount = patch.amount != null ? assertValidAmount(patch.amount) : Number(existing.amount);
+
+      if (patch.accountId != null || patch.amount != null) {
+        if (existing.transferAccountId != null) {
+          await applyBalance(db, existing.accountId, -Number(existing.amount));
+          await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+          await applyBalance(db, newAccountId, newAmount);
+          await applyBalance(db, existing.transferAccountId, -newAmount);
+        } else if (!isSplitParent) {
+          if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
+            await applyBalance(db, existing.accountId, -Number(existing.amount));
+            if (newAccountId !== existing.accountId) {
+              await applyBalance(db, newAccountId, newAmount);
+            } else {
+              await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+            }
+          }
+        }
+      }
+
       const setFields: Record<string, unknown> = {};
       if (patch.status !== undefined) setFields.status = patch.status;
-      if (patch.categoryId !== undefined) {
-        setFields.categoryId = patch.categoryId;
+      if ("categoryId" in patch) {
+        setFields.categoryId = patch.categoryId ?? null;
       }
       if ("flagColor" in patch && patch.flagColor !== undefined) {
         setFields.flagColor = sanitizeFlagColor(patch.flagColor);
       }
+      if (patch.date != null) setFields.date = String(patch.date);
+      if (patch.payee != null) setFields.payee = String(patch.payee);
+      if ("memo" in patch) setFields.memo = patch.memo ?? null;
+      if (patch.amount != null) setFields.amount = newAmount;
+      if (patch.accountId != null) setFields.accountId = newAccountId;
+      if ("incomeMonth" in patch) setFields.incomeMonth = patch.incomeMonth ?? null;
+
+      if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
+        const onBudget = await isAccountOnBudget(db, newAccountId);
+        const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
+        const isIncome = (
+          existing.transferAccountId == null &&
+          !isSplitParent &&
+          existing.parentId == null &&
+          finalCatId == null &&
+          newAmount > 0 &&
+          onBudget
+        );
+        setFields.isIncome = isIncome;
+      }
+
       if (Object.keys(setFields).length > 0) {
         const [row] = await db
           .update(transactions)
@@ -867,8 +924,27 @@ export async function bulkUpdateTransactions(
           .returning();
         if (row) updated.push(row);
       }
+
+      if (
+        patch.payee != null &&
+        String(patch.payee).trim() !== existing.payee.trim() &&
+        existing.transferAccountId == null &&
+        existing.parentId == null &&
+        !isSplitParent
+      ) {
+        renameRulesToLearn.push({ from: existing.payee, to: String(patch.payee) });
+      }
     }
     db.run(sql`COMMIT`);
+
+    for (const rule of renameRulesToLearn) {
+      try {
+        await learnRenameRuleFromPayees(db, rule.from, rule.to);
+      } catch (learnErr) {
+        console.error("[transactions] failed to learn rename rule in bulk update:", learnErr);
+      }
+    }
+
     return updated;
   } catch (err) {
     db.run(sql`ROLLBACK`);
