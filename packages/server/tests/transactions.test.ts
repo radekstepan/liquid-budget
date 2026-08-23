@@ -856,6 +856,33 @@ describe("transactions queries", () => {
       expect(res).toHaveLength(2);
     });
 
+    it("updates payee, memo, date and category on multiple transactions", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -1000, payee: "Old Payee", status: "u", categoryId: 1, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 2, accountId: 1, amount: -2000, payee: "Old Payee", status: "u", categoryId: 1, transferAccountId: null, parentId: null },
+      ]);
+      mock.respondWithNth("select:accounts", 2, [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [
+        { id: 1, payee: "New Payee", memo: "New Memo", date: "2026-09-01", categoryId: 3 },
+        { id: 2, payee: "New Payee", memo: "New Memo", date: "2026-09-01", categoryId: 3 },
+      ]);
+      mock.respondWith("select:rename_rules", []);
+      mock.respondWith("insert:rename_rules", [
+        { id: 1, sourcePattern: "Old Payee", targetPayee: "New Payee", createdAt: "2026-01-01T00:00:00.000Z" },
+      ]);
+
+      const res = await bulkUpdateTransactions(mock.db, [1, 2], {
+        payee: "New Payee",
+        memo: "New Memo",
+        date: "2026-09-01",
+        categoryId: 3,
+      });
+      expect(res).toHaveLength(2);
+    });
+
     it("rejects changing the flag of a duplicate-flagged transaction", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, status: "c", categoryId: 1, transferAccountId: null, flagColor: "duplicate" },

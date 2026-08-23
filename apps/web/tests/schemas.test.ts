@@ -82,6 +82,27 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
         TransactionBulkUpdateSchema.safeParse({ ids: [1, 2], patch: { status: "c" } }).success
       ).toBe(true);
       expect(TransactionBulkUpdateSchema.safeParse({ ids: [1], patch: {} }).success).toBe(true);
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1, 2, 3],
+          patch: {
+            payee: "Target",
+            date: "2026-09-01",
+            memo: "Grocery run",
+            amount: -5400,
+            accountId: 2,
+            categoryId: 5,
+            flagColor: "blue",
+            incomeMonth: "2026-10",
+          },
+        }).success
+      ).toBe(true);
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1],
+          patch: { date: "invalid-date" },
+        }).success
+      ).toBe(false);
     });
   });
 

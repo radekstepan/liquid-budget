@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { BudgetData, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -272,7 +272,7 @@ export function BudgetAppShell({
     },
     bulkUpdateTransactions: async (
       ids: number[],
-      patch: { status?: "u" | "c" | "r"; categoryId?: number | null }
+      patch: BulkUpdateTransactionPatch
     ) => {
       let snapshot: BudgetData | null = null;
       setData((prev) => {
@@ -285,11 +285,26 @@ export function BudgetAppShell({
             ...x,
             ...(patch.status !== undefined ? { status: patch.status } : {}),
             ...(patch.categoryId !== undefined ? { categoryId: patch.categoryId } : {}),
+            ...(patch.flagColor !== undefined ? { flagColor: patch.flagColor } : {}),
+            ...(patch.date !== undefined ? { date: patch.date } : {}),
+            ...(patch.payee !== undefined ? { payee: patch.payee } : {}),
+            ...(patch.memo !== undefined ? { memo: patch.memo ?? "" } : {}),
+            ...(patch.amount !== undefined ? { amount: String(patch.amount) } : {}),
+            ...(patch.accountId !== undefined ? { accountId: patch.accountId } : {}),
+            ...(patch.incomeMonth !== undefined ? { incomeMonth: patch.incomeMonth } : {}),
           };
         });
         return { ...prev, transactions, budgetIndex: undefined };
       });
-      const isStatusOnly = patch.categoryId === undefined;
+      const isStatusOnly =
+        patch.categoryId === undefined &&
+        patch.payee === undefined &&
+        patch.memo === undefined &&
+        patch.date === undefined &&
+        patch.amount === undefined &&
+        patch.accountId === undefined &&
+        patch.flagColor === undefined &&
+        patch.incomeMonth === undefined;
       return withSync(() =>
         runMutation(async () => {
           try {

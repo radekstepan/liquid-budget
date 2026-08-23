@@ -10,6 +10,7 @@ export { ProjectionsView } from "./ProjectionsView.js";
 export { SettingsView } from "./SettingsView.js";
 export {
   TransactionModal,
+  BulkEditTransactionsModal,
   CategoryModal,
   GroupModal,
   RecurringModal,

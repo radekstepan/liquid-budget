@@ -50,6 +50,12 @@ export const TransactionBulkUpdateSchema = z.object({
     status: z.enum(["u", "c", "r"]).optional(),
     categoryId: z.number().int().positive().nullable().optional(),
     flagColor: TransactionFlagSchema.nullable().optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    payee: z.string().max(255).optional(),
+    memo: z.string().max(1000).nullable().optional(),
+    amount: z.number().int().optional(),
+    accountId: z.number().int().positive().optional(),
+    incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   }),
 });
 

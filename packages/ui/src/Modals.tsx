@@ -7,6 +7,8 @@ import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, ty
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
+export { BulkEditTransactionsModal } from "./BulkEditModal.js";
+
 const inputClass = "w-full py-[3px]";
 
 export type TransactionSavePayload = {
