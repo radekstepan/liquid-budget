@@ -590,4 +590,27 @@ describe("SpendingTrendsReport", () => {
     expect(screen.getByText("Groceries Transactions")).toBeInTheDocument();
     expect(screen.getByText("Whole Foods")).toBeInTheDocument();
   });
+
+  it("resets drilldown to root All Categories when resetKey changes", () => {
+    const data = makeTestData();
+    const { rerender } = render(
+      <SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" resetKey={0} />
+    );
+
+    // Drill into Everyday Expenses -> Groceries
+    fireEvent.click(screen.getByText("Everyday Expenses"));
+    fireEvent.click(screen.getByText("Groceries"));
+    expect(screen.getByText("Groceries Transactions")).toBeInTheDocument();
+
+    // Rerender with incremented resetKey
+    rerender(
+      <SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" resetKey={1} />
+    );
+
+    // Should return to root All Categories with Master Category table
+    expect(screen.queryByText("Groceries Transactions")).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
+    expect(screen.getByText("Everyday Expenses")).toBeInTheDocument();
+    expect(screen.getByText("Monthly Bills")).toBeInTheDocument();
+  });
 });

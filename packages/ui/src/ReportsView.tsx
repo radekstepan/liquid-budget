@@ -32,6 +32,7 @@ export const ReportsView = memo(function ReportsView({
   month,
   minYear,
   maxYear,
+  resetKey,
 }: {
   data: BudgetData;
   month: string;
@@ -40,6 +41,7 @@ export const ReportsView = memo(function ReportsView({
   onSetMonth?: (m: string) => void;
   minYear?: number;
   maxYear?: number;
+  resetKey?: number;
 }) {
   const allMonths = useMemo(() => {
     const thisMonth = todayISO().slice(0, 7);
@@ -292,7 +294,12 @@ export const ReportsView = memo(function ReportsView({
 
         {sub === "trends" && (
           <div className="h-full p-4">
-            <SpendingTrendsReport data={data} startMonth={actualStart} endMonth={actualEnd} />
+            <SpendingTrendsReport
+              data={data}
+              startMonth={actualStart}
+              endMonth={actualEnd}
+              resetKey={resetKey}
+            />
           </div>
         )}
 
