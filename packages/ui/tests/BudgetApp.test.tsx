@@ -117,6 +117,36 @@ describe("BudgetApp", () => {
     expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
   });
 
+  it("navigates to relevant account and checks the transaction when clicking a transaction in Spending Trends", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+
+    // Navigate to Reports -> Spending Trends
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Spending Trends" }));
+
+    // Drill down: Housing -> Mortgage Interest
+    fireEvent.click(screen.getByText("Housing"));
+    fireEvent.click(screen.getAllByText("Mortgage Interest")[0]!);
+
+    // Find the category transaction row for TD Bank and click it
+    const tdBankRow = screen.getAllByText("TD Bank")[0]!.closest("tr")!;
+    expect(tdBankRow).toBeInTheDocument();
+    fireEvent.click(tdBankRow);
+
+    // Should navigate to Transactions view with TD Unlimited Chequing account active
+    expect(screen.getAllByText("TD Unlimited Chequing").length).toBeGreaterThanOrEqual(1);
+
+    // Summary bar should show 1 selected
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    // The transaction row in the register should be selected and checked
+    const selectedRow = document.querySelector("tr.y-row--selected");
+    expect(selectedRow).not.toBeNull();
+    const checkbox = selectedRow!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
+
   it("renders the Settings view with rename rules and calls the api on add", async () => {
     const addRenameRule = vi.fn(async () => {});
     const updateRenameRule = vi.fn(async () => {});

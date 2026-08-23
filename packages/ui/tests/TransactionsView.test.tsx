@@ -486,6 +486,36 @@ describe("TransactionsView", () => {
       // Register table + scheduled transactions drawer table.
       expect(stickyHeaders.length).toBe(2);
     });
+
+    it("checks and selects the transaction specified by focusTransaction", () => {
+      const data = makeSeedBudgetData();
+      // data has transaction with id 2
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={null}
+          focusTransaction={{ id: 2, nonce: 1 }}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+          onFlag={() => {}}
+        />
+      );
+
+      // Row with data-txn-id="2" should have is-sel class and its checkbox should be checked
+      const row = document.querySelector('tr[data-txn-id="2"]');
+      expect(row).not.toBeNull();
+      expect(row!.classList.contains("is-sel")).toBe(true);
+
+      const checkbox = row!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      expect(checkbox).not.toBeNull();
+      expect(checkbox.checked).toBe(true);
+
+      // Summary bar should show 1 selected
+      expect(screen.getByText("1 selected")).toBeInTheDocument();
+    });
   });
 });
 

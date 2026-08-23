@@ -432,12 +432,14 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
   selectedMonth,
   onClearMonth,
   accountMap,
+  onSelectTransaction,
 }: {
   categoryName: string | null | undefined;
   transactions: Transaction[];
   selectedMonth: string | null;
   onClearMonth: () => void;
   accountMap: Map<number, string>;
+  onSelectTransaction?: (transaction: Transaction) => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -496,7 +498,9 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
                 return (
                   <tr
                     key={t.id}
-                    className={`y-row ${idx % 2 === 1 ? "alt" : ""}`}
+                    className={`y-row ${idx % 2 === 1 ? "alt" : ""} cursor-pointer hover:bg-[var(--y-row-sel)]`}
+                    onClick={() => onSelectTransaction?.(t)}
+                    title={`Click to view transaction in ${accountMap.get(t.accountId) ?? "Account"}`}
                   >
                     <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
                       {t.date}
@@ -534,12 +538,14 @@ export function SpendingTrendsReport({
   endMonth,
   activeCategoryIds: initialActiveCategoryIds,
   resetKey,
+  onSelectTransaction,
 }: {
   data: BudgetData;
   startMonth: string;
   endMonth: string;
   activeCategoryIds?: Set<number>;
   resetKey?: number;
+  onSelectTransaction?: (transaction: Transaction) => void;
 }) {
   const gid = useId();
   const { ref: chartContainerRef, size } = useElementSize<HTMLDivElement>();
@@ -1466,6 +1472,7 @@ export function SpendingTrendsReport({
               selectedMonth={selectedMonth}
               onClearMonth={handleClearMonth}
               accountMap={accountMap}
+              onSelectTransaction={onSelectTransaction}
             />
           ) : (
             /* Constituents Breakdown Table */
