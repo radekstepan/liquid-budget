@@ -24,6 +24,10 @@ class MockResizeObserver {
 beforeAll(() => {
   (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
     MockResizeObserver;
+  globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  };
 });
 
 function txn(
@@ -643,4 +647,50 @@ describe("SpendingTrendsReport", () => {
       })
     );
   });
+
+  it("shows breakdown segments in hover popover when multiple categories exist in a month", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    const chartArea = document.querySelector(".relative.min-h-\\[220px\\]")!;
+    // Hover over the first month (April 2026, which has Everyday Expenses and Monthly Bills)
+    fireEvent.mouseMove(chartArea, { clientX: 100, clientY: 100 });
+
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).not.toBeNull();
+    expect(tip.textContent).toContain("Apr 2026");
+    expect(tip.textContent).toContain("Total: $1,450.00");
+    // Multi-category month should show individual segment lines and percentages
+    expect(tip.textContent).toContain("Monthly Bills");
+    expect(tip.textContent).toContain("$1,200.00");
+    expect(tip.textContent).toContain("(83%)");
+    expect(tip.textContent).toContain("Everyday Expenses");
+    expect(tip.textContent).toContain("$250.00");
+    expect(tip.textContent).toContain("(17%)");
+  });
+
+  it("does not duplicate info or show 100 percent breakdown line in hover popover when only 1 category exists", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    // Drill down to a single category: Everyday Expenses -> Groceries
+    fireEvent.click(screen.getByText("Everyday Expenses"));
+    fireEvent.click(screen.getByText("Groceries"));
+
+    const chartArea = document.querySelector(".relative.min-h-\\[220px\\]")!;
+    // Hover over April 2026 (only Groceries = $200)
+    fireEvent.mouseMove(chartArea, { clientX: 100, clientY: 100 });
+
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).not.toBeNull();
+    expect(tip.textContent).toContain("Apr 2026");
+    expect(tip.textContent).toContain("Total: $200.00");
+    // Should NOT show the redundant segment breakdown line with 100%
+    expect(tip.textContent).not.toContain("100%");
+    expect(tip.textContent).not.toContain("(100%)");
+    // Only total is shown in tooltip, not a duplicate Groceries row
+    const tipLabels = tip.querySelectorAll(".flex.items-center.justify-between");
+    expect(tipLabels.length).toBe(0);
+  });
 });
+

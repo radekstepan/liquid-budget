@@ -1069,7 +1069,7 @@ export function SpendingTrendsReport({
         <div className="mb-1 text-[12px] font-bold text-white">
           {totalLabel} {fmt(mPoint.total)}
         </div>
-        {mPoint.segments.length > 0 && (
+        {mPoint.segments.length > 1 && (
           <div className="mt-1 border-t border-[rgba(255,255,255,0.15)] pt-1 space-y-[2px]">
             {mPoint.segments.map((s, idx) => {
               const color = colorMap.get(s.id) ?? colorAt(idx);
