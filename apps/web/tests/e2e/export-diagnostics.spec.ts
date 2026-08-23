@@ -13,60 +13,27 @@ async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
 }
 
-test("Inspector Settings cog reveals all export and backup options", async ({ page }) => {
+test("Inspector Settings cog reveals Backup YNAB4 option and no CSV/JSON/SQLite options", async ({ page }) => {
   await page.goto("/");
   await waitForReady(page);
 
   await page.getByTitle("Settings").click();
-  await expect(page.getByText("Export as CSV")).toBeVisible();
-  await expect(page.getByText("Export as JSON")).toBeVisible();
-  await expect(page.getByText("Backup SQLite DB")).toBeVisible();
+  await expect(page.getByText("Backup YNAB4")).toBeVisible();
+  await expect(page.getByText("Export as CSV")).toBeHidden();
+  await expect(page.getByText("Export as JSON")).toBeHidden();
+  await expect(page.getByText("Backup SQLite DB")).toBeHidden();
 });
 
 test.describe("API /api/export contracts", () => {
-  test("GET /api/export returns full budget CSV export", async () => {
+  test("GET /api/export returns YNAB4 backup archive", async () => {
     const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
     const res = await ctx.get("/api/export");
     expect(res.status()).toBe(200);
-    expect(res.headers()["content-type"]).toContain("text/csv");
-
-    const text = await res.text();
-    // Headers for various budget sections
-    expect(text).toContain("Account,");
-    expect(text).toContain("Category,");
-    expect(text).toContain("Transaction,");
-    expect(text).toContain("Assignment,");
-    expect(text).toContain("Recurring,");
-    await ctx.dispose();
-  });
-
-  test("GET /api/export?format=json returns complete budget JSON payload", async () => {
-    const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
-    const res = await ctx.get("/api/export?format=json");
-    expect(res.status()).toBe(200);
-    expect(res.headers()["content-type"]).toContain("application/json");
-
-    const body = await res.json();
-    expect(Array.isArray(body.accounts)).toBe(true);
-    expect(Array.isArray(body.groups)).toBe(true);
-    expect(Array.isArray(body.categories)).toBe(true);
-    expect(Array.isArray(body.transactions)).toBe(true);
-    expect(Array.isArray(body.assignments)).toBe(true);
-    expect(Array.isArray(body.recurring)).toBe(true);
-    await ctx.dispose();
-  });
-
-  test("GET /api/export?format=sqlite returns binary SQLite database", async () => {
-    const ctx = await apiRequest.newContext({ baseURL: BASE_URL });
-    const res = await ctx.get("/api/export?format=sqlite");
-    expect(res.status()).toBe(200);
-    expect(res.headers()["content-type"]).toContain("application/x-sqlite3");
+    expect(res.headers()["content-type"]).toBe("application/octet-stream");
+    expect(res.headers()["content-disposition"]).toContain(".y4backup");
 
     const body = await res.body();
-    // SQLite header starts with "SQLite format 3\0"
     expect(body.length).toBeGreaterThan(100);
-    const header = body.subarray(0, 15).toString("utf-8");
-    expect(header).toBe("SQLite format 3");
     await ctx.dispose();
   });
 });
