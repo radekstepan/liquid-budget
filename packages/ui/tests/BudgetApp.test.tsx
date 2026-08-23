@@ -89,6 +89,34 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Spending by Category")).toBeInTheDocument();
   });
 
+  it("resets Spending Trends drilldown to All Categories when Reports sidebar item is clicked", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+
+    // Navigate to Reports
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+
+    // Switch to Spending Trends tab
+    fireEvent.click(screen.getByRole("button", { name: "Spending Trends" }));
+    expect(screen.getByText("All Categories")).toBeInTheDocument();
+
+    // Verify initial state has Master Category header
+    expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
+
+    // Drill down into Housing
+    const housingRow = screen.getByText("Housing");
+    fireEvent.click(housingRow);
+
+    // Now drilled down to Category level
+    expect(screen.getByRole("columnheader", { name: "Category" })).toBeInTheDocument();
+
+    // Click Reports in the sidebar again
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+
+    // Should be reset back to root All Categories
+    expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
+  });
+
   it("renders the Settings view with rename rules and calls the api on add", async () => {
     const addRenameRule = vi.fn(async () => {});
     const updateRenameRule = vi.fn(async () => {});

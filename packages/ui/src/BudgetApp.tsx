@@ -227,6 +227,7 @@ export function BudgetApp({
     return init;
   });
   const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
+  const [reportsResetKey, setReportsResetKey] = useState(0);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [isPending, startTransition] = useTransition();
@@ -497,6 +498,9 @@ export function BudgetApp({
       startTransition(() => {
         setAccountFilter(null);
         setView(v);
+        if (v === "reports") {
+          setReportsResetKey((k) => k + 1);
+        }
         setShowSettingsOverlay(false);
         updateUrl(v, null, month);
       });
@@ -753,6 +757,7 @@ export function BudgetApp({
               month={month}
               minYear={minYear}
               maxYear={maxYear}
+              resetKey={reportsResetKey}
             />
           )}
           {view === "calendar" && (

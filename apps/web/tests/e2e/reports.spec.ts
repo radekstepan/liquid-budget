@@ -204,3 +204,30 @@ test("Spending Trends handles wide multi-year range with readable X-axis stride"
   // Y-axis ticks (~5) + X-axis labels (~6-10) should not exceed 25 total text elements
   expect(count).toBeLessThan(25);
 });
+
+test("clicking Reports in sidebar when drilled down in Spending Trends resets back to root All Categories", async ({ page }) => {
+  await page.getByRole("button", { name: "Spending Trends", exact: true }).click();
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+
+  // Top level constituents list is visible
+  const constituentsTable = panel.locator(".bg-white");
+  await expect(constituentsTable.getByText("Master Category")).toBeVisible();
+
+  // Drill down into a master category
+  const firstGroupRow = constituentsTable.locator(".cursor-pointer").first();
+  await firstGroupRow.click();
+
+  // Drill down into a constituent subcategory
+  const firstCatRow = constituentsTable.locator(".cursor-pointer").first();
+  await firstCatRow.click();
+
+  // Subcategory level shows transactions register table
+  await expect(panel.locator("table.y-table")).toBeVisible();
+
+  // Click "Reports" in the sidebar
+  await page.getByRole("button", { name: "Reports", exact: true }).click();
+
+  // Should now be back at root All Categories with Master Category table
+  await expect(constituentsTable.getByText("Master Category")).toBeVisible();
+});
+

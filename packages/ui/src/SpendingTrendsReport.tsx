@@ -533,11 +533,13 @@ export function SpendingTrendsReport({
   startMonth,
   endMonth,
   activeCategoryIds: initialActiveCategoryIds,
+  resetKey,
 }: {
   data: BudgetData;
   startMonth: string;
   endMonth: string;
   activeCategoryIds?: Set<number>;
+  resetKey?: number;
 }) {
   const gid = useId();
   const { ref: chartContainerRef, size } = useElementSize<HTMLDivElement>();
@@ -558,6 +560,14 @@ export function SpendingTrendsReport({
     x: number;
     y: number;
   } | null>(null);
+
+  // Reset drilldown when resetKey changes (e.g. clicking "Reports" in sidebar)
+  useEffect(() => {
+    setDrillGroupId(null);
+    setDrillCategoryId(null);
+    setSelectedMonth(null);
+    setHover(null);
+  }, [resetKey]);
 
   // Category filter state — persisted in localStorage
   const [filterOpen, setFilterOpen] = useState(false);
