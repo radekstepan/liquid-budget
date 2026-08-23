@@ -91,10 +91,11 @@ describe("SpendingTrendsReport", () => {
     expect(screen.getByText("$1,480.00/mo")).toBeInTheDocument(); // Avg / mo: 4440 / 3 = 1480
 
     // Master categories listed in breakdown table
+    expect(screen.getByRole("columnheader", { name: "Master Category" })).toBeInTheDocument();
     expect(screen.getByText("Monthly Bills")).toBeInTheDocument();
     expect(screen.getByText("Everyday Expenses")).toBeInTheDocument();
 
-    // SVG elements present
+    // SVG elements present and chart container is overflow-hidden
     const svg = document.querySelector("svg");
     expect(svg).not.toBeNull();
   });
@@ -110,6 +111,10 @@ describe("SpendingTrendsReport", () => {
     // Breadcrumb updates
     expect(screen.getByText("All Categories")).toBeInTheDocument();
     expect(screen.getAllByText("Everyday Expenses").length).toBeGreaterThan(0);
+
+    // Table header now says Category instead of Master Category
+    expect(screen.getByRole("columnheader", { name: "Category" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Master Category" })).not.toBeInTheDocument();
 
     // Constituents now show subcategories
     expect(screen.getByText("Groceries")).toBeInTheDocument();
@@ -559,5 +564,30 @@ describe("SpendingTrendsReport", () => {
     expect(avgLine).toBeNull();
     // Avg text label inside chart is still shown
     expect(svg.textContent).toContain("Avg: $400");
+  });
+
+  it("handles mouse hover smoothly when drilled into a category without breaking transaction register", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    // Drill into Everyday Expenses -> Groceries
+    fireEvent.click(screen.getByText("Everyday Expenses"));
+    fireEvent.click(screen.getByText("Groceries"));
+
+    expect(screen.getByText("Groceries Transactions")).toBeInTheDocument();
+    expect(screen.getByText("Whole Foods")).toBeInTheDocument();
+    expect(screen.getByText("Trader Joes")).toBeInTheDocument();
+    expect(screen.getByText("Safeway")).toBeInTheDocument();
+
+    // Hover over the chart container
+    const chartArea = document.querySelector(".relative.min-h-\\[220px\\]")!;
+    expect(chartArea).not.toBeNull();
+
+    // Trigger mousemove on chart container
+    fireEvent.mouseMove(chartArea, { clientX: 200, clientY: 100 });
+
+    // Transactions table remains properly rendered
+    expect(screen.getByText("Groceries Transactions")).toBeInTheDocument();
+    expect(screen.getByText("Whole Foods")).toBeInTheDocument();
   });
 });
