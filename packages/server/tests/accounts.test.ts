@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -7,6 +8,7 @@ import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 import {
+  AccountError,
   createAccount,
   deleteAccount,
   getAccount,
@@ -420,6 +422,361 @@ describe("accounts queries", () => {
 
       const issues = await verifyBalanceIntegrity(db);
       expect(issues).toHaveLength(0);
+    });
+
+    it("re-totals split parent when a transfer child in a >=3 child split is deleted via account deletion", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+      const acctC = await createAccount(db, { name: "Account C" });
+
+      await createTransaction(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 100000,
+      });
+
+      await createTransaction(db, {
+        accountId: acctB.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 50000,
+      });
+
+      await createTransaction(db, {
+        accountId: acctC.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 20000,
+      });
+
+      const group = await createCategoryGroup(db, "General");
+      const cat = await createCategory(db, { name: "Groceries", groupId: group.id });
+
+      // Create a 3-child split on Account A:
+      // Parent: -60000
+      // Child 1: Category (-20000)
+      // Child 2: Transfer to B (-10000)
+      // Child 3: Transfer to C (-30000)
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "Multi-split",
+          memo: "Split across accounts",
+          amount: -60000,
+        },
+        [
+          { categoryId: cat.id, amount: -20000, memo: "groceries" },
+          { transferAccountId: acctB.id, amount: -10000, memo: "to B" },
+          { transferAccountId: acctC.id, amount: -30000, memo: "to C" },
+        ]
+      );
+
+      // Verify intermediate balances
+      // A: 100000 - 60000 = 40000
+      // B: 50000 + 10000 = 60000
+      // C: 20000 + 30000 = 50000
+      expect((await getAccount(db, acctA.id))?.balance).toBe(40000);
+      expect((await getAccount(db, acctB.id))?.balance).toBe(60000);
+      expect((await getAccount(db, acctC.id))?.balance).toBe(50000);
+
+      // Delete Account B
+      await deleteAccount(db, acctB.id);
+
+      // Account B is gone
+      expect(await getAccount(db, acctB.id)).toBeUndefined();
+
+      // Account A balance reversed Child 2's -10000 -> balance becomes 50000
+      expect((await getAccount(db, acctA.id))?.balance).toBe(50000);
+
+      // Account C balance remains 50000
+      expect((await getAccount(db, acctC.id))?.balance).toBe(50000);
+
+      // Split parent on A is re-totaled to (-20000 + -30000) = -50000
+      const [parentRow] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, split.parent.id));
+      expect(parentRow?.amount).toBe(-50000);
+
+      // Remaining children should be 2 (Child 1 and Child 3)
+      const remainingChildren = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.parentId, split.parent.id));
+      expect(remainingChildren).toHaveLength(2);
+      expect(remainingChildren.map((c) => c.amount)).toEqual(
+        expect.arrayContaining([-20000, -30000])
+      );
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("collapses split to 0 children (deletes parent and remaining child) when 2-child split has 1 transfer child deleted via account deletion", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      await createTransaction(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 100000,
+      });
+
+      await createTransaction(db, {
+        accountId: acctB.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 50000,
+      });
+
+      const group = await createCategoryGroup(db, "General");
+      const cat = await createCategory(db, { name: "Groceries", groupId: group.id });
+
+      // Create a 2-child split on Account A:
+      // Parent: -30000
+      // Child 1: Category (-20000)
+      // Child 2: Transfer to B (-10000)
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "2-split",
+          memo: "Split with transfer",
+          amount: -30000,
+        },
+        [
+          { categoryId: cat.id, amount: -20000, memo: "groceries" },
+          { transferAccountId: acctB.id, amount: -10000, memo: "to B" },
+        ]
+      );
+
+      expect((await getAccount(db, acctA.id))?.balance).toBe(70000);
+      expect((await getAccount(db, acctB.id))?.balance).toBe(60000);
+
+      // Delete Account B
+      await deleteAccount(db, acctB.id);
+
+      // Account B is gone
+      expect(await getAccount(db, acctB.id)).toBeUndefined();
+
+      // Account A balance is restored to 100000 (both child 2 and collapsed child 1 balances reversed)
+      expect((await getAccount(db, acctA.id))?.balance).toBe(100000);
+
+      // Split parent and all children should be deleted
+      const parentRow = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, split.parent.id));
+      expect(parentRow).toHaveLength(0);
+
+      const children = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.parentId, split.parent.id));
+      expect(children).toHaveLength(0);
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("handles 2-child split where both children transfer to the deleted account cleanly", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      await createTransaction(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 100000,
+      });
+
+      await createTransaction(db, {
+        accountId: acctB.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 50000,
+      });
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "Dual transfer split",
+          memo: "",
+          amount: -30000,
+        },
+        [
+          { transferAccountId: acctB.id, amount: -10000, memo: "part 1" },
+          { transferAccountId: acctB.id, amount: -20000, memo: "part 2" },
+        ]
+      );
+
+      expect((await getAccount(db, acctA.id))?.balance).toBe(70000);
+      expect((await getAccount(db, acctB.id))?.balance).toBe(80000);
+
+      await deleteAccount(db, acctB.id);
+
+      expect(await getAccount(db, acctB.id)).toBeUndefined();
+      expect((await getAccount(db, acctA.id))?.balance).toBe(100000);
+
+      const parentRow = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, split.parent.id));
+      expect(parentRow).toHaveLength(0);
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("refuses to delete account when counterparty standalone transfer is reconciled", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      const tx = await createTransaction(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Transfer to B",
+        memo: "",
+        amount: -10000,
+        transferAccountId: acctB.id,
+      });
+
+      // Mark transfer transaction reconciled
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, tx.id));
+
+      await expect(deleteAccount(db, acctB.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
+
+      // Account B still exists
+      expect(await getAccount(db, acctB.id)).toBeDefined();
+    });
+
+    it("refuses to delete account when counterparty split child is reconciled", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      const group = await createCategoryGroup(db, "General");
+      const cat = await createCategory(db, { name: "Groceries", groupId: group.id });
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "Split",
+          memo: "",
+          amount: -30000,
+        },
+        [
+          { categoryId: cat.id, amount: -20000, memo: "groceries" },
+          { transferAccountId: acctB.id, amount: -10000, memo: "to B" },
+        ]
+      );
+
+      const transferChild = split.children.find((c) => c.transferAccountId === acctB.id)!;
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, transferChild.id));
+
+      await expect(deleteAccount(db, acctB.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
+
+      expect(await getAccount(db, acctB.id)).toBeDefined();
+    });
+
+    it("refuses to delete account when counterparty split parent is reconciled", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      const group = await createCategoryGroup(db, "General");
+      const cat = await createCategory(db, { name: "Groceries", groupId: group.id });
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "Split",
+          memo: "",
+          amount: -30000,
+        },
+        [
+          { categoryId: cat.id, amount: -20000, memo: "groceries" },
+          { transferAccountId: acctB.id, amount: -10000, memo: "to B" },
+        ]
+      );
+
+      // Reconcile parent
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, split.parent.id));
+
+      await expect(deleteAccount(db, acctB.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
+
+      expect(await getAccount(db, acctB.id)).toBeDefined();
+    });
+
+    it("refuses to delete account when remaining sibling in 1-child collapse is reconciled", async () => {
+      const acctA = await createAccount(db, { name: "Account A" });
+      const acctB = await createAccount(db, { name: "Account B" });
+
+      const group = await createCategoryGroup(db, "General");
+      const cat = await createCategory(db, { name: "Groceries", groupId: group.id });
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-08-01",
+          payee: "Split",
+          memo: "",
+          amount: -30000,
+        },
+        [
+          { categoryId: cat.id, amount: -20000, memo: "groceries" },
+          { transferAccountId: acctB.id, amount: -10000, memo: "to B" },
+        ]
+      );
+
+      const categoryChild = split.children.find((c) => c.categoryId === cat.id)!;
+      // Reconcile category sibling
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, categoryChild.id));
+
+      await expect(deleteAccount(db, acctB.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
+
+      expect(await getAccount(db, acctB.id)).toBeDefined();
     });
   });
 
