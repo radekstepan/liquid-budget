@@ -225,6 +225,15 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
 
   const norm = normaliseInput(patch);
 
+  const effectiveAccountId =
+    "accountId" in patch && patch.accountId != null
+      ? Number(patch.accountId)
+      : existing.accountId;
+
+  if (norm.isTransfer && norm.effectiveTransferAccountId === effectiveAccountId) {
+    throw new RecurringError("transfer account must differ from source account");
+  }
+
   // Validate split children if supplied.
   if (norm.isSplit) {
     const parentAmount =
@@ -232,10 +241,6 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         ? assertValidAmount((patch as UpdateRecurringInput).amount)
         : assertValidAmount(existing.amount);
     assertSplitsBalanced(parentAmount, norm.subTransactions!);
-    const effectiveAccountId =
-      "accountId" in patch && patch.accountId != null
-        ? Number(patch.accountId)
-        : existing.accountId;
     for (const c of norm.subTransactions!) {
       if (c.transferAccountId != null && Number(c.transferAccountId) === Number(effectiveAccountId)) {
         throw new RecurringError("transfer account must differ from source account");
@@ -247,7 +252,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   // changed, but `amount` is — for an existing split entry, the
   // children must still sum to the new amount.
   if (
-    existing.transferAccountId == null &&
+    !norm.isTransfer &&
     !norm.isSplit &&
     !("subTransactions" in patch) &&
     "amount" in patch &&
@@ -274,6 +279,15 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
 
+  if (norm.isSplit) {
+    p.transferAccountId = null;
+    p.categoryId = null;
+  }
+  if (norm.isTransfer) {
+    p.transferAccountId = norm.effectiveTransferAccountId;
+    p.categoryId = null;
+  }
+
   db.run(sql`BEGIN`);
   try {
     const targetAccountId = (p.accountId as number | undefined) ?? existing.accountId;
@@ -286,7 +300,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       await db.update(recurring).set(p).where(eq(recurring.id, id));
     }
 
-    if ("subTransactions" in patch) {
+    if (norm.isTransfer || "subTransactions" in patch) {
       await db
         .delete(recurringSubTransactions)
         .where(eq(recurringSubTransactions.recurringId, id));
@@ -348,7 +362,19 @@ export async function postRecurringTransaction(
     .orderBy(recurringSubTransactions.sort);
 
   let postedTxn;
-  if (children.length > 0) {
+  if (r.transferAccountId != null) {
+    postedTxn = await createTransaction(db, {
+      accountId: r.accountId,
+      categoryId: r.categoryId,
+      date: dateToUse,
+      payee: r.payee,
+      memo: r.memo || "Recurring",
+      amount: Number(r.amount),
+      status: "c",
+      transferAccountId: r.transferAccountId,
+      flagColor: sanitizeFlagColor(r.flagColor),
+    });
+  } else if (children.length > 0) {
     postedTxn = await createSplitWithChildren(
       db,
       {
@@ -376,7 +402,7 @@ export async function postRecurringTransaction(
       memo: r.memo || "Recurring",
       amount: Number(r.amount),
       status: "c",
-      transferAccountId: r.transferAccountId,
+      transferAccountId: null,
       flagColor: sanitizeFlagColor(r.flagColor),
     });
   }

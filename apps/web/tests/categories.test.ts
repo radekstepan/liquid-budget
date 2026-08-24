@@ -41,13 +41,13 @@ describe("PATCH /api/categories (BUG-5.2)", () => {
     const req = new NextRequest("http://localhost:3000/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "group", id: group.id, name: "Renamed Group" }),
+      body: JSON.stringify({ type: "group", id: group!.id, name: "Renamed Group" }),
     });
     const res = await PATCH(req);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.name).toBe("Renamed Group");
-    expect(json.sort).toBe(group.sort);
+    expect(json.sort).toBe(group!.sort);
   });
 
   it("updates sort when only sort is provided, preserving name", async () => {
@@ -57,7 +57,7 @@ describe("PATCH /api/categories (BUG-5.2)", () => {
     const req = new NextRequest("http://localhost:3000/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "group", id: group.id, sort: 88 }),
+      body: JSON.stringify({ type: "group", id: group!.id, sort: 88 }),
     });
     const res = await PATCH(req);
     expect(res.status).toBe(200);
@@ -73,7 +73,7 @@ describe("PATCH /api/categories (BUG-5.2)", () => {
     const req = new NextRequest("http://localhost:3000/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "group", id: group.id, name: "After Both", sort: 99 }),
+      body: JSON.stringify({ type: "group", id: group!.id, name: "After Both", sort: 99 }),
     });
     const res = await PATCH(req);
     expect(res.status).toBe(200);

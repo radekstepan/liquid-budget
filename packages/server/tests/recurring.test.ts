@@ -416,6 +416,70 @@ describe("recurring queries", () => {
       expect(subInserts).toHaveLength(0);
     });
 
+    it("setting transferAccountId deletes existing children and nulls categoryId", async () => {
+      const splitRow = { ...existingRow, amount: -20000, categoryId: null, transferAccountId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("delete:recurring_sub_transactions", []);
+      mock.respondWith("select:recurring", [{ ...splitRow, transferAccountId: 2 }]);
+
+      await updateRecurring(mock.db, 1, { transferAccountId: 2 });
+      const updateCall = mock.calls.find((c) => c.op === "update" && c.table === "recurring");
+      expect(updateCall?.set).toEqual({ transferAccountId: 2, categoryId: null });
+      const calls = mock.calls.map((c) => `${c.op}:${c.table ?? "?"}`);
+      expect(calls).toContain("delete:recurring_sub_transactions");
+    });
+
+    it("installing subTransactions nulls transferAccountId and categoryId", async () => {
+      const transferRow = { ...existingRow, amount: -20000, transferAccountId: 2, categoryId: null };
+      mock.respondWith("select:recurring", [transferRow]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("delete:recurring_sub_transactions", []);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+      mock.respondWith("select:recurring", [{ ...transferRow, transferAccountId: null }]);
+
+      await updateRecurring(mock.db, 1, {
+        subTransactions: [
+          { categoryId: 5, amount: -12000 },
+          { categoryId: 6, amount: -8000 },
+        ],
+      });
+      const updateCall = mock.calls.find((c) => c.op === "update" && c.table === "recurring");
+      expect(updateCall?.set).toEqual({ transferAccountId: null, categoryId: null });
+      const calls = mock.calls.map((c) => `${c.op}:${c.table ?? "?"}`);
+      expect(calls).toContain("delete:recurring_sub_transactions");
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+    });
+
+    it("rejects setting transferAccountId equal to source account on update", async () => {
+      mock.respondWith("select:recurring", [existingRow]);
+      await expect(
+        updateRecurring(mock.db, 1, { transferAccountId: 1 })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "transfer account must differ from source account",
+      });
+    });
+
+    it("validates existing children sum when amount is updated on a split", async () => {
+      const splitRow = { ...existingRow, amount: -20000, categoryId: null, transferAccountId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWith("select:recurring_sub_transactions", [
+        { id: 1, recurringId: 1, categoryId: 5, amount: -12000, memo: "", sort: 0, transferAccountId: null },
+        { id: 2, recurringId: 1, categoryId: 6, amount: -8000, memo: "", sort: 1, transferAccountId: null },
+      ]);
+
+      await expect(
+        updateRecurring(mock.db, 1, { amount: -25000 })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+      });
+    });
+
     it("returns null when the row does not exist", async () => {
       mock.respondWith("select:recurring", []);
       const out = await updateRecurring(mock.db, 99, { payee: "X" });
@@ -514,6 +578,42 @@ describe("recurring queries", () => {
 
       const updateCall = mock.calls.find((c) => c.op === "update" && c.table === "recurring");
       expect(updateCall?.set).toMatchObject({ active: false });
+    });
+
+    it("posts as a transfer when transferAccountId is set even if children exist (flavour alignment)", async () => {
+      const transferWithStaleChildren = {
+        id: 40,
+        accountId: 1,
+        categoryId: null,
+        payee: "Transfer: Savings",
+        amount: -50000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: 2,
+      };
+      mock.respondWithNth("select:recurring", 1, [transferWithStaleChildren]);
+      // Stale children in DB
+      mock.respondWith("select:recurring_sub_transactions", [
+        { id: 101, recurringId: 40, categoryId: 10, amount: -30000, memo: "Old split 1", sort: 0, transferAccountId: null },
+        { id: 102, recurringId: 40, categoryId: 11, amount: -20000, memo: "Old split 2", sort: 1, transferAccountId: null },
+      ]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 400, date: "2026-07-01", amount: -50000, transferAccountId: 2 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...transferWithStaleChildren, nextDate: "2026-08-01" }]);
+
+      await postRecurringTransaction(mock.db, 40);
+
+      // Should have called createTransaction (insert single transaction with transferAccountId: 2)
+      // and NOT createSplitWithChildren (which would insert children transactions)
+      const txnInserts = mock.calls.filter((c) => c.op === "insert" && c.table === "transactions");
+      expect(txnInserts).toHaveLength(1);
+      expect(txnInserts[0]?.values).toMatchObject({
+        accountId: 1,
+        amount: -50000,
+        transferAccountId: 2,
+      });
     });
   });
 });

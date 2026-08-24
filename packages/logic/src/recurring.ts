@@ -199,6 +199,24 @@ export function recurringLiquidFlow(
 
   const sourceKind = accMap.get(r.accountId)?.kind;
 
+  // Transfer recurring
+  if (r.transferAccountId != null) {
+    const destKind = accMap.get(r.transferAccountId)?.kind;
+    if (sourceKind === "liquid" && destKind === "liquid") {
+      // Transfer within liquid pool has 0 net effect on overall liquid cash
+      return 0;
+    }
+    if (sourceKind === "liquid" && destKind !== "liquid") {
+      // Money leaving liquid (e.g. transfer to credit card, loan, or investment)
+      return num(r.amount);
+    }
+    if (sourceKind !== "liquid" && destKind === "liquid") {
+      // Money entering liquid from offbudget / external account
+      return -num(r.amount);
+    }
+    return 0;
+  }
+
   // Split recurring
   if (children.length > 0) {
     return children.reduce((s, c) => {
@@ -218,24 +236,6 @@ export function recurringLiquidFlow(
       }
       return s;
     }, 0);
-  }
-
-  // Transfer recurring
-  if (r.transferAccountId != null) {
-    const destKind = accMap.get(r.transferAccountId)?.kind;
-    if (sourceKind === "liquid" && destKind === "liquid") {
-      // Transfer within liquid pool has 0 net effect on overall liquid cash
-      return 0;
-    }
-    if (sourceKind === "liquid" && destKind !== "liquid") {
-      // Money leaving liquid (e.g. transfer to credit card, loan, or investment)
-      return num(r.amount);
-    }
-    if (sourceKind !== "liquid" && destKind === "liquid") {
-      // Money entering liquid from offbudget / external account
-      return -num(r.amount);
-    }
-    return 0;
   }
 
   // Single recurring

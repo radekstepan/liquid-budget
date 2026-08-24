@@ -167,6 +167,15 @@ describe("netMonthlyAmount", () => {
           accounts
         )
       ).toBe(0);
+
+      // Transfer takes precedence even if stale children are present
+      expect(
+        netMonthlyAmount(
+          base({ accountId: 1, amount: "-50000", transferAccountId: 2 }),
+          [sub({ amount: "-30000" }), sub({ amount: "-20000" })],
+          accounts
+        )
+      ).toBe(0);
     });
   });
 });
