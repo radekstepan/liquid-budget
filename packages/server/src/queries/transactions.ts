@@ -332,6 +332,11 @@ export async function createTransfer(
   transferAccountId: number
 ) {
   assertValidAmount(baseInput.amount);
+  if (baseInput.status === "r") {
+    throw new TransactionError(
+      "cannot directly create a reconciled transaction; use the reconcile flow"
+    );
+  }
   if (transferAccountId === baseInput.accountId) {
     throw new TransactionError("transfer account must differ from source account");
   }
@@ -536,9 +541,15 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
+  if (patch.status === "r") {
+    throw new TransactionError(
+      "cannot set status to 'r'; only the reconcile flow may set 'r'"
+    );
+  }
+
   if (existing.status === "r") {
     const nonStatusKeys = Object.keys(patch).filter((k) => k !== "status");
-    if (nonStatusKeys.length > 0 || patch.status === "r") {
+    if (nonStatusKeys.length > 0) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile the transaction before editing.",
         422
@@ -577,7 +588,11 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.payee != null) p.payee = String(patch.payee);
   if (patch.memo != null) p.memo = String(patch.memo);
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
-  if (patch.status != null) p.status = patch.status;
+  if (patch.status != null) {
+    p.status = patch.status;
+    p.reconciledAt = null;
+    p.reconciliationId = null;
+  }
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("incomeMonth" in patch) p.incomeMonth = patch.incomeMonth ?? null;
   if ("isIncome" in patch) p.isIncome = patch.isIncome;
@@ -737,6 +752,11 @@ export async function updateSplit(
   },
   children: SubTransactionInput[]
 ) {
+  if (parentFields.status === "r") {
+    throw new TransactionError(
+      "cannot set status to 'r'; only the reconcile flow may set 'r'"
+    );
+  }
   const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
   if (!parent) {
     throw new TransactionError("split parent not found", 404);
@@ -780,7 +800,11 @@ export async function updateSplit(
     if (parentFields.date != null) pf.date = String(parentFields.date);
     if (parentFields.payee != null) pf.payee = String(parentFields.payee);
     if (parentFields.memo != null) pf.memo = String(parentFields.memo);
-    if (parentFields.status != null) pf.status = parentFields.status;
+    if (parentFields.status != null) {
+      pf.status = parentFields.status;
+      pf.reconciledAt = null;
+      pf.reconciliationId = null;
+    }
     if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
     if (Object.keys(pf).length > 0) {
       await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
@@ -1038,6 +1062,11 @@ export async function bulkUpdateTransactions(
   patch: BulkUpdateTransactionPatch
 ) {
   if (!ids || ids.length === 0) return [];
+  if (patch.status === "r") {
+    throw new TransactionError(
+      "cannot set status to 'r'; only the reconcile flow may set 'r'"
+    );
+  }
   const updated: any[] = [];
   const renameRulesToLearn: { from: string; to: string }[] = [];
 
@@ -1098,7 +1127,11 @@ export async function bulkUpdateTransactions(
       }
 
       const setFields: Record<string, unknown> = {};
-      if (patch.status !== undefined) setFields.status = patch.status;
+      if (patch.status !== undefined) {
+        setFields.status = patch.status;
+        setFields.reconciledAt = null;
+        setFields.reconciliationId = null;
+      }
       if ("categoryId" in patch) {
         setFields.categoryId = patch.categoryId ?? null;
       }
