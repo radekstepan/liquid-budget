@@ -1126,6 +1126,21 @@ describe("transactions queries", () => {
       expect(deletes).toHaveLength(3);
     });
 
+    it("rejects deleting a split child when the remaining sibling is reconciled with 422 error", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r" },
+      ]);
+
+      await expect(deleteTransaction(mock.db, 2)).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/,
+      });
+    });
+
     it("rolls back transaction and rethrows when an error occurs during deletion", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null },
@@ -1202,6 +1217,21 @@ describe("transactions queries", () => {
       expect(res).toHaveLength(1);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
       expect(deletes).toHaveLength(3);
+    });
+
+    it("rejects bulk deleting a split child when the remaining sibling is reconciled with 422 error", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r" },
+      ]);
+
+      await expect(bulkDeleteTransactions(mock.db, [2])).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/,
+      });
     });
 
     it("bulk deleting 2 children of a 3-child split re-totals then collapses", async () => {
@@ -2006,6 +2036,148 @@ describe("transactions queries", () => {
           .from(schema.transactions)
           .where(eq(schema.transactions.id, transfer.id));
         expect(dbRow?.categoryId).toBe(cat1Id);
+      });
+    });
+
+    describe("Bug 2.7: 1-child collapse reconcile lock", () => {
+      it("deleteTransaction: rejects deleting an unreconciled child when remaining sibling is reconciled (422) and rolls back", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Shopping",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "clothes" },
+            { categoryId: cat2Id, amount: -2000, memo: "groceries" },
+          ]
+        );
+
+        // Mark child 2 as reconciled ("r")
+        const child1 = split.children[0]!;
+        const child2 = split.children[1]!;
+        await db
+          .update(schema.transactions)
+          .set({ status: "r" })
+          .where(eq(schema.transactions.id, child2.id));
+
+        // Attempting to delete child 1 should fail because 1-child collapse would delete reconciled child 2
+        await expect(deleteTransaction(db, child1.id)).rejects.toMatchObject({
+          status: 422,
+          name: "TransactionError",
+          message: /reconciled and locked/,
+        });
+
+        // Verify everything was rolled back
+        const allTx = await db.select().from(schema.transactions);
+        expect(allTx).toHaveLength(3);
+
+        const [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        expect(acct?.balance).toBe(-5000);
+      });
+
+      it("bulkDeleteTransactions: rejects deleting an unreconciled child when remaining sibling is reconciled (422) and rolls back", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Shopping",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "clothes" },
+            { categoryId: cat2Id, amount: -2000, memo: "groceries" },
+          ]
+        );
+
+        // Mark child 2 as reconciled ("r")
+        const child1 = split.children[0]!;
+        const child2 = split.children[1]!;
+        await db
+          .update(schema.transactions)
+          .set({ status: "r" })
+          .where(eq(schema.transactions.id, child2.id));
+
+        // Attempting bulk delete of child 1 should fail
+        await expect(bulkDeleteTransactions(db, [child1.id])).rejects.toMatchObject({
+          status: 422,
+          name: "TransactionError",
+          message: /reconciled and locked/,
+        });
+
+        // Verify everything was rolled back
+        const allTx = await db.select().from(schema.transactions);
+        expect(allTx).toHaveLength(3);
+
+        const [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        expect(acct?.balance).toBe(-5000);
+      });
+
+      it("allows deleting a child from a 3-child split when another sibling is reconciled without collapse", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id, cat3Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Supermarket",
+            memo: "Split items",
+            amount: -6000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "food" },
+            { categoryId: cat2Id, amount: -2000, memo: "coffee" },
+            { categoryId: cat3Id, amount: -1000, memo: "household" },
+          ]
+        );
+
+        const child1 = split.children[0]!;
+        const child2 = split.children[1]!;
+        const child3 = split.children[2]!;
+
+        // Mark child 2 as reconciled ("r")
+        await db
+          .update(schema.transactions)
+          .set({ status: "r" })
+          .where(eq(schema.transactions.id, child2.id));
+
+        // Deleting child 1 does NOT trigger collapse (2 children remain), so it should succeed
+        await expect(deleteTransaction(db, child1.id)).resolves.not.toThrow();
+
+        // Account balance updated to -3000
+        let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        expect(acct?.balance).toBe(-3000);
+
+        // Parent amount re-totaled to -3000
+        const [parent] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, split.parent.id));
+        expect(parent?.amount).toBe(-3000);
+
+        // Now deleting child 3 would leave only child 2 (reconciled), so it should fail with 422
+        await expect(deleteTransaction(db, child3.id)).rejects.toMatchObject({
+          status: 422,
+          name: "TransactionError",
+          message: /reconciled and locked/,
+        });
+
+        // Account balance is still -3000 and 2 children still exist
+        [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        expect(acct?.balance).toBe(-3000);
       });
     });
   });
