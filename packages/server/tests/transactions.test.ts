@@ -208,11 +208,14 @@ describe("transactions queries", () => {
         amount: -50000,
       });
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "insert", "update", "update", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "insert", "update", "update", "run"]);
     });
 
     it("inserts a transfer row with categoryId when specified", async () => {
-      mock.respondWith("select:accounts", [{ name: "RRSP" }]);
+      // RRSP is off-budget, so boundary crossing transfer preserves categoryId
+      mock.respondWithNth("select:accounts", 1, [{ name: "RRSP" }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: false }]);
       mock.respondWith("insert:transactions", [{ id: 43 }]);
       mock.respondWith("update:accounts", [{}, {}]);
 
@@ -238,6 +241,37 @@ describe("transactions queries", () => {
       });
     });
 
+    it("treats boundary-crossing transfer from off-budget to on-budget as income", async () => {
+      // account 1: onBudget: true (Checking), account 2: onBudget: false (Brokerage)
+      mock.respondWithNth("select:accounts", 1, [{ name: "Brokerage" }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: false }]);
+      mock.respondWith("insert:transactions", [{ id: 44 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createTransfer(
+        mock.db,
+        {
+          accountId: 1,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "",
+          memo: "Transfer from brokerage",
+          amount: 1000000, // +$10,000 to Checking
+        },
+        2
+      );
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({
+        payee: "Transfer : Brokerage",
+        transferAccountId: 2,
+        categoryId: null,
+        amount: 1000000,
+        isIncome: true,
+      });
+    });
+
     it("rejects transfers to the same account", async () => {
       await expect(
         createTransfer(
@@ -256,7 +290,7 @@ describe("transactions queries", () => {
     });
 
     it("createTransaction routes a transferAccountId to createTransfer", async () => {
-      mock.respondWith("select:accounts", [{ name: "EQ Bank" }]);
+      mock.respondWith("select:accounts", [{ name: "EQ Bank", onBudget: true }]);
       mock.respondWith("insert:transactions", [{ id: 99 }]);
       mock.respondWith("update:accounts", [{}, {}]);
 
@@ -272,7 +306,7 @@ describe("transactions queries", () => {
 
       expect(row).toMatchObject({ id: 99 });
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "insert", "update", "update", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "insert", "update", "update", "run"]);
     });
 
     it("allows a row that is both a transfer and a split child", async () => {
@@ -546,7 +580,7 @@ describe("transactions queries", () => {
         "select", "select",
         "run",
         "update", "update", "update", "update",
-        "select",
+        "select", "select",
         "update",
         "run",
       ]);

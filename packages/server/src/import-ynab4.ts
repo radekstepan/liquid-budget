@@ -488,11 +488,19 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee = payeeMap.get(t.payeeId) || "";
           }
 
+          const sourceIsOnBudget = accOnBudgetMap.get(sourceAccEntityId) ?? true;
+          const destIsOnBudget = destAccEntityId ? (accOnBudgetMap.get(destAccEntityId) ?? true) : false;
+          const isCrossBoundary = destAccId !== null && sourceIsOnBudget !== destIsOnBudget;
+          const netOnBudget = (sourceIsOnBudget ? rawAmount : 0) + (destIsOnBudget ? -rawAmount : 0);
           const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
+          const isSpecialIncomeCat =
+            catEntityId === "Category/__ImmediateIncome__" ||
+            catEntityId === "Category/__DeferredIncome__";
+          const isTransferIncome = isCrossBoundary && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
 
           await db.insert(transactions).values({
             accountId: sourceAccId,
-            categoryId: catId,
+            categoryId: isSpecialIncomeCat ? null : catId,
             date: t.date,
             payee,
             memo,
@@ -506,7 +514,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             flagColor: ynabFlagToColor(t.flag),
             transferAccountId: destAccId,
             parentId: null,
-            isIncome: false,
+            isIncome: isTransferIncome,
             reconciledAt: cleared === "Reconciled" ? (t.date || null) : null,
           });
           totalImportedTxCount++;
@@ -534,10 +542,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             catId = null;
           }
 
+          const srcOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
+          const destOnBudget = destAccId ? (accOnBudgetMap.get(targetAccEntityId!) ?? false) : false;
+          const isCrossBoundaryTx = destAccId !== null && srcOnBudget !== destOnBudget;
+          const netOnBudgetTx = (srcOnBudget ? (t.amount || 0) : 0) + (destOnBudget ? -(t.amount || 0) : 0);
           const isTxIncome =
-            accIsOnBudget &&
-            (isSpecialIncomeCat || (catId === null && destAccId === null)) &&
-            (t.amount || 0) > 0;
+            (srcOnBudget && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
+            (isCrossBoundaryTx && (catId === null || isSpecialIncomeCat) && netOnBudgetTx > 0);
           const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
 
           // Skip ordinary duplicate entries within the backup: the same

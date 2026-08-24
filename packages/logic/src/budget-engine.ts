@@ -59,15 +59,53 @@ export function isIncomeTransaction(
   accountMap?: Map<number, Account> | Account[]
 ): boolean {
   if (t.categoryId != null) return false;
-  if (t.transferAccountId != null) return false;
-  if (num(t.amount) <= 0) return false;
+
   if (accountMap) {
-    const acc =
+    const accA =
       accountMap instanceof Map
         ? accountMap.get(t.accountId)
         : accountMap.find((a) => a.id === t.accountId);
-    if (acc && !acc.onBudget) return false;
+    const onA = accA ? accA.onBudget : true;
+
+    if (t.transferAccountId != null) {
+      const accB =
+        accountMap instanceof Map
+          ? accountMap.get(t.transferAccountId)
+          : accountMap.find((a) => a.id === t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+
+      // Internal transfer between same budget boundary: never income
+      if (onA === onB) return false;
+
+      // Net change to on-budget balances from this transfer:
+      const netOnBudgetDelta = (onA ? num(t.amount) : 0) + (onB ? -num(t.amount) : 0);
+      if (netOnBudgetDelta <= 0) return false;
+
+      if (t.isIncome !== undefined) {
+        return t.isIncome === true;
+      }
+      if (t.parentId != null) return false;
+      return true;
+    }
+
+    // Regular transaction
+    if (!onA) return false;
+    if (num(t.amount) <= 0) return false;
+    if (t.isIncome !== undefined) {
+      return t.isIncome === true;
+    }
+    if (t.parentId != null) return false;
+    return true;
   }
+
+  // Fallback when accountMap is not provided
+  if (t.transferAccountId != null) {
+    if (t.isIncome !== undefined) {
+      return t.isIncome === true;
+    }
+    return false;
+  }
+  if (num(t.amount) <= 0) return false;
   if (t.isIncome !== undefined) {
     return t.isIncome === true;
   }
@@ -180,25 +218,37 @@ function buildRawIndex(
     if (splitParentIds.has(t.id)) continue;
     const mk = t.date.slice(0, 7);
     const amt = num(t.amount);
-    const acc = accountMap.get(t.accountId);
-    const isOnBudget = acc ? acc.onBudget : true;
+    const accA = accountMap.get(t.accountId);
+    const onA = accA ? accA.onBudget : true;
 
-    if (t.categoryId != null && isOnBudget) {
+    let netOnBudgetDelta: number;
+    let isInternalTransfer = false;
+    if (t.transferAccountId != null) {
+      const accB = accountMap.get(t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+      netOnBudgetDelta = (onA ? amt : 0) + (onB ? -amt : 0);
+      isInternalTransfer = onA && onB;
+    } else {
+      netOnBudgetDelta = onA ? amt : 0;
+    }
+
+    if (t.categoryId != null && !isInternalTransfer && netOnBudgetDelta !== 0) {
       let m = outflowByMonth.get(mk);
       if (!m) {
         m = new Map();
         outflowByMonth.set(mk, m);
       }
-      m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + amt));
+      m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + netOnBudgetDelta));
     }
 
     if (isIncomeTransaction(t, accountMap)) {
       const incMonth = t.incomeMonth || mk;
-      incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + amt));
+      const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
+      incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + incomeAmt));
     }
 
     // 1. Categorised spending/refunds on credit card accounts
-    if (t.categoryId != null && isOnBudget) {
+    if (t.categoryId != null && onA) {
       let s = spendByAccountMonth.get(mk);
       if (!s) {
         s = new Map();
