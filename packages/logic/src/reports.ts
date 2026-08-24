@@ -488,6 +488,7 @@ export function computeSpendingTrends(
     // Drilldown filter checks
     if (drillLevel === "category" && t.categoryId !== currentCategoryId) continue;
     if (drillLevel === "group" && cat.groupId !== currentGroupId) continue;
+    if (drillLevel === "all" && groupMap.get(cat.groupId)?.isCreditCardPayments) continue;
 
     const mCatMap = spendByMonthCat.get(mk);
     if (mCatMap) {
@@ -635,6 +636,7 @@ export function getSpendingTransactions(
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
 
+  const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const catMap = new Map(data.categories.map((c) => [c.id, c]));
   const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
@@ -663,6 +665,13 @@ export function getSpendingTransactions(
         const cat = catMap.get(t.categoryId);
         return cat?.groupId === filter.groupId;
       }
+
+      // No explicit category/group filter -> top-level "all" drilldown.
+      // Skip CC-payment groups to match computeSpendingTrends.
+      const cat = catMap.get(t.categoryId);
+      if (!cat) return false;
+      const grp = groupMap.get(cat.groupId);
+      if (grp?.isCreditCardPayments) return false;
 
       return true;
     })

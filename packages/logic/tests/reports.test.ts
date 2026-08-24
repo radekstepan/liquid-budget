@@ -524,4 +524,55 @@ describe("getSpendingTransactions", () => {
     expect(txs).toHaveLength(1);
     expect(txs[0]?.payee).toBe("Transfer : Wealthsimple RRSP");
   });
+
+  it("excludes CC-payment group transactions at top level ('all') but allows them when explicitly filtered", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+      ],
+      groups: [
+        { id: 1, name: "Everyday Expenses", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 20, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-15000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 20, date: "2026-04-10", payee: "Chase Visa", memo: "", amount: "-50000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    // Top-level chart total excludes CC-payments group
+    const trends = computeSpendingTrends(data, "2026-04", "2026-04");
+    expect(trends.total).toBe(15000);
+    expect(trends.constituents).toHaveLength(1);
+    expect(trends.constituents[0]?.name).toBe("Everyday Expenses");
+
+    // Drilldown list at top-level ("all") with no filter or just month filter excludes CC-payments
+    const allTxs = getSpendingTransactions(data, "2026-04", "2026-04");
+    expect(allTxs).toHaveLength(1);
+    expect(allTxs[0]?.id).toBe(1);
+
+    const monthTxs = getSpendingTransactions(data, "2026-04", "2026-04", { month: "2026-04" });
+    expect(monthTxs).toHaveLength(1);
+    expect(monthTxs[0]?.id).toBe(1);
+
+    // Summing drilldown transactions matches chart total
+    const sumTxs = allTxs.reduce((sum, t) => sum + -Number(t.amount), 0);
+    expect(sumTxs).toBe(trends.total);
+
+    // Explicit group filter includes the CC payment group transactions
+    const ccGroupTxs = getSpendingTransactions(data, "2026-04", "2026-04", { groupId: 2 });
+    expect(ccGroupTxs).toHaveLength(1);
+    expect(ccGroupTxs[0]?.id).toBe(2);
+
+    // Explicit category filter includes the CC payment category transactions
+    const ccCatTxs = getSpendingTransactions(data, "2026-04", "2026-04", { categoryId: 20 });
+    expect(ccCatTxs).toHaveLength(1);
+    expect(ccCatTxs[0]?.id).toBe(2);
+  });
 });
