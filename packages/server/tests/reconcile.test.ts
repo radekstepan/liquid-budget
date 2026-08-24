@@ -44,6 +44,28 @@ describe("reconcile queries", () => {
       });
     });
 
+    it("BUG-3.1: computes working balance strictly from date-bounded clearedSum + reconciledSum regardless of account.balance", async () => {
+      // Account balance includes future transactions (+30000 after statement date)
+      mock.respondWithNth("select:accounts", 1, [
+        { id: 1, name: "Chequing", balance: 90000, lastReconciledAt: null, lastReconciledBalance: null },
+      ]);
+      mock.respondWith("select:transactions", [
+        {
+          unclearedSum: 5000,
+          unclearedCount: 1,
+          clearedSum: 50000,
+          clearedCount: 3,
+          reconciledSum: 10000,
+          reconciledCount: 1,
+        },
+      ]);
+
+      const state = await getReconcileState(mock.db, 1, "2026-06-30");
+      // workingBalance must be clearedSum (50000) + reconciledSum (10000) = 60000,
+      // NOT acct.balance - unclearedTotal (90000 - 5000 = 85000)
+      expect(state.workingBalance).toBe(60000);
+    });
+
     it("throws 404 when the account does not exist", async () => {
       mock.respondWith("select:accounts", []);
       await expect(getReconcileState(mock.db, 999)).rejects.toBeInstanceOf(
