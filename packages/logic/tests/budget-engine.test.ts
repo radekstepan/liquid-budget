@@ -1384,11 +1384,14 @@ describe("computeBudget", () => {
       };
       expect(isIncomeTransaction(splitChildCategorized, accountMap)).toBe(false);
 
-      // Transfer is not income even if isIncome: true is set
-      const transferTx = {
+      // Transfer between on-budget accounts is not income even if isIncome: true is set
+      const onBudgetAccount2 = { id: 3, name: "Savings", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 1 };
+      const accountMapWithSavings = [onBudgetAccount, offBudgetAccount, onBudgetAccount2];
+
+      const internalTransferTx = {
         id: 3,
         accountId: 1,
-        transferAccountId: 2,
+        transferAccountId: 3,
         categoryId: null,
         date: "2026-07-01",
         payee: "Transfer",
@@ -1397,7 +1400,7 @@ describe("computeBudget", () => {
         status: "c" as const,
         isIncome: true,
       };
-      expect(isIncomeTransaction(transferTx, accountMap)).toBe(false);
+      expect(isIncomeTransaction(internalTransferTx, accountMapWithSavings)).toBe(false);
 
       // Off-budget transaction is not income even if isIncome: true is set
       const offBudgetTx = {
@@ -1412,6 +1415,172 @@ describe("computeBudget", () => {
         isIncome: true,
       };
       expect(isIncomeTransaction(offBudgetTx, accountMap)).toBe(false);
+    });
+
+    describe("BUG 1.6: transfers across budget boundary into/out of TBB", () => {
+      const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000000", onBudget: true, sort: 0 };
+      const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Tracking", balance: "5000000", onBudget: false, sort: 1 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Investments" });
+
+      it("treats transfer from off-budget to on-budget (uncategorized) as income to TBB (recorded on checking)", () => {
+        const transferInflow = {
+          id: 1,
+          accountId: onBudgetAccount.id,
+          transferAccountId: offBudgetAccount.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Transfer : Brokerage",
+          memo: "Withdrawal from brokerage",
+          amount: "1000000", // +$10,000 inflow to Checking
+          status: "c" as const,
+        };
+
+        expect(isIncomeTransaction(transferInflow, [onBudgetAccount, offBudgetAccount])).toBe(true);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [],
+          transactions: [transferInflow],
+          recurring: [],
+        };
+
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(1000000);
+        expect(res.tbb).toBe(1000000);
+
+        // Budget integrity invariant check
+        const totalOnBudget = 1000000;
+        const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
+
+        // Pre-indexed verification
+        const index = buildBudgetIndex(data);
+        expect(index.incomeByMonth["2026-07"]).toBe(1000000);
+        const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+        expect(indexedRes.totalIncome).toBe(1000000);
+        expect(indexedRes.tbb).toBe(1000000);
+      });
+
+      it("treats transfer from off-budget to on-budget (uncategorized) as income to TBB (recorded on brokerage)", () => {
+        const transferInflowFromBrokerage = {
+          id: 1,
+          accountId: offBudgetAccount.id,
+          transferAccountId: onBudgetAccount.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Transfer : Checking",
+          memo: "Transfer to checking",
+          amount: "-1000000", // -$10,000 on Brokerage -> +$10,000 on Checking
+          status: "c" as const,
+        };
+
+        expect(isIncomeTransaction(transferInflowFromBrokerage, [onBudgetAccount, offBudgetAccount])).toBe(true);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [],
+          transactions: [transferInflowFromBrokerage],
+          recurring: [],
+        };
+
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(1000000);
+        expect(res.tbb).toBe(1000000);
+
+        // Budget integrity invariant check
+        const totalOnBudget = 1000000;
+        const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
+
+        // Pre-indexed verification
+        const index = buildBudgetIndex(data);
+        expect(index.incomeByMonth["2026-07"]).toBe(1000000);
+        const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+        expect(indexedRes.totalIncome).toBe(1000000);
+        expect(indexedRes.tbb).toBe(1000000);
+      });
+
+      it("categorized transfer from off-budget to on-budget increases category available and not TBB", () => {
+        const categorizedTransferInflow = {
+          id: 1,
+          accountId: onBudgetAccount.id,
+          transferAccountId: offBudgetAccount.id,
+          categoryId: category.id,
+          date: "2026-07-01",
+          payee: "Transfer : Brokerage",
+          memo: "Direct category refund/inflow",
+          amount: "1000000", // +$10,000
+          status: "c" as const,
+        };
+
+        expect(isIncomeTransaction(categorizedTransferInflow, [onBudgetAccount, offBudgetAccount])).toBe(false);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [],
+          transactions: [categorizedTransferInflow],
+          recurring: [],
+        };
+
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(0);
+        expect(res.tbb).toBe(0);
+        expect(res.groups[0]?.rows[0]?.available).toBe(1000000);
+
+        // Budget integrity invariant check
+        const totalOnBudget = 1000000;
+        const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
+      });
+
+      it("categorized transfer from on-budget to off-budget decreases category available and preserves integrity", () => {
+        const categorizedTransferOutflow = {
+          id: 1,
+          accountId: onBudgetAccount.id,
+          transferAccountId: offBudgetAccount.id,
+          categoryId: category.id,
+          date: "2026-07-01",
+          payee: "Transfer : Brokerage",
+          memo: "Fund brokerage",
+          amount: "-500000", // -$5,000 from Checking
+          status: "c" as const,
+        };
+
+        expect(isIncomeTransaction(categorizedTransferOutflow, [onBudgetAccount, offBudgetAccount])).toBe(false);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [
+            { id: 1, categoryId: category.id, month: "2026-07", amount: "500000" }, // Budget $5,000
+          ],
+          transactions: [
+            { id: 10, accountId: onBudgetAccount.id, categoryId: null, date: "2026-07-01", payee: "Salary", memo: "", amount: "500000", status: "c" as const, isIncome: true },
+            categorizedTransferOutflow,
+          ],
+          recurring: [],
+        };
+
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(500000);
+        expect(res.tbb).toBe(0);
+        expect(res.groups[0]?.rows[0]?.assigned).toBe(500000);
+        expect(res.groups[0]?.rows[0]?.outflow).toBe(-500000);
+        expect(res.groups[0]?.rows[0]?.available).toBe(0);
+
+        // Budget integrity invariant check: Checking has $5,000 ($5,000 salary - $5,000 transfer)
+        const totalOnBudget = 0; // Net 0 cash on Checking (5000 - 5000)
+        const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0); // 0
+        expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
+      });
     });
   });
 });

@@ -305,10 +305,38 @@ export async function createTransfer(
 
   db.run(sql`BEGIN`);
   try {
+    const srcOnBudget = await isAccountOnBudget(db, baseInput.accountId);
+    const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+    const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+    const netOnBudgetDelta = (srcOnBudget ? baseInput.amount : 0) + (destOnBudget ? -baseInput.amount : 0);
+
     let categoryId: number | null = null;
-    if (baseInput.categoryId != null) {
-      const onBudget = await isAccountOnBudget(db, baseInput.accountId);
-      categoryId = onBudget ? baseInput.categoryId : null;
+    let isIncome = false;
+    let incomeMonth: string | null = null;
+
+    if (isBoundaryCrossing) {
+      if (netOnBudgetDelta > 0) {
+        // Inflow into budget from off-budget
+        if (baseInput.categoryId != null) {
+          categoryId = baseInput.categoryId;
+          isIncome = false;
+          incomeMonth = null;
+        } else {
+          categoryId = null;
+          isIncome = baseInput.isIncome !== undefined ? Boolean(baseInput.isIncome) : true;
+          incomeMonth = isIncome ? (baseInput.incomeMonth ?? null) : null;
+        }
+      } else {
+        // Outflow from budget to off-budget
+        categoryId = baseInput.categoryId ?? null;
+        isIncome = false;
+        incomeMonth = null;
+      }
+    } else {
+      // Internal transfer between same budget boundary
+      categoryId = null;
+      isIncome = false;
+      incomeMonth = null;
     }
 
     const [row] = await db
@@ -324,7 +352,8 @@ export async function createTransfer(
         flagColor: sanitizeFlagColor(baseInput.flagColor),
         transferAccountId,
         parentId: baseInput.parentId ?? null,
-        isIncome: false,
+        isIncome,
+        incomeMonth,
       })
       .returning();
 
@@ -385,17 +414,38 @@ export async function createSplitWithChildren(
       })
       .returning();
 
-    const onBudget = await isAccountOnBudget(db, parent.accountId);
+    const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
     const childRows = [];
     for (const c of children) {
       let payee = parent.payee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = onBudget && c.categoryId ? Number(c.categoryId) : null;
+      let categoryId = c.categoryId ? Number(c.categoryId) : null;
+      let isIncome = false;
+
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
+        const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+        const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+        const netOnBudgetDelta = (srcOnBudget ? c.amount : 0) + (destOnBudget ? -c.amount : 0);
+
+        if (isBoundaryCrossing) {
+          if (netOnBudgetDelta > 0) {
+            if (categoryId == null) {
+              isIncome = true;
+            }
+          }
+        } else {
+          categoryId = null;
+        }
+      } else {
+        if (!srcOnBudget) {
+          categoryId = null;
+          isIncome = false;
+        } else {
+          isIncome = categoryId == null && c.amount > 0;
+        }
       }
-      const isIncome = transferAccountId == null && categoryId == null && c.amount > 0 && onBudget;
 
       const [child] = await db
         .insert(transactions)
@@ -528,15 +578,49 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       }
     }
 
-    const onBudget = await isAccountOnBudget(db, newAccountId);
-    if (!onBudget) {
+    const srcOnBudget = await isAccountOnBudget(db, newAccountId);
+    const destOnBudget =
+      existing.transferAccountId != null
+        ? await isAccountOnBudget(db, existing.transferAccountId)
+        : null;
+
+    if (existing.transferAccountId != null) {
+      const isBoundaryCrossing = destOnBudget !== null && srcOnBudget !== destOnBudget;
+      const netOnBudgetDelta =
+        (srcOnBudget ? newAmount : 0) + (destOnBudget ? -newAmount : 0);
+
+      if (isBoundaryCrossing) {
+        const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
+        if (netOnBudgetDelta > 0) {
+          if (finalCatId != null) {
+            p.categoryId = finalCatId;
+            p.isIncome = false;
+            p.incomeMonth = null;
+          } else {
+            p.categoryId = null;
+            const isIncome = "isIncome" in p ? Boolean(p.isIncome) : true;
+            p.isIncome = isIncome;
+            if (!isIncome) {
+              p.incomeMonth = null;
+            }
+          }
+        } else {
+          p.categoryId = finalCatId ?? null;
+          p.isIncome = false;
+          p.incomeMonth = null;
+        }
+      } else {
+        p.categoryId = null;
+        p.isIncome = false;
+        p.incomeMonth = null;
+      }
+    } else if (!srcOnBudget) {
       p.categoryId = null;
       p.incomeMonth = null;
       p.isIncome = false;
     } else {
       const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
       const isEligibleForIncome =
-        existing.transferAccountId == null &&
         !isSplitParent &&
         existing.parentId == null &&
         finalCatId == null;
@@ -658,17 +742,38 @@ export async function updateSplit(
     const newStatus: ClearedStatus =
       (pf.status as ClearedStatus | undefined) ?? (parent.status as ClearedStatus);
 
-    const onBudget = await isAccountOnBudget(db, parent.accountId);
+    const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
     const newChildren = [];
     for (const c of children) {
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-      const categoryId = onBudget && c.categoryId ? Number(c.categoryId) : null;
+      let categoryId = c.categoryId ? Number(c.categoryId) : null;
+      let isIncome = false;
+
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
+        const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+        const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+        const netOnBudgetDelta = (srcOnBudget ? c.amount : 0) + (destOnBudget ? -c.amount : 0);
+
+        if (isBoundaryCrossing) {
+          if (netOnBudgetDelta > 0) {
+            if (categoryId == null) {
+              isIncome = true;
+            }
+          }
+        } else {
+          categoryId = null;
+        }
+      } else {
+        if (!srcOnBudget) {
+          categoryId = null;
+          isIncome = false;
+        } else {
+          isIncome = categoryId == null && c.amount > 0;
+        }
       }
-      const isIncome = transferAccountId == null && categoryId == null && c.amount > 0 && onBudget;
 
       const [row] = await db
         .insert(transactions)
@@ -928,15 +1033,45 @@ export async function bulkUpdateTransactions(
       if (patch.accountId != null) setFields.accountId = newAccountId;
       if ("incomeMonth" in patch) setFields.incomeMonth = patch.incomeMonth ?? null;
 
-      const onBudget = await isAccountOnBudget(db, newAccountId);
-      if (!onBudget) {
+      const srcOnBudget = await isAccountOnBudget(db, newAccountId);
+      const destOnBudget =
+        existing.transferAccountId != null
+          ? await isAccountOnBudget(db, existing.transferAccountId)
+          : null;
+
+      if (existing.transferAccountId != null) {
+        const isBoundaryCrossing = destOnBudget !== null && srcOnBudget !== destOnBudget;
+        const netOnBudgetDelta =
+          (srcOnBudget ? newAmount : 0) + (destOnBudget ? -newAmount : 0);
+
+        if (isBoundaryCrossing) {
+          const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
+          if (netOnBudgetDelta > 0) {
+            if (finalCatId != null) {
+              setFields.categoryId = finalCatId;
+              setFields.isIncome = false;
+              setFields.incomeMonth = null;
+            } else {
+              setFields.categoryId = null;
+              setFields.isIncome = true;
+            }
+          } else {
+            setFields.categoryId = finalCatId ?? null;
+            setFields.isIncome = false;
+            setFields.incomeMonth = null;
+          }
+        } else {
+          setFields.categoryId = null;
+          setFields.isIncome = false;
+          setFields.incomeMonth = null;
+        }
+      } else if (!srcOnBudget) {
         setFields.categoryId = null;
         setFields.incomeMonth = null;
         setFields.isIncome = false;
       } else {
         const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
         const isEligibleForIncome =
-          existing.transferAccountId == null &&
           !isSplitParent &&
           existing.parentId == null &&
           finalCatId == null;

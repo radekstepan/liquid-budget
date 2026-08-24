@@ -198,10 +198,25 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
     if (t.date.slice(0, 7) !== month) continue;
 
     const amt = num(t.amount);
+    const accA = accountMap.get(t.accountId);
+    const onA = accA ? accA.onBudget : true;
+
+    let netOnBudgetDelta: number;
+    let isInternalTransfer = false;
+    if (t.transferAccountId != null) {
+      const accB = accountMap.get(t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+      netOnBudgetDelta = (onA ? amt : 0) + (onB ? -amt : 0);
+      isInternalTransfer = onA && onB;
+    } else {
+      netOnBudgetDelta = onA ? amt : 0;
+    }
+
     if (isIncomeTransaction(t, accountMap)) {
-      income = Math.round(income + amt);
-    } else if ((t.transferAccountId == null || t.categoryId != null) && amt < 0) {
-      outflow = Math.round(outflow + Math.abs(amt));
+      const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
+      income = Math.round(income + incomeAmt);
+    } else if (!isInternalTransfer && netOnBudgetDelta < 0) {
+      outflow = Math.round(outflow + Math.abs(netOnBudgetDelta));
     }
   }
 
@@ -284,6 +299,7 @@ export function computeMonthlyInsights(
 ): SpendingInsight[] {
   const insights: SpendingInsight[] = [];
   const catMap = new Map(data.categories.map((c) => [c.id, c.name]));
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
   const splitParentIds = new Set<number>();
   for (const t of data.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
@@ -301,7 +317,7 @@ export function computeMonthlyInsights(
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (t.categoryId == null) continue;
-    if (isIncomeTransaction(t)) continue;
+    if (isIncomeTransaction(t, accountMap)) continue;
 
     const netOutflow = -num(t.amount);
     const mk = t.date.slice(0, 7);
@@ -425,6 +441,7 @@ export function computeSpendingTrends(
 
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const catMap = new Map(data.categories.map((c) => [c.id, c]));
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   // Determine current drill level & metadata
   let drillLevel: "all" | "group" | "category" = "all";
@@ -457,7 +474,7 @@ export function computeSpendingTrends(
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (t.categoryId == null) continue;
-    if (isIncomeTransaction(t)) continue;
+    if (isIncomeTransaction(t, accountMap)) continue;
 
     // Category filter check
     if (activeCategoryIds && !activeCategoryIds.has(t.categoryId)) continue;
@@ -619,12 +636,13 @@ export function getSpendingTransactions(
   }
 
   const catMap = new Map(data.categories.map((c) => [c.id, c]));
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   return data.transactions
     .filter((t) => {
       if (splitParentIds.has(t.id)) return false;
       if (t.categoryId == null) return false;
-      if (isIncomeTransaction(t)) return false;
+      if (isIncomeTransaction(t, accountMap)) return false;
 
       const mk = t.date.slice(0, 7);
       if (filter?.month) {

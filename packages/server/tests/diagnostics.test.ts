@@ -10,8 +10,10 @@ import type { Db } from "../src/client.js";
 import {
   createAccount,
   createTransaction,
+  createTransfer,
   createSplitWithChildren,
   verifyBalanceIntegrity,
+  verifyBudgetIntegrity,
   recomputeAccountBalances,
 } from "../src/index.js";
 
@@ -150,6 +152,33 @@ describe("diagnostics queries", () => {
         .from(schema.accounts)
         .where(eq(schema.accounts.id, acct.id));
       expect(repaired?.balance).toBe(120000);
+    });
+  });
+
+  describe("verifyBudgetIntegrity", () => {
+    it("maintains zero difference when transferring money from off-budget to on-budget (BUG 1.6)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true });
+      const brokerage = await createAccount(db, { name: "Brokerage", kind: "offbudget", onBudget: false });
+
+      // Transfer $10,000 from off-budget Brokerage to on-budget Checking
+      await createTransfer(
+        db,
+        {
+          accountId: checking.id,
+          categoryId: null,
+          date: "2026-06-01",
+          payee: "Transfer : Brokerage",
+          memo: "Withdrawal",
+          amount: 1000000,
+        },
+        brokerage.id
+      );
+
+      const report = await verifyBudgetIntegrity(db);
+      expect(report.totalOnBudgetAccountBalance).toBe(1000000);
+      expect(report.tbb).toBe(1000000);
+      expect(report.totalCategoryAvailable).toBe(0);
+      expect(report.difference).toBe(0);
     });
   });
 });
