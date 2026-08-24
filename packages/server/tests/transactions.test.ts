@@ -627,6 +627,28 @@ describe("transactions queries", () => {
         )
       ).rejects.toBeInstanceOf(TransactionError);
     });
+
+    it("rejects a child whose transferAccountId matches parent accountId", async () => {
+      await expect(
+        createSplitWithChildren(
+          mock.db,
+          {
+            accountId: 7,
+            date: "2026-07-01",
+            payee: "Self Transfer",
+            memo: "",
+            amount: -10000,
+          },
+          [
+            { categoryId: 1, amount: -6000 },
+            { transferAccountId: 7, amount: -4000 },
+          ]
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: "transfer account must differ from source account",
+      });
+    });
   });
 
   describe("updateTransaction", () => {
@@ -991,6 +1013,28 @@ describe("transactions queries", () => {
         status: "u",
         reconciledAt: null,
         reconciliationId: null,
+      });
+    });
+
+    it("rejects a child whose transferAccountId matches parent accountId", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Old", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
+
+      await expect(
+        updateSplit(
+          mock.db,
+          1,
+          {},
+          [
+            { categoryId: 1, amount: -6000 },
+            { transferAccountId: 5, amount: -4000 },
+          ]
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: "transfer account must differ from source account",
       });
     });
   });
@@ -2178,6 +2222,64 @@ describe("transactions queries", () => {
         // Account balance is still -3000 and 2 children still exist
         [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
         expect(acct?.balance).toBe(-3000);
+      });
+
+      it("prevents self-transfer in createSplitWithChildren and updateSplit", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        // createSplitWithChildren with self-transfer child should be rejected
+        await expect(
+          createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Supermarket",
+              memo: "Split items",
+              amount: -5000,
+            },
+            [
+              { categoryId: cat1Id, amount: -3000, memo: "food" },
+              { transferAccountId: accountId, amount: -2000, memo: "self transfer" },
+            ]
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "transfer account must differ from source account",
+        });
+
+        // Create valid split
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Supermarket",
+            memo: "Split items",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "food" },
+            { categoryId: cat2Id, amount: -2000, memo: "coffee" },
+          ]
+        );
+
+        // updateSplit with self-transfer child should be rejected
+        await expect(
+          updateSplit(
+            db,
+            split.parent.id,
+            {},
+            [
+              { categoryId: cat1Id, amount: -3000, memo: "food" },
+              { transferAccountId: accountId, amount: -2000, memo: "self transfer" },
+            ]
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "transfer account must differ from source account",
+        });
       });
     });
   });

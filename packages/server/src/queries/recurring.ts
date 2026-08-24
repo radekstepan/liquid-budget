@@ -159,6 +159,11 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
   const validatedAmount = assertValidAmount(input.amount);
   if (norm.isSplit) {
     assertSplitsBalanced(validatedAmount, norm.subTransactions!);
+    for (const c of norm.subTransactions!) {
+      if (c.transferAccountId != null && Number(c.transferAccountId) === Number(input.accountId)) {
+        throw new RecurringError("transfer account must differ from source account");
+      }
+    }
   }
 
   db.run(sql`BEGIN`);
@@ -219,6 +224,15 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         ? assertValidAmount((patch as UpdateRecurringInput).amount)
         : assertValidAmount(existing.amount);
     assertSplitsBalanced(parentAmount, norm.subTransactions!);
+    const effectiveAccountId =
+      "accountId" in patch && patch.accountId != null
+        ? Number(patch.accountId)
+        : existing.accountId;
+    for (const c of norm.subTransactions!) {
+      if (c.transferAccountId != null && Number(c.transferAccountId) === Number(effectiveAccountId)) {
+        throw new RecurringError("transfer account must differ from source account");
+      }
+    }
   }
 
   // If neither `subTransactions` nor `transferAccountId` are being

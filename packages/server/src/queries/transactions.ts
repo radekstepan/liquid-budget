@@ -440,6 +440,12 @@ export async function createSplitWithChildren(
     );
   }
 
+  for (const c of children) {
+    if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
+      throw new TransactionError("transfer account must differ from source account");
+    }
+  }
+
   db.run(sql`BEGIN`);
   try {
     const [parentRow] = await db
@@ -781,6 +787,12 @@ export async function updateSplit(
 
   const parentAmount = assertValidAmount(parent.amount);
   assertSplitsBalanced(parentAmount, children);
+
+  for (const c of children) {
+    if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
+      throw new TransactionError("transfer account must differ from source account");
+    }
+  }
 
   const oldChildren = await getChildren(db, parentId);
   if (oldChildren.some((c) => c.status === "r")) {
