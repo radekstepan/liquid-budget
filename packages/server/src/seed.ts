@@ -202,6 +202,28 @@ export async function seedDatabase(db: Db) {
     A("Manulife GRSP",              0),
     A("EquatePlus SAP",             0),
     A("Other Investments",          0),
+
+    // ── May 2026 assignments (prior month for carryover math) ───────────────
+    A("Mortgage Principal",         180000, "2026-05"),
+    A("Mortgage Interest",          235297, "2026-05"),
+    A("Condo Fees/HOA",             43900,  "2026-05"),
+    A("Internet, iPhone",           20000,  "2026-05"),
+    A("Utilities, Electricity, Water", 15000, "2026-05"),
+    A("Groceries",                  100000, "2026-05"),
+    A("Household",                  20000,  "2026-05"),
+    A("Eat/Drink Out, Alcohol",     100000, "2026-05"),
+    A("Public Transport, Uber, Bike", 7500, "2026-05"),
+    A("Retirement",                 45550,  "2026-05"),
+    A("Rent",                       200000, "2026-05"),
+    A("Dental, Optical, Counselling", 40000, "2026-05"),
+    A("Fees, Charges, Loans",       3500,   "2026-05"),
+    A("Lessons (Sailing, Guitar)",  71860,  "2026-05"),
+    A("Travels, Flights",           100000, "2026-05"),
+    A("Computers, Games, Guitar",   60000,  "2026-05"),
+    A("Work/Family",                100000, "2026-05"),
+    A("Other Wants",                100000, "2026-05"),
+    A("Other Needs",                5000,   "2026-05"),
+    A("Clothing",                   7560,   "2026-05"),
   ]);
 
   // ---------------------------------------------------------------------------
@@ -333,7 +355,7 @@ export async function seedDatabase(db: Db) {
     T("AMEX Cobalt", "Work/Family", "2026-06-12", "Amazon", -14792, ""),
     T("AMEX Cobalt", "Work/Family", "2026-06-19", "Indigo Books", -5835, ""),
     // Retirement / savings transfer
-    T("EQ Bank", null, "2026-06-01", "Wealthsimple TFSA", -45550, "Monthly TFSA contribution", "c", false, "Wealthsimple TFSA"),
+    T("EQ Bank", "Retirement", "2026-06-01", "Wealthsimple TFSA", -45550, "Monthly TFSA contribution", "c", false, "Wealthsimple TFSA"),
     // Susie shared expense tracking
     T("Susie", null, "2026-06-07", "Published on Main (Susie share)",    -8925,  "Half of dinner"),
     T("Susie", null, "2026-06-13", "St. Augustine's (Susie share)",      -4365,  "Half of pub tab"),
@@ -371,7 +393,7 @@ export async function seedDatabase(db: Db) {
     { accountId: a("EQ Bank"), categoryId: null, payee: "SAP Concur", amount: 415297, frequency: "monthly", nextDate: "2026-07-16", active: true },
     { accountId: a("EQ Bank"), categoryId: null, payee: "SAP Concur", amount: 415297, frequency: "monthly", nextDate: "2026-07-30", active: true },
     // TFSA contribution
-    { accountId: a("EQ Bank"), categoryId: null, payee: "Wealthsimple TFSA", amount: -45550, frequency: "monthly", nextDate: "2026-07-01", active: true, transferAccountId: a("Wealthsimple TFSA") },
+    { accountId: a("EQ Bank"), categoryId: byName("Retirement"), payee: "Wealthsimple TFSA", amount: -45550, frequency: "monthly", nextDate: "2026-07-01", active: true, transferAccountId: a("Wealthsimple TFSA") },
     // Jericho sailing — annual (next year)
     { accountId: a("TD Unlimited Chequing"), categoryId: byName("Lessons (Sailing, Guitar)"), payee: "Jericho Sailing Centre", amount: -71860, frequency: "yearly", nextDate: "2027-05-01", active: true },
   ]);

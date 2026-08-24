@@ -8,7 +8,7 @@ export const DEMO_MONTH = "2026-06";
 // ---------------------------------------------------------------------------
 const accounts: Account[] = [
   // On-budget: liquid
-  { id: 1,  name: "TD Unlimited Chequing", kind: "liquid",    groupLabel: "Budget Accounts", balance: "-805319",   onBudget: true,  sort: 0 },
+  { id: 1,  name: "TD Unlimited Chequing", kind: "liquid",    groupLabel: "Budget Accounts", balance: "-805319",   onBudget: true,  sort: 0, lastReconciledAt: "2026-04-10", lastReconciledBalance: "608358" },
   { id: 2,  name: "EQ Bank",               kind: "liquid",    groupLabel: "Budget Accounts", balance: "12454286",  onBudget: true,  sort: 1 },
   { id: 3,  name: "Scotia e-Chequing",     kind: "liquid",    groupLabel: "Budget Accounts", balance: "45823",     onBudget: true,  sort: 2 },
   { id: 4,  name: "Cash",                  kind: "liquid",    groupLabel: "Budget Accounts", balance: "11605",     onBudget: true,  sort: 3 },
@@ -235,9 +235,9 @@ const transactions: Transaction[] = [
   // ── April 2026 ────────────────────────────────────────────────────────────
   T(aid("EQ Bank"),               null,                         "2026-04-15", "SAP Concur",               "442865",  "Income for April", "c", true),
   T(aid("EQ Bank"),               null,                         "2026-04-29", "SAP Concur",               "442865",  "Income for April", "c", true),
-  T(aid("TD Unlimited Chequing"), cid("Mortgage Principal"),    "2026-04-01", "TD Bank",                  "-180000", "Housing: Mortgage Principal"),
-  T(aid("TD Unlimited Chequing"), cid("Mortgage Interest"),     "2026-04-01", "TD Bank",                  "-235297", "Housing: Mortgage Interest"),
-  T(aid("TD Unlimited Chequing"), cid("Condo Fees/HOA"),        "2026-04-01", "Mountain's Edge MSP",      "-43900",  "BC405"),
+  T(aid("TD Unlimited Chequing"), cid("Mortgage Principal"),    "2026-04-01", "TD Bank",                  "-180000", "Housing: Mortgage Principal", "r"),
+  T(aid("TD Unlimited Chequing"), cid("Mortgage Interest"),     "2026-04-01", "TD Bank",                  "-235297", "Housing: Mortgage Interest", "r"),
+  T(aid("TD Unlimited Chequing"), cid("Condo Fees/HOA"),        "2026-04-01", "Mountain's Edge MSP",      "-43900",  "BC405", "r"),
   T(aid("AMEX Cobalt"),           cid("Utilities, Electricity, Water"), "2026-04-25", "Fortis BC",        "-30385",  ""),
   T(aid("AMEX Cobalt"),           cid("Groceries"),             "2026-04-05", "Superstore",               "-18742",  ""),
   T(aid("AMEX Cobalt"),           cid("Groceries"),             "2026-04-12", "Save-On-Foods",            "-14360",  ""),
@@ -245,8 +245,8 @@ const transactions: Transaction[] = [
   T(aid("AMEX Cobalt"),           cid("Eat/Drink Out, Alcohol"),"2026-04-08", "Cactus Club",              "-14200",  "Split with Susie"),
   T(aid("AMEX Cobalt"),           cid("Eat/Drink Out, Alcohol"),"2026-04-17", "Jam Café",                 "-5420",   ""),
   T(aid("AMEX Cobalt"),           cid("Eat/Drink Out, Alcohol"),"2026-04-22", "Parallel 49 Brewing",      "-6740",   "Split with Susie"),
-  T(aid("TD Unlimited Chequing"), cid("Internet, iPhone"),      "2026-04-10", "Telus",                    "-11000",  ""),
-  T(aid("TD Unlimited Chequing"), cid("Internet, iPhone"),      "2026-04-10", "Fido",                     "-9000",   ""),
+  T(aid("TD Unlimited Chequing"), cid("Internet, iPhone"),      "2026-04-10", "Telus",                    "-11000",  "", "r"),
+  T(aid("TD Unlimited Chequing"), cid("Internet, iPhone"),      "2026-04-10", "Fido",                     "-9000",   "", "r"),
   T(aid("Susie"),                 null,                         "2026-04-30", "Susie",                    "32015",   "April shared expenses reimbursement", "c", true),
 
   // ── May 2026 ──────────────────────────────────────────────────────────────
@@ -315,7 +315,7 @@ const transactions: Transaction[] = [
   T(aid("AMEX Cobalt"),           cid("Work/Family"),           "2026-06-12", "Amazon",                   "-14792",  ""),
   T(aid("AMEX Cobalt"),           cid("Work/Family"),           "2026-06-19", "Indigo Books",             "-5835",   ""),
   // TFSA contribution
-  T(aid("EQ Bank"),               null,                         "2026-06-01", "Wealthsimple TFSA",        "-45550",  "Monthly TFSA contribution", "c", false, 12),
+  T(aid("EQ Bank"),               cid("Retirement"),            "2026-06-01", "Wealthsimple TFSA",        "-45550",  "Monthly TFSA contribution", "c", false, aid("Wealthsimple TFSA")),
   // Susie shared expense split tracking
   T(aid("Susie"),                 null,                         "2026-06-07", "Published on Main (Susie share)", "-8925",  "Half of dinner"),
   T(aid("Susie"),                 null,                         "2026-06-13", "St. Augustine's (Susie share)",  "-4365",  "Half of pub tab"),
@@ -344,7 +344,7 @@ const recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[] 
   { id: 7,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "415297",     frequency: "monthly", nextDate: "2026-07-16", active: true, subTransactions: [] },
   { id: 8,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "SAP Concur",                amount: "415297",     frequency: "monthly", nextDate: "2026-07-30", active: true, subTransactions: [] },
   // TFSA contribution
-  { id: 9,  accountId: aid("EQ Bank"),               categoryId: null,                                 payee: "Wealthsimple TFSA",         amount: "-45550",     frequency: "monthly", nextDate: "2026-07-01", active: true, transferAccountId: 12, subTransactions: [] },
+  { id: 9,  accountId: aid("EQ Bank"),               categoryId: cid("Retirement"),                    payee: "Wealthsimple TFSA",         amount: "-45550",     frequency: "monthly", nextDate: "2026-07-01", active: true, transferAccountId: aid("Wealthsimple TFSA"), subTransactions: [] },
   // Sailing (annual)
   { id: 10, accountId: aid("TD Unlimited Chequing"), categoryId: cid("Lessons (Sailing, Guitar)"),     payee: "Jericho Sailing Centre",    amount: "-71860",     frequency: "yearly",  nextDate: "2027-05-01", active: true, subTransactions: [] },
 ];
