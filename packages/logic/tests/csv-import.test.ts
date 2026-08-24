@@ -143,6 +143,49 @@ describe("parseCsvImport", () => {
     expect(rows[2]!.error).toBeNull();
   });
 
+  it("falls through from a 0.00 outflow cell to the inflow column", () => {
+    const csv = [
+      "Date,Payee,Category,Memo,Outflow,Inflow",
+      "13/08/2026,PAYROLL,,,0.00,1908.03",
+      "13/08/2026,RESTAURANT,,,28.08,0.00",
+      "13/08/2026,ZERO BOTH,,,0.00,0.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      date: "2026-08-13",
+      payee: "PAYROLL",
+      amountCents: 190803,
+      error: null,
+    });
+    expect(rows[1]).toMatchObject({
+      date: "2026-08-13",
+      payee: "RESTAURANT",
+      amountCents: -2808,
+      error: null,
+    });
+    expect(rows[2]).toMatchObject({
+      date: "2026-08-13",
+      payee: "ZERO BOTH",
+      amountCents: 0,
+    });
+    expect(rows[2]!.error).toMatch(/zero/);
+  });
+
+  it("falls through to amount column when outflow and inflow are 0.00", () => {
+    const csv = [
+      "Date,Payee,Outflow,Inflow,Amount",
+      "13/08/2026,TRANSFER,0.00,0.00,-50.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      payee: "TRANSFER",
+      amountCents: -5000,
+      error: null,
+    });
+  });
+
   it("returns a header error for a missing Payee column", () => {
     const { headerError } = parseCsvImport("Date,Outflow\n2026-08-01,5.00\n");
     expect(headerError).toMatch(/Payee/);

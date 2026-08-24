@@ -274,4 +274,42 @@ describe("importCsvTransactions", () => {
     expect(out.count).toBe(0);
     expect(out.skipped).toHaveLength(1);
   });
+
+  it("reports errored and invalid rows in skipped instead of silently dropping them", async () => {
+    const accountId = await seedAccount();
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Valid Store", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "Zero Row", error: "Amount is zero", amountCents: 0 }),
+        row({ rowNumber: 4, payee: "Bad Date", error: "Invalid date", date: null }),
+        row({ rowNumber: 5, payee: "Bad Amount", error: "Invalid amount", amountCents: null }),
+      ],
+    });
+    expect(out.count).toBe(1);
+    expect(out.skipped).toHaveLength(3);
+    expect(out.skipped[0]).toMatchObject({
+      rowNumber: 3,
+      payee: "Zero Row",
+      amount: 0,
+      reason: "Amount is zero",
+      accountName: "Chequing",
+    });
+    expect(out.skipped[1]).toMatchObject({
+      rowNumber: 4,
+      payee: "Bad Date",
+      reason: "Invalid date",
+      accountName: "Chequing",
+    });
+    expect(out.skipped[2]).toMatchObject({
+      rowNumber: 5,
+      payee: "Bad Amount",
+      reason: "Invalid amount",
+      accountName: "Chequing",
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions).toHaveLength(1);
+    expect(data.transactions[0]!.payee).toBe("Valid Store");
+  });
 });
