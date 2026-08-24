@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, categories, reconciliations, transactions } from "../schema.js";
 import { TransactionError } from "./transactions.js";
@@ -72,17 +72,20 @@ export async function getReconcileState(
 
   const [agg] = await db
     .select({
-      unclearedSum: sql<number>`coalesce(sum(case when status = 'u' and date <= ${statementDate} then amount else 0 end), 0)`,
+      unclearedSum: sql<number>`coalesce(sum(case when status = 'u' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
       unclearedCount: sql<number>`coalesce(sum(case when status = 'u' and date <= ${statementDate} then 1 else 0 end), 0)`,
-      clearedSum: sql<number>`coalesce(sum(case when status = 'c' and date <= ${statementDate} then amount else 0 end), 0)`,
+      clearedSum: sql<number>`coalesce(sum(case when status = 'c' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
       clearedCount: sql<number>`coalesce(sum(case when status = 'c' and date <= ${statementDate} then 1 else 0 end), 0)`,
-      reconciledSum: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then amount else 0 end), 0)`,
+      reconciledSum: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
       reconciledCount: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then 1 else 0 end), 0)`,
     })
     .from(transactions)
     .where(
       and(
-        eq(transactions.accountId, accountId),
+        or(
+          eq(transactions.accountId, accountId),
+          eq(transactions.transferAccountId, accountId)
+        ),
         sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
       )
     );
@@ -179,7 +182,10 @@ export async function reconcileAccount(
       .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
       .where(
         and(
-          eq(transactions.accountId, input.accountId),
+          or(
+            eq(transactions.accountId, input.accountId),
+            eq(transactions.transferAccountId, input.accountId)
+          ),
           eq(transactions.status, "c"),
           sql`${transactions.date} <= ${statementDate}`
         )
@@ -272,7 +278,10 @@ export async function unreconcileAccount(
         .set({ status: "c", reconciledAt: null, reconciliationId: null })
         .where(
           and(
-            eq(transactions.accountId, accountId),
+            or(
+              eq(transactions.accountId, accountId),
+              eq(transactions.transferAccountId, accountId)
+            ),
             eq(transactions.status, "r"),
             eq(transactions.reconciliationId, lastRec.id)
           )
@@ -318,7 +327,10 @@ export async function unreconcileAccount(
         .set({ status: "c", reconciledAt: null, reconciliationId: null })
         .where(
           and(
-            eq(transactions.accountId, accountId),
+            or(
+              eq(transactions.accountId, accountId),
+              eq(transactions.transferAccountId, accountId)
+            ),
             eq(transactions.status, "r"),
             sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
           )

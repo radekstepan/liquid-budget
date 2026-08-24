@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -10,6 +11,7 @@ import {
   createAccount,
   createSplitWithChildren,
   createTransaction,
+  createTransfer,
   getReconcileState,
   reconcileAccount,
   RECONCILE_ADJUSTMENT_MEMO,
@@ -455,6 +457,156 @@ describe("reconcile queries", () => {
       });
       expect(recResult.adjustmentTransactionId).toBeNull();
       expect(recResult.finalDiff).toBe(0);
+    });
+
+    it("BUG-3.3: includes inbound transfers and inbound split children in destination account reconcile aggregates, flip, and unreconcile", async () => {
+      const srcAcct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+      const destAcct = await createAccount(db, { name: "Savings", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat] = await db.insert(schema.categories).values({ groupId: group.id, name: "Income / Other", sort: 0 }).returning();
+
+      // 1. Cleared standalone transfer from src to dest: -10000 on src => +10000 on dest
+      const t1 = await createTransfer(
+        db,
+        {
+          accountId: srcAcct.id,
+          date: "2026-06-01",
+          payee: "Transfer to Savings",
+          memo: "Savings transfer",
+          amount: -10000,
+          status: "c",
+        },
+        destAcct.id
+      );
+
+      // 2. Uncleared standalone transfer from src to dest: -2500 on src => +2500 on dest
+      const t2 = await createTransfer(
+        db,
+        {
+          accountId: srcAcct.id,
+          date: "2026-06-02",
+          payee: "Transfer to Savings",
+          memo: "Pending savings",
+          amount: -2500,
+          status: "u",
+        },
+        destAcct.id
+      );
+
+      // 3. Cleared split transaction on src with a transfer child to dest:
+      // Parent: -50000, Child 1: -47000 (cat), Child 2: -3000 (transfer to dest => +3000 on dest)
+      const splitResult = await createSplitWithChildren(
+        db,
+        {
+          accountId: srcAcct.id,
+          date: "2026-06-03",
+          payee: "Split Payee",
+          memo: "Split with savings leg",
+          amount: -50000,
+          status: "c",
+        },
+        [
+          { categoryId: cat.id, amount: -47000, memo: "Spending portion" },
+          { transferAccountId: destAcct.id, amount: -3000, memo: "Savings portion" },
+        ]
+      );
+      const splitChildTransfer = splitResult.children.find(
+        (c) => c.transferAccountId === destAcct.id
+      )!;
+
+      // Check destination account reconcile state before reconcile:
+      // clearedSum: +10000 (t1) + +3000 (splitChild) = 13000 (count: 2)
+      // unclearedTotal: +2500 (t2) (count: 1)
+      // reconciledSum: 0 (count: 0)
+      // workingBalance: cleared (13000) + reconciled (0) = 13000
+      const destStateBefore = await getReconcileState(db, destAcct.id, "2026-06-30");
+      expect(destStateBefore).toMatchObject({
+        accountId: destAcct.id,
+        accountName: "Savings",
+        workingBalance: 13000,
+        unclearedTotal: 2500,
+        unclearedCount: 1,
+        clearedCount: 2,
+        reconciledCount: 0,
+      });
+
+      // Reconcile destination account with statement balance matching workingBalance (13000)
+      const reconcileResult = await reconcileAccount(db, {
+        accountId: destAcct.id,
+        statementBalance: 13000,
+        statementDate: "2026-06-30",
+      });
+
+      expect(reconcileResult).toMatchObject({
+        reconciledCount: 2,
+        adjustmentTransactionId: null,
+        finalDiff: 0,
+      });
+
+      // Verify that t1 and splitChildTransfer were flipped to status 'r' in DB
+      const [t1Db] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, t1.id));
+      expect(t1Db?.status).toBe("r");
+      expect(t1Db?.reconciliationId).toBeTruthy();
+
+      const [splitChildDb] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, splitChildTransfer.id));
+      expect(splitChildDb?.status).toBe("r");
+      expect(splitChildDb?.reconciliationId).toBe(t1Db?.reconciliationId);
+
+      // Verify uncleared transfer t2 remains 'u'
+      const [t2Db] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, t2.id));
+      expect(t2Db?.status).toBe("u");
+      expect(t2Db?.reconciliationId).toBeNull();
+
+      // State after reconcile:
+      // clearedSum: 0 (count: 0)
+      // reconciledSum: 13000 (count: 2)
+      // workingBalance: 13000
+      const destStateAfter = await getReconcileState(db, destAcct.id, "2026-06-30");
+      expect(destStateAfter).toMatchObject({
+        accountId: destAcct.id,
+        workingBalance: 13000,
+        clearedCount: 0,
+        reconciledCount: 2,
+        unclearedTotal: 2500,
+        unclearedCount: 1,
+      });
+
+      // Unreconcile destination account: should flip the 2 inbound rows back to 'c'
+      const unrecResult = await unreconcileAccount(db, destAcct.id);
+      expect(unrecResult).toEqual({ flipped: 2, deletedAdjustmentId: null });
+
+      const [t1DbRestored] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, t1.id));
+      expect(t1DbRestored?.status).toBe("c");
+      expect(t1DbRestored?.reconciliationId).toBeNull();
+
+      const [splitChildDbRestored] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, splitChildTransfer.id));
+      expect(splitChildDbRestored?.status).toBe("c");
+      expect(splitChildDbRestored?.reconciliationId).toBeNull();
+
+      const destStateUnrec = await getReconcileState(db, destAcct.id, "2026-06-30");
+      expect(destStateUnrec).toMatchObject({
+        accountId: destAcct.id,
+        workingBalance: 13000,
+        clearedCount: 2,
+        reconciledCount: 0,
+        unclearedTotal: 2500,
+        unclearedCount: 1,
+      });
     });
   });
 });
