@@ -5,6 +5,7 @@ import {
   AssignmentUpsertSchema,
   CategoryCreateSchema,
   CategoryGroupCreateSchema,
+  CategoryGroupPatchSchema,
   CategoryPatchSchema,
   ReconcileAccountSchema,
   RecurringCreateSchema,
@@ -155,6 +156,26 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(
         CategoryPatchSchema.safeParse({ id: 5, name: "Updated", overspendCarriesOver: true }).success
       ).toBe(true);
+    });
+
+    it("validates category group patch requires at least one field", () => {
+      expect(
+        CategoryGroupPatchSchema.safeParse({ id: 1, type: "group", name: "Renamed Group" }).success
+      ).toBe(true);
+      expect(
+        CategoryGroupPatchSchema.safeParse({ id: 1, type: "group", sort: 3 }).success
+      ).toBe(true);
+      expect(
+        CategoryGroupPatchSchema.safeParse({ id: 1, type: "group", name: "Renamed Group", sort: 3 }).success
+      ).toBe(true);
+
+      // Rejects patch when neither name nor sort is provided (BUG-5.2)
+      const noFieldsResult = CategoryGroupPatchSchema.safeParse({ id: 1, type: "group" });
+      expect(noFieldsResult.success).toBe(false);
+
+      // Rejects patch when name is empty string
+      const emptyNameResult = CategoryGroupPatchSchema.safeParse({ id: 1, type: "group", name: "" });
+      expect(emptyNameResult.success).toBe(false);
     });
   });
 

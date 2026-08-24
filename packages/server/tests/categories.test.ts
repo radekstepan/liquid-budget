@@ -7,6 +7,7 @@ import {
   deleteCategoryGroup,
   renameCategoryGroup,
   updateCategory,
+  updateCategoryGroup,
   updateCategoryGroupSort,
 } from "../src/queries/categories.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
@@ -65,6 +66,40 @@ describe("categories queries", () => {
       expect(sqls[0]).toBe("BEGIN");
       expect(sqls[sqls.length - 1]).toBe("COMMIT");
       expect(sqls).not.toContain("ROLLBACK");
+    });
+  });
+
+  describe("updateCategoryGroup", () => {
+    it("updates name only", async () => {
+      mock.respondWith("update:category_groups", [{ id: 1, name: "Renamed" }]);
+      const row = await updateCategoryGroup(mock.db, 1, { name: "Renamed" });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ name: "Renamed" });
+      expect(row).toMatchObject({ name: "Renamed" });
+    });
+
+    it("updates sort only", async () => {
+      mock.respondWith("update:category_groups", [{ id: 1, sort: 3 }]);
+      const row = await updateCategoryGroup(mock.db, 1, { sort: 3 });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ sort: 3 });
+      expect(row).toMatchObject({ sort: 3 });
+    });
+
+    it("updates both name and sort together", async () => {
+      mock.respondWith("update:category_groups", [{ id: 1, name: "Renamed", sort: 3 }]);
+      const row = await updateCategoryGroup(mock.db, 1, { name: "Renamed", sort: 3 });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ name: "Renamed", sort: 3 });
+      expect(row).toMatchObject({ name: "Renamed", sort: 3 });
+    });
+
+    it("returns existing row if patch is empty", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Existing", sort: 2 }]);
+      const row = await updateCategoryGroup(mock.db, 1, {});
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      expect(updateCall).toBeUndefined();
+      expect(row).toMatchObject({ id: 1, name: "Existing", sort: 2 });
     });
   });
 
