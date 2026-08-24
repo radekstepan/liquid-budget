@@ -94,16 +94,97 @@ export async function deleteAccount(db: Database, id: number) {
         accountId: transactions.accountId,
         amount: transactions.amount,
         parentId: transactions.parentId,
+        status: transactions.status,
+        transferAccountId: transactions.transferAccountId,
       })
       .from(transactions)
       .where(eq(transactions.transferAccountId, id));
 
     for (const cp of counterparties) {
-      await db
-        .update(accounts)
-        .set({ balance: sql`${accounts.balance} - ${Number(cp.amount)}` })
-        .where(eq(accounts.id, cp.accountId));
-      await db.delete(transactions).where(eq(transactions.id, cp.id));
+      const [existing] = await db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.id, cp.id));
+      if (!existing) continue;
+
+      if (existing.status === "r") {
+        throw new AccountError(
+          `Transaction ${existing.id} is reconciled and locked. Unreconcile before deleting.`,
+          422
+        );
+      }
+
+      if (existing.parentId != null) {
+        // Check if the split parent is reconciled
+        const [parent] = await db
+          .select()
+          .from(transactions)
+          .where(eq(transactions.id, existing.parentId));
+        if (parent && parent.status === "r") {
+          throw new AccountError(
+            `Reconciled split transaction ${parent.id} cannot be modified. Unreconcile before deleting.`,
+            422
+          );
+        }
+
+        // Reverse balance for this child on its own account
+        await db
+          .update(accounts)
+          .set({ balance: sql`${accounts.balance} - ${Number(existing.amount)}` })
+          .where(eq(accounts.id, existing.accountId));
+
+        // Delete the split child
+        await db.delete(transactions).where(eq(transactions.id, existing.id));
+
+        // Check remaining children of the split parent.
+        const remaining = await db
+          .select({
+            id: transactions.id,
+            accountId: transactions.accountId,
+            amount: transactions.amount,
+            transferAccountId: transactions.transferAccountId,
+            status: transactions.status,
+          })
+          .from(transactions)
+          .where(eq(transactions.parentId, existing.parentId));
+
+        if (remaining.length === 1) {
+          const lastChild = remaining[0]!;
+          if (lastChild.status === "r") {
+            throw new AccountError(
+              `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
+              422
+            );
+          }
+          await db
+            .update(accounts)
+            .set({ balance: sql`${accounts.balance} - ${Number(lastChild.amount)}` })
+            .where(eq(accounts.id, lastChild.accountId));
+
+          if (lastChild.transferAccountId != null) {
+            await db
+              .update(accounts)
+              .set({ balance: sql`${accounts.balance} + ${Number(lastChild.amount)}` })
+              .where(eq(accounts.id, lastChild.transferAccountId));
+          }
+          await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+          await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        } else if (remaining.length === 0) {
+          await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        } else {
+          const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
+          await db
+            .update(transactions)
+            .set({ amount: newTotal })
+            .where(eq(transactions.id, existing.parentId));
+        }
+      } else {
+        await db
+          .update(accounts)
+          .set({ balance: sql`${accounts.balance} - ${Number(existing.amount)}` })
+          .where(eq(accounts.id, existing.accountId));
+        await db.delete(transactions).where(eq(transactions.id, existing.id));
+      }
     }
 
     // 2. Reverse balance effects on other accounts for own transfers where transferAccountId IS NOT NULL

@@ -1,8 +1,10 @@
 import {
+  AccountError,
   createAccount,
   deleteAccount,
   getDefaultDb,
   listAccounts,
+  TransactionError,
   updateAccount,
 } from "@ynab/server";
 
@@ -61,6 +63,13 @@ export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-  await deleteAccount(getDefaultDb(), id);
-  return Response.json({ ok: true });
+  try {
+    await deleteAccount(getDefaultDb(), id);
+    return Response.json({ ok: true });
+  } catch (e: any) {
+    if (e instanceof AccountError || e instanceof TransactionError) {
+      return Response.json({ error: e.message }, { status: e.status });
+    }
+    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
 }

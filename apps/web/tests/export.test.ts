@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { NextRequest } from "next/server";
-import { extractYnab4DataFromZip, getDefaultDb, seedDatabase } from "@ynab/server";
+import { extractYnab4DataFromZip, getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
 import { GET } from "../src/app/api/export/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
@@ -8,6 +8,7 @@ vi.stubEnv("DATABASE_URL", ":memory:");
 describe("GET /api/export", () => {
   beforeAll(async () => {
     const db = getDefaultDb();
+    await resetDatabase(db);
     await seedDatabase(db);
   }, 20000);
 
