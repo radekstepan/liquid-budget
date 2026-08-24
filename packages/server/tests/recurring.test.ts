@@ -52,6 +52,22 @@ describe("recurring queries", () => {
       });
     });
 
+    it("rounds float amounts to nearest integer cent", async () => {
+      mock.respondWith("insert:recurring", [{ id: 2 }]);
+      await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: 2,
+        payee: "Netflix",
+        amount: -1599.4,
+        frequency: "monthly",
+        nextDate: "2026-07-15",
+      });
+      const insertCall = mock.calls.find((c) => c.op === "insert");
+      expect(insertCall?.values).toMatchObject({
+        amount: -1599,
+      });
+    });
+
     it("creates a recurring transfer", async () => {
       mock.respondWith("insert:recurring", [{ id: 1 }]);
       await createRecurring(mock.db, {
@@ -122,6 +138,31 @@ describe("recurring queries", () => {
         memo: "household",
         sort: 1,
       });
+    });
+
+    it("rounds float amounts in split parent and sub-transactions", async () => {
+      mock.respondWith("insert:recurring", [{ id: 8 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+      await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "Costco",
+        amount: -20000.4,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        subTransactions: [
+          { categoryId: 5, amount: -12000.2, memo: "groceries" },
+          { categoryId: 6, amount: -8000.2, memo: "household" },
+        ],
+      });
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ amount: -20000 });
+      const subValues = inserts
+        .filter((c) => c.table === "recurring_sub_transactions")
+        .map((c) => c.values);
+      expect(subValues[0]).toMatchObject({ amount: -12000 });
+      expect(subValues[1]).toMatchObject({ amount: -8000 });
     });
 
     it("rejects a split with fewer than two children", async () => {

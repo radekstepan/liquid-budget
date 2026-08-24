@@ -40,6 +40,17 @@ describe("accounts queries", () => {
       expect(row).toMatchObject({ id: 1, sort: 0 });
     });
 
+    it("rounds float balance to nearest integer cent", async () => {
+      mock.respondWith("select:accounts", [{ max: null }]);
+      mock.respondWith("insert:accounts", [{ id: 1, sort: 0, balance: 10050 }]);
+
+      await createAccount(mock.db, { name: "Savings", balance: 10049.6 });
+      const insertCall = mock.calls.find((c) => c.op === "insert");
+      expect(insertCall?.values).toMatchObject({
+        balance: 10050,
+      });
+    });
+
     it("supports creating an archived account", async () => {
       mock.respondWith("select:accounts", [{ max: 0 }]);
       mock.respondWith("insert:accounts", [{ id: 2, archived: true }]);

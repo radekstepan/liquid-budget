@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { assertValidAmount } from "./transactions.js";
 
 export class AccountError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -28,6 +29,7 @@ export type UpdateAccountInput = {
 };
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
+  const balance = input.balance != null ? assertValidAmount(input.balance) : 0;
   db.run(sql`BEGIN`);
   try {
     const [maxRow] = await db
@@ -39,7 +41,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
         name: String(input.name),
         kind: String(input.kind ?? "liquid"),
         groupLabel: String(input.groupLabel ?? "Liquid"),
-        balance: Number(input.balance) || 0,
+        balance,
         onBudget: input.onBudget ?? true,
         sort: Number(maxRow?.max ?? -1) + 1,
         archived: input.archived ?? false,

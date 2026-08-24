@@ -81,13 +81,15 @@ function assertSplitsBalanced(
   children: TxnSubTransactionInput[],
   isExistingChildren = false
 ): void {
-  assertValidAmount(parentAmount);
+  const validParent = assertValidAmount(parentAmount);
   if (children.length < 2) {
     throw new RecurringError("split must have at least two sub-transactions");
   }
+  let sum = 0;
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
-    assertValidAmount(c.amount);
+    const childAmount = assertValidAmount(c.amount);
+    sum += childAmount;
     if (c.categoryId && c.transferAccountId) {
       throw new RecurringError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
@@ -95,10 +97,9 @@ function assertSplitsBalanced(
       throw new RecurringError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
   }
-  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
-  if (sum !== parentAmount) {
+  if (sum !== validParent) {
     throw new RecurringError(
-      `split children do not sum to parent: ${sum} vs ${parentAmount}`
+      `split children do not sum to parent: ${sum} vs ${validParent}`
     );
   }
 }
@@ -171,7 +172,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         categoryId,
         payee: input.payee,
         memo: input.memo ?? "",
-        amount: input.amount,
+        amount: validatedAmount,
         frequency: input.frequency,
         nextDate: input.nextDate,
         active: input.active ?? true,
@@ -188,7 +189,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         await db.insert(recurringSubTransactions).values({
           recurringId: parent.id,
           categoryId,
-          amount: c.amount,
+          amount: assertValidAmount(c.amount),
           memo: c.memo ?? "",
           sort: sort++,
           transferAccountId,
@@ -215,8 +216,8 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (norm.isSplit) {
     const parentAmount =
       "amount" in patch && (patch as UpdateRecurringInput).amount != null
-        ? Number((patch as UpdateRecurringInput).amount)
-        : Number(existing.amount);
+        ? assertValidAmount((patch as UpdateRecurringInput).amount)
+        : assertValidAmount(existing.amount);
     assertSplitsBalanced(parentAmount, norm.subTransactions!);
   }
 
@@ -235,7 +236,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       .from(recurringSubTransactions)
       .where(eq(recurringSubTransactions.recurringId, id));
     if (existingChildren.length > 0) {
-      assertSplitsBalanced(Number((patch as UpdateRecurringInput).amount), existingChildren, true);
+      assertSplitsBalanced(assertValidAmount((patch as UpdateRecurringInput).amount), existingChildren, true);
     }
   }
 
@@ -275,7 +276,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
           await db.insert(recurringSubTransactions).values({
             recurringId: id,
             categoryId,
-            amount: c.amount,
+            amount: assertValidAmount(c.amount),
             memo: c.memo ?? "",
             sort: sort++,
             transferAccountId,
