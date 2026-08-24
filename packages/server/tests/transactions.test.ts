@@ -296,6 +296,28 @@ describe("transactions queries", () => {
       ).rejects.toBeInstanceOf(TransactionError);
     });
 
+    it("rounds float amounts to nearest integer cent", async () => {
+      mock.respondWith("select:accounts", [{ name: "EQ Bank" }]);
+      mock.respondWith("insert:transactions", [{ id: 43 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createTransfer(
+        mock.db,
+        {
+          accountId: 1,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "",
+          memo: "",
+          amount: -50000.4,
+        },
+        2
+      );
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({ amount: -50000 });
+    });
+
     it("rejects direct creation of a reconciled transfer", async () => {
       await expect(
         createTransfer(
@@ -380,6 +402,23 @@ describe("transactions queries", () => {
       });
     });
 
+    it("rounds float amounts to nearest integer cent", async () => {
+      mock.respondWith("insert:transactions", [{ id: 8 }]);
+      mock.respondWith("update:accounts", [{ id: 1 }]);
+
+      await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: 2,
+        date: "2026-07-01",
+        payee: "Coffee",
+        memo: "",
+        amount: -500.4,
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({ amount: -500 });
+    });
+
     it("rejects direct creation of a reconciled transaction", async () => {
       await expect(
         createTransaction(mock.db, {
@@ -415,6 +454,15 @@ describe("transactions queries", () => {
   });
 
   describe("assertSplitsBalanced", () => {
+    it("rounds float amounts and accepts matching rounded split", () => {
+      expect(() =>
+        assertSplitsBalanced(-10000.4, [
+          { categoryId: 1, amount: -6000.2 },
+          { categoryId: 2, amount: -4000.2 },
+        ])
+      ).not.toThrow();
+    });
+
     it("accepts a balanced split with categories", () => {
       expect(() =>
         assertSplitsBalanced(-10000, [
@@ -530,6 +578,35 @@ describe("transactions queries", () => {
       expect(ops).toEqual([
         "run", "insert", "select", "insert", "update", "insert", "update", "run",
       ]);
+    });
+
+    it("rounds parent and child float amounts on insert", async () => {
+      mock.respondWithNth("insert:transactions", 1, [
+        { id: 1, accountId: 7, categoryId: null, date: "2026-07-01", payee: "Costco", memo: "", amount: -10000, status: "c", parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 2 }]);
+      mock.respondWithNth("insert:transactions", 3, [{ id: 3 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createSplitWithChildren(
+        mock.db,
+        {
+          accountId: 7,
+          date: "2026-07-01",
+          payee: "Costco",
+          memo: "",
+          amount: -10000.4,
+        },
+        [
+          { categoryId: 11, amount: -6000.2 },
+          { categoryId: 12, amount: -4000.2 },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ amount: -10000 });
+      expect(inserts[1]?.values).toMatchObject({ amount: -6000 });
+      expect(inserts[2]?.values).toMatchObject({ amount: -4000 });
     });
 
     it("rejects an unbalanced split", async () => {

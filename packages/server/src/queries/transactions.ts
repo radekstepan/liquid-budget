@@ -178,21 +178,21 @@ export function assertSplitsBalanced(
   parentAmount: number,
   children: SubTransactionInput[]
 ): void {
-  assertValidAmount(parentAmount);
+  const validParent = assertValidAmount(parentAmount);
   if (children.length < 2) {
     throw new TransactionError("split must have at least two sub-transactions");
   }
+  let sum = 0;
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
     if (!c.categoryId && !c.transferAccountId) {
       throw new TransactionError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
-    assertValidAmount(c.amount);
+    sum += assertValidAmount(c.amount);
   }
-  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
-  if (sum !== parentAmount) {
+  if (sum !== validParent) {
     throw new TransactionError(
-      `split children do not sum to parent: ${sum} vs ${parentAmount}`
+      `split children do not sum to parent: ${sum} vs ${validParent}`
     );
   }
 }
@@ -208,7 +208,7 @@ export function assertSplitsBalanced(
  * "lastReconciledAt" account metadata and prevents orphan-R rows.
  */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
-  assertValidAmount(input.amount);
+  const amount = assertValidAmount(input.amount);
   if (input.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
@@ -219,7 +219,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       throw new TransactionError("transfer account must differ from source account");
     }
     if (input.parentId == null) {
-      return createTransfer(db, input, input.transferAccountId);
+      return createTransfer(db, { ...input, amount }, input.transferAccountId);
     }
   }
 
@@ -247,7 +247,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       const destOnBudget = await isAccountOnBudget(db, input.transferAccountId!);
       const isBoundaryCrossing = onBudget !== destOnBudget;
       const netOnBudgetDelta =
-        (onBudget ? input.amount : 0) + (destOnBudget ? -input.amount : 0);
+        (onBudget ? amount : 0) + (destOnBudget ? -amount : 0);
 
       if (isBoundaryCrossing) {
         if (netOnBudgetDelta > 0) {
@@ -280,7 +280,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         categoryId == null &&
         input.parentId == null;
       isIncome = isEligibleForIncome
-        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : input.amount > 0)
+        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : amount > 0)
         : false;
       incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
     }
@@ -293,7 +293,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         date: input.date,
         payee,
         memo: input.memo,
-        amount: input.amount,
+        amount,
         status: input.status ?? "c",
         flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: input.transferAccountId ?? null,
@@ -307,9 +307,9 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     // `skipBalance` is only honoured for parents (parentId == null). Children
     // always apply their own balance, regardless of any `skipBalance` flag.
     if (!isSplitParent) {
-      await applyBalance(db, input.accountId, input.amount);
+      await applyBalance(db, input.accountId, amount);
       if (input.transferAccountId != null) {
-        await applyBalance(db, input.transferAccountId, -input.amount);
+        await applyBalance(db, input.transferAccountId, -amount);
       }
     }
     db.run(sql`COMMIT`);
@@ -331,7 +331,7 @@ export async function createTransfer(
   baseInput: CreateTransactionInput,
   transferAccountId: number
 ) {
-  assertValidAmount(baseInput.amount);
+  const amount = assertValidAmount(baseInput.amount);
   if (baseInput.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
@@ -352,7 +352,7 @@ export async function createTransfer(
     const srcOnBudget = await isAccountOnBudget(db, baseInput.accountId);
     const destOnBudget = await isAccountOnBudget(db, transferAccountId);
     const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-    const netOnBudgetDelta = (srcOnBudget ? baseInput.amount : 0) + (destOnBudget ? -baseInput.amount : 0);
+    const netOnBudgetDelta = (srcOnBudget ? amount : 0) + (destOnBudget ? -amount : 0);
 
     let categoryId: number | null = null;
     let isIncome = false;
@@ -391,7 +391,7 @@ export async function createTransfer(
         date: baseInput.date,
         payee,
         memo: baseInput.memo,
-        amount: baseInput.amount,
+        amount,
         status: baseInput.status ?? "c",
         flagColor: sanitizeFlagColor(baseInput.flagColor),
         transferAccountId,
@@ -401,8 +401,8 @@ export async function createTransfer(
       })
       .returning();
 
-    await applyBalance(db, baseInput.accountId, baseInput.amount);
-    await applyBalance(db, transferAccountId, -baseInput.amount);
+    await applyBalance(db, baseInput.accountId, amount);
+    await applyBalance(db, transferAccountId, -amount);
     db.run(sql`COMMIT`);
     return row;
   } catch (err) {
@@ -430,7 +430,8 @@ export async function createSplitWithChildren(
   },
   children: SubTransactionInput[]
 ) {
-  assertSplitsBalanced(parent.amount, children);
+  const parentAmount = assertValidAmount(parent.amount);
+  assertSplitsBalanced(parentAmount, children);
 
   const parentStatus = parent.status ?? "c";
   if (parentStatus === "r") {
@@ -449,7 +450,7 @@ export async function createSplitWithChildren(
         date: parent.date,
         payee: parent.payee,
         memo: parent.memo,
-        amount: parent.amount,
+        amount: parentAmount,
         status: parentStatus,
         flagColor: sanitizeFlagColor(parent.flagColor),
         transferAccountId: null,
@@ -461,6 +462,7 @@ export async function createSplitWithChildren(
     const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
     const childRows = [];
     for (const c of children) {
+      const childAmount = assertValidAmount(c.amount);
       let payee = parent.payee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
       let categoryId = c.categoryId ? Number(c.categoryId) : null;
@@ -471,7 +473,7 @@ export async function createSplitWithChildren(
         payee = `Transfer : ${destName ?? "Unknown"}`;
         const destOnBudget = await isAccountOnBudget(db, transferAccountId);
         const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-        const netOnBudgetDelta = (srcOnBudget ? c.amount : 0) + (destOnBudget ? -c.amount : 0);
+        const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
 
         if (isBoundaryCrossing) {
           if (netOnBudgetDelta > 0) {
@@ -487,7 +489,7 @@ export async function createSplitWithChildren(
           categoryId = null;
           isIncome = false;
         } else {
-          isIncome = categoryId == null && c.amount > 0;
+          isIncome = categoryId == null && childAmount > 0;
         }
       }
 
@@ -499,16 +501,16 @@ export async function createSplitWithChildren(
           date: parent.date,
           payee,
           memo: c.memo ?? "",
-          amount: c.amount,
+          amount: childAmount,
           status: parentStatus,
           transferAccountId,
           parentId: parentRow!.id,
           isIncome,
         })
         .returning();
-      await applyBalance(db, parent.accountId, c.amount);
+      await applyBalance(db, parent.accountId, childAmount);
       if (transferAccountId) {
-        await applyBalance(db, transferAccountId, -c.amount);
+        await applyBalance(db, transferAccountId, -childAmount);
       }
       childRows.push(child);
     }
@@ -777,7 +779,8 @@ export async function updateSplit(
     throw new TransactionError("target row has no children; use a regular update");
   }
 
-  assertSplitsBalanced(parent.amount, children);
+  const parentAmount = assertValidAmount(parent.amount);
+  assertSplitsBalanced(parentAmount, children);
 
   const oldChildren = await getChildren(db, parentId);
   if (oldChildren.some((c) => c.status === "r")) {
@@ -819,6 +822,7 @@ export async function updateSplit(
     const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
     const newChildren = [];
     for (const c of children) {
+      const childAmount = assertValidAmount(c.amount);
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
       let categoryId = c.categoryId ? Number(c.categoryId) : null;
@@ -829,7 +833,7 @@ export async function updateSplit(
         payee = `Transfer : ${destName ?? "Unknown"}`;
         const destOnBudget = await isAccountOnBudget(db, transferAccountId);
         const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-        const netOnBudgetDelta = (srcOnBudget ? c.amount : 0) + (destOnBudget ? -c.amount : 0);
+        const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
 
         if (isBoundaryCrossing) {
           if (netOnBudgetDelta > 0) {
@@ -845,7 +849,7 @@ export async function updateSplit(
           categoryId = null;
           isIncome = false;
         } else {
-          isIncome = categoryId == null && c.amount > 0;
+          isIncome = categoryId == null && childAmount > 0;
         }
       }
 
@@ -858,16 +862,16 @@ export async function updateSplit(
           payee,
           // Children inherit the parent's memo unless they have their own.
           memo: c.memo ?? newMemo ?? "",
-          amount: c.amount,
+          amount: childAmount,
           status: newStatus,
           transferAccountId,
           parentId,
           isIncome,
         })
         .returning();
-      await applyBalance(db, parent.accountId, c.amount);
+      await applyBalance(db, parent.accountId, childAmount);
       if (transferAccountId) {
-        await applyBalance(db, transferAccountId, -c.amount);
+        await applyBalance(db, transferAccountId, -childAmount);
       }
       newChildren.push(row);
     }

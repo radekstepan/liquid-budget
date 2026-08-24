@@ -9,12 +9,20 @@ describe("upsertAssignment", () => {
   });
 
   it("atomically inserts or updates assignment using onConflictDoUpdate in a transaction", async () => {
-    mock.respondWith("insert:assignments", [{ id: 42, categoryId: 1, month: "2025-07", amount: "20.00" }]);
+    mock.respondWith("insert:assignments", [{ id: 42, categoryId: 1, month: "2025-07", amount: 20 }]);
 
     const result = await upsertAssignment(mock.db, { categoryId: 1, month: "2025-07", amount: 20 });
-    expect(result).toMatchObject({ id: 42, amount: "20.00" });
+    expect(result).toMatchObject({ id: 42, amount: 20 });
 
     const ops = mock.calls.map((c) => c.op);
     expect(ops).toEqual(["run", "insert", "run"]);
+  });
+
+  it("rounds float amounts to nearest integer cent", async () => {
+    mock.respondWith("insert:assignments", [{ id: 43, categoryId: 1, month: "2025-07", amount: 21 }]);
+
+    await upsertAssignment(mock.db, { categoryId: 1, month: "2025-07", amount: 20.6 });
+    const insertCall = mock.calls.find((c) => c.op === "insert");
+    expect(insertCall?.values).toMatchObject({ amount: 21 });
   });
 });
