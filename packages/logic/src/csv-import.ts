@@ -8,9 +8,17 @@ export type CsvImportRow = {
   error: string | null;
 };
 
+export type DateFormatConvention = "dmy" | "mdy";
+
+export type CsvImportOptions = {
+  swap?: boolean;
+  dateFormat?: "auto" | "dmy" | "mdy";
+};
+
 export type CsvImportResult = {
   headerError: string | null;
   rows: CsvImportRow[];
+  detectedDateFormat?: DateFormatConvention;
 };
 
 export function parseCsv(text: string): string[][] {
@@ -82,6 +90,8 @@ function toISO(y: string, mo: string, d: string): string | null {
   const Y = Number(y);
   const M = Number(mo);
   const D = Number(d);
+  if (!Number.isInteger(Y) || !Number.isInteger(M) || !Number.isInteger(D)) return null;
+  if (M < 1 || M > 12 || D < 1 || D > 31) return null;
   const dt = new Date(Date.UTC(Y, M - 1, D));
   if (dt.getUTCFullYear() !== Y || dt.getUTCMonth() !== M - 1 || dt.getUTCDate() !== D) {
     return null;
@@ -90,22 +100,41 @@ function toISO(y: string, mo: string, d: string): string | null {
   return `${Y}-${pad(M)}-${pad(D)}`;
 }
 
-function parseDate(input: string): string | null {
+export function detectDateFormat(
+  rows: string[][],
+  dateIdx: number,
+  headerIdx: number = 0
+): DateFormatConvention {
+  let dmyVotes = 0;
+  let mdyVotes = 0;
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const cells = rows[i];
+    if (!cells || cells.every((c) => c.trim() === "")) continue;
+    const raw = (cells[dateIdx] ?? "").trim();
+    const m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(raw);
+    if (m) {
+      const n1 = Number(m[1]);
+      const n2 = Number(m[2]);
+      if (n1 > 12 && n2 <= 12) dmyVotes++;
+      else if (n2 > 12 && n1 <= 12) mdyVotes++;
+    }
+  }
+  return mdyVotes > dmyVotes ? "mdy" : "dmy";
+}
+
+export function parseDate(input: string, convention: DateFormatConvention = "dmy"): string | null {
   const t = input.trim();
   if (!t) return null;
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(t);
   if (m) return toISO(m[1]!, m[2]!, m[3]!);
   m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(t);
   if (m) {
-    let d = Number(m[1]);
-    let mo = Number(m[2]);
+    const n1 = Number(m[1]);
+    const n2 = Number(m[2]);
     let y = Number(m[3]);
     if (y < 100) y += 2000;
-    if (mo > 12) {
-      const tmp = d;
-      d = mo;
-      mo = tmp;
-    }
+    const d = convention === "mdy" ? n2 : n1;
+    const mo = convention === "mdy" ? n1 : n2;
     return toISO(String(y), String(mo), String(d));
   }
   return null;
@@ -150,7 +179,7 @@ export function swapPayeeMemo(rows: CsvImportRow[], swap?: boolean): CsvImportRo
   return rows.map((r) => ({ ...r, payee: r.memo, memo: r.payee }));
 }
 
-export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImportResult {
+export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImportResult {
   const rows = parseCsv(text);
   const headerIdx = findHeaderRow(rows);
   if (rows.length === 0 || headerIdx < 0) {
@@ -183,6 +212,13 @@ export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImpo
   else if (outflowIdx < 0 && inflowIdx < 0 && amountIdx < 0)
     headerError = "Could not find an Outflow, Inflow, or Amount column";
 
+  const convention: DateFormatConvention =
+    opts?.dateFormat && opts.dateFormat !== "auto"
+      ? opts.dateFormat
+      : dateIdx >= 0
+        ? detectDateFormat(rows, dateIdx, headerIdx)
+        : "dmy";
+
   const parsedRows: CsvImportRow[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const cells = rows[i]!;
@@ -191,7 +227,7 @@ export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImpo
     const payee = raw(payeeIdx);
     const memo = raw(memoIdx);
     const category = raw(categoryIdx);
-    const date = parseDate(raw(dateIdx));
+    const date = parseDate(raw(dateIdx), convention);
     let error: string | null = null;
     if (!date) error = "Invalid date";
     let amt: number | null = null;
@@ -242,5 +278,9 @@ export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImpo
       error,
     });
   }
-  return { headerError, rows: opts?.swap ? swapPayeeMemo(parsedRows, true) : parsedRows };
+  return {
+    headerError,
+    rows: opts?.swap ? swapPayeeMemo(parsedRows, true) : parsedRows,
+    detectedDateFormat: convention,
+  };
 }
