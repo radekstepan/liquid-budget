@@ -58,12 +58,8 @@ export function isIncomeTransaction(
   t: Transaction,
   accountMap?: Map<number, Account> | Account[]
 ): boolean {
-  if (t.isIncome !== undefined) {
-    return t.isIncome === true;
-  }
   if (t.categoryId != null) return false;
   if (t.transferAccountId != null) return false;
-  if (t.parentId != null) return false;
   if (num(t.amount) <= 0) return false;
   if (accountMap) {
     const acc =
@@ -72,6 +68,10 @@ export function isIncomeTransaction(
         : accountMap.find((a) => a.id === t.accountId);
     if (acc && !acc.onBudget) return false;
   }
+  if (t.isIncome !== undefined) {
+    return t.isIncome === true;
+  }
+  if (t.parentId != null) return false;
   return true;
 }
 

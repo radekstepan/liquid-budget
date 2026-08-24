@@ -10,6 +10,7 @@ import {
   computeBudget,
   buildBudgetIndex,
   getMonthsWithData,
+  isIncomeTransaction,
 } from "../src/budget-engine.js";
 import { makeSeedBudgetData, DEMO_MONTH } from "../src/seed-fixture.js";
 import type { BudgetData, Category, CategoryGroup } from "../src/types.js";
@@ -1298,6 +1299,119 @@ describe("computeBudget", () => {
       expect(indexedRes.groups[0]?.rows[0]?.outflow).toBe(0);
       expect(indexedRes.groups[0]?.rows[0]?.available).toBe(50000);
       expect(indexedRes.tbb).toBe(50000);
+    });
+
+    it("BUG 1.5: explicit isIncome: true with categoryId != null is not treated as income to avoid double counting", () => {
+      const account = {
+        id: 1,
+        name: "Checking",
+        kind: "liquid" as const,
+        groupLabel: "Budget",
+        balance: "5000",
+        onBudget: true,
+        sort: 0,
+      };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 7, groupId: 1, name: "Groceries" });
+
+      // Transaction has both a category and explicit isIncome: true (e.g. malformed or forged payload)
+      const categorizedInflow = {
+        id: 1,
+        accountId: 1,
+        categoryId: 7,
+        date: "2026-07-10",
+        payee: "Store Refund",
+        memo: "Refund",
+        amount: "5000", // +$50 refund
+        status: "c" as const,
+        isIncome: true,
+      };
+
+      expect(isIncomeTransaction(categorizedInflow, [account])).toBe(false);
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [],
+        transactions: [categorizedInflow],
+        recurring: [],
+      };
+
+      const res = computeBudget(data, "2026-07");
+      // TBB should be 0 because it is a category refund, not general income
+      expect(res.totalIncome).toBe(0);
+      expect(res.tbb).toBe(0);
+      // Groceries available should be +$50 (outflow display is clamped to 0 for positive refunds, available is +5000)
+      const catRow = res.groups[0]?.rows[0];
+      expect(catRow?.outflow).toBe(0);
+      expect(catRow?.available).toBe(5000);
+
+      // Verify pre-indexed mode also treats it as category outflow only
+      const index = buildBudgetIndex(data);
+      expect(index.incomeByMonth["2026-07"]).toBeUndefined();
+      expect(index.outflowByMonth["2026-07"]?.[7]).toBe(5000);
+      const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+      expect(indexedRes.totalIncome).toBe(0);
+      expect(indexedRes.tbb).toBe(0);
+      expect(indexedRes.groups[0]?.rows[0]?.available).toBe(5000);
+    });
+
+    it("BUG 1.5: isIncomeTransaction handles split children and transfer / off-budget guards properly", () => {
+      const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 0 };
+      const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Tracking", balance: "1000", onBudget: false, sort: 1 };
+      const accountMap = [onBudgetAccount, offBudgetAccount];
+
+      // Split child with categoryId == null and isIncome: true is valid income
+      const splitChildIncome = {
+        id: 2,
+        parentId: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Paycheck",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      expect(isIncomeTransaction(splitChildIncome, accountMap)).toBe(true);
+
+      // Split child with category is not income
+      const splitChildCategorized = {
+        ...splitChildIncome,
+        categoryId: 7,
+      };
+      expect(isIncomeTransaction(splitChildCategorized, accountMap)).toBe(false);
+
+      // Transfer is not income even if isIncome: true is set
+      const transferTx = {
+        id: 3,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Transfer",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      expect(isIncomeTransaction(transferTx, accountMap)).toBe(false);
+
+      // Off-budget transaction is not income even if isIncome: true is set
+      const offBudgetTx = {
+        id: 4,
+        accountId: 2,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Dividend",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      expect(isIncomeTransaction(offBudgetTx, accountMap)).toBe(false);
     });
   });
 });

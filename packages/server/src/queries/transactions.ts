@@ -235,12 +235,16 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
     const categoryId = onBudget ? (input.categoryId ?? null) : null;
-    const isIncome = onBudget
-      ? (input.isIncome !== undefined
-          ? input.isIncome
-          : (!isTransfer && !isSplitParent && input.parentId == null && categoryId == null && input.amount > 0))
+    const isEligibleForIncome =
+      onBudget &&
+      categoryId == null &&
+      !isTransfer &&
+      !isSplitParent &&
+      input.parentId == null;
+    const isIncome = isEligibleForIncome
+      ? (input.isIncome !== undefined ? input.isIncome : input.amount > 0)
       : false;
-    const incomeMonth = onBudget ? (input.incomeMonth ?? null) : null;
+    const incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
 
     const [row] = await db
       .insert(transactions)
@@ -531,14 +535,19 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.isIncome = false;
     } else {
       const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
-      const isIncome = "isIncome" in p ? p.isIncome : (
+      const isEligibleForIncome =
         existing.transferAccountId == null &&
         !isSplitParent &&
         existing.parentId == null &&
-        finalCatId == null &&
-        newAmount > 0
-      );
+        finalCatId == null;
+
+      const isIncome = isEligibleForIncome
+        ? ("isIncome" in p ? Boolean(p.isIncome) : newAmount > 0)
+        : false;
       p.isIncome = isIncome;
+      if (!isIncome) {
+        p.incomeMonth = null;
+      }
     }
 
     const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
@@ -924,16 +933,28 @@ export async function bulkUpdateTransactions(
         setFields.categoryId = null;
         setFields.incomeMonth = null;
         setFields.isIncome = false;
-      } else if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
+      } else {
         const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
-        const isIncome = (
+        const isEligibleForIncome =
           existing.transferAccountId == null &&
           !isSplitParent &&
           existing.parentId == null &&
-          finalCatId == null &&
-          newAmount > 0
-        );
-        setFields.isIncome = isIncome;
+          finalCatId == null;
+
+        if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
+          const isIncome = isEligibleForIncome && newAmount > 0;
+          setFields.isIncome = isIncome;
+          if (!isIncome) {
+            setFields.incomeMonth = null;
+          }
+        } else if (!isEligibleForIncome && existing.isIncome) {
+          setFields.isIncome = false;
+          setFields.incomeMonth = null;
+        }
+
+        if (!isEligibleForIncome && "incomeMonth" in setFields) {
+          setFields.incomeMonth = null;
+        }
       }
 
       if (Object.keys(setFields).length > 0) {
