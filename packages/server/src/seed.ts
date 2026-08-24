@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
 
@@ -20,7 +20,9 @@ export async function resetDatabase(db: Db, isNested = false): Promise<void> {
     await db.delete(recurringSubTransactions);
     await db.delete(recurring);
     await db.delete(transactions);
+    await db.delete(reconciliations);
     await db.delete(assignments);
+    await db.delete(payees);
     await db.delete(categories);
     await db.delete(categoryGroups);
     await db.delete(accounts);
