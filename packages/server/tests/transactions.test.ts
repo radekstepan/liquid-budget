@@ -2282,5 +2282,87 @@ describe("transactions queries", () => {
         });
       });
     });
+
+    describe("Bug 2.9: editing split parent date propagates to children", () => {
+      it("updateTransaction: updating split parent date changes date for all children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Grocery Store",
+            memo: "Groceries",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "produce" },
+            { categoryId: cat2Id, amount: -2000, memo: "dairy" },
+          ]
+        );
+
+        // Update parent date to 2026-08-15
+        await updateTransaction(db, split.parent.id, { date: "2026-08-15" });
+
+        // Verify parent was updated
+        const [parent] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, split.parent.id));
+        expect(parent?.date).toBe("2026-08-15");
+
+        // Verify all children were updated to the new date
+        const children = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.parentId, split.parent.id));
+        expect(children).toHaveLength(2);
+        for (const child of children) {
+          expect(child.date).toBe("2026-08-15");
+        }
+      });
+
+      it("bulkUpdateTransactions: updating split parent date changes date for all children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Hardware Store",
+            memo: "Supplies",
+            amount: -7500,
+          },
+          [
+            { categoryId: cat1Id, amount: -4500, memo: "tools" },
+            { categoryId: cat2Id, amount: -3000, memo: "paint" },
+          ]
+        );
+
+        // Bulk update parent date to 2026-08-20
+        await bulkUpdateTransactions(db, [split.parent.id], { date: "2026-08-20" });
+
+        // Verify parent was updated
+        const [parent] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, split.parent.id));
+        expect(parent?.date).toBe("2026-08-20");
+
+        // Verify all children were updated to the new date
+        const children = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.parentId, split.parent.id));
+        expect(children).toHaveLength(2);
+        for (const child of children) {
+          expect(child.date).toBe("2026-08-20");
+        }
+      });
+    });
   });
 });

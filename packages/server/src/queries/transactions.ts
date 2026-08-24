@@ -709,6 +709,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
     const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
 
+    // If this row is a split parent and date changed, propagate date to children
+    if (isSplitParent && "date" in p && p.date != null) {
+      await db
+        .update(transactions)
+        .set({ date: String(p.date) })
+        .where(eq(transactions.parentId, id));
+    }
+
     // If this row is a child of a split, verify that the parent is still balanced
     if (existing.parentId != null) {
       const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
@@ -1242,6 +1250,13 @@ export async function bulkUpdateTransactions(
           .where(eq(transactions.id, id))
           .returning();
         if (row) updated.push(row);
+
+        if (isSplitParent && "date" in setFields && setFields.date != null) {
+          await db
+            .update(transactions)
+            .set({ date: String(setFields.date) })
+            .where(eq(transactions.parentId, id));
+        }
       }
 
       if (
