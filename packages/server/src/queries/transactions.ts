@@ -930,6 +930,12 @@ export async function deleteTransaction(db: Database, id: number) {
       const remaining = await getChildren(db, existing.parentId);
       if (remaining.length === 1) {
         const lastChild = remaining[0]!;
+        if (lastChild.status === "r") {
+          throw new TransactionError(
+            "Transaction is reconciled and locked. Unreconcile before deleting.",
+            422
+          );
+        }
         await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
         if (lastChild.transferAccountId != null) {
           await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
@@ -1008,6 +1014,12 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         const remaining = await getChildren(db, existing.parentId);
         if (remaining.length === 1) {
           const lastChild = remaining[0]!;
+          if (lastChild.status === "r") {
+            throw new TransactionError(
+              `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
+              422
+            );
+          }
           await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
           if (lastChild.transferAccountId != null) {
             await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
