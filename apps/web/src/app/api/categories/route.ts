@@ -95,7 +95,7 @@ export async function DELETE(req: Request) {
 
   try {
     if (type === "group") {
-      await deleteCategoryGroup(db, id);
+      await deleteCategoryGroup(db, id, { moveToCategoryId });
     } else {
       await deleteCategory(db, id, { moveToCategoryId });
     }

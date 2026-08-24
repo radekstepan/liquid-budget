@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
 
@@ -193,10 +193,82 @@ export async function deleteCategory(
   }
 }
 
-export async function deleteCategoryGroup(db: Database, id: number) {
+export async function deleteCategoryGroup(
+  db: Database,
+  id: number,
+  opts?: { moveToCategoryId?: number | null }
+) {
+  const [group] = await db.select().from(categoryGroups).where(eq(categoryGroups.id, id));
+  if (!group) return;
+
   const cats = await db.select().from(categories).where(eq(categories.groupId, id));
-  for (const c of cats) {
-    await deleteCategory(db, c.id);
+  const catIds = cats.map((c) => c.id);
+
+  if (opts?.moveToCategoryId) {
+    if (catIds.includes(opts.moveToCategoryId)) {
+      throw new CategoryError(
+        "Cannot reassign transactions to a category in the group being deleted.",
+        400
+      );
+    }
+    const [targetCat] = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.id, opts.moveToCategoryId));
+    if (!targetCat) {
+      throw new CategoryError("Replacement category not found.", 404);
+    }
+  } else if (catIds.length > 0) {
+    const txnRows = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(inArray(transactions.categoryId, catIds));
+
+    const recRows = await db
+      .select({ id: recurring.id })
+      .from(recurring)
+      .where(inArray(recurring.categoryId, catIds));
+
+    const recSubRows = await db
+      .select({ id: recurringSubTransactions.id })
+      .from(recurringSubTransactions)
+      .where(inArray(recurringSubTransactions.categoryId, catIds));
+
+    const totalRefs = txnRows.length + recRows.length + recSubRows.length;
+
+    if (totalRefs > 0) {
+      throw new CategoryError(
+        `Category group has ${txnRows.length} transaction(s) and ${recRows.length + recSubRows.length} scheduled transaction(s). Select a replacement category before deleting.`,
+        422
+      );
+    }
   }
-  await db.delete(categoryGroups).where(eq(categoryGroups.id, id));
+
+  db.run(sql`BEGIN`);
+  try {
+    if (catIds.length > 0) {
+      if (opts?.moveToCategoryId) {
+        await db
+          .update(transactions)
+          .set({ categoryId: opts.moveToCategoryId })
+          .where(inArray(transactions.categoryId, catIds));
+        await db
+          .update(recurring)
+          .set({ categoryId: opts.moveToCategoryId })
+          .where(inArray(recurring.categoryId, catIds));
+        await db
+          .update(recurringSubTransactions)
+          .set({ categoryId: opts.moveToCategoryId })
+          .where(inArray(recurringSubTransactions.categoryId, catIds));
+      }
+      await db.delete(assignments).where(inArray(assignments.categoryId, catIds));
+      await db.delete(categories).where(inArray(categories.id, catIds));
+    }
+    await db.delete(categoryGroups).where(eq(categoryGroups.id, id));
+    db.run(sql`COMMIT`);
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
+
