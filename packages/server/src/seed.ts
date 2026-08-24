@@ -3,6 +3,7 @@ import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
+import { recomputeAccountBalances } from "./queries/diagnostics.js";
 
 // Re-export so `import { DEMO_MONTH } from "@ynab/server"` still works.
 export { DEMO_MONTH };
@@ -230,6 +231,23 @@ export async function seedDatabase(db: Db) {
   // TRANSACTIONS (amounts in cents)
   // ---------------------------------------------------------------------------
   await db.insert(transactions).values([
+    // ── Starting Balances (2026-04-01) ──────────────────────────────────────
+    T("TD Unlimited Chequing", null, "2026-04-01", "Starting Balance", 1087555, "Opening balance", "r", true),
+    T("EQ Bank",               null, "2026-04-01", "Starting Balance", 10383079, "Opening balance", "c", true),
+    T("Scotia e-Chequing",     null, "2026-04-01", "Starting Balance", 45823, "Opening balance", "c", true),
+    T("Cash",                  null, "2026-04-01", "Starting Balance", 11605, "Opening balance", "c", true),
+    T("AMEX Cobalt",           null, "2026-04-01", "Starting Balance", -389784, "Opening balance", "c", false),
+    T("Scotia Passport Visa",  null, "2026-04-01", "Starting Balance", -10348, "Opening balance", "c", false),
+    T("Susie",                 null, "2026-04-01", "Starting Balance", -67428, "Opening balance", "c", false),
+    T("Parents",               null, "2026-04-01", "Starting Balance", 373535, "Opening balance", "c", true),
+    T("Wealthsimple TFSA",     null, "2026-04-01", "Starting Balance", 15367437, "Opening balance", "c", false),
+    T("Wealthsimple RRSP",     null, "2026-04-01", "Starting Balance", 19670022, "Opening balance", "c", false),
+    T("Manulife GRSP",         null, "2026-04-01", "Starting Balance", 9921386, "Opening balance", "c", false),
+    T("EquatePlus SAP",        null, "2026-04-01", "Starting Balance", 235741, "Opening balance", "c", false),
+    T("British Airways Credit",null, "2026-04-01", "Starting Balance", 35700, "Opening balance", "c", false),
+    T("Home Value",            null, "2026-04-01", "Starting Balance", 97900000, "Opening balance", "c", false),
+    T("Mortgage Debt",         null, "2026-04-01", "Starting Balance", -66025355, "Opening balance", "c", false),
+
     // ── April 2026 ─────────────────────────────────────────────────────────
     T("EQ Bank", null, "2026-04-15", "SAP Concur", 442865, "Income for April", "c", true),
     T("EQ Bank", null, "2026-04-29", "SAP Concur", 442865, "Income for April", "c", true),
@@ -323,6 +341,9 @@ export async function seedDatabase(db: Db) {
     // Fees
     T("TD Unlimited Chequing", "Fees, Charges, Loans", "2026-06-30", "TD Bank", -1795, "Monthly bank fee"),
   ]);
+
+  // Compute accurate account balances from transactions
+  await recomputeAccountBalances(db);
 
   // TD last reconciled metadata
   await db
