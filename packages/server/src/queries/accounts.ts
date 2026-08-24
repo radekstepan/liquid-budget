@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
@@ -106,14 +106,40 @@ export async function deleteAccount(db: Database, id: number) {
       await db.delete(transactions).where(eq(transactions.id, cp.id));
     }
 
-    // 2. Clean up recurring transfer counterparties
+    // 2. Reverse balance effects on other accounts for own transfers where transferAccountId IS NOT NULL
+    // (children included, split parents excluded)
+    const ownTransfers = await db
+      .select({
+        id: transactions.id,
+        transferAccountId: transactions.transferAccountId,
+        amount: transactions.amount,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.accountId, id),
+          isNotNull(transactions.transferAccountId),
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+        )
+      );
+
+    for (const tx of ownTransfers) {
+      if (tx.transferAccountId != null) {
+        await db
+          .update(accounts)
+          .set({ balance: sql`${accounts.balance} + ${Number(tx.amount)}` })
+          .where(eq(accounts.id, tx.transferAccountId));
+      }
+    }
+
+    // 3. Clean up recurring transfer counterparties
     await db.delete(recurring).where(eq(recurring.transferAccountId, id));
     await db.delete(recurringSubTransactions).where(eq(recurringSubTransactions.transferAccountId, id));
 
-    // 3. Clean up linked categories (e.g. credit card payment categories)
+    // 4. Clean up linked categories (e.g. credit card payment categories)
     await db.delete(categories).where(eq(categories.linkedAccountId, id));
 
-    // 4. Delete the account itself (SQLite cascade handles own transactions/recurring)
+    // 5. Delete the account itself (SQLite cascade handles own transactions/recurring)
     await db.delete(accounts).where(eq(accounts.id, id));
 
     db.run(sql`COMMIT`);
