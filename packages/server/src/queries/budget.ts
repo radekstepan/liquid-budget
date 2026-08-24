@@ -6,25 +6,16 @@ import { accounts, assignments, categoryGroups, categories, recurring, recurring
 import { sanitizeFlagColor, sanitizeFlagState } from "./transactions.js";
 import { getRenameRules } from "./rename-rules.js";
 
-export async function getBudgetData(
-  db: Db,
-  options?: { limitTransactions?: number }
-): Promise<BudgetData> {
+export async function getBudgetData(db: Db): Promise<BudgetData> {
   const [accts, groups, cats, assigns, txns, recur, recurSubs] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort)),
     db.select().from(categories).orderBy(asc(categories.sort)),
     db.select().from(assignments),
-    options?.limitTransactions != null
-      ? db
-          .select()
-          .from(transactions)
-          .orderBy(desc(transactions.date), desc(transactions.id))
-          .limit(options.limitTransactions)
-      : db
-          .select()
-          .from(transactions)
-          .orderBy(desc(transactions.date), desc(transactions.id)),
+    db
+      .select()
+      .from(transactions)
+      .orderBy(desc(transactions.date), desc(transactions.id)),
     db.select().from(recurring).orderBy(asc(recurring.nextDate)),
     db
       .select()
