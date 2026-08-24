@@ -21,8 +21,6 @@ export const TransactionCreateSchema = z.object({
   flagColor: TransactionFlagSchema.nullable().optional(),
   incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
-  skipBalance: z.boolean().optional(),
-  parentId: z.number().int().nullable().optional(),
 });
 
 export const TransactionPatchSchema = z.object({

@@ -55,6 +55,22 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       const result = TransactionCreateSchema.safeParse(payload);
       expect(result.success).toBe(true);
     });
+
+    it("strips parentId and skipBalance from output", () => {
+      const payload = {
+        accountId: 1,
+        date: "2026-06-15",
+        amount: -5000,
+        parentId: 42,
+        skipBalance: true,
+      };
+      const result = TransactionCreateSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect("parentId" in result.data).toBe(false);
+        expect("skipBalance" in result.data).toBe(false);
+      }
+    });
   });
 
   describe("TransactionPatchSchema", () => {

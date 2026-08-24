@@ -143,8 +143,6 @@ export async function POST(req: Request) {
       status: body.status,
       flagColor: body.flagColor ?? null,
       transferAccountId: body.transferAccountId ?? null,
-      parentId: body.parentId ?? null,
-      skipBalance: body.skipBalance,
       incomeMonth: body.incomeMonth,
     });
     return Response.json(row);
