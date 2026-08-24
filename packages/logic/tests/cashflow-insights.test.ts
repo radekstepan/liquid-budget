@@ -63,6 +63,30 @@ describe("computeCashFlow", () => {
     expect(flow.net).toBe(-50000);
     expect(flow.savingsRate).toBe(-50);
   });
+
+  it("factors in categorized refunds to reduce outflow (8.1)", () => {
+    const data: BudgetData = {
+      accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
+      groups: [],
+      categories: [{ id: 10, groupId: 1, name: "Groceries", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        // Income: $500.00
+        { id: 1, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Employer", memo: "", amount: "500000", status: "c", isIncome: true },
+        // Outflow: $100.00
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "Supermarket", memo: "", amount: "-100000", status: "c" },
+        // Categorized store refund: +$20.00
+        { id: 3, accountId: 1, categoryId: 10, date: "2026-06-15", payee: "Supermarket Return", memo: "Refund", amount: "20000", status: "c" },
+      ],
+    };
+
+    const flow = computeCashFlow(data, "2026-06");
+    expect(flow.income).toBe(500000);
+    expect(flow.outflow).toBe(80000); // 100000 - 20000
+    expect(flow.net).toBe(420000);
+    expect(flow.savingsRate).toBe(84); // (420000 / 500000) * 100
+  });
 });
 
 describe("computeTrailingNetWorth", () => {
