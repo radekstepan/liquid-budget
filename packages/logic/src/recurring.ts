@@ -35,6 +35,40 @@ export const RECURRING_FREQUENCIES: { value: string; label: string }[] = [
   { value: "every2years", label: "Every 2 Years" },
 ];
 
+const VALID_RECURRING_FREQUENCY_SET = new Set([
+  "never",
+  "once",
+  "daily",
+  "weekly",
+  "biweekly",
+  "everyotherweek",
+  "twiceamonth",
+  "semimonthly",
+  "every4weeks",
+  "monthly",
+  "everyothermonth",
+  "bimonthly",
+  "every3months",
+  "quarterly",
+  "every4months",
+  "twiceayear",
+  "semiannually",
+  "yearly",
+  "annually",
+  "every2years",
+  "everyotheryear",
+]);
+
+/**
+ * Returns true if the given frequency string corresponds to a valid recurring frequency
+ * or accepted alias.
+ */
+export function isValidRecurringFrequency(frequency: unknown): boolean {
+  if (typeof frequency !== "string" || !frequency.trim()) return false;
+  const norm = frequency.toLowerCase().replace(/[\s_-]+/g, "");
+  return VALID_RECURRING_FREQUENCY_SET.has(norm);
+}
+
 export function frequencyLabel(freq: string): string {
   const norm = (freq || "").toLowerCase().replace(/[\s_-]+/g, "");
   switch (norm) {
@@ -70,6 +104,7 @@ export function frequencyLabel(freq: string): string {
     case "annually":
       return "Yearly";
     case "every2years":
+    case "everyotheryear":
       return "Every 2 Years";
     default:
       return freq || "Monthly";
@@ -113,6 +148,7 @@ export function frequencyMonthlyMultiplier(frequency: string): number {
     case "annually":
       return 1 / 12;
     case "every2years":
+    case "everyotheryear":
       return 1 / 24;
     case "never":
     case "once":

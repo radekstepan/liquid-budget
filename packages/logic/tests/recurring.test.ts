@@ -6,6 +6,7 @@ import {
   frequencyMonthlyMultiplier,
   getRecurringChildren,
   groupRecurringByTimeline,
+  isValidRecurringFrequency,
   netMonthlyAmount,
   RECURRING_FREQUENCIES,
   recurringFlavour,
@@ -264,7 +265,39 @@ describe("RECURRING_FREQUENCIES and frequencyLabel (UNI-23 / F-13 / BUG-19)", ()
     expect(frequencyLabel("yearly")).toBe("Yearly");
     expect(frequencyLabel("annually")).toBe("Yearly");
     expect(frequencyLabel("every2years")).toBe("Every 2 Years");
+    expect(frequencyLabel("everyotheryear")).toBe("Every 2 Years");
     expect(frequencyLabel("unknown")).toBe("unknown");
+  });
+});
+
+describe("isValidRecurringFrequency", () => {
+  it("returns true for all 13 standard frequencies", () => {
+    for (const f of RECURRING_FREQUENCIES) {
+      expect(isValidRecurringFrequency(f.value)).toBe(true);
+    }
+  });
+
+  it("returns true for accepted aliases and mixed casing/spacing", () => {
+    expect(isValidRecurringFrequency("once")).toBe(true);
+    expect(isValidRecurringFrequency("biweekly")).toBe(true);
+    expect(isValidRecurringFrequency("semimonthly")).toBe(true);
+    expect(isValidRecurringFrequency("bimonthly")).toBe(true);
+    expect(isValidRecurringFrequency("quarterly")).toBe(true);
+    expect(isValidRecurringFrequency("semiannually")).toBe(true);
+    expect(isValidRecurringFrequency("annually")).toBe(true);
+    expect(isValidRecurringFrequency("everyotheryear")).toBe(true);
+    expect(isValidRecurringFrequency("Every Other Week")).toBe(true);
+    expect(isValidRecurringFrequency("TWICE-A-MONTH")).toBe(true);
+  });
+
+  it("returns false for invalid frequencies and non-string inputs", () => {
+    expect(isValidRecurringFrequency("invalid_freq")).toBe(false);
+    expect(isValidRecurringFrequency("every-fortnight-some-day")).toBe(false);
+    expect(isValidRecurringFrequency("")).toBe(false);
+    expect(isValidRecurringFrequency("   ")).toBe(false);
+    expect(isValidRecurringFrequency(null)).toBe(false);
+    expect(isValidRecurringFrequency(undefined)).toBe(false);
+    expect(isValidRecurringFrequency(123)).toBe(false);
   });
 });
 

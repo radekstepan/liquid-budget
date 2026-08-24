@@ -103,6 +103,22 @@ describe("recurring queries", () => {
       ).rejects.toBeInstanceOf(RecurringError);
     });
 
+    it("rejects an invalid frequency on create with 422", async () => {
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: 2,
+          payee: "Netflix",
+          amount: -1599,
+          frequency: "every-fortnight-some-day",
+          nextDate: "2026-07-15",
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 422,
+      });
+    });
+
     it("creates a recurring split with children", async () => {
       mock.respondWith("insert:recurring", [{ id: 7 }]);
       mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
@@ -289,6 +305,18 @@ describe("recurring queries", () => {
           ],
         })
       ).rejects.toBeInstanceOf(RecurringError);
+    });
+
+    it("rejects an invalid frequency on update with 422", async () => {
+      mock.respondWith("select:recurring", [existingRow]);
+      await expect(
+        updateRecurring(mock.db, 1, {
+          frequency: "invalid_frequency",
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 422,
+      });
     });
 
     it("updateRecurring: replacing children with a mixed-sign split succeeds", async () => {

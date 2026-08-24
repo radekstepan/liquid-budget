@@ -149,10 +149,15 @@ describe("format", () => {
       expect(nextDateFor("every4weeks", "2026-07-01")).toBe("2026-07-29");
     });
 
-    it("returns input unchanged for unknown frequencies (UNI-46 / BUG-39)", () => {
-      expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-07-01");
-      expect(nextDateFor("invalid_freq", "2026-10-15")).toBe("2026-10-15");
-      expect(nextDateFor("", "2026-10-15")).toBe("2026-10-15");
+    it("falls back to monthly advance for unknown frequencies", () => {
+      expect(nextDateFor("every-fortnight-some-day", "2026-07-01")).toBe("2026-08-01");
+      expect(nextDateFor("invalid_freq", "2026-10-15")).toBe("2026-11-15");
+      expect(nextDateFor("", "2026-10-15")).toBe("2026-11-15");
+    });
+
+    it("advances every2years and everyotheryear by 2 years", () => {
+      expect(nextDateFor("every2years", "2026-07-01")).toBe("2028-07-01");
+      expect(nextDateFor("everyotheryear", "2026-07-01")).toBe("2028-07-01");
     });
 
     it("returns input unchanged for invalid date", () => {
