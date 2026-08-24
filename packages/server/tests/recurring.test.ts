@@ -196,6 +196,26 @@ describe("recurring queries", () => {
       ).rejects.toBeInstanceOf(RecurringError);
     });
 
+    it("rejects a split child transferring to the recurring source account", async () => {
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: null,
+          payee: "Split with self transfer",
+          amount: -20000,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          subTransactions: [
+            { categoryId: 5, amount: -10000 },
+            { transferAccountId: 1, amount: -10000 },
+          ],
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "transfer account must differ from source account",
+      });
+    });
+
     it("creates a mixed-sign split (Paycheck + tax deduction)", async () => {
       mock.respondWith("insert:recurring", [{ id: 8 }]);
       mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
@@ -337,6 +357,23 @@ describe("recurring queries", () => {
         (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
       );
       expect(subInserts).toHaveLength(2);
+    });
+
+    it("rejects a split child transferring to the recurring source account on update", async () => {
+      const splitRow = { ...existingRow, amount: -20000, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+
+      await expect(
+        updateRecurring(mock.db, 1, {
+          subTransactions: [
+            { categoryId: 5, amount: -12000 },
+            { transferAccountId: 1, amount: -8000 },
+          ],
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "transfer account must differ from source account",
+      });
     });
 
     it("removes all sub-transactions when the key is present with []", async () => {
