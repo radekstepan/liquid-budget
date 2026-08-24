@@ -87,6 +87,35 @@ describe("computeCashFlow", () => {
     expect(flow.net).toBe(420000);
     expect(flow.savingsRate).toBe(84); // (420000 / 500000) * 100
   });
+
+  it("excludes off-budget transactions such as investment fees and dividends (8.2)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 },
+        { id: 2, name: "Investments", kind: "offbudget", groupLabel: "Tracking", balance: "1000000", onBudget: false, sort: 2 },
+      ],
+      groups: [],
+      categories: [{ id: 10, groupId: 1, name: "Groceries", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        // On-budget income: $500.00
+        { id: 1, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Employer", memo: "", amount: "500000", status: "c", isIncome: true },
+        // On-budget outflow: $100.00
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "Supermarket", memo: "", amount: "-100000", status: "c" },
+        // Off-budget investment management fee: -$50.00 (should NOT count as budget outflow)
+        { id: 3, accountId: 2, categoryId: null, date: "2026-06-10", payee: "Broker Fee", memo: "", amount: "-50000", status: "c" },
+        // Off-budget dividend: +$200.00 (should NOT count as budget income)
+        { id: 4, accountId: 2, categoryId: null, date: "2026-06-15", payee: "Dividend", memo: "", amount: "200000", status: "c", isIncome: true },
+      ],
+    };
+
+    const flow = computeCashFlow(data, "2026-06");
+    expect(flow.income).toBe(500000);
+    expect(flow.outflow).toBe(100000);
+    expect(flow.net).toBe(400000);
+    expect(flow.savingsRate).toBe(80);
+  });
 });
 
 describe("computeTrailingNetWorth", () => {
