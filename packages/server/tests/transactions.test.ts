@@ -604,6 +604,17 @@ describe("transactions queries", () => {
       );
     });
 
+    it("rejects account changes on a split child", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, payee: "X", categoryId: 10, date: "2026-07-01", transferAccountId: null },
+      ]);
+      mock.respondWith("select:transactions", []);
+
+      await expect(updateTransaction(mock.db, 2, { accountId: 2 })).rejects.toThrow(
+        /split child/
+      );
+    });
+
     it("persists a flagColor on update", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
@@ -1110,6 +1121,16 @@ describe("transactions queries", () => {
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ categoryId: 5, isIncome: false, incomeMonth: null });
     });
+
+    it("rejects account changes on a split child in bulk update", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, payee: "X", categoryId: 10, date: "2026-07-01", transferAccountId: null },
+      ]);
+
+      await expect(
+        bulkUpdateTransactions(mock.db, [2], { accountId: 2 })
+      ).rejects.toThrow(/split child/);
+    });
   });
 
   describe("split deletion integration (SQLite DB)", () => {
@@ -1269,6 +1290,176 @@ describe("transactions queries", () => {
 
       [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
       expect(acct?.balance).toBe(0);
+    });
+
+    it("Bug 2.2: updateTransaction and bulkUpdateTransactions reject accountId changes on split children", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      const [acct2] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "Savings",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          onBudget: true,
+          balance: 0,
+          sort: 1,
+        })
+        .returning();
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Store",
+          memo: "Split items",
+          amount: -5000,
+        },
+        [
+          { categoryId: cat1Id, amount: -3000, memo: "item 1" },
+          { categoryId: cat2Id, amount: -2000, memo: "item 2" },
+        ]
+      );
+
+      const child1 = split.children[0]!;
+
+      // updateTransaction rejecting accountId on split child
+      await expect(
+        updateTransaction(db, child1.id, { accountId: acct2!.id })
+      ).rejects.toThrow(/split child/);
+
+      // bulkUpdateTransactions rejecting accountId on split child
+      await expect(
+        bulkUpdateTransactions(db, [child1.id], { accountId: acct2!.id })
+      ).rejects.toThrow(/split child/);
+    });
+
+    it("Bug 2.2: deleteTransaction on split parent reverses child balances against each child's accountId", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      const [acct2] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "Savings",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          onBudget: true,
+          balance: 0,
+          sort: 1,
+        })
+        .returning();
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Store",
+          memo: "Split items",
+          amount: -5000,
+        },
+        [
+          { categoryId: cat1Id, amount: -3000, memo: "item 1" },
+          { categoryId: cat2Id, amount: -2000, memo: "item 2" },
+        ]
+      );
+
+      // Manually move child 2 to account 2 in DB (simulating legacy data) and adjust balance accordingly
+      const child2 = split.children[1]!;
+      await db
+        .update(schema.transactions)
+        .set({ accountId: acct2!.id })
+        .where(eq(schema.transactions.id, child2.id));
+      await db
+        .update(schema.accounts)
+        .set({ balance: -2000 })
+        .where(eq(schema.accounts.id, acct2!.id));
+      await db
+        .update(schema.accounts)
+        .set({ balance: -3000 })
+        .where(eq(schema.accounts.id, accountId));
+
+      // Now delete the split parent
+      await deleteTransaction(db, split.parent.id);
+
+      // Account 1 should be restored from -3000 to 0 (reversed child1's -3000)
+      const [finalAcct1] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, accountId));
+      expect(finalAcct1?.balance).toBe(0);
+
+      // Account 2 should be restored from -2000 to 0 (reversed child2's -2000)
+      const [finalAcct2] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, acct2!.id));
+      expect(finalAcct2?.balance).toBe(0);
+    });
+
+    it("Bug 2.2: bulkDeleteTransactions on split parent reverses child balances against each child's accountId", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      const [acct2] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "Savings",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          onBudget: true,
+          balance: 0,
+          sort: 1,
+        })
+        .returning();
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Store",
+          memo: "Split items",
+          amount: -5000,
+        },
+        [
+          { categoryId: cat1Id, amount: -3000, memo: "item 1" },
+          { categoryId: cat2Id, amount: -2000, memo: "item 2" },
+        ]
+      );
+
+      // Manually move child 2 to account 2 in DB and adjust balance
+      const child2 = split.children[1]!;
+      await db
+        .update(schema.transactions)
+        .set({ accountId: acct2!.id })
+        .where(eq(schema.transactions.id, child2.id));
+      await db
+        .update(schema.accounts)
+        .set({ balance: -2000 })
+        .where(eq(schema.accounts.id, acct2!.id));
+      await db
+        .update(schema.accounts)
+        .set({ balance: -3000 })
+        .where(eq(schema.accounts.id, accountId));
+
+      // Bulk delete the split parent
+      await bulkDeleteTransactions(db, [split.parent.id]);
+
+      const [finalAcct1] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, accountId));
+      expect(finalAcct1?.balance).toBe(0);
+
+      const [finalAcct2] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, acct2!.id));
+      expect(finalAcct2?.balance).toBe(0);
     });
   });
 });
