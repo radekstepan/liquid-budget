@@ -85,7 +85,7 @@ export async function getReconcileState(
   const unclearedTotal = Number(agg?.unclearedSum ?? 0);
   const clearedSum = Number(agg?.clearedSum ?? 0);
   const reconciledSum = Number(agg?.reconciledSum ?? 0);
-  const workingBalance = Number(acct.balance ?? 0) - unclearedTotal;
+  const workingBalance = clearedSum + reconciledSum;
 
   return {
     accountId,

@@ -627,7 +627,7 @@ export function BudgetApp({
 
   // Derive the reconcile state for the currently-open account from
   // the in-memory data — no extra API call needed because the
-  // working balance is just account.balance − sum(uncleared.amounts).
+  // working balance is cleared + reconciled total.
   const reconcileState = useMemo(() => {
     if (modal.kind !== "reconcile") return null;
     const acct = data.accounts.find((a) => a.id === modal.accountId);
@@ -637,9 +637,15 @@ export function BudgetApp({
       .filter((t) => t.status === "u")
       .reduce((s, t) => s + num(t.amount), 0);
     const unclearedCount = txns.filter((t) => t.status === "u").length;
+    const clearedSum = txns
+      .filter((t) => t.status === "c")
+      .reduce((s, t) => s + num(t.amount), 0);
+    const reconciledSum = txns
+      .filter((t) => t.status === "r")
+      .reduce((s, t) => s + num(t.amount), 0);
     const clearedCount = txns.filter((t) => t.status === "c").length;
     const reconciledCount = txns.filter((t) => t.status === "r").length;
-    const workingBalance = num(acct.balance) - unclearedTotal;
+    const workingBalance = clearedSum + reconciledSum;
     return {
       accountId: acct.id,
       accountName: acct.name,
