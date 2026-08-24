@@ -178,7 +178,13 @@ export function BudgetAppShell({
         if (!prev) return prev;
         snapshot = prev;
         const transactions = prev.transactions.map((x) => {
-          if (x.id !== id) return x;
+          if (x.id !== id && x.parentId !== id) return x;
+          if (x.parentId === id) {
+            return {
+              ...x,
+              ...(t.date !== undefined ? { date: t.date } : {}),
+            };
+          }
           return {
             ...x,
             ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
@@ -209,7 +215,7 @@ export function BudgetAppShell({
               method: "PATCH",
               body: JSON.stringify({ id, ...t }),
             });
-            if (t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined) {
+            if (t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined || t.date !== undefined) {
               await reload();
             }
           } catch (e) {
@@ -280,7 +286,15 @@ export function BudgetAppShell({
         snapshot = prev;
         const idSet = new Set(ids);
         const transactions = prev.transactions.map((x) => {
-          if (!idSet.has(x.id)) return x;
+          if (!idSet.has(x.id)) {
+            if (x.parentId != null && idSet.has(x.parentId) && patch.date !== undefined) {
+              return {
+                ...x,
+                date: patch.date,
+              };
+            }
+            return x;
+          }
           return {
             ...x,
             ...(patch.status !== undefined ? { status: patch.status } : {}),
