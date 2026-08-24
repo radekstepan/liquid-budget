@@ -296,6 +296,27 @@ describe("transactions queries", () => {
       ).rejects.toBeInstanceOf(TransactionError);
     });
 
+    it("rejects direct creation of a reconciled transfer", async () => {
+      await expect(
+        createTransfer(
+          mock.db,
+          {
+            accountId: 1,
+            categoryId: null,
+            date: "2026-07-01",
+            payee: "X",
+            memo: "",
+            amount: -10000,
+            status: "r",
+          },
+          2
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: /reconcile flow/,
+      });
+    });
+
     it("createTransaction routes a transferAccountId to createTransfer", async () => {
       mock.respondWith("select:accounts", [{ name: "EQ Bank", onBudget: true }]);
       mock.respondWith("insert:transactions", [{ id: 99 }]);
@@ -708,6 +729,50 @@ describe("transactions queries", () => {
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ categoryId: 7, isIncome: false, incomeMonth: null });
     });
+
+    it("rejects setting status to 'r' via updateTransaction", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -5000, status: "c", payee: "Store", date: "2026-07-01" },
+      ]);
+
+      await expect(
+        updateTransaction(mock.db, 1, { status: "r" })
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: /reconcile flow/,
+      });
+    });
+
+    it("nulls reconciledAt and reconciliationId when updating a reconciled transaction to status 'c'", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        {
+          id: 1,
+          accountId: 1,
+          amount: -5000,
+          status: "r",
+          payee: "Store",
+          date: "2026-07-01",
+          reconciledAt: "2026-07-01",
+          reconciliationId: 10,
+          transferAccountId: null,
+          parentId: null,
+        },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [
+        { id: 1, status: "c", reconciledAt: null, reconciliationId: null },
+      ]);
+
+      await updateTransaction(mock.db, 1, { status: "c" });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({
+        status: "c",
+        reconciledAt: null,
+        reconciliationId: null,
+      });
+    });
   });
 
   describe("updateSplit", () => {
@@ -798,6 +863,57 @@ describe("transactions queries", () => {
         status: 422,
         name: "TransactionError",
         message: /Reconciled split transaction cannot be modified/,
+      });
+    });
+
+    it("rejects setting status to 'r' via updateSplit", async () => {
+      await expect(
+        updateSplit(
+          mock.db,
+          1,
+          { status: "r" },
+          [
+            { categoryId: 1, amount: -2500 },
+            { categoryId: 2, amount: -2500 },
+          ]
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: /reconcile flow/,
+      });
+    });
+
+    it("nulls reconciledAt and reconciliationId on parent when updating split status to 'u'", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Old", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 2, accountId: 5, amount: -6000 },
+        { id: 3, accountId: 5, amount: -4000 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 10 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 11 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await updateSplit(
+        mock.db,
+        1,
+        { status: "u" },
+        [
+          { categoryId: 1, amount: -6000 },
+          { categoryId: 2, amount: -4000 },
+        ]
+      );
+
+      const parentUpdate = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(parentUpdate?.set).toMatchObject({
+        status: "u",
+        reconciledAt: null,
+        reconciliationId: null,
       });
     });
   });
@@ -1136,6 +1252,45 @@ describe("transactions queries", () => {
       await expect(
         bulkUpdateTransactions(mock.db, [2], { accountId: 2 })
       ).rejects.toThrow(/split child/);
+    });
+
+    it("rejects setting status to 'r' via bulkUpdateTransactions", async () => {
+      await expect(
+        bulkUpdateTransactions(mock.db, [1, 2], { status: "r" })
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: /reconcile flow/,
+      });
+    });
+
+    it("nulls reconciledAt and reconciliationId when bulk updating status to 'c'", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        {
+          id: 1,
+          accountId: 1,
+          amount: -1000,
+          status: "r",
+          reconciledAt: "2026-07-01",
+          reconciliationId: 5,
+          transferAccountId: null,
+          parentId: null,
+        },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [
+        { id: 1, status: "c", reconciledAt: null, reconciliationId: null },
+      ]);
+
+      const res = await bulkUpdateTransactions(mock.db, [1], { status: "c" });
+      expect(res).toHaveLength(1);
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({
+        status: "c",
+        reconciledAt: null,
+        reconciliationId: null,
+      });
     });
   });
 
