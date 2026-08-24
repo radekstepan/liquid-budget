@@ -1,5 +1,15 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "path";
+import { fileURLToPath } from "url";
+import * as schema from "../src/schema.js";
+import type { Db } from "../src/client.js";
 import {
+  createAccount,
+  createSplitWithChildren,
+  createTransaction,
   getReconcileState,
   reconcileAccount,
   RECONCILE_ADJUSTMENT_MEMO,
@@ -7,6 +17,18 @@ import {
   TransactionError,
 } from "../src/index.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+function openMigratedDb(): Db {
+  const raw = new Database(":memory:");
+  raw.pragma("foreign_keys = ON");
+  const db = drizzle(raw, { schema });
+  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  return db;
+}
 
 describe("reconcile queries", () => {
   let mock: MockDb;
@@ -294,6 +316,145 @@ describe("reconcile queries", () => {
       await expect(unreconcileAccount(mock.db, 999)).rejects.toBeInstanceOf(
         TransactionError
       );
+    });
+  });
+
+  describe("reconcile queries (integration with SQLite)", () => {
+    let db: Db;
+
+    beforeEach(() => {
+      db = openMigratedDb();
+    });
+
+    it("BUG-3.2: excludes split parent transactions from all status aggregates (no double-counting)", async () => {
+      const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat1] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+      const [cat2] = await db.insert(schema.categories).values({ groupId: group.id, name: "Household", sort: 1 }).returning();
+
+      // 1. Uncleared plain transaction: -1000
+      await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: cat1.id,
+        date: "2026-06-01",
+        payee: "Bakery",
+        amount: -1000,
+        status: "u",
+      });
+
+      // 2. Uncleared split transaction: parent -5000, children -3000 and -2000
+      await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-06-02",
+          payee: "Supermarket",
+          memo: "Groceries + Household",
+          amount: -5000,
+          status: "u",
+        },
+        [
+          { categoryId: cat1.id, amount: -3000, memo: "Groceries" },
+          { categoryId: cat2.id, amount: -2000, memo: "Household" },
+        ]
+      );
+
+      // 3. Cleared plain transaction: +10000
+      await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-06-03",
+        payee: "Direct Deposit",
+        amount: 10000,
+        status: "c",
+      });
+
+      // 4. Cleared split transaction: parent -4000, children -2500 and -1500
+      await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-06-04",
+          payee: "Department Store",
+          memo: "Clothing + Home",
+          amount: -4000,
+          status: "c",
+        },
+        [
+          { categoryId: cat1.id, amount: -2500, memo: "Clothing" },
+          { categoryId: cat2.id, amount: -1500, memo: "Home" },
+        ]
+      );
+
+      // 5. Reconciled plain transaction: +5000
+      // Manually insert with status 'r' for test setup since createTransaction forbids direct 'r'
+      await db.insert(schema.transactions).values({
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-05-01",
+        payee: "Old Deposit",
+        amount: 5000,
+        status: "r",
+      });
+
+      // 6. Reconciled split transaction: parent -2000, children -1000 and -1000
+      const [recParent] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId: acct.id,
+          categoryId: null,
+          date: "2026-05-02",
+          payee: "Old Split Store",
+          amount: -2000,
+          status: "r",
+        })
+        .returning();
+      await db.insert(schema.transactions).values([
+        {
+          accountId: acct.id,
+          categoryId: cat1.id,
+          date: "2026-05-02",
+          payee: "Old Split Store",
+          amount: -1000,
+          status: "r",
+          parentId: recParent!.id,
+        },
+        {
+          accountId: acct.id,
+          categoryId: cat2.id,
+          date: "2026-05-02",
+          payee: "Old Split Store",
+          amount: -1000,
+          status: "r",
+          parentId: recParent!.id,
+        },
+      ]);
+
+      const state = await getReconcileState(db, acct.id, "2026-06-30");
+
+      // Expected aggregates:
+      // uncleared: -1000 (plain) + -3000 (child1) + -2000 (child2) = -6000 (count = 3)
+      // cleared: 10000 (plain) + -2500 (child1) + -1500 (child2) = 6000 (count = 3)
+      // reconciled: 5000 (plain) + -1000 (child1) + -1000 (child2) = 3000 (count = 3)
+      // workingBalance: cleared (6000) + reconciled (3000) = 9000
+      expect(state).toMatchObject({
+        accountId: acct.id,
+        accountName: "Chequing",
+        workingBalance: 9000,
+        unclearedTotal: -6000,
+        unclearedCount: 3,
+        clearedCount: 3,
+        reconciledCount: 3,
+      });
+
+      // Reconciling with statement balance matching workingBalance (9000) should succeed with diff = 0 and no adjustment
+      const recResult = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: 9000,
+        statementDate: "2026-06-30",
+      });
+      expect(recResult.adjustmentTransactionId).toBeNull();
+      expect(recResult.finalDiff).toBe(0);
     });
   });
 });

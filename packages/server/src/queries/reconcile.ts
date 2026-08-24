@@ -80,7 +80,12 @@ export async function getReconcileState(
       reconciledCount: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then 1 else 0 end), 0)`,
     })
     .from(transactions)
-    .where(eq(transactions.accountId, accountId));
+    .where(
+      and(
+        eq(transactions.accountId, accountId),
+        sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+      )
+    );
 
   const unclearedTotal = Number(agg?.unclearedSum ?? 0);
   const clearedSum = Number(agg?.clearedSum ?? 0);
