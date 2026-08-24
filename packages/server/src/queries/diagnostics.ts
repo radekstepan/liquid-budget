@@ -2,8 +2,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 import { getBudgetData } from "./budget.js";
-import { computeBudget } from "@ynab/logic";
-import { todayISO } from "@ynab/logic";
+import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 
 export type BalanceIntegrityReport = {
   accountId: number;
@@ -123,10 +122,22 @@ export async function recomputeAccountBalances(
  *
  * This is the core identity that must hold for the budget to be internally
  * consistent. If this invariant is violated, TBB will be silently wrong.
+ *
+ * Evaluates at the latest month with data (or today's month, whichever is later)
+ * to avoid false positives from deferred income or future-dated transactions.
  */
-export async function verifyBudgetIntegrity(db: Database): Promise<BudgetIntegrityReport> {
+export async function verifyBudgetIntegrity(
+  db: Database,
+  targetMonth?: string
+): Promise<BudgetIntegrityReport> {
   const data = await getBudgetData(db);
-  const month = todayISO().slice(0, 7);
+  const todayMonth = todayISO().slice(0, 7);
+  const months = getMonthsWithData(data);
+  const latestMonth = months.reduce(
+    (max, m) => (m > max ? m : max),
+    todayMonth
+  );
+  const month = targetMonth ?? latestMonth;
   const result = computeBudget(data, month);
 
   const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
