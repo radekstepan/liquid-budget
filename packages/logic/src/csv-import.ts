@@ -194,13 +194,16 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   let inflowIdx = -1;
   let amountIdx = -1;
   header.forEach((h, i) => {
+    if (h.includes("type") || h.includes("method")) return;
     if (dateIdx < 0 && h.includes("date")) dateIdx = i;
     else if (payeeIdx < 0 && h.includes("payee")) payeeIdx = i;
     else if (memoIdx < 0 && (h.includes("memo") || h.includes("note") || h.includes("description"))) memoIdx = i;
     else if (categoryIdx < 0 && h.includes("categor")) categoryIdx = i;
-    else if (outflowIdx < 0 && /outflow|debit|withdrawal|payment|expense|spent/.test(h)) outflowIdx = i;
+    else if (amountIdx < 0 && (h === "amount" || h === "value")) amountIdx = i;
+    else if (outflowIdx < 0 && /outflow|debit|withdrawal|expense|spent/.test(h)) outflowIdx = i;
     else if (inflowIdx < 0 && /inflow|credit|deposit|income|received/.test(h)) inflowIdx = i;
     else if (amountIdx < 0 && (h.includes("amount") || h.includes("value"))) amountIdx = i;
+    else if (outflowIdx < 0 && /payment/.test(h)) outflowIdx = i;
   });
   if (payeeIdx < 0 && memoIdx >= 0) {
     payeeIdx = memoIdx;
