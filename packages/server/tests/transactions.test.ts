@@ -153,6 +153,31 @@ describe("transactions queries", () => {
         incomeMonth: null,
       });
     });
+
+    it("BUG 1.5: forces isIncome to false and incomeMonth to null when categoryId is provided on on-budget accounts even if isIncome is true", async () => {
+      mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 7 }]);
+      mock.respondWith("update:accounts", [{}]);
+
+      await createTransaction(mock.db, {
+        accountId: 1,
+        categoryId: 7,
+        date: "2026-07-01",
+        payee: "Store Refund",
+        memo: "Refund",
+        amount: 5000,
+        isIncome: true,
+        incomeMonth: "2026-08",
+      });
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({
+        accountId: 1,
+        categoryId: 7,
+        isIncome: false,
+        incomeMonth: null,
+      });
+    });
   });
 
   describe("createTransfer", () => {
@@ -617,6 +642,20 @@ describe("transactions queries", () => {
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ categoryId: null, isIncome: false, incomeMonth: null });
     });
+
+    it("BUG 1.5: forces isIncome to false and incomeMonth to null when updating transaction with categoryId on on-budget account", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: 5000, payee: "Store", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c", isIncome: true, incomeMonth: "2026-08" },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [{ id: 1, categoryId: 7, isIncome: false }]);
+
+      await updateTransaction(mock.db, 1, { categoryId: 7, isIncome: true });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ categoryId: 7, isIncome: false, incomeMonth: null });
+    });
   });
 
   describe("updateSplit", () => {
@@ -943,6 +982,21 @@ describe("transactions queries", () => {
       expect(res).toHaveLength(1);
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ categoryId: null, isIncome: false, incomeMonth: null });
+    });
+
+    it("BUG 1.5: forces isIncome to false and incomeMonth to null when categorizing transactions on on-budget accounts", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: 10000, payee: "Payroll", status: "c", categoryId: null, transferAccountId: null, parentId: null, isIncome: true, incomeMonth: "2026-08" },
+      ]);
+      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [
+        { id: 1, categoryId: 5, isIncome: false, incomeMonth: null },
+      ]);
+
+      const res = await bulkUpdateTransactions(mock.db, [1], { categoryId: 5 });
+      expect(res).toHaveLength(1);
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ categoryId: 5, isIncome: false, incomeMonth: null });
     });
   });
 });
