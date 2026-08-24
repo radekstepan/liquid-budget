@@ -145,7 +145,7 @@ test("POST /api/import rejects a zip without a .ynab4 entry with 400", async ({ 
   await resetToDemo(base);
 });
 
-test("POST /api/import reports plain duplicate entries that were skipped", async ({
+test("POST /api/import imports plain identical transactions and flags unreconciled duplicates", async ({
   request,
 }) => {
   const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
@@ -184,17 +184,14 @@ test("POST /api/import reports plain duplicate entries that were skipped", async
   });
   expect(res.status()).toBe(200);
   const body = await res.json();
-  expect(body.summary.transactions).toBe(1);
-  expect(body.summary.duplicatesSkipped).toHaveLength(1);
-  expect(body.summary.duplicatesSkipped[0]).toMatchObject({
-    payee: IMPORTED_PAYEE,
-    reason: "Duplicate of an earlier transaction in this backup",
-  });
+  expect(body.summary.transactions).toBe(2);
+  expect(body.summary.duplicatesSkipped).toHaveLength(0);
 
   const budget = await (await request.get("/api/budget")).json();
-  expect(
-    budget.transactions.filter((t: { payee: string }) => t.payee === IMPORTED_PAYEE)
-  ).toHaveLength(1);
+  const imported = budget.transactions.filter((t: { payee: string }) => t.payee === IMPORTED_PAYEE);
+  expect(imported).toHaveLength(2);
+  expect(imported.some((t: { flagColor: string | null }) => t.flagColor === "duplicate")).toBe(true);
+  expect(imported.some((t: { flagColor: string | null }) => t.flagColor === null)).toBe(true);
 
   await resetToDemo(base);
 });
