@@ -1046,9 +1046,11 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, status: "u", categoryId: 1, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [
+      mock.respondWithNth("select:transactions", 2, []);
+      mock.respondWithNth("select:transactions", 3, [
         { id: 2, status: "u", categoryId: 1, transferAccountId: null },
       ]);
+      mock.respondWithNth("select:transactions", 4, []);
       mock.respondWith("update:transactions", [{ id: 1, status: "c" }, { id: 2, status: "c" }]);
 
       const res = await bulkUpdateTransactions(mock.db, [1, 2], { status: "c" });
@@ -1059,10 +1061,12 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, amount: -1000, payee: "Old Payee", status: "u", categoryId: 1, transferAccountId: null, parentId: null },
       ]);
+      mock.respondWithNth("select:transactions", 2, []);
       mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
-      mock.respondWithNth("select:transactions", 2, [
+      mock.respondWithNth("select:transactions", 3, [
         { id: 2, accountId: 1, amount: -2000, payee: "Old Payee", status: "u", categoryId: 1, transferAccountId: null, parentId: null },
       ]);
+      mock.respondWithNth("select:transactions", 4, []);
       mock.respondWithNth("select:accounts", 2, [{ id: 1, onBudget: true }]);
       mock.respondWith("update:transactions", [
         { id: 1, payee: "New Payee", memo: "New Memo", date: "2026-09-01", categoryId: 3 },
@@ -1096,6 +1100,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 2, amount: 10000, payee: "Brokerage", status: "c", categoryId: null, transferAccountId: null, parentId: null },
       ]);
+      mock.respondWithNth("select:transactions", 2, []);
       mock.respondWithNth("select:accounts", 1, [{ id: 2, onBudget: false }]);
       mock.respondWith("update:transactions", [
         { id: 1, categoryId: null, isIncome: false },
@@ -1111,6 +1116,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, amount: 10000, payee: "Payroll", status: "c", categoryId: null, transferAccountId: null, parentId: null, isIncome: true, incomeMonth: "2026-08" },
       ]);
+      mock.respondWithNth("select:transactions", 2, []);
       mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
       mock.respondWith("update:transactions", [
         { id: 1, categoryId: 5, isIncome: false, incomeMonth: null },
@@ -1460,6 +1466,315 @@ describe("transactions queries", () => {
         .from(schema.accounts)
         .where(eq(schema.accounts.id, acct2!.id));
       expect(finalAcct2?.balance).toBe(0);
+    });
+
+    describe("Bug 2.3: transfers and split parents force categoryId to null", () => {
+      it("forces categoryId to null on internal transfer insertion", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Transfer with category",
+            amount: -5000,
+          },
+          acct2!.id
+        );
+
+        expect(transfer.categoryId).toBeNull();
+        expect(transfer.isIncome).toBe(false);
+
+        const [row] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, transfer.id));
+        expect(row?.categoryId).toBeNull();
+        expect(row?.isIncome).toBe(false);
+      });
+
+      it("forces categoryId to null on split parent creation via createTransaction", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+
+        const row = await createTransaction(db, {
+          accountId,
+          categoryId: cat1Id,
+          date: "2026-08-01",
+          payee: "Costco",
+          memo: "Split parent",
+          amount: -10000,
+          skipBalance: true,
+        });
+
+        expect(row.categoryId).toBeNull();
+        expect(row.isIncome).toBe(false);
+
+        const [dbRow] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, row.id));
+        expect(dbRow?.categoryId).toBeNull();
+      });
+
+      it("forces categoryId to null on internal transfer split child via createTransaction", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        const parent = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Bank",
+          memo: "Parent",
+          amount: -10000,
+          skipBalance: true,
+        });
+
+        const childTransfer = await createTransaction(db, {
+          accountId,
+          categoryId: cat1Id,
+          date: "2026-08-01",
+          payee: "",
+          memo: "Child transfer",
+          amount: -5000,
+          transferAccountId: acct2!.id,
+          parentId: parent.id,
+        });
+
+        expect(childTransfer.categoryId).toBeNull();
+        expect(childTransfer.isIncome).toBe(false);
+      });
+
+      it("forces categoryId to null when updating an internal transfer", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Transfer",
+            amount: -5000,
+          },
+          acct2!.id
+        );
+
+        const updated = await updateTransaction(db, transfer.id, {
+          categoryId: cat1Id,
+        });
+
+        expect(updated?.categoryId).toBeNull();
+        expect(updated?.isIncome).toBe(false);
+
+        const [row] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, transfer.id));
+        expect(row?.categoryId).toBeNull();
+      });
+
+      it("forces categoryId to null when updating a split parent", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Store",
+            memo: "Split items",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "item 1" },
+            { categoryId: cat2Id, amount: -2000, memo: "item 2" },
+          ]
+        );
+
+        const updated = await updateTransaction(db, split.parent.id, {
+          categoryId: cat1Id,
+        });
+
+        expect(updated?.categoryId).toBeNull();
+        expect(updated?.isIncome).toBe(false);
+
+        const [row] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, split.parent.id));
+        expect(row?.categoryId).toBeNull();
+      });
+
+      it("forces categoryId to null on internal transfers and split parents in bulkUpdateTransactions", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        // 1. Regular transaction
+        const regular = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Coffee",
+          memo: "Latte",
+          amount: -500,
+        });
+
+        // 2. Internal transfer
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Transfer",
+            amount: -3000,
+          },
+          acct2!.id
+        );
+
+        // 3. Split parent
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Store",
+            memo: "Split",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000 },
+            { categoryId: cat2Id, amount: -2000 },
+          ]
+        );
+
+        // Bulk categorize all three with cat2Id
+        await bulkUpdateTransactions(db, [regular.id, transfer.id, split.parent.id], {
+          categoryId: cat2Id,
+        });
+
+        const [dbRegular] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, regular.id));
+        expect(dbRegular?.categoryId).toBe(cat2Id);
+
+        const [dbTransfer] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, transfer.id));
+        expect(dbTransfer?.categoryId).toBeNull();
+        expect(dbTransfer?.isIncome).toBe(false);
+
+        const [dbSplitParent] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, split.parent.id));
+        expect(dbSplitParent?.categoryId).toBeNull();
+        expect(dbSplitParent?.isIncome).toBe(false);
+      });
+
+      it("preserves categoryId on cross-boundary transfers (e.g. to off-budget)", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        const [offBudgetAcct] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Brokerage",
+            kind: "offbudget",
+            groupLabel: "Tracking Accounts",
+            onBudget: false,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        // 1. Create cross-boundary transfer with category
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Investment transfer",
+            amount: -5000,
+          },
+          offBudgetAcct!.id
+        );
+
+        expect(transfer.categoryId).toBe(cat1Id);
+
+        // 2. Update category on cross-boundary transfer
+        const updated = await updateTransaction(db, transfer.id, {
+          categoryId: cat2Id,
+        });
+        expect(updated?.categoryId).toBe(cat2Id);
+
+        // 3. Bulk update category on cross-boundary transfer
+        await bulkUpdateTransactions(db, [transfer.id], {
+          categoryId: cat1Id,
+        });
+        const [dbRow] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, transfer.id));
+        expect(dbRow?.categoryId).toBe(cat1Id);
+      });
     });
   });
 });

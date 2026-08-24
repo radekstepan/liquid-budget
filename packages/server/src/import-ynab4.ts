@@ -497,10 +497,11 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             catEntityId === "Category/__ImmediateIncome__" ||
             catEntityId === "Category/__DeferredIncome__";
           const isTransferIncome = isCrossBoundary && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
+          const finalTransferCatId = destAccId !== null && !isCrossBoundary ? null : isSpecialIncomeCat ? null : catId;
 
           await db.insert(transactions).values({
             accountId: sourceAccId,
-            categoryId: isSpecialIncomeCat ? null : catId,
+            categoryId: finalTransferCatId,
             date: t.date,
             payee,
             memo,
@@ -545,6 +546,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           const srcOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
           const destOnBudget = destAccId ? (accOnBudgetMap.get(targetAccEntityId!) ?? false) : false;
           const isCrossBoundaryTx = destAccId !== null && srcOnBudget !== destOnBudget;
+          if (destAccId !== null && !isCrossBoundaryTx) {
+            catId = null;
+          }
           const netOnBudgetTx = (srcOnBudget ? (t.amount || 0) : 0) + (destOnBudget ? -(t.amount || 0) : 0);
           const isTxIncome =
             (srcOnBudget && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
