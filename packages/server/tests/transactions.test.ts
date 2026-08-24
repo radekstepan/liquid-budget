@@ -1,4 +1,10 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq } from "drizzle-orm";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "path";
+import { fileURLToPath } from "url";
 import {
   assertSplitsBalanced,
   bulkDeleteTransactions,
@@ -11,6 +17,7 @@ import {
   updateSplit,
   updateTransaction,
 } from "../src/queries/transactions.js";
+import * as schema from "../src/schema.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
 
 describe("transactions queries", () => {
@@ -859,7 +866,7 @@ describe("transactions queries", () => {
       expect(updates).toHaveLength(3);
     });
 
-    it("deleting a split child directly when > 2 children exist reverses child balance without deleting parent", async () => {
+    it("deleting a split child directly when > 2 children exist reverses child balance and re-totals parent amount", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
       ]);
@@ -869,14 +876,17 @@ describe("transactions queries", () => {
       ]);
       mock.respondWith("update:accounts", [{}]);
       mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
 
       const result = await deleteTransaction(mock.db, 2);
       expect(result).toMatchObject({ id: 2 });
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
       expect(deletes).toHaveLength(1);
+      const parentUpdate = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(parentUpdate?.set).toMatchObject({ amount: -7000 });
     });
 
-    it("deleting a split child transfer when > 2 children exist reverses both source and destination balances", async () => {
+    it("deleting a split child transfer when > 2 children exist reverses both source and destination balances and re-totals parent", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: 2, categoryId: null },
       ]);
@@ -886,12 +896,15 @@ describe("transactions queries", () => {
       ]);
       mock.respondWith("update:accounts", [{}, {}]);
       mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
 
       await deleteTransaction(mock.db, 2);
       const updates = mock.calls.filter((c) => c.op === "update" && c.table === "accounts");
       expect(updates).toHaveLength(2);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
       expect(deletes).toHaveLength(1);
+      const parentUpdate = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(parentUpdate?.set).toMatchObject({ amount: -7000 });
     });
 
     it("deleting a split child when only 1 child remains cleans up remaining child and parent", async () => {
@@ -949,6 +962,71 @@ describe("transactions queries", () => {
       ]);
 
       await expect(bulkDeleteTransactions(mock.db, [1])).rejects.toThrow(TransactionError);
+    });
+
+    it("deleting a split child when > 2 children exist reverses child balance and re-totals parent", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+
+      const res = await bulkDeleteTransactions(mock.db, [2]);
+      expect(res).toHaveLength(1);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(1);
+      const parentUpdate = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(parentUpdate?.set).toMatchObject({ amount: -7000 });
+    });
+
+    it("deleting a split child when only 1 child remains collapses remaining child and parent", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 },
+      ]);
+      mock.respondWith("select:transactions", [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+      mock.respondWith("delete:transactions", [{}, {}, {}]);
+
+      const res = await bulkDeleteTransactions(mock.db, [2]);
+      expect(res).toHaveLength(1);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      expect(deletes).toHaveLength(3);
+    });
+
+    it("bulk deleting 2 children of a 3-child split re-totals then collapses", async () => {
+      // First id: 2
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
+      ]);
+      // remaining children after deleting 2: [3, 4]
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+      ]);
+      // Second id: 3
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 10 },
+      ]);
+      // remaining children after deleting 3: [4]
+      mock.respondWithNth("select:transactions", 4, [
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+      mock.respondWith("delete:transactions", [{}, {}, {}, {}]);
+      mock.respondWith("update:transactions", [{}]);
+
+      const res = await bulkDeleteTransactions(mock.db, [2, 3]);
+      expect(res).toHaveLength(2);
+      const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
+      // 1 (id 2) + 1 (id 3) + 1 (id 4 collapsed) + 1 (parent 1 collapsed) = 4
+      expect(deletes).toHaveLength(4);
     });
   });
 
@@ -1031,6 +1109,166 @@ describe("transactions queries", () => {
       expect(res).toHaveLength(1);
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
       expect(update?.set).toMatchObject({ categoryId: 5, isIncome: false, incomeMonth: null });
+    });
+  });
+
+  describe("split deletion integration (SQLite DB)", () => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+    function openMigratedDb() {
+      const raw = new Database(":memory:");
+      raw.pragma("foreign_keys = ON");
+      const db = drizzle(raw, { schema });
+      migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      return db;
+    }
+
+    async function seedTestData(db: ReturnType<typeof openMigratedDb>) {
+      const [account] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "Checking",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          balance: 0,
+          onBudget: true,
+          sort: 0,
+        })
+        .returning();
+
+      const [group] = await db
+        .insert(schema.categoryGroups)
+        .values({ name: "Everyday Expenses", sort: 0 })
+        .returning();
+
+      const [cat1] = await db
+        .insert(schema.categories)
+        .values({ name: "Groceries", groupId: group!.id, sort: 0 })
+        .returning();
+
+      const [cat2] = await db
+        .insert(schema.categories)
+        .values({ name: "Dining", groupId: group!.id, sort: 1 })
+        .returning();
+
+      const [cat3] = await db
+        .insert(schema.categories)
+        .values({ name: "Household", groupId: group!.id, sort: 2 })
+        .returning();
+
+      return {
+        accountId: account!.id,
+        cat1Id: cat1!.id,
+        cat2Id: cat2!.id,
+        cat3Id: cat3!.id,
+      };
+    }
+
+    it("deleteTransaction: deleting 1 child of a 3-child split updates parent amount and allows sibling updates", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id, cat3Id } = await seedTestData(db);
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Supermarket",
+          memo: "Groceries & more",
+          amount: -10000,
+        },
+        [
+          { categoryId: cat1Id, amount: -5000, memo: "food" },
+          { categoryId: cat2Id, amount: -3000, memo: "coffee" },
+          { categoryId: cat3Id, amount: -2000, memo: "soap" },
+        ]
+      );
+
+      // Account balance should be -10000
+      let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(-10000);
+
+      // Delete the 3rd child (-2000)
+      const childToDelete = split.children[2]!;
+      await deleteTransaction(db, childToDelete.id);
+
+      // Account balance should now be -8000
+      [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(-8000);
+
+      // Parent transaction amount should be updated to -8000
+      const [parent] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, split.parent.id));
+      expect(parent?.amount).toBe(-8000);
+
+      // Subsequent child edit should succeed and not throw "split children do not sum to parent"
+      const childToUpdate = split.children[1]!;
+      await expect(
+        updateTransaction(db, childToUpdate.id, { memo: "updated coffee memo" })
+      ).resolves.not.toThrow();
+
+      // Deleting another child should trigger 1-child collapse and delete remaining child + parent
+      await deleteTransaction(db, childToUpdate.id);
+      const remainingTx = await db.select().from(schema.transactions);
+      expect(remainingTx).toHaveLength(0);
+
+      [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(0);
+    });
+
+    it("bulkDeleteTransactions: deleting 1 child of a 3-child split updates parent amount and allows sibling updates", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id, cat3Id } = await seedTestData(db);
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Supermarket",
+          memo: "Groceries & more",
+          amount: -10000,
+        },
+        [
+          { categoryId: cat1Id, amount: -5000, memo: "food" },
+          { categoryId: cat2Id, amount: -3000, memo: "coffee" },
+          { categoryId: cat3Id, amount: -2000, memo: "soap" },
+        ]
+      );
+
+      // Bulk delete the 3rd child (-2000)
+      const childToDelete = split.children[2]!;
+      const deleted = await bulkDeleteTransactions(db, [childToDelete.id]);
+      expect(deleted).toHaveLength(1);
+
+      // Account balance should be -8000
+      let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(-8000);
+
+      // Parent transaction amount should be updated to -8000
+      const [parent] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, split.parent.id));
+      expect(parent?.amount).toBe(-8000);
+
+      // Sibling update succeeds
+      const childToUpdate = split.children[1]!;
+      await expect(
+        updateTransaction(db, childToUpdate.id, { memo: "updated memo" })
+      ).resolves.not.toThrow();
+
+      // Bulk delete child 1 and child 2 together (which collapses)
+      await bulkDeleteTransactions(db, [split.children[0]!.id, childToUpdate.id]);
+      const remainingTx = await db.select().from(schema.transactions);
+      expect(remainingTx).toHaveLength(0);
+
+      [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(0);
     });
   });
 });
