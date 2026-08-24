@@ -234,17 +234,56 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const onBudget = await isAccountOnBudget(db, input.accountId);
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
-    const categoryId = onBudget ? (input.categoryId ?? null) : null;
-    const isEligibleForIncome =
-      onBudget &&
-      categoryId == null &&
-      !isTransfer &&
-      !isSplitParent &&
-      input.parentId == null;
-    const isIncome = isEligibleForIncome
-      ? (input.isIncome !== undefined ? input.isIncome : input.amount > 0)
-      : false;
-    const incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
+
+    let categoryId: number | null = null;
+    let isIncome = false;
+    let incomeMonth: string | null = null;
+
+    if (isSplitParent) {
+      categoryId = null;
+      isIncome = false;
+      incomeMonth = null;
+    } else if (isTransfer) {
+      const destOnBudget = await isAccountOnBudget(db, input.transferAccountId!);
+      const isBoundaryCrossing = onBudget !== destOnBudget;
+      const netOnBudgetDelta =
+        (onBudget ? input.amount : 0) + (destOnBudget ? -input.amount : 0);
+
+      if (isBoundaryCrossing) {
+        if (netOnBudgetDelta > 0) {
+          if (input.categoryId != null) {
+            categoryId = input.categoryId;
+            isIncome = false;
+            incomeMonth = null;
+          } else {
+            categoryId = null;
+            isIncome = input.isIncome !== undefined ? Boolean(input.isIncome) : true;
+            incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
+          }
+        } else {
+          categoryId = input.categoryId ?? null;
+          isIncome = false;
+          incomeMonth = null;
+        }
+      } else {
+        categoryId = null;
+        isIncome = false;
+        incomeMonth = null;
+      }
+    } else if (!onBudget) {
+      categoryId = null;
+      isIncome = false;
+      incomeMonth = null;
+    } else {
+      categoryId = input.categoryId ?? null;
+      const isEligibleForIncome =
+        categoryId == null &&
+        input.parentId == null;
+      isIncome = isEligibleForIncome
+        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : input.amount > 0)
+        : false;
+      incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
+    }
 
     const [row] = await db
       .insert(transactions)
@@ -622,6 +661,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         p.isIncome = false;
         p.incomeMonth = null;
       }
+    } else if (isSplitParent) {
+      p.categoryId = null;
+      p.isIncome = false;
+      p.incomeMonth = null;
     } else if (!srcOnBudget) {
       p.categoryId = null;
       p.incomeMonth = null;
@@ -629,7 +672,6 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     } else {
       const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
       const isEligibleForIncome =
-        !isSplitParent &&
         existing.parentId == null &&
         finalCatId == null;
 
@@ -1017,24 +1059,21 @@ export async function bulkUpdateTransactions(
         );
       }
 
-      let isSplitParent = false;
-      if (patch.accountId != null || patch.amount != null) {
-        const isParent = existing.parentId == null && existing.transferAccountId == null;
-        const hasChildren = isParent && (await childCount(db, id)) > 0;
-        isSplitParent = isParent && hasChildren;
+      const isParent = existing.parentId == null && existing.transferAccountId == null;
+      const hasChildren = isParent && (await childCount(db, id)) > 0;
+      const isSplitParent = isParent && hasChildren;
 
-        if (isSplitParent) {
-          if ("amount" in patch && patch.amount !== undefined) {
-            throw new TransactionError("cannot change amount of a split parent; edit children");
-          }
-          if ("accountId" in patch && patch.accountId !== undefined) {
-            throw new TransactionError("cannot change account of a split parent");
-          }
+      if (isSplitParent) {
+        if ("amount" in patch && patch.amount !== undefined) {
+          throw new TransactionError("cannot change amount of a split parent; edit children");
         }
+        if ("accountId" in patch && patch.accountId !== undefined) {
+          throw new TransactionError("cannot change account of a split parent");
+        }
+      }
 
-        if (existing.parentId != null && patch.accountId !== undefined) {
-          throw new TransactionError("cannot change account of a split child");
-        }
+      if (existing.parentId != null && patch.accountId !== undefined) {
+        throw new TransactionError("cannot change account of a split child");
       }
 
       const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
@@ -1105,6 +1144,10 @@ export async function bulkUpdateTransactions(
           setFields.isIncome = false;
           setFields.incomeMonth = null;
         }
+      } else if (isSplitParent) {
+        setFields.categoryId = null;
+        setFields.isIncome = false;
+        setFields.incomeMonth = null;
       } else if (!srcOnBudget) {
         setFields.categoryId = null;
         setFields.incomeMonth = null;
@@ -1112,7 +1155,6 @@ export async function bulkUpdateTransactions(
       } else {
         const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
         const isEligibleForIncome =
-          !isSplitParent &&
           existing.parentId == null &&
           finalCatId == null;
 
