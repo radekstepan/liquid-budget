@@ -167,8 +167,8 @@ describe("computeBudget", () => {
   it("overspend in prior month is clamped to zero and deducted from TBB", () => {
     // Month A: assign 100, spend -300 → available -200 (overspent)
     // Month B: assign 500 → available = 0 + 500 = 500 (clamped to zero carryover)
-    // TBB = income - assigned + priorSurplus - overspentPrevious
-    //      = 0 - 500 + 0 - 200 = -700
+    // TBB = income - assigned + priorSurplus
+    //      = 0 - 500 + (-300 priorSurplus from June: -100 assigned - 200 overspent) = -800
     const data: BudgetData = {
       ...emptyData(),
       accounts: [
@@ -223,7 +223,7 @@ describe("computeBudget", () => {
     // July: groceries carryover = 0 (clamped from -200000)
     expect(july.groups[0]!.rows[0]!.carryoverIn).toBe(0);
     expect(july.groups[0]!.rows[0]!.available).toBe(0);
-    // July: TBB = 0 - 0 + 400000 (priorSurplus from June) - 200000 = 200000
+    // July: TBB = 0 - 0 + 200000 (priorSurplus from June: 500000 income - 100000 assigned - 200000 overspent) = 200000
     expect(july.overspentPrevious).toBe(200000);
     expect(july.tbb).toBe(200000);
   });

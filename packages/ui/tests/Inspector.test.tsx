@@ -73,6 +73,28 @@ describe("Inspector", () => {
     expect(screen.getByText("Import YNAB4 Backup")).toBeInTheDocument();
   });
 
+  describe("ATB banner", () => {
+    it("renders breakdown tooltip without duplicate overspent line when overbudgeted", () => {
+      const { container } = render(
+        <Inspector
+          {...baseProps}
+          tbb={-50000}
+          overBudgeted={true}
+          priorSurplus={100000}
+          totalIncome={200000}
+          totalAssigned={350000}
+        />
+      );
+      const atbCard = container.querySelector(".y-atb--red");
+      expect(atbCard).toBeInTheDocument();
+      const title = atbCard?.getAttribute("title");
+      expect(title).toBe(
+        "Prior surplus: $1,000.00\nIncome this month: $2,000.00\nAssigned this month: $3,500.00\n─────────────────\n= TBB: -$500.00"
+      );
+      expect(title).not.toContain("Overspent");
+    });
+  });
+
   describe("Net Monthly Card", () => {
     it("renders income, outflow, net savings, and savings rate", () => {
       render(<Inspector {...baseProps} />);

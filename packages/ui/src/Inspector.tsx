@@ -233,7 +233,7 @@ export const Inspector = memo(function Inspector({
         )}
         title={
           overBudgeted
-            ? `Prior surplus: ${money(priorSurplus ?? 0)}\nOverspent last month: ${money(overspentPrevious ?? 0)}\nIncome this month: ${money(totalIncome ?? 0)}\nAssigned this month: ${money(totalAssigned ?? 0)}\n─────────────────\n= TBB: ${money(tbb)}`
+            ? `Prior surplus: ${money(priorSurplus ?? 0)}\nIncome this month: ${money(totalIncome ?? 0)}\nAssigned this month: ${money(totalAssigned ?? 0)}\n─────────────────\n= TBB: ${money(tbb)}`
             : undefined
         }
       >
