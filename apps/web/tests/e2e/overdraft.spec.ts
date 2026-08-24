@@ -76,10 +76,9 @@ test("Inspector ATB card shows Overbudgeted with breakdown tooltip", async ({ pa
   await expect(atbCard).toBeVisible();
   await expect(atbCard.getByText("Overbudgeted", { exact: true })).toBeVisible();
 
-  // The ATB card has a tooltip with the prior-month breakdown.
+  // The ATB card has a tooltip with the breakdown.
   const title = await atbCard.getAttribute("title");
   expect(title).toContain("Prior surplus");
-  expect(title).toContain("Overspent last month");
   expect(title).toContain("Income this month");
   expect(title).toContain("Assigned this month");
   expect(title).toContain("TBB");

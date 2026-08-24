@@ -233,7 +233,7 @@ export type GroupRow = {
 export type BudgetResult = {
   groups: GroupRow[];
   /**
-   * To Be Budgeted: totalIncome − totalAssigned + priorSurplus − overspentPrevious.
+   * To Be Budgeted: totalIncome − totalAssigned + priorSurplus.
    * Negative means you have assigned more than you earned — "over budgeted".
    */
   tbb: number;
@@ -243,12 +243,13 @@ export type BudgetResult = {
   priorSurplus: number;
   /** true when tbb < 0 — you've assigned more than you received. */
   overBudgeted: boolean;
-  /** Total assigned across all non-CC groups this month. */
+  /** Total assigned across all groups this month. */
   totalAssigned: number;
   /**
    * Cash overspending from the previous month that is deducted from this
-   * month's TBB. Only non-CC category overspending is included; credit card
-   * overspending persists as debt within the CC payment category.
+   * month's TBB (already factored into priorSurplus). Only non-CC category
+   * overspending is included; credit card overspending persists as debt within
+   * the CC payment category.
    */
   overspentPrevious: number;
 };
