@@ -858,6 +858,14 @@ export async function deleteTransaction(db: Database, id: number) {
         }
         await db.delete(transactions).where(eq(transactions.id, lastChild.id));
         await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+      } else if (remaining.length === 0) {
+        await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+      } else {
+        const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
+        await db
+          .update(transactions)
+          .set({ amount: newTotal })
+          .where(eq(transactions.id, existing.parentId));
       }
     } else if (existing.transferAccountId != null) {
       await applyBalance(db, existing.accountId, -Number(existing.amount));
@@ -917,6 +925,26 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         }
         await db.delete(transactions).where(eq(transactions.id, id));
         deleted.push(existing);
+
+        // Check remaining children of the split parent.
+        const remaining = await getChildren(db, existing.parentId);
+        if (remaining.length === 1) {
+          const lastChild = remaining[0]!;
+          await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
+          if (lastChild.transferAccountId != null) {
+            await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
+          }
+          await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+          await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        } else if (remaining.length === 0) {
+          await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        } else {
+          const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
+          await db
+            .update(transactions)
+            .set({ amount: newTotal })
+            .where(eq(transactions.id, existing.parentId));
+        }
       } else {
         const children = await getChildren(db, id);
         if (children.some((c) => c.status === "r")) {
