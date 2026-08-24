@@ -482,6 +482,8 @@ export async function createSplitWithChildren(
  *     insert time).
  *   - Split parents may not change `amount` (derived from children) or
  *     `accountId` (the whole split lives on one account).
+ *   - Split children may not change `accountId` (the whole split lives on
+ *     one account).
  *   - Transfers may not change `transferAccountId` (would require
  *     re-routing the mirrored balance). Use delete + recreate.
  *
@@ -554,6 +556,12 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
     if ("accountId" in p) {
       throw new TransactionError("cannot change account of a split parent");
+    }
+  }
+
+  if (existing.parentId != null) {
+    if ("accountId" in p) {
+      throw new TransactionError("cannot change account of a split child");
     }
   }
 
@@ -717,7 +725,7 @@ export async function updateSplit(
   db.run(sql`BEGIN`);
   try {
     for (const c of oldChildren) {
-      await applyBalance(db, parent.accountId, -Number(c.amount));
+      await applyBalance(db, c.accountId, -Number(c.amount));
       if (c.transferAccountId != null) {
         await applyBalance(db, c.transferAccountId, Number(c.amount));
       }
@@ -881,7 +889,7 @@ export async function deleteTransaction(db: Database, id: number) {
       }
       if (children.length > 0) {
         for (const c of children) {
-          await applyBalance(db, existing.accountId, -Number(c.amount));
+          await applyBalance(db, c.accountId, -Number(c.amount));
           if (c.transferAccountId != null) {
             await applyBalance(db, c.transferAccountId, Number(c.amount));
           }
@@ -955,7 +963,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         }
         if (children.length > 0) {
           for (const c of children) {
-            await applyBalance(db, existing.accountId, -Number(c.amount));
+            await applyBalance(db, c.accountId, -Number(c.amount));
             if (c.transferAccountId != null) {
               await applyBalance(db, c.transferAccountId, Number(c.amount));
             }
@@ -1022,6 +1030,10 @@ export async function bulkUpdateTransactions(
           if ("accountId" in patch && patch.accountId !== undefined) {
             throw new TransactionError("cannot change account of a split parent");
           }
+        }
+
+        if (existing.parentId != null && patch.accountId !== undefined) {
+          throw new TransactionError("cannot change account of a split child");
         }
       }
 
