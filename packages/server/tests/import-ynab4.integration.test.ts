@@ -611,4 +611,83 @@ describe("importYnab4 full import", () => {
     expect(negTx?.transferAccountId).toBeNull();
     expect(negTx?.isIncome).toBe(false);
   });
+
+  it("imports scheduled split paychecks with income legs (Category/__ImmediateIncome__) and balances sub-rows", async () => {
+    const paycheckData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Checking", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "401k", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [
+        { entityId: "p-emp", name: "Acme Corp" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Deductions",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc-tax", name: "Taxes" },
+          ],
+        },
+      ],
+      transactions: [],
+      monthlyBudgets: [],
+      scheduledTransactions: [
+        {
+          entityId: "s-paycheck",
+          accountId: "acc1",
+          date: "2026-07-15",
+          amount: 2500, // Net paycheck +$2,500.00
+          frequency: "biweekly",
+          payeeId: "p-emp",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            // Income leg: +$3,000.00 gross pay
+            { categoryId: "Category/__ImmediateIncome__", amount: 3000, memo: "Gross pay" },
+            // Deduction: -$300.00 taxes
+            { categoryId: "sc-tax", amount: -300, memo: "Federal tax" },
+            // Transfer to 401k: -$200.00
+            { categoryId: null, targetAccountId: "acc2", amount: -200, memo: "401k contribution" },
+          ],
+        },
+      ],
+    };
+
+    await importYnab4(db, paycheckData);
+    const { recurring } = await getBudgetData(db);
+    expect(recurring).toHaveLength(1);
+
+    const r = recurring[0]!;
+    expect(r.payee).toBe("Acme Corp");
+    expect(Number(r.amount)).toBe(250000); // 250000 cents
+    expect(r.categoryId).toBeNull();
+    expect(r.subTransactions).toHaveLength(3);
+
+    // Verify sub-transactions
+    const [subIncome, subTax, subTransfer] = r.subTransactions;
+    expect(subIncome).toMatchObject({
+      categoryId: null,
+      transferAccountId: null,
+      memo: "Gross pay",
+    });
+    expect(Number(subIncome!.amount)).toBe(300000); // +$3,000.00
+
+    expect(subTax).toMatchObject({
+      memo: "Federal tax",
+    });
+    expect(subTax!.categoryId).not.toBeNull();
+    expect(Number(subTax!.amount)).toBe(-30000); // -$300.00
+
+    expect(subTransfer).toMatchObject({
+      categoryId: null,
+      memo: "401k contribution",
+    });
+    expect(subTransfer!.transferAccountId).not.toBeNull();
+    expect(Number(subTransfer!.amount)).toBe(-20000); // -$200.00
+
+    // Sum of children matches parent amount
+    const sum = r.subTransactions.reduce((acc, s) => acc + Number(s.amount), 0);
+    expect(sum).toBe(Number(r.amount));
+  });
 });

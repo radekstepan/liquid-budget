@@ -774,8 +774,6 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             }
           }
 
-          if (!subCatId && !subTransferAccountId) continue;
-
           await db.insert(recurringSubTransactions).values({
             recurringId: insertedR.id,
             categoryId: subCatId,

@@ -185,10 +185,11 @@ export function assertSplitsBalanced(
   let sum = 0;
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
-    if (!c.categoryId && !c.transferAccountId) {
+    const childAmount = assertValidAmount(c.amount);
+    if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
       throw new TransactionError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
-    sum += assertValidAmount(c.amount);
+    sum += childAmount;
   }
   if (sum !== validParent) {
     throw new TransactionError(

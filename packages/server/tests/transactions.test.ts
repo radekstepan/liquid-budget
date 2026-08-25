@@ -523,6 +523,15 @@ describe("transactions queries", () => {
       ).not.toThrow();
     });
 
+    it("accepts a mixed-sign paycheck split with an income leg (null category)", () => {
+      expect(() =>
+        assertSplitsBalanced(400000, [
+          { categoryId: null, amount: 500000 },
+          { categoryId: 2, amount: -100000 },
+        ])
+      ).not.toThrow();
+    });
+
     it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
       expect(() =>
         assertSplitsBalanced(400000, [
