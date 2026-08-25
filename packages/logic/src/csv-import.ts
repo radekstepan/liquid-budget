@@ -1,3 +1,5 @@
+import { MONTHS, MONTHS_LONG } from "./format.js";
+
 export type CsvImportRow = {
   rowNumber: number;
   date: string | null;
@@ -20,6 +22,25 @@ export type CsvImportResult = {
   rows: CsvImportRow[];
   detectedDateFormat?: DateFormatConvention;
 };
+
+const MONTH_MAP = new Map<string, number>();
+MONTHS.forEach((m, idx) => {
+  MONTH_MAP.set(m.toLowerCase(), idx + 1);
+});
+MONTHS_LONG.forEach((m, idx) => {
+  MONTH_MAP.set(m.toLowerCase(), idx + 1);
+});
+MONTH_MAP.set("sept", 9);
+
+function parseMonthName(str: string): number | null {
+  const clean = str.replace(/[^a-zA-Z]/g, "").toLowerCase();
+  if (MONTH_MAP.has(clean)) return MONTH_MAP.get(clean)!;
+  if (clean.length >= 3) {
+    const short = clean.slice(0, 3);
+    if (MONTH_MAP.has(short)) return MONTH_MAP.get(short)!;
+  }
+  return null;
+}
 
 export function parseCsv(text: string): string[][] {
   const out: string[][] = [];
@@ -67,6 +88,7 @@ export function parseCsv(text: string): string[][] {
     }
     cell += ch;
     i += 1;
+    continue;
   }
   if (cell !== "" || row.length > 0) {
     row.push(cell);
@@ -111,12 +133,23 @@ export function detectDateFormat(
     const cells = rows[i];
     if (!cells || cells.every((c) => c.trim() === "")) continue;
     const raw = (cells[dateIdx] ?? "").trim();
-    const m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(raw);
-    if (m) {
-      const n1 = Number(m[1]);
-      const n2 = Number(m[2]);
+    const mNum = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(raw);
+    if (mNum) {
+      const n1 = Number(mNum[1]);
+      const n2 = Number(mNum[2]);
       if (n1 > 12 && n2 <= 12) dmyVotes++;
       else if (n2 > 12 && n1 <= 12) mdyVotes++;
+      continue;
+    }
+    const mTextMDY = /^([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+(\d{2,4})$/.exec(raw);
+    if (mTextMDY && parseMonthName(mTextMDY[1]!) != null) {
+      mdyVotes++;
+      continue;
+    }
+    const mTextDMY = /^(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{2,4})$/.exec(raw);
+    if (mTextDMY && parseMonthName(mTextDMY[2]!) != null) {
+      dmyVotes++;
+      continue;
     }
   }
   return mdyVotes > dmyVotes ? "mdy" : "dmy";
@@ -125,8 +158,12 @@ export function detectDateFormat(
 export function parseDate(input: string, convention: DateFormatConvention = "dmy"): string | null {
   const t = input.trim();
   if (!t) return null;
+
+  // Numeric ISO: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(t);
   if (m) return toISO(m[1]!, m[2]!, m[3]!);
+
+  // Numeric DMY / MDY: DD/MM/YYYY, MM/DD/YYYY, etc.
   m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(t);
   if (m) {
     const n1 = Number(m[1]);
@@ -137,6 +174,36 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
     const mo = convention === "mdy" ? n1 : n2;
     return toISO(String(y), String(mo), String(d));
   }
+
+  // Text month: YYYY-Mon-DD (Year-first, e.g. 2026-Aug-15, 2026 August 15)
+  m = /^(\d{4})[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?$/.exec(t);
+  if (m) {
+    const mo = parseMonthName(m[2]!);
+    if (mo != null) return toISO(m[1]!, String(mo), m[3]!);
+  }
+
+  // Text month: Mon DD, YYYY (Month-first, e.g. Aug 15, 2026, Aug-15-2026, Aug 15 26)
+  m = /^([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+(\d{2,4})$/.exec(t);
+  if (m) {
+    const mo = parseMonthName(m[1]!);
+    if (mo != null) {
+      let y = Number(m[3]);
+      if (y < 100) y += 2000;
+      return toISO(String(y), String(mo), m[2]!);
+    }
+  }
+
+  // Text month: DD-Mon-YYYY (Day-first, e.g. 15-Aug-2026, 15-AUG-2026, 15 Aug 2026, 15-Aug-26)
+  m = /^(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{2,4})$/.exec(t);
+  if (m) {
+    const mo = parseMonthName(m[2]!);
+    if (mo != null) {
+      let y = Number(m[3]);
+      if (y < 100) y += 2000;
+      return toISO(String(y), String(mo), m[1]!);
+    }
+  }
+
   return null;
 }
 
