@@ -26,6 +26,7 @@ import {
   FlagPicker,
   SearchList,
   money,
+  cx,
   type SearchListOption,
 } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
@@ -267,26 +268,55 @@ export function BulkEditTransactionsModal({
 
           {transactions.length > 0 && (
             <div>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--y-ink-soft)] mb-1.5">
-                Target Transactions ({transactions.length})
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--y-ink-soft)] mb-1.5 flex items-center justify-between">
+                <span>Target Transactions ({transactions.length})</span>
+                {transactions.length > 10 && (
+                  <span className="text-[10.5px] font-normal normal-case text-[var(--y-ink-soft)]">
+                    Showing first 10
+                  </span>
+                )}
               </div>
               <div
-                className="max-h-36 overflow-y-auto rounded border text-[11.5px] divide-y"
+                className="y-scroll max-h-48 overflow-auto rounded border"
                 style={{
-                  borderColor: "var(--y-line, #e2e8f0)",
+                  borderColor: "var(--y-line, #c9c9c5)",
                   background: "var(--y-row)",
                 }}
               >
-                {transactions.slice(0, 10).map((t) => (
-                  <div key={t.id} className="px-2.5 py-1.5 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[11px] text-[var(--y-ink-soft)]">{t.date}</span>
-                    <span className="font-medium truncate flex-1">{t.payee || "No Payee"}</span>
-                    <span className="font-mono font-medium">{money(num(t.amount))}</span>
-                  </div>
-                ))}
+                <table className="y-table w-full text-left">
+                  <thead className="y-thead--sticky">
+                    <tr>
+                      <th style={{ width: 95 }}>Date</th>
+                      <th>Payee</th>
+                      <th className="num" style={{ width: 100 }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.slice(0, 10).map((t, idx) => (
+                      <tr
+                        key={t.id}
+                        className={cx("y-row", idx % 2 === 1 && "alt")}
+                      >
+                        <td className="y-num whitespace-nowrap text-[11.5px]">{t.date}</td>
+                        <td className="font-medium truncate text-[11.5px]" title={t.payee || ""}>
+                          {t.payee || <span className="y-hint">No Payee</span>}
+                        </td>
+                        <td className="num y-num font-medium text-[11.5px] whitespace-nowrap">
+                          {money(num(t.amount))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
                 {transactions.length > 10 && (
-                  <div className="px-2.5 py-1 text-[11px] text-[var(--y-ink-soft)] text-center bg-[var(--y-gray-50)]">
-                    + {transactions.length - 10} more transactions
+                  <div
+                    className="px-2.5 py-1.5 text-[11px] text-[var(--y-ink-soft)] text-center border-t"
+                    style={{
+                      borderColor: "var(--y-line-soft, #e0e0dc)",
+                      backgroundColor: "var(--y-row-alt, #f4f4f2)",
+                    }}
+                  >
+                    + {transactions.length - 10} more transactions will be updated
                   </div>
                 )}
               </div>
