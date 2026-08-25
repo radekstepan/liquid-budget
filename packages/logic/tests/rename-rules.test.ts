@@ -46,6 +46,14 @@ describe("renamePatternToRegExp", () => {
     expect(re!.test("whole foods #24")).toBe(true);
     expect(re!.test("whole foods 24")).toBe(false);
   });
+
+  it("handles multiple [N] wildcards in a single pattern", () => {
+    const re = renamePatternToRegExp("CHK [N] REF [N]");
+    expect(re).not.toBeNull();
+    expect(re!.test("chk 12 ref 34")).toBe(true);
+    expect(re!.test("chk 1 ref 2")).toBe(true);
+    expect(re!.test("chk 12 ref ab")).toBe(false);
+  });
 });
 
 describe("matchesRenameRule", () => {
@@ -60,6 +68,14 @@ describe("matchesRenameRule", () => {
     expect(matchesRenameRule(r, "BCF42")).toBe(true);
     expect(matchesRenameRule(r, "BCFX")).toBe(false);
     expect(matchesRenameRule(r, "BCF")).toBe(false);
+  });
+
+  it("matches pattern rules with multiple [N] wildcards", () => {
+    const r = rule(1, "CHK [N] REF [N]", "Check Payment");
+    expect(matchesRenameRule(r, "CHK 12 REF 34")).toBe(true);
+    expect(matchesRenameRule(r, "chk 99 ref 100")).toBe(true);
+    expect(matchesRenameRule(r, "  CHK   12   REF   34  ")).toBe(true);
+    expect(matchesRenameRule(r, "CHK 12 REF AB")).toBe(false);
   });
 
   it("returns false for empty payees", () => {
@@ -102,6 +118,11 @@ describe("inferRenameRule", () => {
     expect(inferred).toEqual({ sourcePattern: "BCF[N]" });
   });
 
+  it("generalises case-insensitively (e.g. bcf1 + BCF2)", () => {
+    const inferred = inferRenameRule(["bcf1"], "BCF2");
+    expect(inferred).toEqual({ sourcePattern: "bcf[N]" });
+  });
+
   it("refuses to generalise unrelated prefixes", () => {
     expect(inferRenameRule(["BCF1"], "UBER2")).toBeNull();
     expect(inferRenameRule(["BCF1", "BCF2"], "WHOLE FOODS #24")).toBeNull();
@@ -134,6 +155,16 @@ describe("learnRenameRule", () => {
       sourcePattern: "BCF[N]",
       targetPayee: "BC Ferries",
     });
+  });
+
+  it("generalises renames with mixed casing (e.g. bcf1 and BCF2)", () => {
+    let { rules } = learnRenameRule([], "bcf1", "BC Ferries");
+    const second = learnRenameRule(rules, "BCF2", "BC Ferries");
+    expect(second.generalised).toBe(true);
+    expect(second.rules).toHaveLength(1);
+    expect(second.rules[0]!.targetPayee).toBe("BC Ferries");
+    expect(applyRenameRules(second.rules, "bcf3")).toBe("BC Ferries");
+    expect(applyRenameRules(second.rules, "BCF3")).toBe("BC Ferries");
   });
 
   it("generalises a third rename and removes both exact rules", () => {
