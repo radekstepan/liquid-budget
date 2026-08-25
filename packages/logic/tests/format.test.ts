@@ -129,10 +129,16 @@ describe("format", () => {
       expect(nextDateFor("yearly", "2026-07-01")).toBe("2027-07-01");
     });
 
-    it("advances twiceamonth correctly (1st -> 15th, 15th -> month end, month end -> 1st next month)", () => {
-      expect(nextDateFor("twiceamonth", "2026-07-01")).toBe("2026-07-15");
-      expect(nextDateFor("twiceamonth", "2026-07-15")).toBe("2026-07-31");
-      expect(nextDateFor("twiceamonth", "2026-07-31")).toBe("2026-08-01");
+    it("advances twiceamonth correctly (alternating between two anchors 15 days apart)", () => {
+      expect(nextDateFor("twiceamonth", "2026-07-01")).toBe("2026-07-16");
+      expect(nextDateFor("twiceamonth", "2026-07-16")).toBe("2026-08-01");
+      expect(nextDateFor("twiceamonth", "2026-07-15")).toBe("2026-07-30");
+      expect(nextDateFor("twiceamonth", "2026-07-30")).toBe("2026-08-15");
+      expect(nextDateFor("semimonthly", "2026-07-05")).toBe("2026-07-20");
+      expect(nextDateFor("semimonthly", "2026-07-20")).toBe("2026-08-05");
+      // Clamping in February
+      expect(nextDateFor("twiceamonth", "2026-02-14")).toBe("2026-02-28");
+      expect(nextDateFor("twiceamonth", "2026-02-15")).toBe("2026-02-28");
     });
 
     it("advances daily by 1 day", () => {

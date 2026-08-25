@@ -367,17 +367,17 @@ export function nextDateFor(frequency: string, iso: string): string {
       break;
     case "twiceamonth":
     case "semimonthly": {
-      const day = d.getUTCDate();
-      if (day < 15) {
-        d.setUTCDate(15);
-      } else {
+      const originalDay = d.getUTCDate();
+      if (originalDay <= 15) {
+        const targetDay = originalDay + 15;
         const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-        if (day < lastDay) {
-          d.setUTCDate(lastDay);
-        } else {
-          d.setUTCDate(1);
-          d.setUTCMonth(d.getUTCMonth() + 1);
-        }
+        d.setUTCDate(Math.min(targetDay, lastDay));
+      } else {
+        const targetDay = originalDay - 15;
+        d.setUTCDate(1);
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+        d.setUTCDate(Math.min(targetDay, lastDay));
       }
       break;
     }
