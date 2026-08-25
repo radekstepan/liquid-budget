@@ -176,6 +176,24 @@ describe("analyzeUnflaggedDuplicates", () => {
     expect(result.duplicateCount).toBe(0);
   });
 
+  it("reports active duplicates even when a stale marker was cleared", async () => {
+    // Active duplicate pair
+    await insertTx(db, { payee: "ActiveStore" });
+    await insertTx(db, { payee: "ActiveStore", flagColor: "duplicate" });
+
+    // Unrelated transaction with a stale duplicate marker
+    const staleTx = await insertTx(db, { payee: "UniqueStore", flagColor: "duplicate" });
+
+    const result = await analyzeUnflaggedDuplicates(db);
+    expect(result.clearedCount).toBe(1);
+    expect(result.duplicateCount).toBe(1);
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]!.duplicates).toHaveLength(1);
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.find((t) => t.id === staleTx)!.flagColor).toBeNull();
+  });
+
   it("reports duplicates with account names", async () => {
     await insertTx(db, { payee: "Store" });
     await insertTx(db, { payee: "Store" });
@@ -185,3 +203,4 @@ describe("analyzeUnflaggedDuplicates", () => {
     expect(result.groups[0]!.duplicates[0]!.accountName).toBe("Chequing");
   });
 });
+

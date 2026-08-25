@@ -120,25 +120,14 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
       .where(inArray(transactions.id, staleIds));
   }
 
-  // Drop cleared entries from the returned groups so the report reflects
-  // the post-run state.
-  const effectiveGroups = clearedCount > 0
-    ? groups
-        .map((g) => ({
-          ...g,
-          duplicates: g.duplicates.filter((d) => d.id == null || !d.flagColor),
-        }))
-        .filter((g) => g.duplicates.length > 0)
-    : groups;
-
-  const effectiveDuplicateCount = effectiveGroups.reduce(
+  const duplicateCount = groups.reduce(
     (n, g) => n + g.duplicates.length,
     0
   );
 
   return {
-    groups: effectiveGroups,
-    duplicateCount: effectiveDuplicateCount,
+    groups,
+    duplicateCount,
     flaggedCount,
     alreadyFlaggedCount,
     lockedCount,
