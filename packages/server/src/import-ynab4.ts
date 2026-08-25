@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
-import { dollarsToCents, nextMonthKey, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
+import { dollarsToCents, nextMonthKey, TRANSACTION_DUPLICATE_FLAG, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
 import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
@@ -288,8 +288,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     const processedTransferIds = new Set<string>();
     let totalImportedTxCount = 0;
-    // Fingerprints of already-inserted plain regular rows (used to skip
-    // duplicate ordinary entries within the backup). Split rows and
+    // Fingerprints of already-encountered plain regular rows (used to flag
+    // suspected duplicate entries within the backup). Split rows and
     // transfers are intentionally excluded.
     const plainFingerprints = new Set<string>();
     const skippedDuplicates: ImportSkippedEntry[] = [];
@@ -555,9 +555,12 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             (isCrossBoundaryTx && (catId === null || isSpecialIncomeCat) && netOnBudgetTx > 0);
           const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
 
-          // Skip ordinary duplicate entries within the backup: the same
-          // account + date + amount + normalized payee/memo appearing more
-          // than once is very likely an accidental duplicate.
+          let flagColor: string | null = ynabFlagToColor(t.flag);
+
+          // Track plain regular rows to detect duplicate entries within the backup.
+          // All non-tombstone rows are imported (two identical transactions on the same
+          // day are legitimate). Suspected unflagged, unreconciled duplicates are
+          // flagged with TRANSACTION_DUPLICATE_FLAG for user review.
           if (destAccId === null) {
             const fp = duplicateFingerprint({
               accountId: accId,
@@ -567,17 +570,12 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               amount: dollarsToCents(t.amount),
             });
             if (plainFingerprints.has(fp)) {
-              skippedDuplicates.push({
-                accountName: accNameMap.get(accId) || "",
-                date: t.date,
-                payee,
-                memo: t.memo || "",
-                amount: dollarsToCents(t.amount),
-                reason: "Duplicate of an earlier transaction in this backup",
-              });
-              continue;
+              if (t.cleared !== "Reconciled" && flagColor === null) {
+                flagColor = TRANSACTION_DUPLICATE_FLAG;
+              }
+            } else {
+              plainFingerprints.add(fp);
             }
-            plainFingerprints.add(fp);
           }
 
           await db.insert(transactions).values({
@@ -593,7 +591,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 : t.cleared === "Uncleared"
                   ? "u"
                   : "c",
-            flagColor: ynabFlagToColor(t.flag),
+            flagColor,
             transferAccountId: destAccId,
             parentId: null,
             isIncome: isTxIncome,

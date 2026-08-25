@@ -431,7 +431,7 @@ describe("importYnab4 full import", () => {
     expect(Number(visaPaymentCat.carryover)).toBe(75000); // 75000 cents ($750.00)
   });
 
-  it("skips plain duplicate transactions within the backup and reports them", async () => {
+  it("imports plain identical transactions within the backup and flags unreconciled duplicates", async () => {
     const dupData = {
       accounts: [{ entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true }],
       payees: [{ entityId: "p1", name: "Store" }],
@@ -465,27 +465,55 @@ describe("importYnab4 full import", () => {
           categoryId: null,
           memo: "different",
         },
+        {
+          entityId: "d1",
+          accountId: "acc1",
+          date: "2026-06-02",
+          amount: -3,
+          cleared: "Reconciled",
+          payeeId: "p1",
+          categoryId: null,
+        },
+        {
+          entityId: "d2",
+          accountId: "acc1",
+          date: "2026-06-02",
+          amount: -3,
+          cleared: "Reconciled",
+          payeeId: "p1",
+          categoryId: null,
+        },
       ],
       monthlyBudgets: [],
       scheduledTransactions: [],
     };
 
     const result = await importYnab4(db, dupData);
-    expect(result.transactions).toBe(2);
-    expect(result.duplicatesSkipped).toHaveLength(1);
-    expect(result.duplicatesSkipped[0]).toMatchObject({
-      accountName: "Chequing",
-      date: "2026-06-01",
-      payee: "Store",
-      memo: "",
-      amount: -10000,
-      reason: "Duplicate of an earlier transaction in this backup",
-    });
+    expect(result.transactions).toBe(5);
+    expect(result.duplicatesSkipped).toHaveLength(0);
 
     const { transactions } = await getBudgetData(db);
-    expect(transactions).toHaveLength(2);
-    const payees = transactions.map((t) => `${t.payee}|${t.memo}`);
-    expect(payees).toContain("Store|");
-    expect(payees).toContain("Store|different");
+    expect(transactions).toHaveLength(5);
+
+    // First occurrence 'a' is unflagged
+    const unflaggedJune1 = transactions.filter((t) => t.date === "2026-06-01" && t.memo === "" && t.flagColor === null);
+    expect(unflaggedJune1).toHaveLength(1);
+
+    // Second occurrence 'b' is flagged duplicate
+    const flaggedJune1 = transactions.filter((t) => t.date === "2026-06-01" && t.memo === "" && t.flagColor === "duplicate");
+    expect(flaggedJune1).toHaveLength(1);
+
+    // Different memo 'c' is unflagged
+    const txC = transactions.find((t) => t.memo === "different");
+    expect(txC).toBeDefined();
+    expect(txC!.flagColor).toBeNull();
+
+    // Reconciled identical rows 'd1' and 'd2' are NOT flagged as duplicate
+    const reconciledRows = transactions.filter((t) => t.date === "2026-06-02");
+    expect(reconciledRows).toHaveLength(2);
+    for (const r of reconciledRows) {
+      expect(r.flagColor).toBeNull();
+      expect(r.status).toBe("r");
+    }
   });
 });
