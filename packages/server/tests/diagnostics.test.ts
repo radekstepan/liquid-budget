@@ -275,5 +275,81 @@ describe("diagnostics queries", () => {
       expect(report.difference).toBe(0);
       expect(report.month).toBe("2028-10");
     });
+
+    it("handles explicit historical month before deferred and future-dated activity (BUG 6.2)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [cat] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+
+      // August 2026: Opening deposit of $5,000
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "Opening balance",
+        amount: 500000,
+      });
+
+      // August 2026: Assign $1,000 to Groceries
+      await db.insert(schema.assignments).values({
+        categoryId: cat.id,
+        month: "2026-08",
+        amount: 100000,
+      });
+
+      // August 2026: Paycheck received on 2026-08-30 of $3,000 deferred to 2026-09
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: null,
+        date: "2026-08-30",
+        payee: "Employer",
+        memo: "August Paycheck",
+        amount: 300000,
+        isIncome: true,
+        incomeMonth: "2026-09",
+      });
+
+      // Future activity: Post-dated expense in 2028-10 of -$2,000
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: cat.id,
+        date: "2028-10-01",
+        payee: "Landlord",
+        memo: "Future rent payment",
+        amount: -200000,
+      });
+
+      // Future activity: Assignment in 2028-10 of $2,000
+      await db.insert(schema.assignments).values({
+        categoryId: cat.id,
+        month: "2028-10",
+        amount: 200000,
+      });
+
+      // Verify explicit historical month 2026-08
+      const augReport = await verifyBudgetIntegrity(db, "2026-08");
+      expect(augReport.month).toBe("2026-08");
+      expect(augReport.totalOnBudgetAccountBalance).toBe(500000);
+      expect(augReport.totalCategoryAvailable).toBe(100000);
+      expect(augReport.tbb).toBe(400000);
+      expect(augReport.difference).toBe(0);
+
+      // Verify explicit month 2026-09 (when deferred income enters the budget)
+      const sepReport = await verifyBudgetIntegrity(db, "2026-09");
+      expect(sepReport.month).toBe("2026-09");
+      expect(sepReport.totalOnBudgetAccountBalance).toBe(800000);
+      expect(sepReport.totalCategoryAvailable).toBe(100000);
+      expect(sepReport.tbb).toBe(700000);
+      expect(sepReport.difference).toBe(0);
+
+      // Verify default (latest month 2028-10)
+      const latestReport = await verifyBudgetIntegrity(db);
+      expect(latestReport.month).toBe("2028-10");
+      expect(latestReport.totalOnBudgetAccountBalance).toBe(600000);
+      expect(latestReport.totalCategoryAvailable).toBe(100000);
+      expect(latestReport.tbb).toBe(500000);
+      expect(latestReport.difference).toBe(0);
+    });
   });
 });
