@@ -106,7 +106,7 @@ export const CategoryPatchSchema = z.object({
   type: z.undefined().optional(),
   name: z.string().min(1).max(255).optional(),
   goalTarget: z.number().int().nonnegative().nullable().optional(),
-  carryover: z.number().int().optional(),
+  carryover: z.number().int().nullable().optional(),
   sort: z.number().int().optional(),
   overspendCarriesOver: z.boolean().optional(),
 });

@@ -133,6 +133,27 @@ describe("categories queries", () => {
       expect(set).toEqual({ overspendCarriesOver: true });
     });
 
+    it("updates carryover to an amount", async () => {
+      mock.respondWith("update:categories", [{ id: 1 }]);
+      await updateCategory(mock.db, 1, { carryover: 5000 });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ carryover: 5000 });
+    });
+
+    it("BUG-05: explicit 0 carryover resets carryover to 0", async () => {
+      mock.respondWith("update:categories", [{ id: 1 }]);
+      await updateCategory(mock.db, 1, { carryover: 0 });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ carryover: 0 });
+    });
+
+    it("BUG-05: explicit null carryover clears carryover to 0", async () => {
+      mock.respondWith("update:categories", [{ id: 1 }]);
+      await updateCategory(mock.db, 1, { carryover: null });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ carryover: 0 });
+    });
+
     it("BUG-04: returns existing row if patch is empty", async () => {
       mock.respondWith("select:categories", [{ id: 1, name: "Groceries", sort: 2 }]);
       const row = await updateCategory(mock.db, 1, {});

@@ -41,7 +41,7 @@ describe("CategoryModal", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "  Coffee  " } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({ name: "Coffee", goalTarget: null, overspendCarriesOver: false });
+    expect(onSave).toHaveBeenCalledWith({ name: "Coffee", goalTarget: null, carryover: 0, overspendCarriesOver: false });
   });
 
   it("does not call onSave when name is empty", () => {
@@ -59,7 +59,38 @@ describe("CategoryModal", () => {
     const goalInput = screen.getByPlaceholderText("1000.00");
     fireEvent.change(goalInput, { target: { value: "2000" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 200000, overspendCarriesOver: false });
+    expect(onSave).toHaveBeenCalledWith({ name: "Vacation", goalTarget: 200000, carryover: 0, overspendCarriesOver: false });
+  });
+
+  it("reveals the carryover input and passes carryover when 'Set opening carryover balance' is checked", () => {
+    const onSave = vi.fn();
+    render(<CategoryModal onClose={() => {}} onSave={onSave} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Emergency Fund" } });
+    fireEvent.click(screen.getByLabelText(/set opening carryover balance/i));
+    const carryoverInput = screen.getByPlaceholderText("0.00");
+    fireEvent.change(carryoverInput, { target: { value: "50.00" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({ name: "Emergency Fund", goalTarget: null, carryover: 5000, overspendCarriesOver: false });
+  });
+
+  it("BUG-05: unchecking 'Set opening carryover balance' on an existing category with carryover sends carryover: 0", () => {
+    const onSave = vi.fn();
+    const existingWithCarryover: Category = {
+      id: 12,
+      groupId: 1,
+      name: "Buffer",
+      sort: 2,
+      carryover: "5000",
+      goalTarget: null,
+      linkedAccountId: null,
+    };
+    render(<CategoryModal initial={existingWithCarryover} onClose={() => {}} onSave={onSave} />);
+    const checkbox = screen.getByLabelText(/set opening carryover balance/i);
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({ name: "Buffer", goalTarget: null, carryover: 0, overspendCarriesOver: false });
   });
 
   it("UNI-20 / F-16: toggles overspendCarriesOver (Red Arrow)", () => {
@@ -68,7 +99,7 @@ describe("CategoryModal", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Reimbursements" } });
     fireEvent.click(screen.getByLabelText(/red arrow: carry negative balance over to next month/i));
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({ name: "Reimbursements", goalTarget: null, overspendCarriesOver: true });
+    expect(onSave).toHaveBeenCalledWith({ name: "Reimbursements", goalTarget: null, carryover: 0, overspendCarriesOver: true });
   });
 
   it("pre-fills the name and goal when editing an existing category", () => {

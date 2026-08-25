@@ -156,6 +156,18 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(
         CategoryPatchSchema.safeParse({ id: 5, name: "Updated", overspendCarriesOver: true }).success
       ).toBe(true);
+      expect(
+        CategoryPatchSchema.safeParse({ id: 5, carryover: 0 }).success
+      ).toBe(true);
+      expect(
+        CategoryPatchSchema.safeParse({ id: 5, carryover: 5000 }).success
+      ).toBe(true);
+      expect(
+        CategoryPatchSchema.safeParse({ id: 5, carryover: -5000 }).success
+      ).toBe(true);
+      expect(
+        CategoryPatchSchema.safeParse({ id: 5, carryover: null }).success
+      ).toBe(true);
     });
 
     it("validates category group patch requires at least one field", () => {

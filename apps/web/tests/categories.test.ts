@@ -98,4 +98,46 @@ describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
     expect(json.id).toBe(cat!.id);
     expect(json.name).toBe("Dining Out");
   });
+
+  it("resets carryover to 0 when carryover: 0 is sent in PATCH (BUG-05)", async () => {
+    const db = getDefaultDb();
+    const group = await createCategoryGroup(db, { name: "Test Group" });
+    const cat = await createCategory(db, {
+      groupId: group!.id,
+      name: "Emergency Fund",
+      carryover: 5000,
+    });
+    expect(cat!.carryover).toBe(5000);
+
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cat!.id, carryover: 0 }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.carryover).toBe(0);
+  });
+
+  it("resets carryover to 0 when carryover: null is sent in PATCH (BUG-05)", async () => {
+    const db = getDefaultDb();
+    const group = await createCategoryGroup(db, { name: "Test Group" });
+    const cat = await createCategory(db, {
+      groupId: group!.id,
+      name: "Emergency Fund",
+      carryover: 5000,
+    });
+    expect(cat!.carryover).toBe(5000);
+
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cat!.id, carryover: null }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.carryover).toBe(0);
+  });
 });
