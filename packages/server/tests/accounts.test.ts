@@ -182,6 +182,14 @@ describe("accounts queries", () => {
       expect(set).toEqual({ name: "Safe" });
       expect(set.balance).toBeUndefined();
     });
+
+    it("BUG-04: returns existing row if patch is empty", async () => {
+      mock.respondWith("select:accounts", [{ id: 1, name: "Checking", sort: 1 }]);
+      const row = await updateAccount(mock.db, 1, {});
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      expect(updateCall).toBeUndefined();
+      expect(row).toMatchObject({ id: 1, name: "Checking", sort: 1 });
+    });
   });
 
   describe("deleteAccount", () => {
