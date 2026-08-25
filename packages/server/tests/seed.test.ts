@@ -86,4 +86,23 @@ describe("seedDatabase", () => {
     const data = await getBudgetData(db);
     expect(data.accounts).toHaveLength(18);
   });
+
+  it("wipes payees and reconciliations on resetDatabase", async () => {
+    await seedDatabase(db);
+    const [acc] = await db.select().from(schema.accounts).limit(1);
+    await db.insert(schema.payees).values({ name: "Test Payee" });
+    await db.insert(schema.reconciliations).values({
+      accountId: acc.id,
+      reconciledAt: "2026-04-10",
+      statementDate: "2026-04-10",
+      statementBalance: 1000,
+    });
+    expect(await db.select().from(schema.payees)).toHaveLength(1);
+    expect(await db.select().from(schema.reconciliations)).toHaveLength(1);
+
+    await resetDatabase(db);
+
+    expect(await db.select().from(schema.payees)).toHaveLength(0);
+    expect(await db.select().from(schema.reconciliations)).toHaveLength(0);
+  });
 });
