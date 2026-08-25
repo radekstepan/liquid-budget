@@ -163,11 +163,116 @@ describe("categories queries", () => {
       expect(deleteCalls.map((c) => c.table)).toEqual(["assignments", "categories"]);
     });
 
-    it("deleteCategoryGroup deletes all categories within the group", async () => {
+    it("deleteCategoryGroup returns early if group does not exist", async () => {
+      mock.respondWith("select:category_groups", []);
+      await deleteCategoryGroup(mock.db, 999);
+      expect(mock.calls.find((c) => c.op === "run")).toBeUndefined();
+      expect(mock.calls.find((c) => c.op === "delete")).toBeUndefined();
+    });
+
+    it("deleteCategoryGroup deletes empty group wrapped in BEGIN/COMMIT", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
       mock.respondWith("select:categories", []);
       mock.respondWith("delete:category_groups", [{}]);
       await deleteCategoryGroup(mock.db, 1);
       expect(mock.calls.find((c) => c.op === "delete" && c.table === "category_groups")).toBeDefined();
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls).not.toContain("ROLLBACK");
+    });
+
+    it("deleteCategoryGroup deletes group with empty categories and assignments within BEGIN/COMMIT", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWith("select:categories", [{ id: 10, groupId: 1 }, { id: 11, groupId: 1 }]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("delete:assignments", [{}]);
+      mock.respondWith("delete:categories", [{}]);
+      mock.respondWith("delete:category_groups", [{}]);
+
+      await deleteCategoryGroup(mock.db, 1);
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls.map((c) => c.table)).toEqual([
+        "assignments",
+        "categories",
+        "category_groups",
+      ]);
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls).not.toContain("ROLLBACK");
+    });
+
+    it("deleteCategoryGroup throws 422 CategoryError if any category has transactions and no moveToCategoryId", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWith("select:categories", [{ id: 10, groupId: 1 }, { id: 11, groupId: 1 }]);
+      mock.respondWith("select:transactions", [{ id: 100 }]);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_sub_transactions", []);
+
+      await expect(deleteCategoryGroup(mock.db, 1)).rejects.toMatchObject({
+        status: 422,
+        name: "CategoryError",
+        message: /Category group has 1 transaction\(s\)/,
+      });
+      expect(mock.calls.find((c) => c.op === "delete")).toBeUndefined();
+      expect(mock.calls.find((c) => c.op === "run")).toBeUndefined();
+    });
+
+    it("deleteCategoryGroup rejects moveToCategoryId if it belongs to the group being deleted", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWith("select:categories", [{ id: 10, groupId: 1 }, { id: 11, groupId: 1 }]);
+
+      await expect(deleteCategoryGroup(mock.db, 1, { moveToCategoryId: 10 })).rejects.toMatchObject({
+        status: 400,
+        name: "CategoryError",
+        message: /Cannot reassign transactions to a category in the group being deleted/,
+      });
+      expect(mock.calls.find((c) => c.op === "delete")).toBeUndefined();
+      expect(mock.calls.find((c) => c.op === "run")).toBeUndefined();
+    });
+
+    it("deleteCategoryGroup rejects moveToCategoryId if target category does not exist", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWithNth("select:categories", 1, [{ id: 10, groupId: 1 }]);
+      mock.respondWithNth("select:categories", 2, []);
+
+      await expect(deleteCategoryGroup(mock.db, 1, { moveToCategoryId: 99 })).rejects.toMatchObject({
+        status: 404,
+        name: "CategoryError",
+        message: /Replacement category not found/,
+      });
+      expect(mock.calls.find((c) => c.op === "delete")).toBeUndefined();
+      expect(mock.calls.find((c) => c.op === "run")).toBeUndefined();
+    });
+
+    it("deleteCategoryGroup reassigns transactions and recurring splits to moveToCategoryId", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWithNth("select:categories", 1, [{ id: 10, groupId: 1 }, { id: 11, groupId: 1 }]);
+      mock.respondWithNth("select:categories", 2, [{ id: 20, name: "Groceries" }]);
+
+      await deleteCategoryGroup(mock.db, 1, { moveToCategoryId: 20 });
+      const updateCalls = mock.calls.filter((c) => c.op === "update");
+      expect(updateCalls.map((c) => c.table)).toEqual([
+        "transactions",
+        "recurring",
+        "recurring_sub_transactions",
+      ]);
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls.map((c) => c.table)).toEqual([
+        "assignments",
+        "categories",
+        "category_groups",
+      ]);
+      const runCalls = mock.calls.filter((c) => c.op === "run");
+      const sqls = runCalls.map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls).not.toContain("ROLLBACK");
     });
   });
 
@@ -200,6 +305,37 @@ describe("categories queries", () => {
       expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
       expect(sqls).not.toContain("COMMIT");
     });
+
+    it("deleteCategory issues ROLLBACK when the delete throws", async () => {
+      mock.respondWith("select:categories", [{ id: 1, name: "Dining" }]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      const wrapped = throwOnNextDelete(mock, "categories");
+      await expect(deleteCategory(wrapped.db, 1)).rejects.toBeDefined();
+      const sqls = wrapped.calls
+        .filter((c) => c.op === "run")
+        .map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+    });
+
+    it("deleteCategoryGroup issues ROLLBACK when the delete throws", async () => {
+      mock.respondWith("select:category_groups", [{ id: 1, name: "Bills" }]);
+      mock.respondWith("select:categories", [{ id: 10, groupId: 1 }]);
+      mock.respondWith("select:transactions", []);
+      mock.respondWith("select:recurring", []);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      const wrapped = throwOnNextDelete(mock, "categories");
+      await expect(deleteCategoryGroup(wrapped.db, 1)).rejects.toBeDefined();
+      const sqls = wrapped.calls
+        .filter((c) => c.op === "run")
+        .map((c) => (c.sql ?? "").trim().toUpperCase());
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+    });
   });
 });
 
@@ -221,3 +357,20 @@ function throwOnNextInsert(mock: ReturnType<typeof createMockDb>, tableName: str
   };
   return mock;
 }
+
+/**
+ * Patch a MockDb so the next `delete:<tableName>` call throws.
+ */
+function throwOnNextDelete(mock: ReturnType<typeof createMockDb>, tableName: string): ReturnType<typeof createMockDb> {
+  const realDelete = (mock.db.delete as unknown as (t: unknown) => unknown);
+  const NAME = Symbol.for("drizzle:Name");
+  (mock.db as unknown as { delete: (t: unknown) => unknown }).delete = (t: unknown) => {
+    const name = (t as Record<symbol, unknown>)[NAME] as string | undefined;
+    if (name === tableName) {
+      throw new Error(`synthetic ${tableName} delete failure`);
+    }
+    return realDelete(t);
+  };
+  return mock;
+}
+
