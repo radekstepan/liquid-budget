@@ -390,24 +390,31 @@ describe("computeBudget", () => {
     // Groceries: carryover 0 + assigned 10000 + outflow -50000 = -40000 (overspent on CC)
     const groc = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
     expect(groc.available).toBe(-40000);
-    // CC buffer still accumulates when spending on CC
+    // CC buffer transfers only the funded portion ($100) from Groceries
     const ccRow = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
-    expect(ccRow.ccBuffer).toBe(50000);
+    expect(ccRow.ccBuffer).toBe(10000);
+    expect(ccRow.available).toBe(10000);
+    expect(june.tbb).toBe(490000);
 
     const july = computeBudget(data, "2025-07");
     // Groceries carryover is clamped to 0 (cash overspending rule)
     const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
     expect(grocJuly.carryoverIn).toBe(0);
-    // CC payment category: overspending persists as debt (NOT clamped)
-    // carryover = 0 + 0 + 0 + 50000 (buffer from June) = 50000, then in July: 0 + 0 + 0 + 0 = 50000
+    // CC payment category: funded buffer carries forward ($100)
     const ccRowJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
-    expect(ccRowJuly.carryoverIn).toBe(50000);
-    // Overspent from June: groceries was -40000, clamped to 0, overspent = 40000
-    expect(july.overspentPrevious).toBe(40000);
-    // June: income 500000 - assigned 10000 - overspent 40000 = 450000 priorSurplus
-    // July: 0 income - 0 assigned + 450000 priorSurplus = 450000
-    expect(july.priorSurplus).toBe(450000);
-    expect(july.tbb).toBe(450000);
+    expect(ccRowJuly.carryoverIn).toBe(10000);
+    expect(ccRowJuly.available).toBe(10000);
+    // CC overspending is NOT cash overspending -> overspentPrevious is 0
+    expect(july.overspentPrevious).toBe(0);
+    // June: income 500000 - assigned 10000 - cash overspent 0 = 490000 priorSurplus
+    // July: 0 income - 0 assigned + 490000 priorSurplus = 490000
+    expect(july.priorSurplus).toBe(490000);
+    expect(july.tbb).toBe(490000);
+
+    // Verify budget integrity invariant: on-budget cash == total category available + TBB
+    const totalOnBudgetCash = 500000;
+    const totalCatAvailable = july.groups.reduce((s, g) => s + g.available, 0); // 10000 in Visa Payment
+    expect(totalOnBudgetCash - totalCatAvailable - july.tbb).toBe(0);
   });
 
   it("three-month carryover chain with multiple categories", () => {
@@ -735,6 +742,332 @@ describe("computeBudget", () => {
       // TBB = 300000 - 45000 = 255000
       expect(result.totalAssigned).toBe(45000);
       expect(result.tbb).toBe(255000);
+    });
+
+    describe("BUG-07: Cash overspending vs Credit Card debt overspending", () => {
+      it("pure credit card overspending does not create phantom CC buffer and does not reduce cash TBB", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+            { id: 2, name: "Amex", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Amex Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "0" },
+            { id: 2, categoryId: 2, month: "2025-06", amount: "0" },
+          ],
+          transactions: [
+            // $100 charged on Amex with $0 budgeted
+            { id: 1, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const grocJune = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const amexJune = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJune.available).toBe(-10000);
+        expect(amexJune.ccBuffer).toBe(0); // No cash to back CC buffer
+        expect(amexJune.available).toBe(0); // $0 available to pay Amex
+        expect(june.tbb).toBe(0);
+
+        const july = computeBudget(data, "2025-07");
+        const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const amexJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJuly.carryoverIn).toBe(0);
+        expect(grocJuly.available).toBe(0);
+        expect(amexJuly.carryoverIn).toBe(0);
+        expect(amexJuly.available).toBe(0);
+        expect(july.overspentPrevious).toBe(0); // CC debt is not cash overspent
+        expect(july.priorSurplus).toBe(0);
+        expect(july.tbb).toBe(0); // TBB is NOT deducted by $100
+      });
+
+      it("partial credit card overspending funds CC buffer up to available cash and does not reduce cash TBB", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "4000" }, // $40 assigned
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Store", memo: "", amount: "-10000", status: "c" }, // $100 spent on Visa
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const grocJune = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJune = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJune.available).toBe(-6000); // 4000 - 10000 = -6000
+        expect(visaJune.ccBuffer).toBe(4000); // Only funded $40 moves to buffer
+        expect(visaJune.available).toBe(4000);
+        expect(june.tbb).toBe(46000); // 50000 income - 4000 assigned
+
+        const july = computeBudget(data, "2025-07");
+        const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJuly.carryoverIn).toBe(0);
+        expect(visaJuly.carryoverIn).toBe(4000);
+        expect(visaJuly.available).toBe(4000);
+        expect(july.overspentPrevious).toBe(0);
+        expect(july.priorSurplus).toBe(46000);
+        expect(july.tbb).toBe(46000);
+
+        // Invariant: Checking cash (50000) = Visa Payment Available (4000) + TBB (46000)
+        expect(50000 - visaJuly.available - july.tbb).toBe(0);
+      });
+
+      it("mixed cash and credit spending prioritizes cash for funded pool", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "5000" }, // $50 assigned
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 1, categoryId: 1, date: "2025-06-10", payee: "Farmer Market", memo: "", amount: "-3000", status: "c" }, // $30 cash
+            { id: 3, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-4000", status: "c" }, // $40 credit
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const grocJune = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJune = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJune.available).toBe(-2000); // 5000 - 3000 - 4000 = -2000
+        // $30 cash consumed $30 of the $50 pool -> $20 remaining cash pool moves to Visa buffer
+        expect(visaJune.ccBuffer).toBe(2000);
+        expect(visaJune.available).toBe(2000);
+        expect(june.tbb).toBe(45000); // 50000 income - 5000 assigned
+
+        const july = computeBudget(data, "2025-07");
+        const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJuly.carryoverIn).toBe(0);
+        expect(visaJuly.carryoverIn).toBe(2000);
+        expect(july.overspentPrevious).toBe(0); // Cash was fully covered ($30 <= $50)
+        expect(july.priorSurplus).toBe(45000);
+        expect(july.tbb).toBe(45000);
+
+        // Checking cash remaining = 50000 income - 3000 cash spend = 47000
+        // Invariant: Checking cash (47000) = Visa Payment Available (2000) + TBB (45000)
+        expect(47000 - visaJuly.available - july.tbb).toBe(0);
+      });
+
+      it("mixed cash and credit spending where cash exceeds category allocation reduces TBB only by cash overspend", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "2000" }, // $20 assigned
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 1, categoryId: 1, date: "2025-06-10", payee: "Farmer Market", memo: "", amount: "-5000", status: "c" }, // $50 cash
+            { id: 3, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-4000", status: "c" }, // $40 credit
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const grocJune = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJune = june.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJune.available).toBe(-7000); // 2000 - 5000 - 4000 = -7000
+        // Cash spent ($50) exceeded pool ($20) -> $0 cash remaining for Visa buffer
+        expect(visaJune.ccBuffer).toBe(0);
+        expect(visaJune.available).toBe(0);
+        expect(june.tbb).toBe(48000); // 50000 income - 2000 assigned
+
+        const july = computeBudget(data, "2025-07");
+        const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJuly.carryoverIn).toBe(0);
+        expect(visaJuly.carryoverIn).toBe(0);
+        // Only the cash overspent ($50 - $20 = $30) is deducted from TBB, not the $40 CC debt!
+        expect(july.overspentPrevious).toBe(3000);
+        expect(july.priorSurplus).toBe(45000); // 48000 surplus - 3000 cash overspent = 45000
+        expect(july.tbb).toBe(45000);
+
+        // Checking cash remaining = 50000 income - 5000 cash spend = 45000
+        // Invariant: Checking cash (45000) = Visa Payment Available (0) + TBB (45000)
+        expect(45000 - visaJuly.available - july.tbb).toBe(0);
+      });
+
+      it("multi-card spending in single category allocates funded buffer chronologically", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa 1", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+            { id: 3, name: "Visa 2", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 2 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Visa 1 Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            { id: 3, groupId: 2, name: "Visa 2 Payment", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 3 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "5000" }, // $50 assigned
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-02", payee: "Store 1", memo: "", amount: "-3000", status: "c" }, // $30 on Visa 1
+            { id: 3, accountId: 3, categoryId: 1, date: "2025-06-05", payee: "Store 2", memo: "", amount: "-4000", status: "c" }, // $40 on Visa 2
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const v1June = june.groups.find((g) => g.group.isCreditCardPayments)!.rows.find((r) => r.category.name === "Visa 1 Payment")!;
+        const v2June = june.groups.find((g) => g.group.isCreditCardPayments)!.rows.find((r) => r.category.name === "Visa 2 Payment")!;
+        expect(v1June.ccBuffer).toBe(3000); // First $30 fully funded
+        expect(v2June.ccBuffer).toBe(2000); // Remaining $20 of $50 pool funds Visa 2
+
+        const july = computeBudget(data, "2025-07");
+        const v1July = july.groups.find((g) => g.group.isCreditCardPayments)!.rows.find((r) => r.category.name === "Visa 1 Payment")!;
+        const v2July = july.groups.find((g) => g.group.isCreditCardPayments)!.rows.find((r) => r.category.name === "Visa 2 Payment")!;
+        expect(v1July.carryoverIn).toBe(3000);
+        expect(v2July.carryoverIn).toBe(2000);
+        expect(july.overspentPrevious).toBe(0);
+        expect(july.tbb).toBe(45000);
+
+        // Checking cash (50000) = v1 (3000) + v2 (2000) + TBB (45000)
+        expect(50000 - v1July.available - v2July.available - july.tbb).toBe(0);
+      });
+
+      it("Red Arrow with CC overspending carries negative balance forward without deducting from TBB", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null, overspendCarriesOver: true },
+            { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "4000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Store", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const grocJune = june.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJune.available).toBe(-6000);
+
+        const july = computeBudget(data, "2025-07");
+        const grocJuly = july.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+        const visaJuly = july.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+        expect(grocJuly.carryoverIn).toBe(-6000); // Red Arrow carries -$60
+        expect(grocJuly.available).toBe(-6000);
+        expect(visaJuly.carryoverIn).toBe(4000);
+        expect(july.overspentPrevious).toBe(0);
+        expect(july.tbb).toBe(46000);
+      });
+
+      it("buildBudgetIndex matches computeBudget across all CC overspending and mixed spending scenarios", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 1, name: "Dining", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null, overspendCarriesOver: true },
+            { id: 3, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "5000" },
+            { id: 2, categoryId: 2, month: "2025-06", amount: "2000" },
+            { id: 3, categoryId: 1, month: "2025-07", amount: "3000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "100000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-10", payee: "Store", memo: "", amount: "-8000", status: "c" },
+            { id: 3, accountId: 2, categoryId: 2, date: "2025-06-12", payee: "Restaurant", memo: "", amount: "-4000", status: "c" },
+            { id: 4, accountId: 1, categoryId: 1, date: "2025-06-15", payee: "Cash Shop", memo: "", amount: "-2000", status: "c" },
+            // Payment to Visa in July
+            { id: 5, accountId: 1, categoryId: null, transferAccountId: 2, date: "2025-07-05", payee: "Transfer : Visa", memo: "", amount: "-5000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const months = ["2025-06", "2025-07", "2025-08"];
+        const index = buildBudgetIndex(data);
+        const indexedData: BudgetData = { ...data, budgetIndex: index };
+
+        for (const m of months) {
+          const rawRes = computeBudget(data, m);
+          const fastRes = computeBudget(indexedData, m);
+          expect(fastRes.tbb).toBe(rawRes.tbb);
+          expect(fastRes.priorSurplus).toBe(rawRes.priorSurplus);
+          expect(fastRes.overspentPrevious).toBe(rawRes.overspentPrevious);
+          for (let g = 0; g < rawRes.groups.length; g++) {
+            for (let r = 0; r < rawRes.groups[g]!.rows.length; r++) {
+              const rawRow = rawRes.groups[g]!.rows[r]!;
+              const fastRow = fastRes.groups[g]!.rows[r]!;
+              expect(fastRow.available).toBe(rawRow.available);
+              expect(fastRow.carryoverIn).toBe(rawRow.carryoverIn);
+              expect(fastRow.ccBuffer).toBe(rawRow.ccBuffer);
+            }
+          }
+        }
+      });
     });
   });
 
