@@ -52,6 +52,8 @@ const ynabData = {
   payees: [
     { entityId: "p1", name: "Grocery Store" },
     { entityId: "p2", name: "Employer" },
+    { entityId: "p3", name: "Biennial Insurer" },
+    { entityId: "p4", name: "One-off Electrician" },
     { entityId: "pX", name: "Old Payee", isTombstone: true },
   ],
   masterCategories: [
@@ -174,6 +176,24 @@ const ynabData = {
         { categoryId: null, targetAccountId: "acc2", amount: -100 },
       ],
     },
+    {
+      entityId: "s5",
+      accountId: "acc1",
+      date: "2026-07-05",
+      amount: -500,
+      frequency: "EveryOtherYear",
+      payeeId: "p3",
+      categoryId: "sc1",
+    },
+    {
+      entityId: "s6",
+      accountId: "acc1",
+      date: "2026-07-06",
+      amount: -600,
+      frequency: "Never",
+      payeeId: "p4",
+      categoryId: "sc1",
+    },
     { entityId: "sX", accountId: "acc1", date: "2026-07-05", amount: -1, frequency: "monthly", payeeId: null, categoryId: null, isTombstone: true },
   ],
 };
@@ -274,7 +294,7 @@ describe("importYnab4 full import", () => {
   it("normalizes scheduled frequencies, transfers, and split children", async () => {
     await importYnab4(db, ynabData);
     const { recurring } = await getBudgetData(db);
-    expect(recurring).toHaveLength(4);
+    expect(recurring).toHaveLength(6);
 
     const byPayee = new Map(recurring.map((r) => [r.payee, r]));
     expect(byPayee.get("Grocery Store")).toBeTruthy();
@@ -294,6 +314,15 @@ describe("importYnab4 full import", () => {
     expect(Number(splitR.subTransactions[0]!.amount)).toBe(-20000);
     expect(Number(splitR.subTransactions[1]!.amount)).toBe(-10000);
     expect(splitR.subTransactions[1]!.transferAccountId).toBeTruthy();
+
+    // EveryOtherYear maps to every2years, Never maps to once
+    const biennial = recurring.find((r) => Number(r.amount) === -50000);
+    expect(biennial).toBeTruthy();
+    expect(biennial!.frequency).toBe("every2years");
+
+    const oneOff = recurring.find((r) => Number(r.amount) === -60000);
+    expect(oneOff).toBeTruthy();
+    expect(oneOff!.frequency).toBe("once");
   });
 
   it("orients liquidation transfers (off-budget→on-budget) to the on-budget account as source", async () => {

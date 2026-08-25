@@ -419,7 +419,8 @@ export function nextDateFor(frequency: string, iso: string): string {
       d.setUTCDate(Math.min(originalDay, lastDay));
       break;
     }
-    case "every2years": {
+    case "every2years":
+    case "everyotheryear": {
       const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCFullYear(d.getUTCFullYear() + 2);
@@ -436,7 +437,8 @@ export function nextDateFor(frequency: string, iso: string): string {
       d.setUTCDate(Math.min(originalDay, lastDay));
       break;
     }
-    case "monthly": {
+    case "monthly":
+    default: {
       const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 1);
@@ -444,8 +446,6 @@ export function nextDateFor(frequency: string, iso: string): string {
       d.setUTCDate(Math.min(originalDay, lastDay));
       break;
     }
-    default:
-      return iso;
   }
   return d.toISOString().slice(0, 10);
 }

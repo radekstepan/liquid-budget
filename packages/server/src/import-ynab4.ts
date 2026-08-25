@@ -671,10 +671,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
       let frequency = (st.frequency || "monthly").toLowerCase();
       if (frequency === "everyotherweek") frequency = "biweekly";
+      if (frequency === "everyotheryear") frequency = "every2years";
+      if (frequency === "never") frequency = "once";
       const validFrequencies = [
         "daily",
         "weekly",
         "biweekly",
+        "everyotherweek",
         "twiceamonth",
         "every4weeks",
         "monthly",
@@ -685,6 +688,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         "yearly",
         "every2years",
         "once",
+        "never",
       ];
       if (!validFrequencies.includes(frequency)) {
         frequency = "monthly";

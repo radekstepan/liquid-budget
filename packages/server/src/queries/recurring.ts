@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { nextDateFor, todayISO, type TransactionFlagColor } from "@ynab/logic";
+import { isValidRecurringFrequency, nextDateFor, todayISO, type TransactionFlagColor } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
 import {
@@ -10,6 +10,13 @@ import {
   sanitizeFlagColor,
   type SubTransactionInput as TxnSubTransactionInput,
 } from "./transactions.js";
+
+function assertValidFrequency(frequency: unknown): string {
+  if (!isValidRecurringFrequency(frequency)) {
+    throw new RecurringError(`invalid frequency: ${frequency}`, 422);
+  }
+  return String(frequency);
+}
 
 export type CreateRecurringInput = {
   accountId: number;
@@ -157,6 +164,7 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
 export async function createRecurring(db: Database, input: CreateRecurringInput) {
   const norm = normaliseInput(input);
   const validatedAmount = assertValidAmount(input.amount);
+  const validatedFrequency = assertValidFrequency(input.frequency);
   if (norm.isSplit) {
     assertSplitsBalanced(validatedAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
@@ -178,7 +186,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         payee: input.payee,
         memo: input.memo ?? "",
         amount: validatedAmount,
-        frequency: input.frequency,
+        frequency: validatedFrequency,
         nextDate: input.nextDate,
         active: input.active ?? true,
         flagColor: sanitizeFlagColor(input.flagColor),
@@ -260,7 +268,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.payee != null) p.payee = String(patch.payee);
   if ("memo" in patch) p.memo = String(patch.memo ?? "");
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
-  if (patch.frequency != null) p.frequency = String(patch.frequency);
+  if ("frequency" in patch) p.frequency = assertValidFrequency(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
   if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
@@ -403,7 +411,7 @@ export async function autoPostDueRecurringTransactions(
     while (currentNextDate <= asOfDate) {
       const res = await postRecurringTransaction(db, r.id, currentNextDate);
       posted.push(res.transaction);
-      if (res.nextDate <= currentNextDate) break;
+      if (!res.active || res.nextDate <= currentNextDate) break;
       currentNextDate = res.nextDate;
     }
   }
