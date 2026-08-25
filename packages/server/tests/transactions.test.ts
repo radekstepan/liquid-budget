@@ -18,6 +18,7 @@ import {
   updateTransaction,
 } from "../src/queries/transactions.js";
 import * as schema from "../src/schema.js";
+import { reconcileAccount, unreconcileAccount } from "../src/queries/reconcile.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
 
 describe("transactions queries", () => {
@@ -930,7 +931,7 @@ describe("transactions queries", () => {
       });
     });
 
-    it("nulls reconciledAt and reconciliationId when updating a reconciled transaction to status 'c'", async () => {
+    it("rejects updating a reconciled transaction even with status 'c' via updateTransaction", async () => {
       mock.respondWithNth("select:transactions", 1, [
         {
           id: 1,
@@ -945,19 +946,11 @@ describe("transactions queries", () => {
           parentId: null,
         },
       ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
-      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
-      mock.respondWith("update:transactions", [
-        { id: 1, status: "c", reconciledAt: null, reconciliationId: null },
-      ]);
 
-      await updateTransaction(mock.db, 1, { status: "c" });
-
-      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
-      expect(update?.set).toMatchObject({
-        status: "c",
-        reconciledAt: null,
-        reconciliationId: null,
+      await expect(updateTransaction(mock.db, 1, { status: "c" })).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/i,
       });
     });
   });
@@ -1502,7 +1495,7 @@ describe("transactions queries", () => {
       });
     });
 
-    it("nulls reconciledAt and reconciliationId when bulk updating status to 'c'", async () => {
+    it("rejects bulk updating a reconciled transaction via bulkUpdateTransactions", async () => {
       mock.respondWithNth("select:transactions", 1, [
         {
           id: 1,
@@ -1515,20 +1508,11 @@ describe("transactions queries", () => {
           parentId: null,
         },
       ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
-      mock.respondWithNth("select:accounts", 1, [{ id: 1, onBudget: true }]);
-      mock.respondWith("update:transactions", [
-        { id: 1, status: "c", reconciledAt: null, reconciliationId: null },
-      ]);
 
-      const res = await bulkUpdateTransactions(mock.db, [1], { status: "c" });
-      expect(res).toHaveLength(1);
-
-      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
-      expect(update?.set).toMatchObject({
-        status: "c",
-        reconciledAt: null,
-        reconciliationId: null,
+      await expect(bulkUpdateTransactions(mock.db, [1], { status: "c" })).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: /reconciled and locked/i,
       });
     });
   });
@@ -2707,6 +2691,252 @@ describe("transactions queries", () => {
         for (const child of children) {
           expect(child.date).toBe("2026-08-20");
         }
+      });
+
+      describe("reconciled transaction lock and account metadata integrity (Bug 2.5)", () => {
+        it("rejects updateTransaction on reconciled transaction and preserves account metadata", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id } = await seedTestData(db);
+
+          const t1 = await createTransaction(db, {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "Grocery Store",
+            amount: -5000,
+            status: "c",
+          });
+
+          const recResult = await reconcileAccount(db, {
+            accountId,
+            statementBalance: -5000,
+            statementDate: "2026-08-01",
+          });
+          expect(recResult.finalDiff).toBe(0);
+
+          // Verify row is reconciled
+          const [t1Db] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t1.id));
+          expect(t1Db?.status).toBe("r");
+          expect(t1Db?.reconciliationId).toBeTruthy();
+
+          // Account metadata is stamped
+          const [acctBefore] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acctBefore?.lastReconciledAt).toBeTruthy();
+          expect(acctBefore?.lastReconciledBalance).toBe(-5000);
+
+          // 1. Attempting to change status to 'c' must fail with 422
+          await expect(
+            updateTransaction(db, t1.id, { status: "c" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // 2. Attempting to change status to 'u' must fail with 422
+          await expect(
+            updateTransaction(db, t1.id, { status: "u" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // 3. Attempting to change other fields (memo, payee, amount) must fail with 422
+          await expect(
+            updateTransaction(db, t1.id, { memo: "New Memo" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Verify transaction was untouched in DB
+          const [t1DbAfter] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t1.id));
+          expect(t1DbAfter?.status).toBe("r");
+          expect(t1DbAfter?.reconciliationId).toBe(t1Db?.reconciliationId);
+          expect(t1DbAfter?.memo).toBe(t1Db?.memo);
+
+          // Verify account metadata was untouched
+          const [acctAfter] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acctAfter?.lastReconciledAt).toBe(acctBefore?.lastReconciledAt);
+          expect(acctAfter?.lastReconciledBalance).toBe(acctBefore?.lastReconciledBalance);
+
+          // 4. Calling unreconcileAccount successfully unreconciles
+          const unrec = await unreconcileAccount(db, accountId);
+          expect(unrec.flipped).toBe(1);
+
+          const [acctUnrec] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acctUnrec?.lastReconciledAt).toBeNull();
+          expect(acctUnrec?.lastReconciledBalance).toBeNull();
+
+          // Now the transaction can be updated normally
+          await expect(
+            updateTransaction(db, t1.id, { status: "u", memo: "Updated after unreconcile" })
+          ).resolves.not.toThrow();
+
+          const [t1Final] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t1.id));
+          expect(t1Final?.status).toBe("u");
+          expect(t1Final?.memo).toBe("Updated after unreconcile");
+        });
+
+        it("bulkUpdateTransactions: rejects batch containing a reconciled transaction and rolls back atomically", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const t1 = await createTransaction(db, {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "Store 1",
+            amount: -3000,
+            status: "c",
+          });
+
+          await reconcileAccount(db, {
+            accountId,
+            statementBalance: -3000,
+            statementDate: "2026-08-01",
+          });
+
+          // Create a new unreconciled transaction
+          const t2 = await createTransaction(db, {
+            accountId,
+            categoryId: cat2Id,
+            date: "2026-08-02",
+            payee: "Store 2",
+            amount: -2000,
+            status: "c",
+          });
+
+          // Attempt bulk update on [t2, t1] changing category
+          await expect(
+            bulkUpdateTransactions(db, [t2.id, t1.id], { categoryId: cat1Id })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Verify t2 was rolled back and still has cat2Id
+          const [t2Db] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t2.id));
+          expect(t2Db?.categoryId).toBe(cat2Id);
+
+          // Verify t1 is still reconciled
+          const [t1Db] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t1.id));
+          expect(t1Db?.status).toBe("r");
+
+          // Attempt bulk update changing status to 'u' on [t1, t2]
+          await expect(
+            bulkUpdateTransactions(db, [t1.id, t2.id], { status: "u" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Verify t1 and t2 status are unchanged
+          const [t1Db2] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t1.id));
+          expect(t1Db2?.status).toBe("r");
+
+          const [t2Db2] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, t2.id));
+          expect(t2Db2?.status).toBe("c");
+        });
+
+        it("rejects updateTransaction and bulkUpdateTransactions on split parents/children when reconciled", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Department Store",
+              memo: "Items",
+              amount: -8000,
+              status: "c",
+            },
+            [
+              { categoryId: cat1Id, amount: -5000, memo: "clothes" },
+              { categoryId: cat2Id, amount: -3000, memo: "shoes" },
+            ]
+          );
+
+          await reconcileAccount(db, {
+            accountId,
+            statementBalance: -8000,
+            statementDate: "2026-08-01",
+          });
+
+          const child1 = split.children[0]!;
+
+          // Attempting to update split child via updateTransaction must fail with 422
+          await expect(
+            updateTransaction(db, child1.id, { memo: "new child memo" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Attempting to update split parent via updateTransaction must fail with 422
+          await expect(
+            updateTransaction(db, split.parent.id, { payee: "New Store" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Attempting bulk update on split child must fail with 422
+          await expect(
+            bulkUpdateTransactions(db, [child1.id], { memo: "bulk child memo" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Attempting bulk update on split parent must fail with 422
+          await expect(
+            bulkUpdateTransactions(db, [split.parent.id], { payee: "Bulk Store" })
+          ).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+        });
       });
     });
   });

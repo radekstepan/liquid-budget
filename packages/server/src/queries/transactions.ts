@@ -570,10 +570,17 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   }
 
   if (existing.status === "r") {
-    const nonStatusKeys = Object.keys(patch).filter((k) => k !== "status");
-    if (nonStatusKeys.length > 0) {
+    throw new TransactionError(
+      "Transaction is reconciled and locked. Unreconcile before editing.",
+      422
+    );
+  }
+
+  if (existing.parentId != null) {
+    const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
+    if (parent && parent.status === "r") {
       throw new TransactionError(
-        "Transaction is reconciled and locked. Unreconcile the transaction before editing.",
+        "Transaction is reconciled and locked. Unreconcile before editing.",
         422
       );
     }
@@ -627,6 +634,13 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   const isSplitParent = isParent && hasChildren;
 
   if (isSplitParent) {
+    const children = await getChildren(db, id);
+    if (children.some((c) => c.status === "r")) {
+      throw new TransactionError(
+        "Transaction is reconciled and locked. Unreconcile before editing.",
+        422
+      );
+    }
     if ("amount" in p) {
       throw new TransactionError("cannot change amount of a split parent; edit children");
     }
@@ -1134,11 +1148,20 @@ export async function bulkUpdateTransactions(
     for (const id of ids) {
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
-      if (existing.status === "r" && patch.status !== "c" && patch.status !== "u") {
+      if (existing.status === "r") {
         throw new TransactionError(
-          `Transaction ${id} is reconciled and locked.`,
+          `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
           422
         );
+      }
+      if (existing.parentId != null) {
+        const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
+        if (parent && parent.status === "r") {
+          throw new TransactionError(
+            `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
+            422
+          );
+        }
       }
       if ("flagColor" in patch && patch.flagColor !== undefined && existing.flagColor === TRANSACTION_DUPLICATE_FLAG) {
         throw new TransactionError(
@@ -1152,6 +1175,13 @@ export async function bulkUpdateTransactions(
       const isSplitParent = isParent && hasChildren;
 
       if (isSplitParent) {
+        const children = await getChildren(db, id);
+        if (children.some((c) => c.status === "r")) {
+          throw new TransactionError(
+            `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
+            422
+          );
+        }
         if ("amount" in patch && patch.amount !== undefined) {
           throw new TransactionError("cannot change amount of a split parent; edit children");
         }
