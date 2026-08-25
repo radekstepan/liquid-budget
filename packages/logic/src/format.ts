@@ -29,16 +29,18 @@ export const MONTHS_LONG = [
 ];
 
 export function fmt(cents: number): string {
-  const abs = Math.abs(cents) / 100;
+  const rounded = Math.round(cents);
+  if (rounded === 0) return "$0.00";
+  const abs = Math.abs(rounded) / 100;
   const s = abs.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return (cents < 0 ? "-$" : "$") + s;
+  return (rounded < 0 ? "-$" : "$") + s;
 }
 
 export function fmtSigned(cents: number): string {
-  if (cents === 0) return "$0.00";
+  if (Math.round(cents) === 0) return "$0.00";
   return fmt(cents);
 }
 

@@ -14,8 +14,25 @@ describe("format", () => {
     expect(fmt(-123456789)).toBe("-$1,234,567.89");
   });
 
-  it("fmtSigned shows zero as $0.00", () => {
+  it("fmt handles small fractional and negative amounts without producing negative zero (BUG-09)", () => {
+    expect(fmt(-0.2)).toBe("$0.00");
+    expect(fmt(-0.01)).toBe("$0.00");
+    expect(fmt(-0.49)).toBe("$0.00");
+    expect(fmt(-0.5)).toBe("$0.00");
+    expect(fmt(-0.51)).toBe("-$0.01");
+    expect(fmt(-0)).toBe("$0.00");
+    expect(fmt(0.2)).toBe("$0.00");
+    expect(fmt(0.49)).toBe("$0.00");
+    expect(fmt(0.5)).toBe("$0.01");
+  });
+
+  it("fmtSigned shows zero as $0.00 and handles small negative cents without negative zero (BUG-09)", () => {
     expect(fmtSigned(0)).toBe("$0.00");
+    expect(fmtSigned(-0.01)).toBe("$0.00");
+    expect(fmtSigned(-0.2)).toBe("$0.00");
+    expect(fmtSigned(-0.49)).toBe("$0.00");
+    expect(fmtSigned(-0.5)).toBe("$0.00");
+    expect(fmtSigned(-0.51)).toBe("-$0.01");
     expect(fmtSigned(-500)).toBe("-$5.00");
   });
 
