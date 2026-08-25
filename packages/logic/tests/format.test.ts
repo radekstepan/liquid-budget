@@ -344,6 +344,20 @@ describe("format", () => {
       expect(evalAmount("  100  +  50  ")).toBe(150);
     });
 
+    it("handles European decimal commas when followed by two digits (BUG-14)", () => {
+      expect(evalAmount("12,50")).toBe(12.5);
+      expect(evalAmount(",50")).toBe(0.5);
+      expect(evalAmount("12,50 + 3,45")).toBeCloseTo(15.95);
+      expect(evalAmount("(12,50 + 2,50) * 2")).toBe(30);
+      expect(evalAmount("-12,50")).toBe(-12.5);
+      expect(evalAmount("$12,50")).toBe(12.5);
+      expect(evalAmount("€12,50")).toBe(12.5);
+      expect(evalAmount("1,250")).toBe(1250);
+      expect(evalAmount("1,000")).toBe(1000);
+      expect(evalAmount("1,250.00")).toBe(1250);
+      expect(evalAmount("12,500")).toBe(12500);
+    });
+
     it("accepts leading and trailing dots", () => {
       expect(evalAmount(".5")).toBe(0.5);
       expect(evalAmount(".5 + .25")).toBeCloseTo(0.75);
