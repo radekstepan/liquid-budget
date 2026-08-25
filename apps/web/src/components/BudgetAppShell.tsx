@@ -361,6 +361,7 @@ export function BudgetAppShell({
                     id: r.subTransactions?.[i]?.id ?? -(i + 1),
                     recurringId: id,
                     categoryId: st.categoryId,
+                    transferAccountId: st.transferAccountId ?? null,
                     amount: st.amount.toFixed(2),
                     memo: st.memo ?? "",
                     sort: i,

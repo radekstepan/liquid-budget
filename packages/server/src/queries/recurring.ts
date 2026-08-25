@@ -85,8 +85,7 @@ export class RecurringError extends Error {
  */
 function assertSplitsBalanced(
   parentAmount: number,
-  children: TxnSubTransactionInput[],
-  isExistingChildren = false
+  children: TxnSubTransactionInput[]
 ): void {
   const validParent = assertValidAmount(parentAmount);
   if (children.length < 2) {
@@ -100,7 +99,7 @@ function assertSplitsBalanced(
     if (c.categoryId && c.transferAccountId) {
       throw new RecurringError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
     }
-    if (!isExistingChildren && !c.categoryId && !c.transferAccountId) {
+    if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
       throw new RecurringError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
   }
@@ -263,7 +262,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       .from(recurringSubTransactions)
       .where(eq(recurringSubTransactions.recurringId, id));
     if (existingChildren.length > 0) {
-      assertSplitsBalanced(assertValidAmount((patch as UpdateRecurringInput).amount), existingChildren, true);
+      assertSplitsBalanced(assertValidAmount((patch as UpdateRecurringInput).amount), existingChildren);
     }
   }
 
