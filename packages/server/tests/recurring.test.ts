@@ -293,18 +293,69 @@ describe("recurring queries", () => {
       });
     });
 
-    it("rejects a split with a missing category on update", async () => {
-      const splitRow = { ...existingRow, amount: 20000, categoryId: null };
+    it("creates a mixed-sign split with a positive null-category income leg", async () => {
+      mock.respondWith("insert:recurring", [{ id: 8 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+
+      const row = await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "Employer Inc.",
+        amount: 400000,
+        frequency: "biweekly",
+        nextDate: "2026-07-15",
+        subTransactions: [
+          { categoryId: null, amount: 500000, memo: "gross pay (income)" },
+          { categoryId: 6, amount: -100000, memo: "taxes" },
+        ],
+      });
+
+      expect(row).toMatchObject({ id: 8 });
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      expect(subInserts[0]?.values).toMatchObject({ categoryId: null, amount: 500000 });
+      expect(subInserts[1]?.values).toMatchObject({ categoryId: 6, amount: -100000 });
+    });
+
+    it("rejects a split with a negative missing category on update", async () => {
+      const splitRow = { ...existingRow, amount: -20000, categoryId: null };
       mock.respondWith("select:recurring", [splitRow]);
 
       await expect(
         updateRecurring(mock.db, 1, {
           subTransactions: [
-            { categoryId: 5, amount: 10000 },
-            { categoryId: 0, amount: 10000 },
+            { categoryId: 5, amount: -10000 },
+            { categoryId: 0, amount: -10000 },
           ],
         })
       ).rejects.toBeInstanceOf(RecurringError);
+    });
+
+    it("allows updating a split with a positive null-category income child", async () => {
+      const splitRow = { ...existingRow, amount: 400000, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("delete:recurring_sub_transactions", []);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+      mock.respondWith("select:recurring", [splitRow]);
+
+      await updateRecurring(mock.db, 1, {
+        subTransactions: [
+          { categoryId: null, amount: 500000, memo: "gross pay" },
+          { categoryId: 6, amount: -100000, memo: "taxes" },
+        ],
+      });
+
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      expect(subInserts[0]?.values).toMatchObject({ categoryId: null, amount: 500000 });
+      expect(subInserts[1]?.values).toMatchObject({ categoryId: 6, amount: -100000 });
     });
 
     it("rejects an invalid frequency on update with 422", async () => {

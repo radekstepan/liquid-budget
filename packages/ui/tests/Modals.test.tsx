@@ -1389,6 +1389,58 @@ describe("RecurringModal", () => {
     expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: 500000 });
     expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -100000 });
   });
+
+  it("allows saving an imported paycheck split with a positive null-category income child", () => {
+    const onSave = vi.fn();
+    const subs: RecurringSubTransaction[] = [
+      { id: 1, recurringId: 9, categoryId: null, amount: "300000", memo: "Gross pay", sort: 0 },
+      { id: 2, recurringId: 9, categoryId: 10, amount: "-50000", memo: "Tax", sort: 1 },
+    ];
+    const initial = {
+      id: 9,
+      accountId: 1,
+      categoryId: null,
+      payee: "Employer Inc.",
+      amount: "250000",
+      frequency: "biweekly",
+      nextDate: "2026-07-15",
+      active: true,
+      subTransactions: subs,
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+
+    const saveBtn = screen.getByRole("button", { name: /save changes/i });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![0] as {
+      id?: number;
+      amount: number;
+      subTransactions: { categoryId: number | null; amount: number; memo?: string }[];
+    };
+    expect(payload.id).toBe(9);
+    expect(payload.amount).toBe(250000);
+    expect(payload.subTransactions).toHaveLength(2);
+    expect(payload.subTransactions[0]).toMatchObject({
+      categoryId: null,
+      amount: 300000,
+      memo: "Gross pay",
+    });
+    expect(payload.subTransactions[1]).toMatchObject({
+      categoryId: 10,
+      amount: -50000,
+      memo: "Tax",
+    });
+  });
 });
 
 describe("GroupModal", () => {

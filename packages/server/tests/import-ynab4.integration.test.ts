@@ -27,6 +27,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { importYnab4 } from "../src/import-ynab4.js";
 import { getBudgetData } from "../src/queries/budget.js";
+import { postRecurringTransaction, updateRecurring } from "../src/queries/recurring.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -689,5 +690,121 @@ describe("importYnab4 full import", () => {
     // Sum of children matches parent amount
     const sum = r.subTransactions.reduce((acc, s) => acc + Number(s.amount), 0);
     expect(sum).toBe(Number(r.amount));
+  });
+
+  it("supports round-trip import, editing, and posting of income-leg recurring splits", async () => {
+    const paycheckData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Checking", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "Savings", accountType: "Savings", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p-emp", name: "Acme Corp" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Deductions",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc-tax", name: "Taxes" },
+          ],
+        },
+      ],
+      transactions: [],
+      monthlyBudgets: [],
+      scheduledTransactions: [
+        {
+          entityId: "s-paycheck",
+          accountId: "acc1",
+          date: "2026-07-15",
+          amount: 2500, // Net paycheck +$2,500.00
+          frequency: "biweekly",
+          payeeId: "p-emp",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            { categoryId: "Category/__ImmediateIncome__", amount: 3000, memo: "Gross pay" },
+            { categoryId: "sc-tax", amount: -300, memo: "Federal tax" },
+            { categoryId: null, targetAccountId: "acc2", amount: -200, memo: "Savings transfer" },
+          ],
+        },
+      ],
+    };
+
+    // 1. Import
+    await importYnab4(db, paycheckData);
+    let budget = await getBudgetData(db);
+    expect(budget.recurring).toHaveLength(1);
+    const recurringRow = budget.recurring[0]!;
+    const taxCat = budget.categories.find((c) => c.name === "Taxes")!;
+    const savings = budget.accounts.find((a) => a.name === "Savings")!;
+    const checking = budget.accounts.find((a) => a.name === "Checking")!;
+
+    // 2. Edit through updateRecurring (replaces subTransactions with updated income-leg split)
+    const updated = await updateRecurring(db, recurringRow.id, {
+      amount: 260000, // Updated net: +$2,600.00
+      subTransactions: [
+        { categoryId: null, amount: 320000, memo: "Gross pay (raised)" }, // Income leg: +$3,200.00
+        { categoryId: taxCat.id, amount: -35000, memo: "Federal tax (adjusted)" }, // -$350.00
+        { categoryId: null, transferAccountId: savings.id, amount: -25000, memo: "Savings transfer (raised)" }, // -$250.00
+      ],
+    });
+    expect(updated).not.toBeNull();
+    expect(Number(updated?.amount)).toBe(260000);
+
+    // Verify DB state after edit
+    budget = await getBudgetData(db);
+    const editedRecurring = budget.recurring[0]!;
+    expect(editedRecurring.subTransactions).toHaveLength(3);
+    expect(editedRecurring.subTransactions[0]).toMatchObject({
+      categoryId: null,
+      transferAccountId: null,
+      amount: "320000",
+      memo: "Gross pay (raised)",
+    });
+
+    // 3. Post recurring transaction
+    const postResult = await postRecurringTransaction(db, recurringRow.id);
+    expect(postResult.transaction).toBeDefined();
+    expect(postResult.nextDate).toBe("2026-07-29"); // Advanced by 2 weeks (biweekly)
+
+    // 4. Verify posted split transactions in budget
+    budget = await getBudgetData(db);
+    expect(budget.transactions).toHaveLength(4); // 1 parent + 3 children
+
+    const parentTx = budget.transactions.find((t) => t.parentId === null);
+    expect(parentTx).toBeDefined();
+    expect(Number(parentTx?.amount)).toBe(260000);
+    expect(parentTx?.payee).toBe("Acme Corp");
+    expect(parentTx?.date).toBe("2026-07-15");
+
+    const children = budget.transactions.filter((t) => t.parentId === parentTx?.id);
+    expect(children).toHaveLength(3);
+
+    const incomeChild = children.find((c) => c.memo === "Gross pay (raised)");
+    expect(incomeChild).toBeDefined();
+    expect(Number(incomeChild?.amount)).toBe(320000);
+    expect(incomeChild?.categoryId).toBeNull();
+    expect(incomeChild?.transferAccountId).toBeNull();
+    expect(incomeChild?.isIncome).toBe(true);
+
+    const taxChild = children.find((c) => c.memo === "Federal tax (adjusted)");
+    expect(taxChild).toBeDefined();
+    expect(Number(taxChild?.amount)).toBe(-35000);
+    expect(taxChild?.categoryId).toBe(taxCat.id);
+    expect(taxChild?.isIncome).toBe(false);
+
+    const transferChild = children.find((c) => c.memo === "Savings transfer (raised)");
+    expect(transferChild).toBeDefined();
+    expect(Number(transferChild?.amount)).toBe(-25000);
+    expect(transferChild?.transferAccountId).toBe(savings.id);
+
+    // 5. Verify account balances
+    // Checking: +320000 (income) - 35000 (tax) - 25000 (transfer out) = +260000 cents ($2,600.00)
+    // Savings: +25000 cents (incoming transfer from checking)
+    const updatedChecking = budget.accounts.find((a) => a.id === checking.id)!;
+    const updatedSavings = budget.accounts.find((a) => a.id === savings.id)!;
+    expect(Number(updatedChecking.balance)).toBe(260000);
+    expect(Number(updatedSavings.balance)).toBe(25000);
   });
 });

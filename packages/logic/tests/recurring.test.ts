@@ -196,13 +196,22 @@ describe("validateRecurringSubTransactions", () => {
     ).toMatch(/at least two/i);
   });
 
-  it("rejects a child with no category and no transfer", () => {
+  it("rejects a negative child with no category and no transfer", () => {
     expect(
-      validateRecurringSubTransactions(20000, [
-        { categoryId: 0, amount: 10000 },
-        { categoryId: 2, amount: 10000 },
+      validateRecurringSubTransactions(-20000, [
+        { categoryId: 0, amount: -10000 },
+        { categoryId: 2, amount: -10000 },
       ])
     ).toMatch(/missing a category/i);
+  });
+
+  it("accepts a mixed-sign paycheck split with an income leg (null category)", () => {
+    expect(
+      validateRecurringSubTransactions(400000, [
+        { categoryId: null, amount: 500000 },
+        { categoryId: 2, amount: -100000 },
+      ])
+    ).toBeNull();
   });
 
   it("rejects unbalanced children", () => {

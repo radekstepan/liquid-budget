@@ -33,7 +33,7 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
     const categoryId = o.categoryId ? Number(o.categoryId) : null;
     const transferAccountId = o.transferAccountId ? Number(o.transferAccountId) : null;
     const amount = Number(o.amount);
-    if ((!categoryId && !transferAccountId) || Number.isNaN(amount)) {
+    if ((!categoryId && !transferAccountId && amount <= 0) || Number.isNaN(amount)) {
       throw new TransactionError(`subTransactions[${i}] missing categoryId/transferAccountId or amount`);
     }
     return {
