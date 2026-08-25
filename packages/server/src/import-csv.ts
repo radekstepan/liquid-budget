@@ -33,9 +33,6 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
   // duplicate detection and insertion, so re-importing a bank statement
   // produces clean, consistent payee names.
   const renameRules = getRenameRules(db);
-  const rows = input.rows
-    .filter((r) => !r.error && r.date != null && r.amountCents != null)
-    .map((r) => ({ ...r, payee: applyRenameRules(renameRules, r.payee ?? "") }));
 
   // Build a fingerprint set from existing plain regular transactions in
   // this account so re-importing a statement never doubles the rows.
@@ -78,7 +75,29 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     const skipped: ImportSkippedEntry[] = [];
     // First occurrence of a fingerprint in this batch -> source row number.
     const batchSeen = new Map<string, number>();
-    for (const row of rows) {
+    for (const rawRow of input.rows) {
+      if (rawRow.error || rawRow.date == null || rawRow.amountCents == null) {
+        skipped.push({
+          rowNumber: rawRow.rowNumber,
+          accountName: account.name,
+          date: rawRow.date ?? "",
+          payee: rawRow.payee ?? "",
+          memo: rawRow.memo ?? "",
+          amount: rawRow.amountCents != null ? Math.round(rawRow.amountCents) : 0,
+          reason:
+            rawRow.error ||
+            (!rawRow.date
+              ? "Invalid date"
+              : rawRow.amountCents == null
+                ? "Invalid amount"
+                : "Invalid row"),
+        });
+        continue;
+      }
+      const row = {
+        ...rawRow,
+        payee: applyRenameRules(renameRules, rawRow.payee ?? ""),
+      };
       const amount = Math.round(row.amountCents!);
       if (amount === 0) {
         throw new TransactionError(`Row ${row.rowNumber}: amount must be non-zero`);

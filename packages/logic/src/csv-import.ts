@@ -195,17 +195,39 @@ export function parseCsvImport(text: string, opts?: { swap?: boolean }): CsvImpo
     let error: string | null = null;
     if (!date) error = "Invalid date";
     let amt: number | null = null;
+    let sawZero = false;
     if (outflowIdx >= 0) {
-      amt = parseAmount(raw(outflowIdx));
-      if (amt != null) {
-        amt = -amt;
-      } else if (inflowIdx >= 0) {
-        amt = parseAmount(raw(inflowIdx));
+      const parsedOutflow = parseAmount(raw(outflowIdx));
+      if (parsedOutflow != null) {
+        if (parsedOutflow !== 0) {
+          amt = -Math.abs(parsedOutflow);
+        } else {
+          sawZero = true;
+        }
       }
-    } else if (inflowIdx >= 0) {
-      amt = parseAmount(raw(inflowIdx));
-    } else if (amountIdx >= 0) {
-      amt = parseAmount(raw(amountIdx));
+    }
+    if (amt == null && inflowIdx >= 0) {
+      const parsedInflow = parseAmount(raw(inflowIdx));
+      if (parsedInflow != null) {
+        if (parsedInflow !== 0) {
+          amt = Math.abs(parsedInflow);
+        } else {
+          sawZero = true;
+        }
+      }
+    }
+    if (amt == null && amountIdx >= 0) {
+      const parsedAmount = parseAmount(raw(amountIdx));
+      if (parsedAmount != null) {
+        if (parsedAmount !== 0) {
+          amt = parsedAmount;
+        } else {
+          sawZero = true;
+        }
+      }
+    }
+    if (amt == null && sawZero) {
+      amt = 0;
     }
     if (amt == null) error = error ? `${error}; Invalid amount` : "Invalid amount";
     else if (amt === 0) error = error ? `${error}; Amount is zero` : "Amount is zero";
