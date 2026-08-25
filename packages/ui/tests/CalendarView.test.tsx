@@ -113,10 +113,26 @@ describe("CalendarView", () => {
     expect(within(dayCell).getByText("-$30.00")).toBeInTheDocument();
   });
 
-  it("does not call onAdd for a populated day", () => {
+  it("does not call onAdd for a populated day when clicking cell background", () => {
     const { onAdd } = renderView({ data: makeData([txn(20, "Shop", -10)]) });
     fireEvent.click(screen.getByRole("button", { name: /add transaction on 2026-06-20/i }));
     expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("calls onAdd when clicking plus button on a populated day (BUG-15)", () => {
+    const { onAdd } = renderView({ data: makeData([txn(20, "Shop", -10)]) });
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-20/i });
+    const plusBtn = within(dayCell).getByRole("button", { name: /^add transaction$/i });
+    fireEvent.click(plusBtn);
+    expect(onAdd).toHaveBeenCalledWith("2026-06-20");
+  });
+
+  it("calls onAdd when clicking plus button on an empty day (BUG-15)", () => {
+    const { onAdd } = renderView({ data: makeData([]) });
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-05/i });
+    const plusBtn = within(dayCell).getByRole("button", { name: /^add transaction$/i });
+    fireEvent.click(plusBtn);
+    expect(onAdd).toHaveBeenCalledWith("2026-06-05");
   });
 
   it("shows empty-state banner when month has no transactions or events (UNI-42 / BUG-35)", () => {

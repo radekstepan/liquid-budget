@@ -164,12 +164,27 @@ export const CalendarView = memo(function CalendarView({
                 {d && (
                   <>
                     <div className="flex items-center justify-between">
-                      <span
-                        className="y-num text-[12px] font-semibold"
-                        style={{ color: "var(--y-ink)" }}
-                      >
-                        {d}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span
+                          className="y-num text-[12px] font-semibold"
+                          style={{ color: "var(--y-ink)" }}
+                        >
+                          {d}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Add transaction"
+                          title="Add transaction"
+                          className="flex h-4 w-4 items-center justify-center rounded text-[10px] opacity-60 transition hover:bg-[var(--y-line-soft)] hover:opacity-100"
+                          style={{ color: "var(--y-ink-soft)" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAdd(dateIso(d));
+                          }}
+                        >
+                          <Icon name="plus" size={10} />
+                        </button>
+                      </div>
                       {dayNet !== 0 && (
                         <span
                           className="y-num text-[10.5px] font-bold"
