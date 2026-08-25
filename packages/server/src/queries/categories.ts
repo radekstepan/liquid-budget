@@ -81,13 +81,27 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
   }
 }
 
-export async function renameCategoryGroup(db: Database, id: number, name: string) {
-  const [row] = await db
-    .update(categoryGroups)
-    .set({ name })
-    .where(eq(categoryGroups.id, id))
-    .returning();
+export async function updateCategoryGroup(
+  db: Database,
+  id: number,
+  patch: {
+    name?: string;
+    sort?: number;
+  }
+) {
+  const p: Record<string, unknown> = {};
+  if (patch.name !== undefined) p.name = String(patch.name);
+  if (patch.sort !== undefined) p.sort = Number(patch.sort);
+  if (Object.keys(p).length === 0) {
+    const [row] = await db.select().from(categoryGroups).where(eq(categoryGroups.id, id));
+    return row;
+  }
+  const [row] = await db.update(categoryGroups).set(p).where(eq(categoryGroups.id, id)).returning();
   return row;
+}
+
+export async function renameCategoryGroup(db: Database, id: number, name: string) {
+  return updateCategoryGroup(db, id, { name });
 }
 
 export async function updateCategory(
@@ -116,12 +130,7 @@ export async function updateCategory(
 }
 
 export async function updateCategoryGroupSort(db: Database, id: number, sort: number) {
-  const [row] = await db
-    .update(categoryGroups)
-    .set({ sort: Number(sort) })
-    .where(eq(categoryGroups.id, id))
-    .returning();
-  return row;
+  return updateCategoryGroup(db, id, { sort });
 }
 
 export async function deleteCategory(

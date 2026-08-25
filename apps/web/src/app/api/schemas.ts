@@ -90,12 +90,16 @@ export const CategoryCreateSchema = z.object({
   overspendCarriesOver: z.boolean().optional().default(false),
 });
 
-export const CategoryGroupPatchSchema = z.object({
-  id: z.number().int().positive(),
-  type: z.literal("group"),
-  name: z.string().min(1).max(255).optional(),
-  sort: z.number().int().optional(),
-});
+export const CategoryGroupPatchSchema = z
+  .object({
+    id: z.number().int().positive(),
+    type: z.literal("group"),
+    name: z.string().min(1).max(255).optional(),
+    sort: z.number().int().optional(),
+  })
+  .refine((data) => data.name !== undefined || data.sort !== undefined, {
+    message: "At least one of name or sort must be provided",
+  });
 
 export const CategoryPatchSchema = z.object({
   id: z.number().int().positive(),

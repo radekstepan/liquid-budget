@@ -7,6 +7,7 @@ import {
   getDefaultDb,
   renameCategoryGroup,
   updateCategory,
+  updateCategoryGroup,
   updateCategoryGroupSort,
 } from "@ynab/server";
 
@@ -60,11 +61,10 @@ export async function PATCH(req: Request) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
     const body = parseResult.data;
-    if (body.sort != null) {
-      const row = await updateCategoryGroupSort(db, body.id, body.sort);
-      return Response.json(row);
-    }
-    const row = await renameCategoryGroup(db, body.id, String(body.name ?? ""));
+    const row = await updateCategoryGroup(db, body.id, {
+      name: body.name,
+      sort: body.sort,
+    });
     return Response.json(row);
   }
 
