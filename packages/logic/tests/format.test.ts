@@ -43,9 +43,22 @@ describe("format", () => {
     expect(num("+ $1,000")).toBe(1000);
   });
 
-  it("num throws RangeError on integer overflow beyond MAX_SAFE_INTEGER", () => {
+  it("num handles fractional numbers and fractional strings with consistent rounding", () => {
+    expect(num(100.5)).toBe(101);
+    expect(num("100.5")).toBe(101);
+    expect(num("4.03")).toBe(4);
+    expect(num("4.6")).toBe(5);
+    expect(num("-100.5")).toBe(-101);
+    expect(num("$-100.5")).toBe(-101);
+    expect(num("(100.5)")).toBe(-101);
+    expect(num("+100.5")).toBe(101);
+  });
+
+  it("num throws RangeError on integer overflow beyond MAX_SAFE_INTEGER and large scientific notation", () => {
     expect(() => num("9007199254740992")).toThrow(RangeError);
+    expect(() => num("1e21")).toThrow(RangeError);
     expect(() => num(Number.MAX_SAFE_INTEGER + 100)).toThrow(RangeError);
+    expect(() => num(1e21)).toThrow(RangeError);
   });
 
   it("dollarsToCents converts dollar amounts to integer cents", () => {
