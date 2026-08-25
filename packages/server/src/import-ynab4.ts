@@ -396,7 +396,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         // Non-split transaction
         // Check if this is the standalone side of a split transfer in YNAB4
         const linkedSub = t.transferTransactionId ? subTxById.get(t.transferTransactionId) : null;
-        if (linkedSub) {
+        if (linkedSub && accountIdMap.has(linkedSub.parent.accountId)) {
           // This was the duplicate counterpart of a split subtransaction in YNAB4.
           // Since the subtransaction on the parent split now carries transferAccountId,
           // the transfer is already fully accounted for without needing this duplicate row.
@@ -425,24 +425,26 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           }
 
           const partner = txById.get(t.transferTransactionId);
+          const partnerAccId = partner ? accountIdMap.get(partner.accountId) : undefined;
           processedTransferIds.add(t.entityId);
           if (partner) processedTransferIds.add(partner.entityId);
 
-          let sourceAccEntityId = t.accountId;
-          let destAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);
-          let rawAmount = t.amount || 0;
-          let memo = t.memo || "";
-          let cleared = t.cleared;
-          let catEntityId = t.categoryId;
+          if (partner && partnerAccId) {
+            // Both sides of transfer pair have valid accounts in DB: import as single linked transfer
+            let sourceAccEntityId = t.accountId;
+            let destAccEntityId = partner.accountId;
+            let rawAmount = t.amount || 0;
+            let memo = t.memo || "";
+            let cleared = t.cleared;
+            let catEntityId = t.categoryId;
 
-          // Normalize transfer orientation:
-          // - Cross-budget-boundary (one on-budget, one off-budget):
-          //   always use the on-budget account as the source so the amount sign
-          //   is meaningful relative to the budget (negative = spending,
-          //   positive = inflow to budget).
-          // - Same-budget (both on or both off):
-          //   use the negative-amount (outflow) side as the source.
-          if (partner) {
+            // Normalize transfer orientation:
+            // - Cross-budget-boundary (one on-budget, one off-budget):
+            //   always use the on-budget account as the source so the amount sign
+            //   is meaningful relative to the budget (negative = spending,
+            //   positive = inflow to budget).
+            // - Same-budget (both on or both off):
+            //   use the negative-amount (outflow) side as the source.
             const tOnBudget = accOnBudgetMap.get(t.accountId);
             const pOnBudget = accOnBudgetMap.get(partner.accountId);
             const isCrossBoundary =
@@ -476,51 +478,91 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             if (partner.categoryId && !catEntityId) {
               catEntityId = partner.categoryId;
             }
+
+            const sourceAccId = accountIdMap.get(sourceAccEntityId)!;
+            const destAccId = accountIdMap.get(destAccEntityId)!;
+            const payee = "Transfer : " + (accNameMap.get(destAccId) || "Unknown");
+
+            const sourceIsOnBudget = accOnBudgetMap.get(sourceAccEntityId) ?? true;
+            const destIsOnBudget = accOnBudgetMap.get(destAccEntityId) ?? true;
+            const isCrossBoundaryTransfer = sourceIsOnBudget !== destIsOnBudget;
+            const netOnBudget = (sourceIsOnBudget ? rawAmount : 0) + (destIsOnBudget ? -rawAmount : 0);
+            const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
+            const isSpecialIncomeCat =
+              catEntityId === "Category/__ImmediateIncome__" ||
+              catEntityId === "Category/__DeferredIncome__";
+            const isTransferIncome = isCrossBoundaryTransfer && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
+            const finalTransferCatId = !isCrossBoundaryTransfer ? null : isSpecialIncomeCat ? null : catId;
+
+            await db.insert(transactions).values({
+              accountId: sourceAccId,
+              categoryId: finalTransferCatId,
+              date: t.date,
+              payee,
+              memo,
+              amount: dollarsToCents(rawAmount),
+              status:
+                cleared === "Reconciled"
+                  ? "r"
+                  : cleared === "Uncleared"
+                    ? "u"
+                    : "c",
+              flagColor: ynabFlagToColor(t.flag),
+              transferAccountId: destAccId,
+              parentId: null,
+              isIncome: isTransferIncome,
+              reconciledAt: cleared === "Reconciled" ? (t.date || null) : null,
+            });
+            totalImportedTxCount++;
+          } else {
+            // Partner is missing or its account is not in accountIdMap (e.g. deleted/tombstoned account).
+            // Fall back to importing the resolvable side as a regular transaction on accId.
+            let memo = t.memo || (partner?.memo || "");
+            let cleared = t.cleared;
+            let catEntityId = t.categoryId || (partner?.categoryId || null);
+            let payee = (t.payeeId ? payeeMap.get(t.payeeId) : "") || (partner?.payeeId ? payeeMap.get(partner.payeeId) || "" : "") || "";
+
+            const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
+            let catId = (accIsOnBudget && catEntityId && categoryIdMap.get(catEntityId)) || null;
+            const isTxDeferred = catEntityId === "Category/__DeferredIncome__";
+            const isSpecialIncomeCat =
+              catEntityId === "Category/__ImmediateIncome__" ||
+              isTxDeferred;
+            if (
+              isSpecialIncomeCat ||
+              catEntityId === "Category/__Split__"
+            ) {
+              catId = null;
+            }
+
+            const isTxIncome =
+              accIsOnBudget &&
+              (isSpecialIncomeCat || catId === null) &&
+              (t.amount || 0) > 0;
+            const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+
+            await db.insert(transactions).values({
+              accountId: accId,
+              categoryId: catId,
+              date: t.date,
+              payee,
+              memo,
+              amount: dollarsToCents(t.amount),
+              status:
+                cleared === "Reconciled"
+                  ? "r"
+                  : cleared === "Uncleared"
+                    ? "u"
+                    : "c",
+              flagColor: ynabFlagToColor(t.flag),
+              transferAccountId: null,
+              parentId: null,
+              isIncome: isTxIncome,
+              incomeMonth: txIncomeMonth,
+              reconciledAt: cleared === "Reconciled" ? (t.date || null) : null,
+            });
+            totalImportedTxCount++;
           }
-
-          const sourceAccId = accountIdMap.get(sourceAccEntityId);
-          const destAccId = destAccEntityId ? accountIdMap.get(destAccEntityId) || null : null;
-
-          if (!sourceAccId) continue;
-
-          let payee = "";
-          if (destAccId) {
-            payee = "Transfer : " + (accNameMap.get(destAccId) || "Unknown");
-          } else if (t.payeeId) {
-            payee = payeeMap.get(t.payeeId) || "";
-          }
-
-          const sourceIsOnBudget = accOnBudgetMap.get(sourceAccEntityId) ?? true;
-          const destIsOnBudget = destAccEntityId ? (accOnBudgetMap.get(destAccEntityId) ?? true) : false;
-          const isCrossBoundary = destAccId !== null && sourceIsOnBudget !== destIsOnBudget;
-          const netOnBudget = (sourceIsOnBudget ? rawAmount : 0) + (destIsOnBudget ? -rawAmount : 0);
-          const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
-          const isSpecialIncomeCat =
-            catEntityId === "Category/__ImmediateIncome__" ||
-            catEntityId === "Category/__DeferredIncome__";
-          const isTransferIncome = isCrossBoundary && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
-          const finalTransferCatId = destAccId !== null && !isCrossBoundary ? null : isSpecialIncomeCat ? null : catId;
-
-          await db.insert(transactions).values({
-            accountId: sourceAccId,
-            categoryId: finalTransferCatId,
-            date: t.date,
-            payee,
-            memo,
-            amount: dollarsToCents(rawAmount),
-            status:
-              cleared === "Reconciled"
-                ? "r"
-                : cleared === "Uncleared"
-                  ? "u"
-                  : "c",
-            flagColor: ynabFlagToColor(t.flag),
-            transferAccountId: destAccId,
-            parentId: null,
-            isIncome: isTransferIncome,
-            reconciledAt: cleared === "Reconciled" ? (t.date || null) : null,
-          });
-          totalImportedTxCount++;
         } else {
           // Plain transaction (or standalone transfer without transferTransactionId)
           let targetAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);

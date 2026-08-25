@@ -524,4 +524,91 @@ describe("importYnab4 full import", () => {
       expect(r.status).toBe("r");
     }
   });
+
+  it("imports live side of transfer pair when partner account is missing/tombstoned", async () => {
+    const dataWithMissingPartnerAcc = {
+      accounts: [
+        { entityId: "accLive", accountName: "Checking", accountType: "Checking", onBudget: true },
+        { entityId: "accDead", accountName: "Deleted Savings", accountType: "Savings", onBudget: true, isTombstone: true },
+      ],
+      payees: [
+        { entityId: "p-dead", name: "Transfer : Deleted Savings" },
+        { entityId: "p-live", name: "Transfer : Checking" },
+      ],
+      masterCategories: [],
+      transactions: [
+        // Live side is positive (+500), missing partner side is negative (-500)
+        {
+          entityId: "t-pos-live",
+          accountId: "accLive",
+          date: "2026-06-10",
+          amount: 500,
+          cleared: "Cleared",
+          payeeId: "p-dead",
+          categoryId: null,
+          targetAccountId: "accDead",
+          transferTransactionId: "t-neg-dead",
+        },
+        {
+          entityId: "t-neg-dead",
+          accountId: "accDead",
+          date: "2026-06-10",
+          amount: -500,
+          cleared: "Cleared",
+          payeeId: "p-live",
+          categoryId: null,
+          targetAccountId: "accLive",
+          transferTransactionId: "t-pos-live",
+        },
+        // Live side is negative (-300), missing partner side is positive (+300)
+        {
+          entityId: "t-neg-live",
+          accountId: "accLive",
+          date: "2026-06-11",
+          amount: -300,
+          cleared: "Cleared",
+          payeeId: "p-dead",
+          categoryId: null,
+          targetAccountId: "accDead",
+          transferTransactionId: "t-pos-dead",
+        },
+        {
+          entityId: "t-pos-dead",
+          accountId: "accDead",
+          date: "2026-06-11",
+          amount: 300,
+          cleared: "Cleared",
+          payeeId: "p-live",
+          categoryId: null,
+          targetAccountId: "accLive",
+          transferTransactionId: "t-neg-live",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    const result = await importYnab4(db, dataWithMissingPartnerAcc);
+    expect(result.accounts).toBe(1);
+    expect(result.transactions).toBe(2);
+
+    const { accounts, transactions } = await getBudgetData(db);
+    expect(accounts).toHaveLength(1);
+    // Net balance: +$500 - $300 = +$200 = 20000 cents
+    expect(Number(accounts[0]?.balance)).toBe(20000);
+
+    expect(transactions).toHaveLength(2);
+
+    const posTx = transactions.find((t) => t.date === "2026-06-10");
+    expect(posTx).toBeDefined();
+    expect(Number(posTx?.amount)).toBe(50000);
+    expect(posTx?.transferAccountId).toBeNull();
+    expect(posTx?.isIncome).toBe(true);
+
+    const negTx = transactions.find((t) => t.date === "2026-06-11");
+    expect(negTx).toBeDefined();
+    expect(Number(negTx?.amount)).toBe(-30000);
+    expect(negTx?.transferAccountId).toBeNull();
+    expect(negTx?.isIncome).toBe(false);
+  });
 });
