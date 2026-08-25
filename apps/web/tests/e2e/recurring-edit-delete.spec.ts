@@ -95,7 +95,9 @@ test("deleting a recurring removes its card", async ({ page }) => {
 
   // The trash button has aria-label="Delete <payee>"
   // (RecurringView.tsx:178). Click trash then confirm in the modal.
-  await page.getByRole("button", { name: `Delete ${payee}` }).click({ force: true });
+  const delBtn = page.getByRole("button", { name: `Delete ${payee}` });
+  await delBtn.scrollIntoViewIfNeeded();
+  await delBtn.click();
   await page.getByRole("button", { name: "Delete Recurring Rule" }).click();
 
   // The card disappears

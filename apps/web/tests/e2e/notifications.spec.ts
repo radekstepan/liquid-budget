@@ -38,9 +38,9 @@ async function loadFresh(page: Page) {
   await expect(page.getByText(/Automatically entered \d+ scheduled transactions?\./)).toBeHidden({ timeout: 10_000 });
 }
 
-async function resetToDemo() {
-  const res = await fetch(`${BASE_URL}/api/reset`, { method: "POST" });
-  expect(res.ok).toBe(true);
+async function resetToDemo(page: Page) {
+  const res = await page.request.post("/api/reset");
+  expect(res.ok()).toBe(true);
 }
 
 async function gotoAllTransactions(page: Page) {
@@ -82,7 +82,7 @@ async function addRecurringViaModal(
 }
 
 test.beforeEach(async ({ page }) => {
-  await resetToDemo();
+  await resetToDemo(page);
   await loadFresh(page);
 });
 
@@ -336,7 +336,7 @@ test.describe("automatic recurring posting", () => {
   }) => {
     // Reset + first load auto-posts the seed's due recurrings and reports
     // them via the automatic-post toast.
-    await resetToDemo();
+    await resetToDemo(page);
     await page.goto("/");
     await waitForReady(page);
     await expect(

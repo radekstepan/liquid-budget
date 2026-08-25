@@ -16,11 +16,17 @@
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
 
+async function resetToDemo(page: Page) {
+  const res = await page.request.post("/api/reset");
+  expect(res.ok()).toBe(true);
+}
+
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
 }
 
 test.beforeEach(async ({ page }) => {
+  await resetToDemo(page);
   await page.goto("/");
   await waitForReady(page);
 });
@@ -56,7 +62,7 @@ async function forceOverbudgeted(
   await setAssignment(page, overdraftCategoryId, month, 0);
 
   // Push the bump category's assignment high enough to flip TBB negative.
-  for (const bump of [30000, 40000, 50000, 60000]) {
+  for (const bump of [5_000_000, 10_000_000, 15_000_000]) {
     await setAssignment(page, bumpCategoryId, month, bump);
     await page.reload();
     await waitForReady(page);
@@ -89,6 +95,11 @@ test("inline Unassign button PATCHes an overdrafted category to assigned=0", asy
 }) => {
   await forceOverbudgeted(page, 11, 7);
 
+  // Switch to 1-month mode — the Unassign button only renders in
+  // single-month view (BudgetView.tsx:641-651 vs. MonthCells which
+  // omits it for multi-month).
+  await page.getByRole("button", { name: "1 month" }).click();
+
   // Groceries (id 11) should be overdrafted with assigned=0 (we zeroed it),
   // so it shows "overspent" text rather than an Unassign button.
   // Rent (id 7) has assigned > 0 from forceOverbudgeted, so if it's also
@@ -111,7 +122,7 @@ test("inline Unassign button PATCHes an overdrafted category to assigned=0", asy
   });
 
   // Find an inline Unassign button.
-  const unassignBtn = page.getByRole("button", { name: /unassign/i });
+  const unassignBtn = page.getByRole("button", { name: /unassign/i }).first();
   await expect(unassignBtn).toBeVisible();
   const label = await unassignBtn.textContent();
   const match = label?.match(/Unassign \$?([\d,]+\.?\d*)/i);

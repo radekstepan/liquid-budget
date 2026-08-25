@@ -163,7 +163,7 @@ export const ReportsView = memo(function ReportsView({
     for (const t of rangeTxns) {
       if (t.transferAccountId != null && t.categoryId == null) continue;
       const a = num(t.amount);
-      if (a < 0 && t.payee) byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
+      if (a < 0 && t.payee && t.payee !== "Starting Balance") byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
     }
     return [...byPayee.entries()]
       .map(([n, v]) => ({ n, v }))
