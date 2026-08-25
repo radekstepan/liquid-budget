@@ -17,9 +17,9 @@ function txn(day: number, payee: string, amountInDollars: number): Transaction {
   };
 }
 
-function makeData(txns: Transaction[]): BudgetData {
+function makeData(txns: Transaction[], accounts?: BudgetData["accounts"]): BudgetData {
   return {
-    accounts: [
+    accounts: accounts ?? [
       { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
     ],
     groups: [],
@@ -124,5 +124,87 @@ describe("CalendarView", () => {
     expect(
       screen.getByText("No transactions or scheduled events for this month. Click any day to add a transaction.")
     ).toBeInTheDocument();
+  });
+
+  it("excludes internal on-budget transfers from monthTotal and dayNet (BUG-10)", () => {
+    const accounts: BudgetData["accounts"] = [
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 1 },
+    ];
+    const transferTxn: Transaction = {
+      id: 101,
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: null,
+      date: "2026-06-10",
+      payee: "Transfer : Savings",
+      memo: "",
+      amount: "-100000",
+      status: "u",
+    };
+    renderView({ data: makeData([transferTxn], accounts) });
+
+    expect(screen.getByText("Net this month:")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-10/i });
+    expect(within(dayCell).getByText("Transfer : Savings")).toBeInTheDocument();
+    expect(within(dayCell).getByText("-$1,000.00")).toBeInTheDocument();
+
+    // dayNet is 0, so the day net badge is not rendered
+    expect(within(dayCell).queryByText("-$1,000.00", { selector: "span.text-\\[10\\.5px\\]" })).not.toBeInTheDocument();
+  });
+
+  it("factors boundary transfers into monthTotal and dayNet", () => {
+    const accounts: BudgetData["accounts"] = [
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+      { id: 3, name: "Investments", kind: "offbudget", groupLabel: "Tracking", balance: "500000", onBudget: false, sort: 2 },
+    ];
+    const boundaryOutflow: Transaction = {
+      id: 201,
+      accountId: 1,
+      transferAccountId: 3,
+      categoryId: 10,
+      date: "2026-06-15",
+      payee: "Transfer : Investments",
+      memo: "",
+      amount: "-50000",
+      status: "u",
+    };
+    renderView({ data: makeData([boundaryOutflow], accounts) });
+
+    const netToolbar = screen.getByText("Net this month:").closest("span")!;
+    expect(within(netToolbar).getByText("-$500.00")).toBeInTheDocument();
+
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-15/i });
+    expect(within(dayCell).getByText("Transfer : Investments")).toBeInTheDocument();
+    expect(within(dayCell).getByText("-$500.00", { selector: "span.text-\\[10\\.5px\\]" })).toBeInTheDocument();
+  });
+
+  it("excludes internal transfer from dayNet when mixed with standard expense", () => {
+    const accounts: BudgetData["accounts"] = [
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 1 },
+    ];
+    const transferTxn: Transaction = {
+      id: 301,
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: null,
+      date: "2026-06-20",
+      payee: "Transfer : Savings",
+      memo: "",
+      amount: "-50000",
+      status: "u",
+    };
+    const coffeeTxn = txn(20, "Coffee", -5);
+
+    renderView({ data: makeData([transferTxn, coffeeTxn], accounts) });
+
+    const netToolbar = screen.getByText("Net this month:").closest("span")!;
+    expect(within(netToolbar).getByText("-$5.00")).toBeInTheDocument();
+
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-20/i });
+    expect(within(dayCell).getByText("-$5.00", { selector: "span.text-\\[10\\.5px\\]" })).toBeInTheDocument();
   });
 });
