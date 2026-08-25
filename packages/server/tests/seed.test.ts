@@ -14,7 +14,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
-import { seedDatabase, resetDatabase } from "../src/seed.js";
+import { seedDatabase, resetDatabase, DEMO_MONTH } from "../src/seed.js";
 import { getBudgetData, isSeeded } from "../src/queries/budget.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
@@ -61,6 +61,38 @@ describe("seedDatabase", () => {
     expect(td).toBeTruthy();
     expect(td!.lastReconciledAt).toBe("2026-04-10");
     expect(Number(td!.lastReconciledBalance)).toBe(608358);
+  });
+
+  it("marks TD starting balance and April transactions as status 'r'", async () => {
+    await seedDatabase(db);
+    const data = await getBudgetData(db);
+    const td = data.accounts.find((a) => a.name === "TD Unlimited Chequing")!;
+    const tdAprilTx = data.transactions.filter(
+      (t) => t.accountId === td.id && t.date.startsWith("2026-04")
+    );
+    expect(tdAprilTx).toHaveLength(6);
+    for (const t of tdAprilTx) {
+      expect(t.status).toBe("r");
+    }
+  });
+
+  it("categorizes TFSA transfer and recurring contribution to Retirement", async () => {
+    await seedDatabase(db);
+    const data = await getBudgetData(db);
+    const retirementCat = data.categories.find((c) => c.name === "Retirement")!;
+    const tfsaAccount = data.accounts.find((a) => a.name === "Wealthsimple TFSA")!;
+
+    const tfsaTx = data.transactions.find(
+      (t) => t.transferAccountId === tfsaAccount.id
+    );
+    expect(tfsaTx).toBeDefined();
+    expect(tfsaTx!.categoryId).toBe(retirementCat.id);
+
+    const tfsaRecurring = data.recurring.find(
+      (r) => r.transferAccountId === tfsaAccount.id
+    );
+    expect(tfsaRecurring).toBeDefined();
+    expect(tfsaRecurring!.categoryId).toBe(retirementCat.id);
   });
 
   it("marks exactly one category group as credit-card payments", async () => {
