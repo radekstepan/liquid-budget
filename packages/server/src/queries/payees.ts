@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, or } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { payees, transactions, recurring } from "../schema.js";
 
@@ -86,17 +86,27 @@ export function updatePayee(
       .returning()
       .get();
 
-    // If payee name changed, propagate to transactions and recurring referencing this payeeId
+    // If payee name changed, propagate to transactions and recurring referencing this payeeId or name
     if (patch.name !== undefined && patch.name.trim() !== current.name) {
       const newName = patch.name.trim();
+      const oldName = current.name;
+
+      const txCondition = oldName
+        ? or(eq(transactions.payeeId, id), eq(transactions.payee, oldName))
+        : eq(transactions.payeeId, id);
+
       tx.update(transactions)
         .set({ payee: newName })
-        .where(eq(transactions.payeeId, id))
+        .where(txCondition)
         .run();
+
+      const recCondition = oldName
+        ? or(eq(recurring.payeeId, id), eq(recurring.payee, oldName))
+        : eq(recurring.payeeId, id);
 
       tx.update(recurring)
         .set({ payee: newName })
-        .where(eq(recurring.payeeId, id))
+        .where(recCondition)
         .run();
     }
 

@@ -79,6 +79,26 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     expect(rec.payee).toBe("Whole Foods Market");
   });
 
+  it("updates payee name and propagates to transactions and recurring with null payee_id by name", () => {
+    const p = findOrCreatePayee(db, "Target Superstore", 10);
+
+    db.run(
+      `INSERT INTO transactions (account_id, category_id, date, payee, memo, amount, status, created_at, is_income) VALUES (1, 10, '2026-06-01', 'Target Superstore', '', -5000, 'c', '', 0);`
+    );
+    db.run(
+      `INSERT INTO recurring (account_id, category_id, payee, amount, frequency, next_date, active) VALUES (1, 10, 'Target Superstore', -5000, 'monthly', '2026-07-01', 1);`
+    );
+
+    const updated = updatePayee(db, p.id, { name: "Target" });
+    expect(updated?.name).toBe("Target");
+
+    const tx = db.select().from(transactions).all()[0]!;
+    expect(tx.payee).toBe("Target");
+
+    const rec = db.select().from(recurring).all()[0]!;
+    expect(rec.payee).toBe("Target");
+  });
+
   it("deletes a payee", () => {
     const p = findOrCreatePayee(db, "Gas Station");
     expect(getPayees(db)).toHaveLength(1);
