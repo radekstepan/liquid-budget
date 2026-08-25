@@ -2,7 +2,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
 import { getBudgetData } from "./budget.js";
-import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
+import { computeBudget, getMonthsWithData, isIncomeTransaction, todayISO } from "@ynab/logic";
 
 export type BalanceIntegrityReport = {
   accountId: number;
@@ -124,7 +124,8 @@ export async function recomputeAccountBalances(
  * consistent. If this invariant is violated, TBB will be silently wrong.
  *
  * Evaluates at the latest month with data (or today's month, whichever is later)
- * to avoid false positives from deferred income or future-dated transactions.
+ * by default, or at an explicit `targetMonth` with date-bounded account balances,
+ * avoiding false positives from deferred income or future-dated transactions.
  */
 export async function verifyBudgetIntegrity(
   db: Database,
@@ -140,11 +141,37 @@ export async function verifyBudgetIntegrity(
   const month = targetMonth ?? latestMonth;
   const result = computeBudget(data, month);
 
-  const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
-  const totalAccountBalance = onBudgetAccounts.reduce(
-    (s, a) => s + Number(a.balance ?? 0),
-    0
-  );
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  let totalAccountBalance = 0;
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+
+    const accA = accountMap.get(t.accountId);
+    const onA = accA ? accA.onBudget : true;
+
+    let netOnBudgetDelta = 0;
+    if (t.transferAccountId != null) {
+      const accB = accountMap.get(t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+      netOnBudgetDelta = (onA ? Number(t.amount) : 0) + (onB ? -Number(t.amount) : 0);
+    } else {
+      netOnBudgetDelta = onA ? Number(t.amount) : 0;
+    }
+
+    if (netOnBudgetDelta === 0) continue;
+
+    const isIncome = isIncomeTransaction(t, accountMap);
+    const effectiveMonth = isIncome ? (t.incomeMonth || t.date.slice(0, 7)) : t.date.slice(0, 7);
+
+    if (effectiveMonth <= month) {
+      totalAccountBalance += netOnBudgetDelta;
+    }
+  }
 
   const totalCategoryAvailable = result.groups.reduce(
     (s, g) => s + g.available,
