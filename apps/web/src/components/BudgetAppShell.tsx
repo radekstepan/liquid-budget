@@ -703,13 +703,13 @@ export function BudgetAppShell({
         })
       );
     },
-    importCsv: async ({ accountId, swap, csv }) => {
+    importCsv: async ({ accountId, swap, dateFormat, csv }) => {
       return withSync(() =>
         runMutation(async () => {
           const res = await fetch("/api/import/csv", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accountId, swap, csv }),
+            body: JSON.stringify({ accountId, swap, dateFormat, csv }),
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");

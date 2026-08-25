@@ -213,4 +213,26 @@ describe("CsvImportModal", () => {
     });
     expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
   });
+
+  it("handles US MM/DD CSV files consistently and allows changing date format", async () => {
+    const usCsv = [
+      "Date,Payee,Outflow",
+      "08/13/2026,Store A,10.00",
+      "08/05/2026,Store B,20.00",
+    ].join("\n");
+    const onImport = vi.fn().mockResolvedValue(undefined);
+    await renderModal(usCsv, onImport);
+
+    expect(screen.getByText("2026-08-13")).toBeInTheDocument();
+    expect(screen.getByText("2026-08-05")).toBeInTheDocument();
+
+    const select = screen.getByLabelText(/date format/i);
+    expect(select).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "dmy" } });
+    // In DMY format, 08/13/2026 is invalid (month 13) and 08/05/2026 is May 8
+    await waitFor(() => {
+      expect(screen.getByText("2026-05-08")).toBeInTheDocument();
+    });
+  });
 });

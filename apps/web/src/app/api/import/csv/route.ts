@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 const BodySchema = z.object({
   accountId: z.number().int().positive(),
   swap: z.boolean().optional().default(false),
+  dateFormat: z.enum(["auto", "dmy", "mdy"]).optional().default("auto"),
   csv: z.string().min(1),
 });
 
@@ -23,8 +24,8 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
-  const { accountId, swap, csv } = parsed.data;
-  const result = parseCsvImport(csv, { swap });
+  const { accountId, swap, dateFormat, csv } = parsed.data;
+  const result = parseCsvImport(csv, { swap, dateFormat });
   if (result.headerError) {
     return NextResponse.json({ error: result.headerError }, { status: 400 });
   }

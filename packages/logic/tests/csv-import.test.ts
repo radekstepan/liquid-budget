@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  detectDateFormat,
   parseCsv,
   parseCsvImport,
+  parseDate,
   swapPayeeMemo,
 } from "../src/csv-import.js";
 
@@ -194,6 +196,127 @@ describe("parseCsvImport", () => {
   it("returns a header error for an empty file", () => {
     const { headerError } = parseCsvImport("");
     expect(headerError).toBe("The file is empty");
+  });
+
+  it("decides date convention once per file for US MM/DD files without mixing conventions", () => {
+    // In US MM/DD files:
+    // 08/13/2026 -> August 13 (second number > 12 implies MM/DD)
+    // 08/05/2026 -> August 5 (must NOT be parsed as May 8)
+    const csv = [
+      "Date,Payee,Amount",
+      "08/13/2026,Store A,-10.00",
+      "08/05/2026,Store B,-20.00",
+    ].join("\n");
+    const { rows, detectedDateFormat } = parseCsvImport(csv);
+    expect(detectedDateFormat).toBe("mdy");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.date).toBe("2026-08-13");
+    expect(rows[1]!.date).toBe("2026-08-05");
+  });
+
+  it("decides date convention once per file for DD/MM files without mixing conventions", () => {
+    // In DD/MM files:
+    // 13/08/2026 -> August 13 (first number > 12 implies DD/MM)
+    // 05/08/2026 -> August 5 (must NOT be parsed as May 8)
+    const csv = [
+      "Date,Payee,Amount",
+      "13/08/2026,Store A,-10.00",
+      "05/08/2026,Store B,-20.00",
+    ].join("\n");
+    const { rows, detectedDateFormat } = parseCsvImport(csv);
+    expect(detectedDateFormat).toBe("dmy");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.date).toBe("2026-08-13");
+    expect(rows[1]!.date).toBe("2026-08-05");
+  });
+
+  it("defaults ambiguous files to DD/MM unless overridden by options", () => {
+    const csv = [
+      "Date,Payee,Amount",
+      "03/05/2026,Store A,-10.00",
+      "04/06/2026,Store B,-20.00",
+    ].join("\n");
+    const defaultResult = parseCsvImport(csv);
+    expect(defaultResult.detectedDateFormat).toBe("dmy");
+    expect(defaultResult.rows[0]!.date).toBe("2026-05-03"); // 3rd of May
+    expect(defaultResult.rows[1]!.date).toBe("2026-06-04"); // 4th of June
+
+    const mdyResult = parseCsvImport(csv, { dateFormat: "mdy" });
+    expect(mdyResult.detectedDateFormat).toBe("mdy");
+    expect(mdyResult.rows[0]!.date).toBe("2026-03-05"); // March 5th
+    expect(mdyResult.rows[1]!.date).toBe("2026-04-06"); // April 6th
+  });
+
+  it("marks rows violating the chosen file convention as invalid date", () => {
+    // If file is detected as DD/MM because of 14/08/2026, then 08/14/2026 (month 14) is invalid
+    const csv = [
+      "Date,Payee,Amount",
+      "14/08/2026,Store A,-10.00",
+      "15/08/2026,Store B,-20.00",
+      "08/14/2026,Store C,-30.00",
+    ].join("\n");
+    const { rows, detectedDateFormat } = parseCsvImport(csv);
+    expect(detectedDateFormat).toBe("dmy");
+    expect(rows[0]!.error).toBeNull();
+    expect(rows[0]!.date).toBe("2026-08-14");
+    expect(rows[1]!.error).toBeNull();
+    expect(rows[1]!.date).toBe("2026-08-15");
+    expect(rows[2]!.error).toMatch(/Invalid date/);
+    expect(rows[2]!.date).toBeNull();
+  });
+});
+
+describe("detectDateFormat", () => {
+  it("detects MDY when second number > 12", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["08/13/2026", "Store", "-10.00"],
+      ["08/05/2026", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("mdy");
+  });
+
+  it("detects DMY when first number > 12", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["13/08/2026", "Store", "-10.00"],
+      ["05/08/2026", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
+  });
+
+  it("defaults to DMY when ambiguous or ISO", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["01/02/2026", "Store", "-10.00"],
+      ["2026-08-01", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
+  });
+});
+
+describe("parseDate", () => {
+  it("parses dates with explicit convention", () => {
+    expect(parseDate("08/05/2026", "mdy")).toBe("2026-08-05");
+    expect(parseDate("08/05/2026", "dmy")).toBe("2026-05-08");
+    expect(parseDate("13/08/2026", "dmy")).toBe("2026-08-13");
+    expect(parseDate("13/08/2026", "mdy")).toBeNull(); // month 13 invalid
+  });
+
+  it("parses 2-digit years", () => {
+    expect(parseDate("08/05/26", "mdy")).toBe("2026-08-05");
+    expect(parseDate("05/08/26", "dmy")).toBe("2026-08-05");
+  });
+
+  it("parses ISO dates regardless of convention", () => {
+    expect(parseDate("2026-08-05", "mdy")).toBe("2026-08-05");
+    expect(parseDate("2026-08-05", "dmy")).toBe("2026-08-05");
+  });
+
+  it("rejects invalid date strings", () => {
+    expect(parseDate("invalid")).toBeNull();
+    expect(parseDate("2026-02-30")).toBeNull();
+    expect(parseDate("32/01/2026", "dmy")).toBeNull();
   });
 });
 

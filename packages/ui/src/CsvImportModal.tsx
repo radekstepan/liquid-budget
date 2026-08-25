@@ -21,11 +21,12 @@ export function CsvImportModal({
   defaultAccountId: number | null;
   file: File;
   onClose: () => void;
-  onImport: (input: { accountId: number; swap: boolean; csv: string }) => Promise<void>;
+  onImport: (input: { accountId: number; swap: boolean; dateFormat?: "auto" | "dmy" | "mdy"; csv: string }) => Promise<void>;
 }) {
   const [text, setText] = useState<string | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [swap, setSwap] = useState(false);
+  const [dateFormat, setDateFormat] = useState<"auto" | "dmy" | "mdy">("auto");
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +50,7 @@ export function CsvImportModal({
     defaultAccountId ?? availableAccounts[0]?.id ?? 0
   );
 
-  const parsed = useMemo(() => (text != null ? parseCsvImport(text) : null), [text]);
+  const parsed = useMemo(() => (text != null ? parseCsvImport(text, { dateFormat }) : null), [text, dateFormat]);
   const rows = useMemo(() => {
     if (!parsed) return [];
     // The server applies rename rules after the swap, so the preview mirrors
@@ -114,7 +115,7 @@ export function CsvImportModal({
     setImporting(true);
     setError(null);
     try {
-      await onImport({ accountId, swap, csv: text });
+      await onImport({ accountId, swap, dateFormat, csv: text });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
       setImporting(false);
@@ -175,9 +176,28 @@ export function CsvImportModal({
         </Select>
       </Field>
 
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-4 flex-wrap">
         <Checkbox checked={swap} onChange={setSwap} label="Swap Payee and Memo" />
-        <span className="y-hint text-[11px]">
+        <div className="flex items-center gap-1.5">
+          <label htmlFor="csv-date-format" className="y-hint text-[11px] whitespace-nowrap">
+            Date Format:
+          </label>
+          <select
+            id="csv-date-format"
+            value={dateFormat}
+            onChange={(e) => setDateFormat(e.target.value as "auto" | "dmy" | "mdy")}
+            className="text-[11px] bg-transparent border rounded px-1.5 py-0.5"
+            style={{ borderColor: "var(--y-line)" }}
+            aria-label="Date format"
+          >
+            <option value="auto">
+              Auto-detect {parsed?.detectedDateFormat ? `(${parsed.detectedDateFormat.toUpperCase()})` : ""}
+            </option>
+            <option value="dmy">DD/MM/YYYY</option>
+            <option value="mdy">MM/DD/YYYY</option>
+          </select>
+        </div>
+        <span className="y-hint text-[11px] ml-auto">
           {importableRows.length} importable · {errorRows.length + duplicateRows.length} skipped
         </span>
       </div>
