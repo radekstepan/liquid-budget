@@ -63,7 +63,7 @@ export function renamePatternToRegExp(sourcePattern: string): RegExp | null {
   if (!pattern) return null;
   const wc = RENAME_WILDCARD.toLowerCase();
   if (!pattern.includes(wc)) return null;
-  const escaped = escapeRegExp(pattern).replace(escapeRegExp(wc), "\\d+");
+  const escaped = escapeRegExp(pattern).split(escapeRegExp(wc)).join("\\d+");
   return new RegExp(`^${escaped}$`, "i");
 }
 
@@ -134,7 +134,11 @@ export function inferRenameRule(
   const candidate = { prefix: first.prefix, suffix: first.suffix };
   for (const s of sources.slice(1)) {
     const p = splitTrailingNumber(s);
-    if (!p || p.prefix !== candidate.prefix || p.suffix !== candidate.suffix) {
+    if (
+      !p ||
+      normalizeRenameText(p.prefix) !== normalizeRenameText(candidate.prefix) ||
+      normalizeRenameText(p.suffix) !== normalizeRenameText(candidate.suffix)
+    ) {
       return null;
     }
   }
