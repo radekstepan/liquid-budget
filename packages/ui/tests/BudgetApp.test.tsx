@@ -539,4 +539,86 @@ describe("BudgetApp", () => {
     fireEvent.click(yearTrigger);
     expect(screen.getByRole("option", { name: "2020" })).toBeInTheDocument();
   });
+
+  it("opens ReconcileModal with workingBalance correctly excluding split parents and including inbound transfers (BUG-03)", () => {
+    const { api } = makeApi();
+    const seed = makeSeedBudgetData();
+    const acct1 = { ...seed.accounts[0]!, id: 1, name: "Chequing" };
+    const acct2 = { ...seed.accounts[1]!, id: 2, name: "Savings" };
+    const customData: BudgetData = {
+      ...seed,
+      accounts: [acct1, acct2],
+      transactions: [
+        // 1. Cleared plain transaction on Chequing: +10000 ($100.00)
+        {
+          id: 101,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-06-01",
+          payee: "Direct Deposit",
+          memo: "",
+          amount: "10000",
+          status: "c",
+        },
+        // 2. Cleared split transaction on Chequing: parent -$50, children -$30 and -$20
+        {
+          id: 102,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-06-02",
+          payee: "Store",
+          memo: "Split",
+          amount: "-5000",
+          status: "c",
+        },
+        {
+          id: 103,
+          accountId: 1,
+          categoryId: seed.categories[0]!.id,
+          parentId: 102,
+          date: "2026-06-02",
+          payee: "Store",
+          memo: "Item 1",
+          amount: "-3000",
+          status: "c",
+        },
+        {
+          id: 104,
+          accountId: 1,
+          categoryId: seed.categories[1]!.id,
+          parentId: 102,
+          date: "2026-06-02",
+          payee: "Store",
+          memo: "Item 2",
+          amount: "-2000",
+          status: "c",
+        },
+        // 3. Cleared transfer from Savings (2) into Chequing (1): -$25 on Savings -> +$25 on Chequing
+        {
+          id: 105,
+          accountId: 2,
+          transferAccountId: 1,
+          categoryId: null,
+          date: "2026-06-03",
+          payee: "Transfer",
+          memo: "Inbound to Chequing",
+          amount: "-2500",
+          status: "c",
+        },
+      ],
+    };
+
+    render(<BudgetApp data={customData} api={api} />);
+
+    // Click on Chequing account in sidebar
+    fireEvent.click(screen.getByRole("button", { name: /^Chequing/ }));
+
+    // Click Reconcile button in register footer
+    fireEvent.click(screen.getByRole("button", { name: /^reconcile$/i }));
+
+    // Working balance: +10000 (deposit) - 5000 (split children: -3000 + -2000, parent excluded) + 2500 (inbound transfer) = +7500 ($75.00)
+    expect(screen.getByText("Reconcile: Chequing")).toBeInTheDocument();
+    expect(screen.getByText("$75.00")).toBeInTheDocument();
+    expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
+  });
 });
