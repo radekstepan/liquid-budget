@@ -732,6 +732,74 @@ describe("TransactionModal", () => {
       fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
       expect(onSave).not.toHaveBeenCalled();
     });
+
+    it("requires category for boundary transfer outflow to off-budget account", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-100" } });
+      // Select Brokerage (account 3, off-budget)
+      pickFromOpenSearchableByValue(/transfer to/i, "3");
+
+      // Category selector should now appear because it's a boundary outflow
+      expect(screen.getByRole("button", { name: /category/i })).toBeInTheDocument();
+
+      // Save button should be disabled when category is not yet picked
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).toBeDisabled();
+
+      // Pick Groceries category (id 10)
+      pickFromOpenSearchableByValue(/category/i, "10");
+      expect(saveBtn).toBeEnabled();
+
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave.mock.calls[0]![0]).toMatchObject({
+        accountId: 1,
+        transferAccountId: 3,
+        categoryId: 10,
+        amount: -10000,
+        payee: "Transfer : Brokerage",
+      });
+    });
+
+    it("supports boundary transfer inflow from off-budget account", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      // +100 inflow to Chequing from Brokerage
+      fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "100" } });
+      pickFromOpenSearchableByValue(/transfer to/i, "3");
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      expect(saveBtn).toBeEnabled();
+
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave.mock.calls[0]![0]).toMatchObject({
+        accountId: 1,
+        transferAccountId: 3,
+        categoryId: null,
+        amount: 10000,
+        payee: "Transfer : Brokerage",
+      });
+    });
   });
 
   describe("split mode", () => {

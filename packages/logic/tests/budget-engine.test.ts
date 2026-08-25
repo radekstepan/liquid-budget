@@ -1581,6 +1581,47 @@ describe("computeBudget", () => {
         const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0); // 0
         expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
       });
+
+      it("treats inbound boundary transfer with explicit isIncome: false as income to preserve budget identity", () => {
+        const transferInflowWithFalse = {
+          id: 1,
+          accountId: onBudgetAccount.id,
+          transferAccountId: offBudgetAccount.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Transfer : Brokerage",
+          memo: "Withdrawal from brokerage",
+          amount: "1000000", // +$10,000 inflow to Checking
+          status: "c" as const,
+          isIncome: false, // explicitly false should not exclude uncategorized boundary inflow
+        };
+
+        expect(isIncomeTransaction(transferInflowWithFalse, [onBudgetAccount, offBudgetAccount])).toBe(true);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [],
+          transactions: [transferInflowWithFalse],
+          recurring: [],
+        };
+
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(1000000);
+        expect(res.tbb).toBe(1000000);
+
+        // Budget integrity invariant: On-budget cash (1000000) = totalCatAvailable (0) + TBB (1000000)
+        const totalOnBudget = 1000000;
+        const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalOnBudget - totalCatAvailable - res.tbb).toBe(0);
+
+        const index = buildBudgetIndex(data);
+        expect(index.incomeByMonth["2026-07"]).toBe(1000000);
+        const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+        expect(indexedRes.totalIncome).toBe(1000000);
+        expect(indexedRes.tbb).toBe(1000000);
+      });
     });
   });
 });

@@ -279,6 +279,85 @@ describe("transactions queries", () => {
       });
     });
 
+    it("forces isIncome: true on uncategorized boundary-crossing transfer from off-budget to on-budget even if isIncome is false", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ name: "Brokerage" }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: false }]);
+      mock.respondWith("insert:transactions", [{ id: 45 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createTransfer(
+        mock.db,
+        {
+          accountId: 1,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "",
+          memo: "Transfer from brokerage",
+          amount: 1000000,
+          isIncome: false,
+        },
+        2
+      );
+
+      const insert = mock.calls.find((c) => c.op === "insert");
+      expect(insert?.values).toMatchObject({
+        payee: "Transfer : Brokerage",
+        transferAccountId: 2,
+        categoryId: null,
+        amount: 1000000,
+        isIncome: true,
+      });
+    });
+
+    it("rejects boundary-crossing transfer from on-budget to off-budget without a category", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ name: "Brokerage" }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: false }]);
+
+      await expect(
+        createTransfer(
+          mock.db,
+          {
+            accountId: 1,
+            categoryId: null,
+            date: "2026-07-01",
+            payee: "",
+            memo: "Fund brokerage",
+            amount: -50000,
+          },
+          2
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: "Boundary transfer outflow requires a category",
+      });
+    });
+
+    it("rejects boundary-crossing transfer outflow recorded from off-budget account without a category", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ name: "Checking" }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: true }]);
+
+      await expect(
+        createTransfer(
+          mock.db,
+          {
+            accountId: 2,
+            categoryId: null,
+            date: "2026-07-01",
+            payee: "",
+            memo: "Fund brokerage",
+            amount: 50000,
+          },
+          1
+        )
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: "Boundary transfer outflow requires a category",
+      });
+    });
+
     it("rejects transfers to the same account", async () => {
       await expect(
         createTransfer(
@@ -2089,6 +2168,263 @@ describe("transactions queries", () => {
           .from(schema.transactions)
           .where(eq(schema.transactions.id, transfer.id));
         expect(dbRow?.categoryId).toBe(cat1Id);
+      });
+
+      it("enforces category requirement for boundary outflows across create/update/bulk/split paths and both orientations", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [offBudgetAcct] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Brokerage",
+            kind: "offbudget",
+            groupLabel: "Tracking Accounts",
+            onBudget: false,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+
+        // A. createTransfer boundary outflow without category (Orientation 1: on-budget -> off-budget, negative amount)
+        await expect(
+          createTransfer(
+            db,
+            {
+              accountId,
+              categoryId: null,
+              date: "2026-08-01",
+              payee: "",
+              memo: "Investment transfer",
+              amount: -5000,
+            },
+            offBudgetAcct!.id
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // B. createTransfer boundary outflow without category (Orientation 2: off-budget -> on-budget, positive amount on off-budget)
+        await expect(
+          createTransfer(
+            db,
+            {
+              accountId: offBudgetAcct!.id,
+              categoryId: null,
+              date: "2026-08-01",
+              payee: "",
+              memo: "Investment transfer",
+              amount: 5000,
+            },
+            accountId
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // C. createTransaction boundary outflow without category
+        await expect(
+          createTransaction(db, {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "Transfer : Brokerage",
+            memo: "Investment transfer",
+            amount: -5000,
+            transferAccountId: offBudgetAcct!.id,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // Create valid boundary outflow transfer
+        const validOutflow = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Investment transfer",
+            amount: -5000,
+          },
+          offBudgetAcct!.id
+        );
+
+        // D. updateTransaction attempting to strip category on boundary outflow
+        await expect(
+          updateTransaction(db, validOutflow.id, {
+            categoryId: null,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // E. bulkUpdateTransactions attempting to strip category on boundary outflow
+        await expect(
+          bulkUpdateTransactions(db, [validOutflow.id], {
+            categoryId: null,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // F. createSplitWithChildren with boundary outflow transfer child lacking category
+        await expect(
+          createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Split investment",
+              memo: "Split",
+              amount: -5000,
+            },
+            [
+              { categoryId: cat1Id, amount: -2000 },
+              { transferAccountId: offBudgetAcct!.id, categoryId: null, amount: -3000 },
+            ]
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+
+        // Valid split with boundary outflow transfer child having a category succeeds
+        const validSplit = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Split investment",
+            memo: "Split",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -2000 },
+            { transferAccountId: offBudgetAcct!.id, categoryId: cat1Id, amount: -3000 },
+          ]
+        );
+        expect(validSplit.children[1]?.categoryId).toBe(cat1Id);
+
+        // G. updateSplit with boundary outflow transfer child lacking category
+        await expect(
+          updateSplit(
+            db,
+            validSplit.parent.id,
+            {},
+            [
+              { categoryId: cat1Id, amount: -2000 },
+              { transferAccountId: offBudgetAcct!.id, categoryId: null, amount: -3000 },
+            ]
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Boundary transfer outflow requires a category",
+        });
+      });
+
+      it("forces isIncome: true for uncategorized boundary inflows across create/update/bulk paths and both orientations even if isIncome: false is passed", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+        const [offBudgetAcct] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Brokerage",
+            kind: "offbudget",
+            groupLabel: "Tracking Accounts",
+            onBudget: false,
+            balance: 100000,
+            sort: 1,
+          })
+          .returning();
+
+        // 1. createTransfer (Orientation 1: on-budget account with positive amount, isIncome: false)
+        const inbound1 = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Inbound 1",
+            amount: 5000,
+            isIncome: false,
+          },
+          offBudgetAcct!.id
+        );
+        expect(inbound1.isIncome).toBe(true);
+        expect(inbound1.categoryId).toBeNull();
+
+        // 2. createTransfer (Orientation 2: off-budget account with negative amount, isIncome: false)
+        const inbound2 = await createTransfer(
+          db,
+          {
+            accountId: offBudgetAcct!.id,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Inbound 2",
+            amount: -5000,
+            isIncome: false,
+          },
+          accountId
+        );
+        expect(inbound2.isIncome).toBe(true);
+        expect(inbound2.categoryId).toBeNull();
+
+        // 3. createTransaction with boundary inflow transfer and isIncome: false
+        const inbound3 = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Transfer : Brokerage",
+          memo: "Inbound 3",
+          amount: 5000,
+          transferAccountId: offBudgetAcct!.id,
+          isIncome: false,
+        });
+        expect(inbound3.isIncome).toBe(true);
+        expect(inbound3.categoryId).toBeNull();
+
+        // 4. updateTransaction with isIncome: false on uncategorized boundary inflow
+        const updated = await updateTransaction(db, inbound1.id, {
+          isIncome: false,
+        });
+        expect(updated?.isIncome).toBe(true);
+
+        // 5. bulkUpdateTransactions with isIncome: false / category null
+        await bulkUpdateTransactions(db, [inbound1.id, inbound2.id], {
+          memo: "Bulk updated inbounds",
+        });
+        const [dbRow1] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, inbound1.id));
+        expect(dbRow1?.isIncome).toBe(true);
+        expect(dbRow1?.categoryId).toBeNull();
+
+        // 6. createSplitWithChildren with boundary inflow transfer child without category
+        const splitInbound = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Split inbound",
+            memo: "",
+            amount: 5000,
+          },
+          [
+            { categoryId: null, amount: 2000 },
+            { transferAccountId: offBudgetAcct!.id, categoryId: null, amount: 3000 },
+          ]
+        );
+        expect(splitInbound.children[1]?.isIncome).toBe(true);
+        expect(splitInbound.children[1]?.categoryId).toBeNull();
       });
     });
 
