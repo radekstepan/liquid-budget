@@ -1082,6 +1082,23 @@ export function RecurringModal({
     initial?.transferAccountId ?? ""
   );
 
+  const transferDestAccount = useMemo(() => {
+    return transferAccountId ? accounts.find((a) => a.id === Number(transferAccountId)) : null;
+  }, [accounts, transferAccountId]);
+
+  const isTransferBoundary =
+    mode === "transfer" &&
+    transferDestAccount != null &&
+    Boolean(selectedAccount?.onBudget) !== Boolean(transferDestAccount.onBudget);
+
+  const transferAmountCents = Math.round((evalAmount(amount) ?? 0) * 100);
+  const srcOnBudget = Boolean(selectedAccount?.onBudget);
+  const destOnBudget = Boolean(transferDestAccount?.onBudget);
+  const transferNetOnBudgetDelta = isTransferBoundary
+    ? (srcOnBudget ? transferAmountCents : 0) + (destOnBudget ? -transferAmountCents : 0)
+    : 0;
+  const isBoundaryOutflow = isTransferBoundary && transferNetOnBudgetDelta <= 0;
+
   // Split sub-rows
   const [subRows, setSubRows] = useState<SubTransaction[]>(
     initialChildren.length > 0
@@ -1123,7 +1140,9 @@ export function RecurringModal({
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else if (next === "transfer") {
-      setCategoryId("");
+      if (!isInitialTransfer) {
+        setCategoryId("");
+      }
       setSubRows([
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
@@ -1142,11 +1161,22 @@ export function RecurringModal({
     if (mode === "transfer") {
       if (!transferAccountId) return;
       if (Number(transferAccountId) === accountId) return;
+      if (isBoundaryOutflow && (categoryId === "" || categoryId == null)) {
+        return;
+      }
       const destName = otherAccounts.find((x) => x.id === Number(transferAccountId))?.name ?? "";
+      let finalCatId: number | null = null;
+      if (isTransferBoundary) {
+        if (isBoundaryOutflow) {
+          finalCatId = Number(categoryId);
+        } else {
+          finalCatId = categoryId === "" ? null : Number(categoryId);
+        }
+      }
       onSave({
         id: initial?.id,
         accountId,
-        categoryId: null,
+        categoryId: finalCatId,
         payee: payee.trim() || `Transfer : ${destName}`,
         memo: memo.trim(),
         amount: amountCents,
@@ -1203,7 +1233,11 @@ export function RecurringModal({
     const a = Math.abs(evalAmount(amount) ?? NaN);
     if (Number.isNaN(a) || !accountId) return false;
     if (mode === "transfer") {
-      return Boolean(transferAccountId) && Number(transferAccountId) !== accountId;
+      if (!transferAccountId || Number(transferAccountId) === accountId) return false;
+      if (isBoundaryOutflow) {
+        return categoryId !== "" && categoryId != null;
+      }
+      return true;
     }
     if (mode === "split") {
       return Boolean(payee.trim()) && subValidation === null;
@@ -1353,6 +1387,40 @@ export function RecurringModal({
           </Field>
         )}
       </div>
+
+      {mode === "transfer" && isTransferBoundary && (
+        <Field label={isBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
+          <Select
+            value={categoryId}
+            onChange={(v) => setCategoryId(v === "" ? "" : Number(v))}
+            className="w-full"
+            searchable
+          >
+            {isBoundaryOutflow ? (
+              <option value="" disabled>Select category…</option>
+            ) : (
+              <option value="">Income: Available this month</option>
+            )}
+            {groups && groups.length > 0 ? (
+              groups.map((g) => (
+                <optgroup key={g.id} label={g.name}>
+                  {categories
+                    .filter((c) => c.groupId === g.id)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </optgroup>
+              ))
+            ) : (
+              categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))
+            )}
+          </Select>
+        </Field>
+      )}
 
       {mode === "transfer" && (
         <Field label="Payee (auto-generated, override optional)">

@@ -89,6 +89,76 @@ describe("recurring queries", () => {
       expect(insertCount).toBe(1);
     });
 
+    it("creates a recurring boundary transfer to off-budget preserving categoryId (BUG-01)", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("insert:recurring", [{ id: 10 }]);
+
+      const row = await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: 5,
+        payee: "Wealthsimple TFSA",
+        amount: -50000,
+        frequency: "monthly",
+        nextDate: "2026-07-20",
+        transferAccountId: 2,
+      });
+
+      expect(row).toMatchObject({ id: 10 });
+      const insertCall = mock.calls.find((c) => c.op === "insert" && c.table === "recurring");
+      expect(insertCall?.values).toMatchObject({
+        accountId: 1,
+        categoryId: 5,
+        transferAccountId: 2,
+        amount: -50000,
+      });
+    });
+
+    it("rejects a boundary transfer outflow to off-budget without category with 422 (BUG-01)", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: null,
+          payee: "Wealthsimple TFSA",
+          amount: -50000,
+          frequency: "monthly",
+          nextDate: "2026-07-20",
+          transferAccountId: 2,
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Boundary transfer outflow requires a category",
+        status: 422,
+      });
+    });
+
+    it("allows a boundary transfer inflow from off-budget without category (BUG-01)", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("insert:recurring", [{ id: 11 }]);
+
+      await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "TFSA Withdrawal",
+        amount: 50000,
+        frequency: "monthly",
+        nextDate: "2026-07-20",
+        transferAccountId: 2,
+      });
+
+      const insertCall = mock.calls.find((c) => c.op === "insert" && c.table === "recurring");
+      expect(insertCall?.values).toMatchObject({
+        accountId: 1,
+        categoryId: null,
+        transferAccountId: 2,
+        amount: 50000,
+      });
+    });
+
     it("rejects a transfer to the same account", async () => {
       await expect(
         createRecurring(mock.db, {
@@ -531,6 +601,46 @@ describe("recurring queries", () => {
       });
     });
 
+    it("updateRecurring: preserves and updates categoryId for boundary transfer (BUG-01)", async () => {
+      const boundaryTransferRow = {
+        ...existingRow,
+        accountId: 1,
+        categoryId: 5,
+        transferAccountId: 2,
+        amount: -50000,
+      };
+      mock.respondWith("select:recurring", [boundaryTransferRow]);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [{ ...boundaryTransferRow, categoryId: 6 }]);
+
+      await updateRecurring(mock.db, 1, { categoryId: 6 });
+      const updateCall = mock.calls.find((c) => c.op === "update" && c.table === "recurring");
+      expect(updateCall?.set).toMatchObject({ categoryId: 6 });
+    });
+
+    it("updateRecurring: rejects boundary transfer outflow when category is cleared (BUG-01)", async () => {
+      const boundaryTransferRow = {
+        ...existingRow,
+        accountId: 1,
+        categoryId: 5,
+        transferAccountId: 2,
+        amount: -50000,
+      };
+      mock.respondWith("select:recurring", [boundaryTransferRow]);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+
+      await expect(
+        updateRecurring(mock.db, 1, { categoryId: null })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Boundary transfer outflow requires a category",
+        status: 422,
+      });
+    });
+
     it("returns null when the row does not exist", async () => {
       mock.respondWith("select:recurring", []);
       const out = await updateRecurring(mock.db, 99, { payee: "X" });
@@ -703,6 +813,40 @@ describe("recurring queries", () => {
       expect(txnInserts).toHaveLength(1);
       expect(txnInserts[0]?.values).toMatchObject({
         accountId: 1,
+        amount: -50000,
+        transferAccountId: 2,
+      });
+    });
+
+    it("posts recurring transfer to off-budget account with category without crashing (BUG-01)", async () => {
+      const boundaryRecurring = {
+        id: 50,
+        accountId: 1,
+        categoryId: 7,
+        payee: "Wealthsimple TFSA",
+        amount: -50000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: 2,
+      };
+      mock.respondWithNth("select:recurring", 1, [boundaryRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("insert:transactions", [{ id: 500, date: "2026-07-01", amount: -50000, categoryId: 7, transferAccountId: 2 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...boundaryRecurring, nextDate: "2026-08-01" }]);
+
+      const res = await postRecurringTransaction(mock.db, 50);
+      expect(res.nextDate).toBe("2026-08-01");
+
+      const txnInserts = mock.calls.filter((c) => c.op === "insert" && c.table === "transactions");
+      expect(txnInserts).toHaveLength(1);
+      expect(txnInserts[0]?.values).toMatchObject({
+        accountId: 1,
+        categoryId: 7,
         amount: -50000,
         transferAccountId: 2,
       });
