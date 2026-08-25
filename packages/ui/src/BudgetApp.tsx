@@ -777,7 +777,7 @@ export function BudgetApp({
               onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
             />
           )}
-          {view === "projections" && <ProjectionsView data={data} month={month} />}
+          {view === "projections" && <ProjectionsView data={data} />}
           {view === "recurring" && (
             <RecurringView
               data={data}

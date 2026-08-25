@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ProjectionsView } from "../src/ProjectionsView.js";
-import { fmt } from "@ynab/logic";
+import { fmt, todayISO, parseMonthKey, MONTHS_LONG } from "@ynab/logic";
 import type {
   Account,
   Category,
@@ -215,5 +215,26 @@ describe("ProjectionsView", () => {
     };
     render(<ProjectionsView data={data} month="2026-07" />);
     expect(screen.getAllByText(expectedProjected(0, (400000 * 26) / 12)).length).toBeGreaterThan(0);
+  });
+
+  it("anchors forecast to current month (todayISO) by default when month prop is omitted", () => {
+    const currentMonth = todayISO().slice(0, 7);
+    const { year, month0 } = parseMonthKey(currentMonth);
+    const expectedFirstLabel = `${MONTHS_LONG[month0]?.slice(0, 3)} ${String(year).slice(2)}`;
+
+    const data = {
+      accounts: [acct({ id: 1, balance: "500000" })],
+      groups: emptyGroups,
+      categories: emptyCategories,
+      assignments: [],
+      transactions: [],
+      recurring: [] as Recurring[],
+    };
+
+    render(<ProjectionsView data={data} />);
+    // Month 0 label in table should match today's month
+    expect(screen.getAllByText(expectedFirstLabel).length).toBeGreaterThan(0);
+    // Starting balance should be $5,000.00
+    expect(screen.getAllByText("$5,000.00").length).toBeGreaterThan(0);
   });
 });

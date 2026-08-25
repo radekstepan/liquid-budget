@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { BudgetApp, type BudgetAppApi } from "../src/BudgetApp.js";
 import type { BudgetData } from "@ynab/logic";
-import { makeSeedBudgetData } from "@ynab/logic";
+import { makeSeedBudgetData, todayISO, parseMonthKey, MONTHS_LONG } from "@ynab/logic";
 import { openSearchlistByPlaceholder } from "./dropdown.js";
 
 function makeApi(overrides: Partial<BudgetAppApi> = {}): {
@@ -620,5 +620,22 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Reconcile: Chequing")).toBeInTheDocument();
     expect(screen.getByText("$75.00")).toBeInTheDocument();
     expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
+  });
+
+  it("anchors Projections view to current month even when viewing historical budget months (BUG-16)", () => {
+    const { api } = makeApi();
+    // Render BudgetApp initialized to a historical month (e.g., 2024-01)
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialMonth="2024-01" />);
+
+    // Switch to Projections view
+    fireEvent.click(screen.getByRole("button", { name: /projections/i }));
+
+    // Month 0 should be labeled with current month (todayISO) rather than Jan 24
+    const currentMonth = todayISO().slice(0, 7);
+    const { year, month0 } = parseMonthKey(currentMonth);
+    const expectedCurrentLabel = `${MONTHS_LONG[month0]?.slice(0, 3)} ${String(year).slice(2)}`;
+
+    expect(screen.queryByText("Jan 24")).not.toBeInTheDocument();
+    expect(screen.getAllByText(expectedCurrentLabel).length).toBeGreaterThan(0);
   });
 });

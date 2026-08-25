@@ -9,11 +9,18 @@ import {
   frequencyMonthlyMultiplier,
   MONTHS_LONG,
   parseMonthKey,
+  todayISO,
 } from "@ynab/logic";
 import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
 import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
-export const ProjectionsView = memo(function ProjectionsView({ data, month }: { data: BudgetData; month: string }) {
+export const ProjectionsView = memo(function ProjectionsView({
+  data,
+  month = todayISO().slice(0, 7),
+}: {
+  data: BudgetData;
+  month?: string;
+}) {
   const { year, month0 } = parseMonthKey(month);
   const activeAccounts = data.accounts.filter((a) => !a.archived);
   const liquidNow = activeAccounts
