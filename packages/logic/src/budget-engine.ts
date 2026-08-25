@@ -81,10 +81,7 @@ export function isIncomeTransaction(
       const netOnBudgetDelta = (onA ? num(t.amount) : 0) + (onB ? -num(t.amount) : 0);
       if (netOnBudgetDelta <= 0) return false;
 
-      if (t.isIncome !== undefined) {
-        return t.isIncome === true;
-      }
-      if (t.parentId != null) return false;
+      // Inbound boundary transfer with categoryId == null is always income to TBB
       return true;
     }
 

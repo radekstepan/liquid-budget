@@ -151,6 +151,24 @@ export function TransactionModal({
     initial?.transferAccountId ?? ""
   );
 
+  const transferDestAccount = useMemo(() => {
+    return transferAccountId ? accounts.find((a) => a.id === Number(transferAccountId)) : null;
+  }, [accounts, transferAccountId]);
+
+  const isTransferBoundary =
+    mode === "transfer" &&
+    transferDestAccount != null &&
+    Boolean(selectedAccount?.onBudget) !== Boolean(transferDestAccount.onBudget);
+
+  const transferAmountCents = Math.round((evalAmount(amount) ?? 0) * 100);
+  const srcOnBudget = Boolean(selectedAccount?.onBudget);
+  const destOnBudget = Boolean(transferDestAccount?.onBudget);
+  const transferNetOnBudgetDelta = isTransferBoundary
+    ? (srcOnBudget ? transferAmountCents : 0) + (destOnBudget ? -transferAmountCents : 0)
+    : 0;
+  const isBoundaryOutflow = isTransferBoundary && transferNetOnBudgetDelta <= 0;
+  const isBoundaryInflow = isTransferBoundary && transferNetOnBudgetDelta > 0;
+
   // Split sub-rows
   const [subRows, setSubRows] = useState<SubTransaction[]>(
     initialChildren
@@ -192,7 +210,9 @@ export function TransactionModal({
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
       ]);
     } else if (next === "transfer") {
-      setCategoryId("");
+      if (!isInitialTransfer) {
+        setCategoryId("");
+      }
       setSubRows([
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
         { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
@@ -222,11 +242,25 @@ export function TransactionModal({
       if (!payee.trim() && !transferAccountId) return;
       if (!transferAccountId) return;
       if (Number(transferAccountId) === accountId) return;
+      if (isBoundaryOutflow && (categoryId === "" || categoryId === "__deferred__" || categoryId == null)) {
+        return;
+      }
       const destName = otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? "";
+      let finalCatId: number | null = null;
+      let incMonth: string | null = null;
+      if (isTransferBoundary) {
+        if (isBoundaryOutflow) {
+          finalCatId = Number(categoryId);
+        } else {
+          const isDeferred = categoryId === "__deferred__";
+          finalCatId = categoryId === "" || isDeferred ? null : Number(categoryId);
+          incMonth = isDeferred ? nextMonthKey(date.slice(0, 7)) : null;
+        }
+      }
       onSave({
         id: initial?.id,
         accountId,
-        categoryId: null,
+        categoryId: finalCatId,
         date,
         payee: payee.trim() || `Transfer : ${destName}`,
         memo: memo.trim(),
@@ -234,6 +268,7 @@ export function TransactionModal({
         status: cleared ? "c" : "u",
         flagColor: savedFlagColor,
         transferAccountId: Number(transferAccountId),
+        incomeMonth: incMonth,
       });
       return;
     }
@@ -285,7 +320,11 @@ export function TransactionModal({
     const a = Math.abs(evalAmount(amount) ?? NaN);
     if (Number.isNaN(a) || !accountId) return false;
     if (mode === "transfer") {
-      return Boolean(transferAccountId) && Number(transferAccountId) !== accountId;
+      if (!transferAccountId || Number(transferAccountId) === accountId) return false;
+      if (isBoundaryOutflow) {
+        return categoryId !== "" && categoryId !== "__deferred__" && categoryId != null;
+      }
+      return true;
     }
     if (mode === "split") {
       return Boolean(payee.trim()) && subValidation === null;
@@ -475,6 +514,43 @@ export function TransactionModal({
               </Field>
             )}
           </div>
+
+          {mode === "transfer" && isTransferBoundary && (
+            <Field label={isBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
+              <Select
+                value={categoryId}
+                onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
+                className="w-full"
+                searchable
+              >
+                {isBoundaryOutflow ? (
+                  <option value="" disabled>Select category…</option>
+                ) : (
+                  <>
+                    <option value="">Income: Available this month</option>
+                    <option value="__deferred__">Income: Available next month</option>
+                  </>
+                )}
+                {groups && groups.length > 0 ? (
+                  groups.map((g) => (
+                    <optgroup key={g.id} label={g.name}>
+                      {categories
+                        .filter((c) => c.groupId === g.id)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))
+                ) : (
+                  categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))
+                )}
+              </Select>
+            </Field>
+          )}
 
           {mode === "transfer" && (
             <Field label="Payee (auto-generated, override optional)">

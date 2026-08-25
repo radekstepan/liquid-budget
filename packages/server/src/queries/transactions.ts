@@ -258,11 +258,14 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
             incomeMonth = null;
           } else {
             categoryId = null;
-            isIncome = input.isIncome !== undefined ? Boolean(input.isIncome) : true;
-            incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
+            isIncome = true;
+            incomeMonth = input.incomeMonth ?? null;
           }
         } else {
-          categoryId = input.categoryId ?? null;
+          if (input.categoryId == null) {
+            throw new TransactionError("Boundary transfer outflow requires a category", 400);
+          }
+          categoryId = input.categoryId;
           isIncome = false;
           incomeMonth = null;
         }
@@ -368,12 +371,15 @@ export async function createTransfer(
           incomeMonth = null;
         } else {
           categoryId = null;
-          isIncome = baseInput.isIncome !== undefined ? Boolean(baseInput.isIncome) : true;
-          incomeMonth = isIncome ? (baseInput.incomeMonth ?? null) : null;
+          isIncome = true;
+          incomeMonth = baseInput.incomeMonth ?? null;
         }
       } else {
         // Outflow from budget to off-budget
-        categoryId = baseInput.categoryId ?? null;
+        if (baseInput.categoryId == null) {
+          throw new TransactionError("Boundary transfer outflow requires a category", 400);
+        }
+        categoryId = baseInput.categoryId;
         isIncome = false;
         incomeMonth = null;
       }
@@ -486,7 +492,14 @@ export async function createSplitWithChildren(
           if (netOnBudgetDelta > 0) {
             if (categoryId == null) {
               isIncome = true;
+            } else {
+              isIncome = false;
             }
+          } else {
+            if (categoryId == null) {
+              throw new TransactionError("Boundary transfer outflow requires a category", 400);
+            }
+            isIncome = false;
           }
         } else {
           categoryId = null;
@@ -669,14 +682,16 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
             p.incomeMonth = null;
           } else {
             p.categoryId = null;
-            const isIncome = "isIncome" in p ? Boolean(p.isIncome) : true;
-            p.isIncome = isIncome;
-            if (!isIncome) {
-              p.incomeMonth = null;
+            p.isIncome = true;
+            if (!("incomeMonth" in p)) {
+              p.incomeMonth = existing.incomeMonth ?? null;
             }
           }
         } else {
-          p.categoryId = finalCatId ?? null;
+          if (finalCatId == null) {
+            throw new TransactionError("Boundary transfer outflow requires a category", 400);
+          }
+          p.categoryId = finalCatId;
           p.isIncome = false;
           p.incomeMonth = null;
         }
@@ -860,7 +875,14 @@ export async function updateSplit(
           if (netOnBudgetDelta > 0) {
             if (categoryId == null) {
               isIncome = true;
+            } else {
+              isIncome = false;
             }
+          } else {
+            if (categoryId == null) {
+              throw new TransactionError("Boundary transfer outflow requires a category", 400);
+            }
+            isIncome = false;
           }
         } else {
           categoryId = null;
@@ -1205,7 +1227,10 @@ export async function bulkUpdateTransactions(
               setFields.isIncome = true;
             }
           } else {
-            setFields.categoryId = finalCatId ?? null;
+            if (finalCatId == null) {
+              throw new TransactionError("Boundary transfer outflow requires a category", 400);
+            }
+            setFields.categoryId = finalCatId;
             setFields.isIncome = false;
             setFields.incomeMonth = null;
           }
