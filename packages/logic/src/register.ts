@@ -35,6 +35,7 @@
  * database, no React.
  */
 
+import { num } from "./format.js";
 import type { Transaction } from "./types.js";
 
 export type RegisterRow = Omit<Transaction, "amount"> & {
@@ -101,7 +102,7 @@ export function computeRunningBalances(
       const isDest = r.transferAccountId === anchorAccountId;
       if (!isSource && !isDest) continue;
       runningBalanceById.set(r.id, bal);
-      const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
+      const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
       const delta = isSource ? amt : -amt;
       bal -= delta;
     }
@@ -133,7 +134,7 @@ export function computeRunningBalances(
         if (isSource) {
           runningBalanceById.set(r.id, bal);
         }
-        const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
+        const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
         const delta = isSource ? amt : -amt;
         bal -= delta;
       }
@@ -163,18 +164,10 @@ export function computeRunningBalances(
   const result: RegisterRow[] = new Array(len);
   for (let i = 0; i < len; i++) {
     const r = rows[i]!;
-    const amt = typeof r.amount === "number" ? r.amount : numSafe(r.amount);
+    const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
     const runningBalance =
       runningBalanceById.get(r.id) ?? accountBalances.get(r.accountId) ?? 0;
     result[i] = { ...r, amount: amt, runningBalance };
   }
   return result;
-}
-
-/* ---------------- internal helpers ---------------- */
-
-function numSafe(s: string | number | null | undefined): number {
-  if (s == null) return 0;
-  const n = typeof s === "number" ? Math.round(s) : parseInt(String(s), 10);
-  return Number.isNaN(n) ? 0 : n;
 }

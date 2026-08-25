@@ -1,6 +1,7 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { assertValidAmount } from "./transactions.js";
 
 export class CategoryError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -68,8 +69,8 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
         groupId: input.groupId,
         name: String(input.name ?? "New Category"),
         sort: Number(maxRow?.max ?? -1) + 1,
-        goalTarget: input.goalTarget != null ? Number(input.goalTarget) : null,
-        carryover: input.carryover != null ? Number(input.carryover) : 0,
+        goalTarget: input.goalTarget != null ? assertValidAmount(input.goalTarget) : null,
+        carryover: input.carryover != null ? assertValidAmount(input.carryover) : 0,
         overspendCarriesOver: input.overspendCarriesOver === true,
       })
       .returning();
@@ -118,9 +119,9 @@ export async function updateCategory(
   const p: Record<string, unknown> = {};
   if (patch.name != null) p.name = String(patch.name);
   if ("goalTarget" in patch) {
-    p.goalTarget = patch.goalTarget == null ? null : Number(patch.goalTarget);
+    p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget);
   }
-  if (patch.carryover != null) p.carryover = Number(patch.carryover);
+  if (patch.carryover != null) p.carryover = assertValidAmount(patch.carryover);
   if (patch.sort != null) p.sort = Number(patch.sort);
   if ("overspendCarriesOver" in patch) {
     p.overspendCarriesOver = patch.overspendCarriesOver === true;

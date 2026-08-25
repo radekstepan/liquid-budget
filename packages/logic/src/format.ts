@@ -75,9 +75,10 @@ export function num(s: string | number | null | undefined): number {
     str = str.slice(1).trim();
   }
 
-  const n = parseInt(str, 10);
-  if (Number.isNaN(n) || n === 0) return 0;
-  const finalVal = sign * n;
+  const rawNum = Number(str);
+  if (Number.isNaN(rawNum) || rawNum === 0) return 0;
+  const rounded = Math.round(rawNum);
+  const finalVal = sign * rounded;
   if (!Number.isSafeInteger(finalVal)) {
     throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
   }
