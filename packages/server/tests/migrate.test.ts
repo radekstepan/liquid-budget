@@ -96,6 +96,7 @@ describe("Drizzle migrations", () => {
 
     const recurringCols = tableInfo(ctx.raw, "recurring").map((c) => c.name);
     expect(recurringCols).toContain("transfer_account_id");
+    expect(recurringCols).toContain("anchor_day");
   });
 
   it("is idempotent — running twice does not fail or duplicate", () => {

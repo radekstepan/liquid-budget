@@ -745,6 +745,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           amount: dollarsToCents(st.amount),
           frequency,
           nextDate: st.date,
+          anchorDay: parseInt(st.date.slice(8, 10), 10),
           active: true,
           transferAccountId,
         })

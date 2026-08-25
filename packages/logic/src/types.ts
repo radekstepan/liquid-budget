@@ -145,6 +145,7 @@ export type Recurring = {
   amount: string;
   frequency: string;
   nextDate: string;
+  anchorDay?: number | null;
   active: boolean;
   transferAccountId?: number | null;
   flagColor?: TransactionFlagColor | null;
