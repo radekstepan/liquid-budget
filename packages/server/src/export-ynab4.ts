@@ -447,7 +447,14 @@ export async function exportYnab4(
           parentTransactionId: `sched-${r.id}`,
           amount: s.amount / 100,
           memo: s.memo || "",
-          categoryId: s.transferAccountId != null ? null : s.categoryId != null ? `sc-${s.categoryId}` : null,
+          categoryId:
+            s.transferAccountId != null
+              ? null
+              : s.categoryId != null
+              ? `sc-${s.categoryId}`
+              : s.amount > 0
+              ? "Category/__ImmediateIncome__"
+              : null,
           targetAccountId: s.transferAccountId != null ? `acc-${s.transferAccountId}` : undefined,
           payeeId: s.transferAccountId != null ? `Payee/Transfer:acc-${s.transferAccountId}` : undefined,
           entityType: "subTransaction",

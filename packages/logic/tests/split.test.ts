@@ -107,6 +107,15 @@ describe("validateSubTransactions", () => {
     ).toBeNull();
   });
 
+  it("returns null for a mixed-sign paycheck split with an income leg (null category)", () => {
+    expect(
+      validateSubTransactions(400000, [
+        { categoryId: null, amount: 500000 },
+        { categoryId: 2, amount: -100000 },
+      ])
+    ).toBeNull();
+  });
+
   it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
     const result = validateSubTransactions(400000, [
       { categoryId: 1, amount: 500000 },

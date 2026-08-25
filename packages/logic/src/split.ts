@@ -74,7 +74,7 @@ export function validateSubTransactions(
   if (children.length < 2) return "Add at least two sub-transactions.";
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
-    if (!c.categoryId && !c.transferAccountId) {
+    if (!c.categoryId && !c.transferAccountId && Number(c.amount) <= 0) {
       return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
     }
     if (c.categoryId && c.transferAccountId) {

@@ -530,6 +530,47 @@ describe("recurring queries", () => {
       });
     });
 
+    it("posts recurring paycheck split with an income leg (categoryId: null) setting isIncome: true", async () => {
+      const splitRecurring = {
+        id: 11,
+        accountId: 1,
+        categoryId: null,
+        payee: "Employer Inc",
+        amount: 400000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [splitRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", [
+        { id: 111, recurringId: 11, categoryId: null, amount: 500000, memo: "Gross", sort: 0, transferAccountId: null },
+        { id: 112, recurringId: 11, categoryId: 11, amount: -100000, memo: "Tax", sort: 1, transferAccountId: null },
+      ]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 110, date: "2026-07-01", amount: 400000 }]);
+      mock.respondWith("insert:transactions", [{ id: 111, amount: 500000, isIncome: true }]);
+      mock.respondWith("insert:transactions", [{ id: 112, amount: -100000, isIncome: false }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...splitRecurring, nextDate: "2026-08-01" }]);
+
+      const res = await postRecurringTransaction(mock.db, 11);
+      expect(res.nextDate).toBe("2026-08-01");
+      const subTxInserts = mock.calls.filter((c) => c.op === "insert" && c.table === "transactions").slice(1);
+      expect(subTxInserts).toHaveLength(2);
+      expect(subTxInserts[0]?.values).toMatchObject({
+        amount: 500000,
+        categoryId: null,
+        isIncome: true,
+      });
+      expect(subTxInserts[1]?.values).toMatchObject({
+        amount: -100000,
+        categoryId: 11,
+        isIncome: false,
+      });
+    });
+
     it("UNI-09 / F-05: auto-posts due recurring transactions with nextDate <= asOfDate", async () => {
       const dueRow = {
         id: 20,
