@@ -112,6 +112,20 @@ export async function deleteAccount(db: Database, id: number) {
 
   db.run(sql`BEGIN`);
   try {
+    // Check if the account contains any reconciled transactions
+    const [reconciled] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.accountId, id), eq(transactions.status, "r")))
+      .limit(1);
+
+    if (reconciled) {
+      throw new AccountError(
+        "Account contains reconciled transactions. Unreconcile before deleting.",
+        422
+      );
+    }
+
     // 1. Clean up transfer counterparty transactions where transferAccountId = id
     const counterparties = await db
       .select({
