@@ -264,6 +264,115 @@ describe("parseCsvImport", () => {
     expect(rows[2]!.error).toMatch(/Invalid date/);
     expect(rows[2]!.date).toBeNull();
   });
+
+  it("treats a single 'Payment Amount' column as a signed amount, preserving debit and credit signs", () => {
+    const csv = [
+      "Date,Payee,Payment Amount",
+      "2026-08-01,Store,-10.50",
+      "2026-08-02,Salary,500.00",
+    ].join("\n");
+    const { headerError, rows } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      payee: "Store",
+      amountCents: -1050,
+      error: null,
+    });
+    expect(rows[1]).toMatchObject({
+      payee: "Salary",
+      amountCents: 50000,
+      error: null,
+    });
+  });
+
+  it("skips 'Type of Payment' header and uses the 'Amount' column", () => {
+    const csv = [
+      "Date,Payee,Type of Payment,Amount",
+      "2026-08-01,Store,Direct Debit,-10.50",
+      "2026-08-02,Salary,Direct Deposit,500.00",
+    ].join("\n");
+    const { headerError, rows } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      payee: "Store",
+      amountCents: -1050,
+      error: null,
+    });
+    expect(rows[1]).toMatchObject({
+      payee: "Salary",
+      amountCents: 50000,
+      error: null,
+    });
+  });
+
+  it("skips headers containing 'type' or 'method'", () => {
+    const csv1 = [
+      "Date,Payee,Payment Method,Amount",
+      "2026-08-01,Store,Credit Card,-15.00",
+    ].join("\n");
+    const res1 = parseCsvImport(csv1);
+    expect(res1.headerError).toBeNull();
+    expect(res1.rows[0]!.amountCents).toBe(-1500);
+
+    const csv2 = [
+      "Date,Payee,Transaction Type,Amount",
+      "2026-08-01,Store,POS,-25.00",
+    ].join("\n");
+    const res2 = parseCsvImport(csv2);
+    expect(res2.headerError).toBeNull();
+    expect(res2.rows[0]!.amountCents).toBe(-2500);
+  });
+
+  it("keeps accounting-style negatives in Outflow columns as negative outflows", () => {
+    const csv = [
+      "Date,Payee,Outflow",
+      "2026-08-01,Store A,(28.08)",
+      "2026-08-02,Store B,-18.63",
+      "2026-08-03,Store C,25.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.amountCents).toBe(-2808);
+    expect(rows[1]!.amountCents).toBe(-1863);
+    expect(rows[2]!.amountCents).toBe(-2500);
+  });
+
+  it("falls back to amount column when outflow column cell is non-numeric text", () => {
+    const csv = [
+      "Date,Payee,Outflow,Amount",
+      "2026-08-01,Store,N/A,-10.50",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.amountCents).toBe(-1050);
+    expect(rows[0]!.error).toBeNull();
+  });
+
+  it("handles Debit Amount and Credit Amount columns", () => {
+    const csv = [
+      "Date,Payee,Debit Amount,Credit Amount",
+      "2026-08-01,Store,10.50,",
+      "2026-08-02,Salary,,500.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.amountCents).toBe(-1050);
+    expect(rows[1]!.amountCents).toBe(50000);
+  });
+
+  it("handles Payment and Deposit columns as Outflow and Inflow", () => {
+    const csv = [
+      "Date,Payee,Payment,Deposit",
+      "2026-08-01,Store,10.50,",
+      "2026-08-02,Salary,,500.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.amountCents).toBe(-1050);
+    expect(rows[1]!.amountCents).toBe(50000);
+  });
 });
 
 describe("detectDateFormat", () => {
