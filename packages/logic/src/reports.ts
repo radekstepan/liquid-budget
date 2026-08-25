@@ -215,8 +215,8 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
     if (isIncomeTransaction(t, accountMap)) {
       const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
       income = Math.round(income + incomeAmt);
-    } else if (!isInternalTransfer && netOnBudgetDelta < 0) {
-      outflow = Math.round(outflow + Math.abs(netOnBudgetDelta));
+    } else if (!isInternalTransfer) {
+      outflow = Math.round(outflow - netOnBudgetDelta);
     }
   }
 
