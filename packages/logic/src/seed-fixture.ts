@@ -8,21 +8,21 @@ export const DEMO_MONTH = "2026-06";
 // ---------------------------------------------------------------------------
 const accounts: Account[] = [
   // On-budget: liquid
-  { id: 1,  name: "TD Unlimited Chequing", kind: "liquid",    groupLabel: "Budget Accounts", balance: "1087555",   onBudget: true,  sort: 0 },
-  { id: 2,  name: "EQ Bank",               kind: "liquid",    groupLabel: "Budget Accounts", balance: "10383079",  onBudget: true,  sort: 1 },
+  { id: 1,  name: "TD Unlimited Chequing", kind: "liquid",    groupLabel: "Budget Accounts", balance: "-805319",   onBudget: true,  sort: 0 },
+  { id: 2,  name: "EQ Bank",               kind: "liquid",    groupLabel: "Budget Accounts", balance: "12454286",  onBudget: true,  sort: 1 },
   { id: 3,  name: "Scotia e-Chequing",     kind: "liquid",    groupLabel: "Budget Accounts", balance: "45823",     onBudget: true,  sort: 2 },
   { id: 4,  name: "Cash",                  kind: "liquid",    groupLabel: "Budget Accounts", balance: "11605",     onBudget: true,  sort: 3 },
   // On-budget: credit cards
-  { id: 5,  name: "AMEX Cobalt",           kind: "credit",    groupLabel: "Credit Cards",    balance: "-389784",   onBudget: true,  sort: 4 },
+  { id: 5,  name: "AMEX Cobalt",           kind: "credit",    groupLabel: "Credit Cards",    balance: "-103774",   onBudget: true,  sort: 4 },
   { id: 6,  name: "Scotia Passport Visa",  kind: "credit",    groupLabel: "Credit Cards",    balance: "-10348",    onBudget: true,  sort: 5 },
   { id: 7,  name: "Rogers World Elite MC", kind: "credit",    groupLabel: "Credit Cards",    balance: "0",         onBudget: true,  sort: 6 },
   { id: 8,  name: "Capital One Aspire MC", kind: "credit",    groupLabel: "Credit Cards",    balance: "0",         onBudget: true,  sort: 7 },
   // Tracking (reimbursement)
-  { id: 9,  name: "Susie",                 kind: "liquid",    groupLabel: "Tracking",        balance: "-67428",    onBudget: true,  sort: 8 },
+  { id: 9,  name: "Susie",                 kind: "liquid",    groupLabel: "Tracking",        balance: "-25116",    onBudget: true,  sort: 8 },
   { id: 10, name: "Parents",               kind: "liquid",    groupLabel: "Tracking",        balance: "373535",    onBudget: true,  sort: 9 },
   // Off-budget: investments
   { id: 11, name: "Wealthsimple Trade",    kind: "offbudget", groupLabel: "Investments",     balance: "0",         onBudget: false, sort: 10 },
-  { id: 12, name: "Wealthsimple TFSA",     kind: "offbudget", groupLabel: "Investments",     balance: "15367437",  onBudget: false, sort: 11 },
+  { id: 12, name: "Wealthsimple TFSA",     kind: "offbudget", groupLabel: "Investments",     balance: "15412987",  onBudget: false, sort: 11 },
   { id: 13, name: "Wealthsimple RRSP",     kind: "offbudget", groupLabel: "Investments",     balance: "19670022",  onBudget: false, sort: 12 },
   { id: 14, name: "Manulife GRSP",         kind: "offbudget", groupLabel: "Investments",     balance: "9921386",   onBudget: false, sort: 13 },
   { id: 15, name: "EquatePlus SAP",        kind: "offbudget", groupLabel: "Investments",     balance: "235741",    onBudget: false, sort: 14 },
@@ -198,6 +198,14 @@ const _aidMap: Record<string, number> = {
   "Capital One Aspire MC": 8,
   "Susie":                 9,
   "Parents":               10,
+  "Wealthsimple Trade":    11,
+  "Wealthsimple TFSA":     12,
+  "Wealthsimple RRSP":     13,
+  "Manulife GRSP":         14,
+  "EquatePlus SAP":        15,
+  "British Airways Credit":16,
+  "Home Value":            17,
+  "Mortgage Debt":         18,
 };
 
 const aid = (name: string): number => {
@@ -207,6 +215,23 @@ const aid = (name: string): number => {
 };
 
 const transactions: Transaction[] = [
+  // ── Starting Balances (2026-04-01) ──────────────────────────────────────────
+  T(aid("TD Unlimited Chequing"), null,                         "2026-04-01", "Starting Balance",         "1087555", "Opening balance", "r", true),
+  T(aid("EQ Bank"),               null,                         "2026-04-01", "Starting Balance",         "10383079","Opening balance", "c", true),
+  T(aid("Scotia e-Chequing"),     null,                         "2026-04-01", "Starting Balance",         "45823",   "Opening balance", "c", true),
+  T(aid("Cash"),                  null,                         "2026-04-01", "Starting Balance",         "11605",   "Opening balance", "c", true),
+  T(aid("AMEX Cobalt"),           null,                         "2026-04-01", "Starting Balance",         "-389784", "Opening balance", "c", false),
+  T(aid("Scotia Passport Visa"),  null,                         "2026-04-01", "Starting Balance",         "-10348",  "Opening balance", "c", false),
+  T(aid("Susie"),                 null,                         "2026-04-01", "Starting Balance",         "-67428",  "Opening balance", "c", false),
+  T(aid("Parents"),               null,                         "2026-04-01", "Starting Balance",         "373535",  "Opening balance", "c", true),
+  T(aid("Wealthsimple TFSA"),     null,                         "2026-04-01", "Starting Balance",         "15367437","Opening balance", "c", false),
+  T(aid("Wealthsimple RRSP"),     null,                         "2026-04-01", "Starting Balance",         "19670022","Opening balance", "c", false),
+  T(aid("Manulife GRSP"),         null,                         "2026-04-01", "Starting Balance",         "9921386", "Opening balance", "c", false),
+  T(aid("EquatePlus SAP"),        null,                         "2026-04-01", "Starting Balance",         "235741",  "Opening balance", "c", false),
+  T(aid("British Airways Credit"),null,                         "2026-04-01", "Starting Balance",         "35700",   "Opening balance", "c", false),
+  T(aid("Home Value"),            null,                         "2026-04-01", "Starting Balance",         "97900000","Opening balance", "c", false),
+  T(aid("Mortgage Debt"),         null,                         "2026-04-01", "Starting Balance",         "-66025355","Opening balance", "c", false),
+
   // ── April 2026 ────────────────────────────────────────────────────────────
   T(aid("EQ Bank"),               null,                         "2026-04-15", "SAP Concur",               "442865",  "Income for April", "c", true),
   T(aid("EQ Bank"),               null,                         "2026-04-29", "SAP Concur",               "442865",  "Income for April", "c", true),

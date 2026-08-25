@@ -64,7 +64,7 @@ describe("TransactionsView", () => {
     const firstRow = within(tbody).getAllByRole("row")[0]!;
     const cells = within(firstRow).getAllByRole("cell");
     const balanceCell = cells[cells.length - 1]!;
-    expect(balanceCell.textContent).toBe("$10,875.55");
+    expect(balanceCell.textContent).toBe("-$8,053.19");
   });
 
   it("does not render subtransactions in the list and shows Split (Multiple Categories) for split parent", () => {

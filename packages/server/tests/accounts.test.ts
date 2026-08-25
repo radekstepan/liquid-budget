@@ -88,11 +88,57 @@ describe("accounts queries", () => {
       const row = await createAccount(mock.db, { name: "Old", archived: true });
       expect(row).toMatchObject({ id: 2, archived: true });
 
-      const insertCall = mock.calls.find((c) => c.op === "insert");
+      const insertCall = mock.calls.find((c) => c.op === "insert" && c.table === "accounts");
       expect(insertCall?.values).toMatchObject({
         name: "Old",
         archived: true,
       });
+    });
+
+    it("inserts a Starting Balance transaction when balance is non-zero (BUG 6.1)", async () => {
+      mock.respondWith("select:accounts", [{ max: null }]);
+      mock.respondWith("insert:accounts", [{ id: 42, sort: 0, balance: 50000 }]);
+
+      await createAccount(mock.db, { name: "Checking", kind: "liquid", balance: 50000, onBudget: true });
+
+      const txInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(txInsert).toBeDefined();
+      expect(txInsert?.values).toMatchObject({
+        accountId: 42,
+        categoryId: null,
+        payee: "Starting Balance",
+        amount: 50000,
+        status: "c",
+        isIncome: true,
+      });
+    });
+
+    it("sets isIncome to false for credit accounts with negative starting balance (BUG 6.1)", async () => {
+      mock.respondWith("select:accounts", [{ max: null }]);
+      mock.respondWith("insert:accounts", [{ id: 43, sort: 0, balance: -15000 }]);
+
+      await createAccount(mock.db, { name: "Visa", kind: "credit", balance: -15000, onBudget: true });
+
+      const txInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(txInsert).toBeDefined();
+      expect(txInsert?.values).toMatchObject({
+        accountId: 43,
+        categoryId: null,
+        payee: "Starting Balance",
+        amount: -15000,
+        status: "c",
+        isIncome: false,
+      });
+    });
+
+    it("does not insert a Starting Balance transaction when balance is 0 or omitted", async () => {
+      mock.respondWith("select:accounts", [{ max: null }]);
+      mock.respondWith("insert:accounts", [{ id: 44, sort: 0, balance: 0 }]);
+
+      await createAccount(mock.db, { name: "Empty", kind: "liquid" });
+
+      const txInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(txInsert).toBeUndefined();
     });
   });
 
@@ -185,6 +231,40 @@ describe("accounts queries", () => {
 
       const updateCalls = mock.calls.filter((c) => c.op === "update");
       expect(updateCalls.some((c) => c.table === "accounts")).toBe(true);
+    });
+  });
+
+  describe("createAccount (SQLite integration)", () => {
+    let db: Db;
+    beforeEach(() => {
+      db = openMigratedDb();
+    });
+
+    it("creates an account and an explicit Starting Balance transaction in SQLite", async () => {
+      const acct = await createAccount(db, {
+        name: "TD Checking",
+        kind: "liquid",
+        balance: 1087555,
+        onBudget: true,
+      });
+
+      expect(acct.id).toBeDefined();
+      expect(acct.balance).toBe(1087555);
+
+      const txs = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+
+      expect(txs).toHaveLength(1);
+      expect(txs[0]!.payee).toBe("Starting Balance");
+      expect(txs[0]!.amount).toBe(1087555);
+      expect(txs[0]!.status).toBe("c");
+      expect(txs[0]!.isIncome).toBe(true);
+      expect(txs[0]!.categoryId).toBeNull();
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
     });
   });
 

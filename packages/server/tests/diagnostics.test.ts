@@ -15,6 +15,8 @@ import {
   verifyBalanceIntegrity,
   verifyBudgetIntegrity,
   recomputeAccountBalances,
+  seedDatabase,
+  getBudgetData,
 } from "../src/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -117,9 +119,39 @@ describe("diagnostics queries", () => {
         difference: 49999,
       });
     });
+
+    it("reports zero issues for a freshly seeded database (BUG 6.1)", async () => {
+      await seedDatabase(db);
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("maintains balance integrity when creating accounts with starting balances (BUG 6.1)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", balance: 100000 });
+      const credit = await createAccount(db, { name: "Credit Card", kind: "credit", balance: -25000 });
+      const offbudget = await createAccount(db, { name: "Investment", kind: "offbudget", balance: 500000, onBudget: false });
+
+      expect(checking.balance).toBe(100000);
+      expect(credit.balance).toBe(-25000);
+      expect(offbudget.balance).toBe(500000);
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
   });
 
   describe("recomputeAccountBalances", () => {
+    it("does not alter or destroy balances on a freshly seeded database (BUG 6.1)", async () => {
+      await seedDatabase(db);
+      const dataBefore = await getBudgetData(db);
+      const result = await recomputeAccountBalances(db);
+      expect(result.updatedCount).toBe(0);
+
+      const dataAfter = await getBudgetData(db);
+      expect(dataAfter.accounts.map((a) => ({ id: a.id, name: a.name, balance: a.balance })))
+        .toEqual(dataBefore.accounts.map((a) => ({ id: a.id, name: a.name, balance: a.balance })));
+    });
+
     it("repairs drifted balances back to computed transaction sums", async () => {
       const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
 

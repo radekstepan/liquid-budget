@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { accounts, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
@@ -30,6 +31,7 @@ export type UpdateAccountInput = {
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
   const balance = input.balance != null ? assertValidAmount(input.balance) : 0;
+  const onBudget = input.onBudget ?? true;
   db.run(sql`BEGIN`);
   try {
     const [maxRow] = await db
@@ -42,11 +44,30 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
         kind: String(input.kind ?? "liquid"),
         groupLabel: String(input.groupLabel ?? "Liquid"),
         balance,
-        onBudget: input.onBudget ?? true,
+        onBudget,
         sort: Number(maxRow?.max ?? -1) + 1,
         archived: input.archived ?? false,
       })
       .returning();
+    if (!row) {
+      throw new AccountError("Failed to create account");
+    }
+
+    if (balance !== 0) {
+      await db.insert(transactions).values({
+        accountId: row.id,
+        categoryId: null,
+        date: todayISO(),
+        payee: "Starting Balance",
+        memo: "",
+        amount: balance,
+        status: "c",
+        isIncome: onBudget && balance > 0,
+        transferAccountId: null,
+        parentId: null,
+      });
+    }
+
     db.run(sql`COMMIT`);
     return row;
   } catch (err) {
