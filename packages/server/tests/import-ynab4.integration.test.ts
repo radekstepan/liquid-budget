@@ -132,6 +132,14 @@ const ynabData = {
       monthlySubCategoryBudgets: [
         { categoryId: "sc1", budgeted: 500 },
         { categoryId: "sc2", budgeted: 0 },
+        { categoryId: "sc1", budgeted: 999, isTombstone: true },
+      ],
+    },
+    {
+      month: "2026-07-01",
+      isTombstone: true,
+      monthlySubCategoryBudgets: [
+        { categoryId: "sc1", budgeted: 999 },
       ],
     },
   ],
@@ -284,7 +292,7 @@ describe("importYnab4 full import", () => {
     expect(splitChildren.some((c) => c.categoryId === null)).toBe(true);
   });
 
-  it("imports assignments only for non-zero budgeted amounts", async () => {
+  it("imports assignments only for non-zero budgeted amounts and ignores tombstones", async () => {
     await importYnab4(db, ynabData);
     const { assignments } = await getBudgetData(db);
     expect(assignments).toHaveLength(1);

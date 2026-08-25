@@ -243,10 +243,12 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     // 4. Insert Assignments (Monthly Budgets)
     for (const mb of yBudgets) {
+      if (mb.isTombstone) continue;
       if (!mb.monthlySubCategoryBudgets) continue;
       const month = mb.month.substring(0, 7); // Convert "2014-08-01" -> "2014-08"
 
       for (const msb of mb.monthlySubCategoryBudgets) {
+        if (msb.isTombstone) continue;
         if (msb.budgeted !== 0 && msb.budgeted != null) {
           const catId = categoryIdMap.get(msb.categoryId);
           if (catId) {
