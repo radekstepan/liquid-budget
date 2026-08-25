@@ -212,5 +212,68 @@ describe("diagnostics queries", () => {
       expect(report.totalCategoryAvailable).toBe(0);
       expect(report.difference).toBe(0);
     });
+
+    it("does not false-positive on deferred income (BUG 6.2)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true });
+
+      // Paycheck received on 2026-08-30 deferred to 2026-09
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: null,
+        date: "2026-08-30",
+        payee: "Acme Corp",
+        memo: "August Paycheck",
+        amount: 300000,
+        isIncome: true,
+        incomeMonth: "2026-09",
+      });
+
+      const report = await verifyBudgetIntegrity(db);
+      expect(report.totalOnBudgetAccountBalance).toBe(300000);
+      expect(report.tbb).toBe(300000);
+      expect(report.totalCategoryAvailable).toBe(0);
+      expect(report.difference).toBe(0);
+      expect(report.month >= "2026-09").toBe(true);
+    });
+
+    it("does not false-positive on future-dated transactions and assignments (BUG 6.2)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [cat] = await db.insert(schema.categories).values({ groupId: group.id, name: "Rent", sort: 0 }).returning();
+
+      // Opening deposit in August
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 500000,
+      });
+
+      // Post-dated transaction in 2028-10
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: cat.id,
+        date: "2028-10-01",
+        payee: "Landlord",
+        memo: "Future rent payment",
+        amount: -200000,
+      });
+
+      // Future assignment in 2028-10
+      await db.insert(schema.assignments).values({
+        categoryId: cat.id,
+        month: "2028-10",
+        amount: 200000,
+      });
+
+      const report = await verifyBudgetIntegrity(db);
+      expect(report.totalOnBudgetAccountBalance).toBe(300000);
+      expect(report.totalCategoryAvailable).toBe(0);
+      expect(report.tbb).toBe(300000);
+      expect(report.difference).toBe(0);
+      expect(report.month).toBe("2028-10");
+    });
   });
 });
