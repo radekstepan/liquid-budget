@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+    env: {
+      DATABASE_URL: ":memory:",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
