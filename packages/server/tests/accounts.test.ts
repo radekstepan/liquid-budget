@@ -195,6 +195,7 @@ describe("accounts queries", () => {
   describe("deleteAccount", () => {
     it("UNI-07 / F-04: cleans up transfer counterparties, recurring links, and linked categories atomically", async () => {
       mock.respondWithNth("select:accounts", 1, [{ id: 5, name: "Checking" }]);
+      mock.respondWithNth("select:transactions", 1, []);
       mock.respondWith("select:transactions", [
         { id: 101, accountId: 2, amount: -5000, parentId: null },
       ]);
@@ -229,8 +230,9 @@ describe("accounts queries", () => {
 
     it("reverses balance effects for own outgoing transfers on other accounts", async () => {
       mock.respondWithNth("select:accounts", 1, [{ id: 1, name: "Checking" }]);
-      mock.respondWithNth("select:transactions", 1, []); // no counterparties where transferAccountId = 1
-      mock.respondWithNth("select:transactions", 2, [
+      mock.respondWithNth("select:transactions", 1, []); // no reconciled transactions on account 1
+      mock.respondWithNth("select:transactions", 2, []); // no counterparties where transferAccountId = 1
+      mock.respondWithNth("select:transactions", 3, [
         { id: 201, transferAccountId: 2, amount: -10000 },
       ]);
 
@@ -239,6 +241,17 @@ describe("accounts queries", () => {
 
       const updateCalls = mock.calls.filter((c) => c.op === "update");
       expect(updateCalls.some((c) => c.table === "accounts")).toBe(true);
+    });
+
+    it("BUG-08: refuses to delete account when own transactions are reconciled", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ id: 1, name: "Checking" }]);
+      mock.respondWithNth("select:transactions", 1, [{ id: 42, status: "r" }]);
+
+      await expect(deleteAccount(mock.db, 1)).rejects.toMatchObject({
+        name: "AccountError",
+        status: 422,
+        message: "Account contains reconciled transactions. Unreconcile before deleting.",
+      });
     });
   });
 
@@ -865,6 +878,94 @@ describe("accounts queries", () => {
       await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
 
       expect(await getAccount(db, acctB.id)).toBeDefined();
+    });
+
+    it("BUG-08: refuses to delete account when own standalone transaction is reconciled", async () => {
+      const acct = await createAccount(db, { name: "Checking" });
+      const tx = await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Test Payee",
+        memo: "",
+        amount: -5000,
+      });
+
+      // Mark transaction reconciled
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, tx.id));
+
+      await expect(deleteAccount(db, acct.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acct.id)).rejects.toMatchObject({
+        status: 422,
+        message: "Account contains reconciled transactions. Unreconcile before deleting.",
+      });
+
+      // Account still exists
+      expect(await getAccount(db, acct.id)).toBeDefined();
+    });
+
+    it("BUG-08: refuses to delete account when own split child is reconciled", async () => {
+      const acct = await createAccount(db, { name: "Checking" });
+      const group = await createCategoryGroup(db, "General");
+      const cat1 = await createCategory(db, { name: "Groceries", groupId: group.id });
+      const cat2 = await createCategory(db, { name: "Household", groupId: group.id });
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-08-01",
+          payee: "Grocery Store",
+          memo: "",
+          amount: -5000,
+        },
+        [
+          { categoryId: cat1.id, amount: -3000, memo: "food" },
+          { categoryId: cat2.id, amount: -2000, memo: "supplies" },
+        ]
+      );
+
+      // Reconcile child
+      await db
+        .update(schema.transactions)
+        .set({ status: "r" })
+        .where(eq(schema.transactions.id, split.children[0]!.id));
+
+      await expect(deleteAccount(db, acct.id)).rejects.toThrow(AccountError);
+      await expect(deleteAccount(db, acct.id)).rejects.toMatchObject({
+        status: 422,
+        message: "Account contains reconciled transactions. Unreconcile before deleting.",
+      });
+
+      expect(await getAccount(db, acct.id)).toBeDefined();
+    });
+
+    it("BUG-08: allows deleting account when transactions exist but none are reconciled", async () => {
+      const acct = await createAccount(db, { name: "Checking" });
+      await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Cleared Transaction",
+        memo: "",
+        amount: -5000,
+        status: "c",
+      });
+      await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-08-02",
+        payee: "Uncleared Transaction",
+        memo: "",
+        amount: -2500,
+        status: "u",
+      });
+
+      await deleteAccount(db, acct.id);
+      expect(await getAccount(db, acct.id)).toBeUndefined();
     });
   });
 
