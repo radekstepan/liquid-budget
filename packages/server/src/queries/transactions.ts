@@ -743,6 +743,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         .where(eq(transactions.parentId, id));
     }
 
+    // If this row is a split parent and status changed, propagate status to children
+    if (isSplitParent && "status" in p && p.status != null) {
+      await db
+        .update(transactions)
+        .set({ status: p.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
+        .where(eq(transactions.parentId, id));
+    }
+
     // If this row is a child of a split, verify that the parent is still balanced
     if (existing.parentId != null) {
       const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));

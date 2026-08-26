@@ -112,28 +112,28 @@ export async function reconcileAccount(
   input: ReconcileInput
 ): Promise<ReconcileResult> {
   const statementDate = input.statementDate ?? todayISO();
-  const state = await getReconcileState(db, input.accountId, statementDate);
-  const diff = state.workingBalance - input.statementBalance;
-
-  if (diff !== 0) {
-    if (input.adjustmentCategoryId == null) {
-      throw new TransactionError(
-        "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
-        422
-      );
-    }
-    const [cat] = await db
-      .select()
-      .from(categories)
-      .where(eq(categories.id, input.adjustmentCategoryId));
-    if (!cat) {
-      throw new TransactionError("Invalid adjustment category", 422);
-    }
-  }
-
   const today = todayISO();
 
   return withTransaction(db, async () => {
+    const state = await getReconcileState(db, input.accountId, statementDate);
+    const diff = state.workingBalance - input.statementBalance;
+
+    if (diff !== 0) {
+      if (input.adjustmentCategoryId == null) {
+        throw new TransactionError(
+          "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
+          422
+        );
+      }
+      const [cat] = await db
+        .select()
+        .from(categories)
+        .where(eq(categories.id, input.adjustmentCategoryId));
+      if (!cat) {
+        throw new TransactionError("Invalid adjustment category", 422);
+      }
+    }
+
     const [rec] = await db
       .insert(reconciliations)
       .values({
@@ -161,6 +161,7 @@ export async function reconcileAccount(
     }
 
     // Flip every Cleared row in the account dated on or before statementDate to Reconciled.
+    // Exclude split parents so only balance-contributing child transactions are counted and flipped.
     const flip = await db
       .update(transactions)
       .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
@@ -171,7 +172,8 @@ export async function reconcileAccount(
             eq(transactions.transferAccountId, input.accountId)
           ),
           eq(transactions.status, "c"),
-          sql`${transactions.date} <= ${statementDate}`
+          sql`${transactions.date} <= ${statementDate}`,
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
         )
       )
       .returning({ id: transactions.id });
@@ -232,22 +234,22 @@ export async function unreconcileAccount(
   db: Database,
   accountId: number
 ): Promise<{ flipped: number; deletedAdjustmentId: number | null }> {
-  const [acct] = await db.select().from(accounts).where(eq(accounts.id, accountId));
-  if (!acct) {
-    throw new TransactionError(`Account ${accountId} not found`, 404);
-  }
-  if (!acct.lastReconciledAt) {
-    throw new TransactionError("This account has never been reconciled", 404);
-  }
-
-  const [lastRec] = await db
-    .select()
-    .from(reconciliations)
-    .where(eq(reconciliations.accountId, accountId))
-    .orderBy(desc(reconciliations.id))
-    .limit(1);
-
   return withTransaction(db, async () => {
+    const [acct] = await db.select().from(accounts).where(eq(accounts.id, accountId));
+    if (!acct) {
+      throw new TransactionError(`Account ${accountId} not found`, 404);
+    }
+    if (!acct.lastReconciledAt) {
+      throw new TransactionError("This account has never been reconciled", 404);
+    }
+
+    const [lastRec] = await db
+      .select()
+      .from(reconciliations)
+      .where(eq(reconciliations.accountId, accountId))
+      .orderBy(desc(reconciliations.id))
+      .limit(1);
+
     let flippedCount = 0;
     let deletedAdjustmentId: number | null = null;
 
@@ -262,7 +264,8 @@ export async function unreconcileAccount(
               eq(transactions.transferAccountId, accountId)
             ),
             eq(transactions.status, "r"),
-            eq(transactions.reconciliationId, lastRec.id)
+            eq(transactions.reconciliationId, lastRec.id),
+            sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
           )
         )
         .returning({ id: transactions.id });
@@ -311,7 +314,8 @@ export async function unreconcileAccount(
               eq(transactions.transferAccountId, accountId)
             ),
             eq(transactions.status, "r"),
-            sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
+            sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
+            sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
           )
         )
         .returning({ id: transactions.id });
