@@ -460,6 +460,10 @@ export async function postRecurringTransaction(
   return withTransaction(db, async () => {
     const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
     if (!r) throw new RecurringError("Recurring transaction not found", 404);
+    if (!r.active) throw new RecurringError("Recurring transaction is inactive", 400);
+    if (postDate && postDate < r.nextDate) {
+      throw new RecurringError(`Recurring transaction occurrence for ${postDate} has already been posted`, 409);
+    }
 
     const dateToUse = postDate || r.nextDate;
     const children = await db
@@ -522,7 +526,21 @@ export async function postRecurringTransaction(
     if (isOneOff) {
       updatePayload.active = false;
     }
-    await db.update(recurring).set(updatePayload).where(eq(recurring.id, r.id));
+    const [updated] = await db
+      .update(recurring)
+      .set(updatePayload)
+      .where(
+        and(
+          eq(recurring.id, r.id),
+          eq(recurring.nextDate, r.nextDate),
+          eq(recurring.active, true)
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      throw new RecurringError("Recurring transaction schedule mismatch or inactive", 409);
+    }
 
     return { transaction: postedTxn, nextDate: next, active: isOneOff ? false : r.active };
   });
@@ -535,22 +553,24 @@ export async function autoPostDueRecurringTransactions(
   db: Database,
   asOfDate: string = todayISO()
 ) {
-  const due = await db
-    .select()
-    .from(recurring)
-    .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${asOfDate}`));
+  return withTransaction(db, async () => {
+    const due = await db
+      .select()
+      .from(recurring)
+      .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${asOfDate}`));
 
-  const posted = [];
-  for (const r of due) {
-    let currentNextDate = r.nextDate;
-    while (currentNextDate <= asOfDate) {
-      const res = await postRecurringTransaction(db, r.id, currentNextDate);
-      posted.push(res.transaction);
-      if (!res.active || res.nextDate <= currentNextDate) break;
-      currentNextDate = res.nextDate;
+    const posted = [];
+    for (const r of due) {
+      let currentNextDate = r.nextDate;
+      while (currentNextDate <= asOfDate) {
+        const res = await postRecurringTransaction(db, r.id, currentNextDate);
+        posted.push(res.transaction);
+        if (!res.active || res.nextDate <= currentNextDate) break;
+        currentNextDate = res.nextDate;
+      }
     }
-  }
-  return posted;
+    return posted;
+  });
 }
 
 export const createRecurringTransaction = createRecurring;

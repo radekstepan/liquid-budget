@@ -1116,5 +1116,58 @@ describe("recurring queries", () => {
       const res4 = await postRecurringTransaction(mock.db, 61);
       expect(res4.nextDate).toBe("2026-03-28");
     });
+
+    it("rejects posting an inactive recurring transaction with 400 (BUG-04)", async () => {
+      const inactiveRow = {
+        id: 70,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Old Subscription",
+        amount: -1000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: false,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [inactiveRow]);
+
+      await expect(
+        postRecurringTransaction(mock.db, 70)
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Recurring transaction is inactive",
+        status: 400,
+      });
+    });
+
+    it("rejects with 409 conflict when CAS update matches 0 rows (BUG-04)", async () => {
+      const activeRow = {
+        id: 71,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Gym Membership",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [activeRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 701, date: "2026-07-01", amount: -5000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      // Return empty array to simulate CAS failure (0 rows updated)
+      mock.respondWith("update:recurring", []);
+
+      await expect(
+        postRecurringTransaction(mock.db, 71)
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Recurring transaction schedule mismatch or inactive",
+        status: 409,
+      });
+    });
   });
 });
+

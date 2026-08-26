@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 import {
+  autoPostDueRecurringTransactions,
   createAccount,
   createCategory,
   createCategoryGroup,
@@ -18,6 +19,7 @@ import {
   postRecurringTransaction,
   upsertAssignment,
   withTransaction,
+  RecurringError,
   TransactionError,
 } from "../src/index.js";
 
@@ -264,4 +266,203 @@ describe("SQLite transaction concurrency & serialization", () => {
     const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
     expect(freshAcct?.balance).toBe(44200);
   });
+
+  it("prevents duplicate ledger rows on concurrent postRecurringTransaction for the same occurrence (BUG-04)", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 10000, onBudget: true });
+    const grp = await createCategoryGroup(db, { name: "Bills" });
+    const cat = await createCategory(db, { groupId: grp.id, name: "Subscriptions" });
+
+    const rec = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Streaming Service",
+      amount: -1500,
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+    });
+
+    // Launch two simultaneous postRecurringTransaction calls for the same occurrence date
+    const [res1, res2] = await Promise.allSettled([
+      postRecurringTransaction(db, rec.id, "2026-07-01"),
+      postRecurringTransaction(db, rec.id, "2026-07-01"),
+    ]);
+
+    const fulfilled = [res1, res2].filter((r) => r.status === "fulfilled");
+    const rejected = [res1, res2].filter((r) => r.status === "rejected");
+
+    // Exactly one should succeed, and one should fail with 409 conflict
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      name: "RecurringError",
+      status: 409,
+    });
+
+    // Verify exactly ONE non-starting transaction was created for the recurring post
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    // 1 starting balance row + 1 posted recurring row = 2 total
+    expect(txRows).toHaveLength(2);
+    const postedTx = txRows.find((t) => t.payee === "Streaming Service");
+    expect(postedTx).toBeDefined();
+    expect(postedTx?.amount).toBe(-1500);
+
+    // Balance: 10,000 - 1,500 = 8,500 (NOT double-deducted)
+    const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+    expect(freshAcct?.balance).toBe(8500);
+
+    // Schedule should be advanced exactly once
+    const [freshRec] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec.id));
+    expect(freshRec?.nextDate).toBe("2026-08-01");
+  });
+
+  it("prevents double execution on concurrent postRecurringTransaction for one-off transactions (BUG-04)", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 10000, onBudget: true });
+    const grp = await createCategoryGroup(db, { name: "Bills" });
+    const cat = await createCategory(db, { groupId: grp.id, name: "Repairs" });
+
+    const rec = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Plumber",
+      amount: -8000,
+      frequency: "never",
+      nextDate: "2026-07-01",
+    });
+
+    // Launch two simultaneous postRecurringTransaction calls
+    const [res1, res2] = await Promise.allSettled([
+      postRecurringTransaction(db, rec.id),
+      postRecurringTransaction(db, rec.id),
+    ]);
+
+    const fulfilled = [res1, res2].filter((r) => r.status === "fulfilled");
+    const rejected = [res1, res2].filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      name: "RecurringError",
+      status: 400,
+      message: "Recurring transaction is inactive",
+    });
+
+    // Verify exactly ONE transaction was created
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    expect(txRows).toHaveLength(2);
+
+    // Balance: 10,000 - 8,000 = 2,000
+    const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+    expect(freshAcct?.balance).toBe(2000);
+
+    // Rec should now be inactive
+    const [freshRec] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec.id));
+    expect(freshRec?.active).toBe(false);
+  });
+
+  it("rejects postRecurringTransaction on inactive recurring rows (BUG-04)", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 10000, onBudget: true });
+    const grp = await createCategoryGroup(db, { name: "Bills" });
+    const cat = await createCategory(db, { groupId: grp.id, name: "Gym" });
+
+    const rec = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Old Gym",
+      amount: -3000,
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+      active: false,
+    });
+
+    await expect(
+      postRecurringTransaction(db, rec.id)
+    ).rejects.toMatchObject({
+      name: "RecurringError",
+      message: "Recurring transaction is inactive",
+      status: 400,
+    });
+
+    // Verify no transaction was created
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    // Only starting balance row
+    expect(txRows).toHaveLength(1);
+    expect(txRows[0]?.payee).toBe("Starting Balance");
+  });
+
+  it("rolls back the entire batch if any item fails during autoPostDueRecurringTransactions (BUG-04, BUG-53)", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 50000, onBudget: true });
+    const grp = await createCategoryGroup(db, { name: "Bills" });
+    const cat = await createCategory(db, { groupId: grp.id, name: "Services" });
+
+    // Item 1: Valid
+    const rec1 = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Valid Bill 1",
+      amount: -1000,
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+    });
+
+    // Item 2: Invalid (will fail at post time because transfer destination is same as source)
+    // We insert directly into schema.recurring bypassing initial createRecurring validation to simulate corrupted data
+    const [rec2] = await db
+      .insert(schema.recurring)
+      .values({
+        accountId: acct.id,
+        categoryId: null,
+        payee: "Invalid Transfer",
+        memo: "",
+        amount: -2000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        anchorDay: 1,
+        active: true,
+        transferAccountId: acct.id, // invalid: same account
+      })
+      .returning();
+
+    // Item 3: Valid
+    const rec3 = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Valid Bill 3",
+      amount: -3000,
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+    });
+
+    // Attempt auto-posting due items
+    await expect(
+      autoPostDueRecurringTransactions(db, "2026-07-05")
+    ).rejects.toThrow();
+
+    // Verify all transactions in the batch were rolled back (only starting balance remains)
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    expect(txRows).toHaveLength(1);
+    expect(txRows[0]?.payee).toBe("Starting Balance");
+
+    // Balance should remain unchanged (50,000)
+    const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+    expect(freshAcct?.balance).toBe(50000);
+
+    // Schedules of rec1 and rec3 should NOT be advanced
+    const [freshRec1] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec1.id));
+    expect(freshRec1?.nextDate).toBe("2026-07-01");
+    const [freshRec3] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec3.id));
+    expect(freshRec3?.nextDate).toBe("2026-07-01");
+  });
 });
+
