@@ -594,7 +594,7 @@ describe("computeBudget", () => {
       expect(indexedCcRow.available).toBe(10000);
     });
 
-    it("cash advance from CC to checking does not draw down CC buffer (Issue 1.1)", () => {
+    it("cash advance from CC to checking increases CC buffer to back new debt with liquid cash [BUG-20]", () => {
       // 1. Recorded as inflow in Checking from Visa: accountId=1, transferAccountId=2, amount=+10000
       const dataInflow = ccData();
       dataInflow.transactions.push({
@@ -612,8 +612,15 @@ describe("computeBudget", () => {
       const ccRowInflow = resultInflow.groups
         .flatMap((g) => g.rows)
         .find((r) => r.category.name === "Visa Payment")!;
-      expect(ccRowInflow.ccBuffer).toBe(20000);
-      expect(ccRowInflow.available).toBe(25000);
+      // Buffer = funded spending (20000) + cash advance (10000) = 30000
+      expect(ccRowInflow.ccBuffer).toBe(30000);
+      expect(ccRowInflow.available).toBe(35000); // 5000 assigned + 30000 buffer
+
+      // Verify budget integrity invariant: Checking liquid cash = Envelopes + CC Payment Available + TBB
+      // Checking cash = 300000 (Payroll) + 10000 (Cash advance) = 310000
+      const checkingCashInflow = 310000;
+      const totalCatAvailableInflow = resultInflow.groups.reduce((s, g) => s + g.available, 0); // 20000 (Groceries) + 35000 (Visa Payment) = 55000
+      expect(checkingCashInflow - totalCatAvailableInflow - resultInflow.tbb).toBe(0);
 
       // 2. Recorded as outflow in Visa to Checking: accountId=2, transferAccountId=1, amount=-10000
       const dataOutflow = ccData();
@@ -632,8 +639,66 @@ describe("computeBudget", () => {
       const ccRowOutflow = resultOutflow.groups
         .flatMap((g) => g.rows)
         .find((r) => r.category.name === "Visa Payment")!;
-      expect(ccRowOutflow.ccBuffer).toBe(20000);
-      expect(ccRowOutflow.available).toBe(25000);
+      expect(ccRowOutflow.ccBuffer).toBe(30000);
+      expect(ccRowOutflow.available).toBe(35000);
+
+      const checkingCashOutflow = 310000;
+      const totalCatAvailableOutflow = resultOutflow.groups.reduce((s, g) => s + g.available, 0);
+      expect(checkingCashOutflow - totalCatAvailableOutflow - resultOutflow.tbb).toBe(0);
+
+      // 3. Verify via buildBudgetIndex matches computeBudget
+      dataOutflow.budgetIndex = buildBudgetIndex(dataOutflow);
+      const indexedResult = computeBudget(dataOutflow, "2025-07");
+      const indexedCcRow = indexedResult.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.category.name === "Visa Payment")!;
+      expect(indexedCcRow.ccBuffer).toBe(30000);
+      expect(indexedCcRow.available).toBe(35000);
+    });
+
+    it("cash advance followed by card payment payoff in subsequent month preserves full budget integrity [BUG-20]", () => {
+      const data = ccData();
+      // Month 1 (July): $100 cash advance from Visa to Checking
+      data.transactions.push({
+        id: 4,
+        accountId: 2,
+        categoryId: null,
+        transferAccountId: 1,
+        date: "2025-07-20",
+        payee: "Transfer : Checking",
+        memo: "Cash advance",
+        amount: "-10000",
+        status: "c",
+      });
+      // Month 2 (August): Pay off the $100 advance + $200 spending ($300 total payment)
+      data.transactions.push({
+        id: 5,
+        accountId: 1,
+        categoryId: null,
+        transferAccountId: 2,
+        date: "2025-08-05",
+        payee: "Transfer : Visa",
+        memo: "Full card payoff",
+        amount: "-30000",
+        status: "c",
+      });
+
+      const july = computeBudget(data, "2025-07");
+      const ccJuly = july.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa Payment")!;
+      expect(ccJuly.carryoverIn).toBe(0);
+      expect(ccJuly.ccBuffer).toBe(30000); // 20000 spend + 10000 advance
+      expect(ccJuly.available).toBe(35000); // 5000 assigned + 30000 buffer
+
+      const august = computeBudget(data, "2025-08");
+      const ccAugust = august.groups.flatMap((g) => g.rows).find((r) => r.category.name === "Visa Payment")!;
+      expect(ccAugust.carryoverIn).toBe(35000);
+      expect(ccAugust.ccBuffer).toBe(-30000); // -30000 card payment
+      expect(ccAugust.available).toBe(5000); // 35000 carryover - 30000 payment = 5000 remaining (initial assigned)
+
+      // Checking cash in August: 300000 (Payroll) + 10000 (advance) - 30000 (payment) = 280000
+      const checkingCashAugust = 280000;
+      const totalCatAvailableAugust = august.groups.reduce((s, g) => s + g.available, 0); // 20000 (Groceries) + 5000 (Visa Payment) = 25000
+      expect(checkingCashAugust - totalCatAvailableAugust - august.tbb).toBe(0);
     });
 
     it("CC to CC balance transfer draws down receiving card buffer and leaves source card untouched (Issue 1.1)", () => {
