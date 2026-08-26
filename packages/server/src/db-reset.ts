@@ -8,18 +8,14 @@
  *
  * Reads DATABASE_URL from the environment (defaults to ./budget.db).
  */
-import { openDb, resetDatabase, seedDatabase } from "./index.js";
+import { openDb, resetAndSeedDatabase } from "./index.js";
 
 const DB_PATH = process.env.DATABASE_URL ?? "../../budget.db";
 const db = openDb(DB_PATH);
 
 try {
-  console.log("⟳  Resetting database…");
-  await resetDatabase(db);
-  console.log("✓  All tables cleared.");
-
-  console.log("⟳  Re-seeding with demo data…");
-  await seedDatabase(db);
+  console.log("⟳  Resetting and re-seeding database…");
+  await resetAndSeedDatabase(db);
   console.log("✓  Seed complete. Ready to go.");
 } catch (err) {
   console.error("✗  Reset failed:", err);

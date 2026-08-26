@@ -6,8 +6,7 @@ import {
   createCategoryGroup,
   createRecurring,
   getDefaultDb,
-  resetDatabase,
-  seedDatabase,
+  resetAndSeedDatabase,
 } from "@ynab/server";
 import { PATCH } from "../src/app/api/recurring/route";
 
@@ -16,8 +15,7 @@ vi.stubEnv("DATABASE_URL", ":memory:");
 describe("PATCH /api/recurring (BUG-19)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
-    await resetDatabase(db);
-    await seedDatabase(db);
+    await resetAndSeedDatabase(db);
   });
 
   it("BUG-19: preserves categoryId when setting flagColor on recurring rule", async () => {

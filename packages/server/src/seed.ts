@@ -32,10 +32,24 @@ export async function resetDatabase(db: Db, _isNested = false): Promise<void> {
   });
 }
 
+/**
+ * Atomically reset all budget data and reseed with demo data in a single transaction.
+ * If seeding fails at any point, the entire operation is rolled back, preserving
+ * the pre-existing database state.
+ */
+export async function resetAndSeedDatabase(db: Db): Promise<void> {
+  return withTransaction(db, async () => {
+    await resetDatabase(db);
+    await seedDatabase(db);
+  });
+}
+
 export async function seedDatabase(db: Db) {
   if (await isSeeded(db)) return;
 
   return withTransaction(db, async () => {
+    if (await isSeeded(db)) return;
+
     // ---------------------------------------------------------------------------
     // ACCOUNTS (amounts in cents)
     // ---------------------------------------------------------------------------

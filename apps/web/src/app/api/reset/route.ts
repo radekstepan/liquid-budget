@@ -1,11 +1,11 @@
-import { getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
+import { getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/reset
  *
- * Wipes all budget data and immediately re-seeds with the demo dataset.
+ * Wipes all budget data and immediately re-seeds with the demo dataset atomically.
  * Useful during development to get back to a clean slate.
  *
  * curl -X POST http://localhost:3000/api/reset
@@ -13,8 +13,7 @@ export const dynamic = "force-dynamic";
 export async function POST() {
   try {
     const db = getDefaultDb();
-    await resetDatabase(db);
-    await seedDatabase(db);
+    await resetAndSeedDatabase(db);
     return Response.json({ ok: true, message: "Database reset and re-seeded." });
   } catch (err) {
     console.error("[reset]", err);

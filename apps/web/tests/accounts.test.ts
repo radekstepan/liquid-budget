@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { createAccount, getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
+import { createAccount, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 import { PATCH } from "../src/app/api/accounts/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
@@ -8,8 +8,7 @@ vi.stubEnv("DATABASE_URL", ":memory:");
 describe("PATCH /api/accounts (BUG-04)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
-    await resetDatabase(db);
-    await seedDatabase(db);
+    await resetAndSeedDatabase(db);
   });
 
   it("handles empty patch for account without throwing 'No values to set' (BUG-04)", async () => {

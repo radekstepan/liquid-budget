@@ -6,8 +6,7 @@ import {
   createCategoryGroup,
   createTransaction,
   getDefaultDb,
-  resetDatabase,
-  seedDatabase,
+  resetAndSeedDatabase,
 } from "@ynab/server";
 import { PATCH } from "../src/app/api/transactions/route";
 
@@ -16,8 +15,7 @@ vi.stubEnv("DATABASE_URL", ":memory:");
 describe("PATCH /api/transactions (BUG-19)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
-    await resetDatabase(db);
-    await seedDatabase(db);
+    await resetAndSeedDatabase(db);
   });
 
   it("BUG-19: preserves categoryId and amount when toggling status", async () => {
