@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Category, CategoryGroup } from "@ynab/logic";
+import type { Category, CategoryGroup, ReconcileState } from "@ynab/logic";
 import { evalAmount, round2 } from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
@@ -11,17 +11,7 @@ import { AmountPreview } from "./AmountInput.js";
  * Server response from `POST /api/reconcile` with `action: "reconcile"`.
  * Mirrors the type exported from `@ynab/server` (`ReconcileResult`).
  */
-export type ReconcileModalState = {
-  accountId: number;
-  accountName: string;
-  workingBalance: number;
-  unclearedTotal: number;
-  unclearedCount: number;
-  clearedCount: number;
-  reconciledCount: number;
-  lastReconciledAt: string | null;
-  lastReconciledBalance: number | null;
-};
+export type ReconcileModalState = ReconcileState;
 
 export type ReconcileResultPayload = {
   reconciledCount: number;

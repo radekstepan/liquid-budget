@@ -5,6 +5,7 @@ import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, I
 import {
   computeBudget,
   computeCashFlow,
+  computeReconcileState,
   computeTrailingNetWorth,
   computeMonthlyInsights,
   num,
@@ -627,37 +628,12 @@ export function BudgetApp({
 
   // Derive the reconcile state for the currently-open account from
   // the in-memory data — no extra API call needed because the
-  // working balance is cleared + reconciled total.
+  // working balance is cleared + reconciled total bounded by statement date.
   const reconcileState = useMemo(() => {
     if (modal.kind !== "reconcile") return null;
     const acct = data.accounts.find((a) => a.id === modal.accountId);
     if (!acct) return null;
-    const txns = data.transactions.filter((t) => t.accountId === acct.id);
-    const unclearedTotal = txns
-      .filter((t) => t.status === "u")
-      .reduce((s, t) => s + num(t.amount), 0);
-    const unclearedCount = txns.filter((t) => t.status === "u").length;
-    const clearedSum = txns
-      .filter((t) => t.status === "c")
-      .reduce((s, t) => s + num(t.amount), 0);
-    const reconciledSum = txns
-      .filter((t) => t.status === "r")
-      .reduce((s, t) => s + num(t.amount), 0);
-    const clearedCount = txns.filter((t) => t.status === "c").length;
-    const reconciledCount = txns.filter((t) => t.status === "r").length;
-    const workingBalance = clearedSum + reconciledSum;
-    return {
-      accountId: acct.id,
-      accountName: acct.name,
-      workingBalance,
-      unclearedTotal,
-      unclearedCount,
-      clearedCount,
-      reconciledCount,
-      lastReconciledAt: acct.lastReconciledAt ?? null,
-      lastReconciledBalance:
-        acct.lastReconciledBalance != null ? num(acct.lastReconciledBalance) : null,
-    };
+    return computeReconcileState(acct, data.transactions, todayISO());
   }, [modal, data.accounts, data.transactions]);
 
   const dueBadgeCount = useMemo(() => {

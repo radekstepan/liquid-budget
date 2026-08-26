@@ -2,7 +2,7 @@ import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, categories, reconciliations, transactions } from "../schema.js";
 import { TransactionError } from "./transactions.js";
-import { todayISO } from "@ynab/logic";
+import { todayISO, type ReconcileState } from "@ynab/logic";
 
 /**
  * Sentinel memo used on the auto-generated adjustment row that
@@ -12,23 +12,7 @@ import { todayISO } from "@ynab/logic";
  */
 export const RECONCILE_ADJUSTMENT_MEMO = "Reconciliation balance";
 
-export type ReconcileState = {
-  accountId: number;
-  accountName: string;
-  /**
-   * Sum of every Cleared + Reconciled transaction in the account up to statement date.
-   * This is the figure the user compares against their bank's
-   * statement to find the missing/extra transaction(s).
-   */
-  workingBalance: number;
-  /** Sum of every Uncleared transaction in the account up to statement date. */
-  unclearedTotal: number;
-  unclearedCount: number;
-  clearedCount: number;
-  reconciledCount: number;
-  lastReconciledAt: string | null;
-  lastReconciledBalance: number | null;
-};
+export type { ReconcileState };
 
 export type ReconcileInput = {
   accountId: number;
