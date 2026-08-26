@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { isValidRecurringFrequency, nextDateFor, todayISO, type TransactionFlagColor } from "@ynab/logic";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
 import {
   createSplitWithChildren,
@@ -179,8 +180,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
     }
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const srcOnBudget = await isAccountOnBudget(db, input.accountId);
     let categoryId: number | null = null;
 
@@ -272,12 +272,8 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       }
     }
 
-    db.run(sql`COMMIT`);
     return parent;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function updateRecurring(db: Database, id: number, patch: UpdateRecurringInput) {
@@ -355,8 +351,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if (patch.transferAccountId !== undefined) p.transferAccountId = norm.effectiveTransferAccountId ?? null;
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const targetAccountId = (p.accountId as number | undefined) ?? existing.accountId;
     const srcOnBudget = await isAccountOnBudget(db, targetAccountId);
 
@@ -442,23 +437,14 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
     }
 
     const [row] = await db.select().from(recurring).where(eq(recurring.id, id));
-    db.run(sql`COMMIT`);
     return row ?? null;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function deleteRecurring(db: Database, id: number) {
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     await db.delete(recurring).where(and(eq(recurring.id, id)));
-    db.run(sql`COMMIT`);
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -471,73 +457,75 @@ export async function postRecurringTransaction(
   recurringId: number,
   postDate?: string
 ) {
-  const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
-  if (!r) throw new RecurringError("Recurring transaction not found", 404);
+  return withTransaction(db, async () => {
+    const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
+    if (!r) throw new RecurringError("Recurring transaction not found", 404);
 
-  const dateToUse = postDate || r.nextDate;
-  const children = await db
-    .select()
-    .from(recurringSubTransactions)
-    .where(eq(recurringSubTransactions.recurringId, r.id))
-    .orderBy(recurringSubTransactions.sort);
+    const dateToUse = postDate || r.nextDate;
+    const children = await db
+      .select()
+      .from(recurringSubTransactions)
+      .where(eq(recurringSubTransactions.recurringId, r.id))
+      .orderBy(recurringSubTransactions.sort);
 
-  let postedTxn;
-  if (r.transferAccountId != null) {
-    postedTxn = await createTransaction(db, {
-      accountId: r.accountId,
-      categoryId: r.categoryId,
-      date: dateToUse,
-      payee: r.payee,
-      memo: r.memo || "Recurring",
-      amount: Number(r.amount),
-      status: "c",
-      transferAccountId: r.transferAccountId,
-      flagColor: sanitizeFlagColor(r.flagColor),
-    });
-  } else if (children.length > 0) {
-    postedTxn = await createSplitWithChildren(
-      db,
-      {
+    let postedTxn;
+    if (r.transferAccountId != null) {
+      postedTxn = await createTransaction(db, {
         accountId: r.accountId,
+        categoryId: r.categoryId,
         date: dateToUse,
         payee: r.payee,
         memo: r.memo || "Recurring",
         amount: Number(r.amount),
         status: "c",
+        transferAccountId: r.transferAccountId,
         flagColor: sanitizeFlagColor(r.flagColor),
-      },
-      children.map((c) => ({
-        categoryId: c.categoryId,
-        amount: Number(c.amount),
-        memo: c.memo || undefined,
-        transferAccountId: c.transferAccountId,
-      }))
-    );
-  } else {
-    postedTxn = await createTransaction(db, {
-      accountId: r.accountId,
-      categoryId: r.categoryId,
-      date: dateToUse,
-      payee: r.payee,
-      memo: r.memo || "Recurring",
-      amount: Number(r.amount),
-      status: "c",
-      transferAccountId: null,
-      flagColor: sanitizeFlagColor(r.flagColor),
-    });
-  }
+      });
+    } else if (children.length > 0) {
+      postedTxn = await createSplitWithChildren(
+        db,
+        {
+          accountId: r.accountId,
+          date: dateToUse,
+          payee: r.payee,
+          memo: r.memo || "Recurring",
+          amount: Number(r.amount),
+          status: "c",
+          flagColor: sanitizeFlagColor(r.flagColor),
+        },
+        children.map((c) => ({
+          categoryId: c.categoryId,
+          amount: Number(c.amount),
+          memo: c.memo || undefined,
+          transferAccountId: c.transferAccountId,
+        }))
+      );
+    } else {
+      postedTxn = await createTransaction(db, {
+        accountId: r.accountId,
+        categoryId: r.categoryId,
+        date: dateToUse,
+        payee: r.payee,
+        memo: r.memo || "Recurring",
+        amount: Number(r.amount),
+        status: "c",
+        transferAccountId: null,
+        flagColor: sanitizeFlagColor(r.flagColor),
+      });
+    }
 
-  const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
-  const isOneOff = normFreq === "never" || normFreq === "once";
-  const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
-  const next = nextDateFor(r.frequency, r.nextDate, anchor);
-  const updatePayload: { nextDate: string; active?: boolean } = { nextDate: next };
-  if (isOneOff) {
-    updatePayload.active = false;
-  }
-  await db.update(recurring).set(updatePayload).where(eq(recurring.id, r.id));
+    const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+    const isOneOff = normFreq === "never" || normFreq === "once";
+    const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
+    const next = nextDateFor(r.frequency, r.nextDate, anchor);
+    const updatePayload: { nextDate: string; active?: boolean } = { nextDate: next };
+    if (isOneOff) {
+      updatePayload.active = false;
+    }
+    await db.update(recurring).set(updatePayload).where(eq(recurring.id, r.id));
 
-  return { transaction: postedTxn, nextDate: next, active: isOneOff ? false : r.active };
+    return { transaction: postedTxn, nextDate: next, active: isOneOff ? false : r.active };
+  });
 }
 
 /**
@@ -564,3 +552,7 @@ export async function autoPostDueRecurringTransactions(
   }
   return posted;
 }
+
+export const createRecurringTransaction = createRecurring;
+export const updateRecurringTransaction = updateRecurring;
+

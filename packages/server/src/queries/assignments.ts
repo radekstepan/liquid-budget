@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { assignments } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
@@ -11,8 +11,7 @@ export type UpsertAssignmentInput = {
 
 export async function upsertAssignment(db: Database, input: UpsertAssignmentInput) {
   const amount = assertValidAmount(input.amount);
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [row] = await db
       .insert(assignments)
       .values({ categoryId: input.categoryId, month: input.month, amount })
@@ -21,10 +20,7 @@ export async function upsertAssignment(db: Database, input: UpsertAssignmentInpu
         set: { amount },
       })
       .returning();
-    db.run(sql`COMMIT`);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
+

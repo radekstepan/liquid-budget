@@ -3,6 +3,7 @@ import AdmZip from "adm-zip";
 import { dollarsToCents, nextMonthKey, TRANSACTION_DUPLICATE_FLAG, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
 import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
+import { withTransaction } from "./transaction.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 
@@ -91,21 +92,7 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
 }
 
 export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: string | Ynab4Settings) {
-  // CRITICAL: Wrap the entire wipe-and-import in a SQLite transaction.
-  // Without this, an unhandled exception halfway through (missing map
-  // key, FK violation, OOM on huge imports) leaves the user's database
-  // PERMANENTLY WIPED with corrupted/partial new data. The whole flow
-  // must be atomic: either everything commits, or nothing changes.
-  //
-  // better-sqlite3 + drizzle's `db.transaction(async (tx) => …)` does
-  // NOT work — better-sqlite3's transaction wrapper commits the moment
-  // the callback returns, ignoring microtask-deferred `await`s. We use
-  // manual BEGIN/COMMIT/ROLLBACK instead, mirroring Drizzle's own
-  // SQLiteSyncDialect.migrate. All drizzle operations on better-
-  // sqlite3 are synchronous under the hood, so the `await`s still
-  // complete before the COMMIT/ROLLBACK runs.
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     // 1. Wipe current data
     await resetDatabase(db, true);
 
@@ -800,12 +787,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       settings,
       duplicatesSkipped: skippedDuplicates,
     };
-    db.run(sql`COMMIT`);
     return result;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**

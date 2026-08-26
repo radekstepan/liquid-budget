@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { accounts, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
@@ -32,8 +33,7 @@ export type UpdateAccountInput = {
 export async function createAccount(db: Database, input: CreateAccountInput) {
   const balance = input.balance != null ? assertValidAmount(input.balance) : 0;
   const onBudget = input.onBudget ?? true;
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${accounts.sort}), -1)` })
       .from(accounts);
@@ -68,12 +68,8 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
       });
     }
 
-    db.run(sql`COMMIT`);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function getAccount(db: Database, id: number) {
@@ -110,8 +106,7 @@ export async function deleteAccount(db: Database, id: number) {
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
   if (!account) return null;
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     // Check if the account contains any reconciled transactions
     const [reconciled] = await db
       .select({ id: transactions.id })
@@ -262,12 +257,8 @@ export async function deleteAccount(db: Database, id: number) {
     // 5. Delete the account itself (SQLite cascade handles own transactions/recurring)
     await db.delete(accounts).where(eq(accounts.id, id));
 
-    db.run(sql`COMMIT`);
     return account;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function listAccounts(db: Database) {

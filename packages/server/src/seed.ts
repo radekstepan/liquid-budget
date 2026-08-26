@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { DEMO_MONTH } from "@ynab/logic";
 import type { Db } from "./client.js";
+import { withTransaction } from "./transaction.js";
 import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { isSeeded } from "./queries/budget.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
@@ -14,9 +15,8 @@ export { DEMO_MONTH };
  * don't fire, then reset the autoincrement sequences.
  * The next call to seedDatabase() will re-populate from scratch.
  */
-export async function resetDatabase(db: Db, isNested = false): Promise<void> {
-  if (!isNested) db.run(sql`BEGIN`);
-  try {
+export async function resetDatabase(db: Db, _isNested = false): Promise<void> {
+  return withTransaction(db, async () => {
     await db.delete(recurringSubTransactions);
     await db.delete(recurring);
     await db.delete(transactions);
@@ -29,18 +29,13 @@ export async function resetDatabase(db: Db, isNested = false): Promise<void> {
     await db.delete(renameRules);
     // Reset sqlite_sequence so IDs restart from 1 on the next insert.
     await db.run(sql`DELETE FROM sqlite_sequence`);
-    if (!isNested) db.run(sql`COMMIT`);
-  } catch (err) {
-    if (!isNested) db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function seedDatabase(db: Db) {
   if (await isSeeded(db)) return;
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     // ---------------------------------------------------------------------------
     // ACCOUNTS (amounts in cents)
     // ---------------------------------------------------------------------------
@@ -397,9 +392,5 @@ export async function seedDatabase(db: Db) {
     // Jericho sailing — annual (next year)
     { accountId: a("TD Unlimited Chequing"), categoryId: byName("Lessons (Sailing, Guitar)"), payee: "Jericho Sailing Centre", amount: -71860, frequency: "yearly", nextDate: "2027-05-01", active: true },
   ]);
-  db.run(sql`COMMIT`);
-} catch (err) {
-  db.run(sql`ROLLBACK`);
-  throw err;
-}
+  });
 }

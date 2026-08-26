@@ -8,6 +8,7 @@ import type {
 } from "@ynab/logic";
 import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { accounts, transactions } from "../schema.js";
 import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
@@ -230,8 +231,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     payee = `Transfer : ${destName ?? "Unknown"}`;
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const onBudget = await isAccountOnBudget(db, input.accountId);
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
@@ -316,12 +316,8 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         await applyBalance(db, input.transferAccountId, -amount);
       }
     }
-    db.run(sql`COMMIT`);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -333,28 +329,31 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
 export async function createTransfer(
   db: Database,
   baseInput: CreateTransactionInput,
-  transferAccountId: number
+  transferAccountId?: number
 ) {
+  const destAccountId = transferAccountId ?? (baseInput.transferAccountId != null ? Number(baseInput.transferAccountId) : undefined);
+  if (destAccountId == null) {
+    throw new TransactionError("transfer requires a transferAccountId");
+  }
   const amount = assertValidAmount(baseInput.amount);
   if (baseInput.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
     );
   }
-  if (transferAccountId === baseInput.accountId) {
+  if (destAccountId === baseInput.accountId) {
     throw new TransactionError("transfer account must differ from source account");
   }
 
-  let payee = baseInput.payee;
+  let payee = baseInput.payee || "";
   if (!payee.trim()) {
-    const destName = await getAccountName(db, transferAccountId);
+    const destName = await getAccountName(db, destAccountId);
     payee = `Transfer : ${destName ?? "Unknown"}`;
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const srcOnBudget = await isAccountOnBudget(db, baseInput.accountId);
-    const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+    const destOnBudget = await isAccountOnBudget(db, destAccountId);
     const isBoundaryCrossing = srcOnBudget !== destOnBudget;
     const netOnBudgetDelta = (srcOnBudget ? amount : 0) + (destOnBudget ? -amount : 0);
 
@@ -401,7 +400,7 @@ export async function createTransfer(
         amount,
         status: baseInput.status ?? "c",
         flagColor: sanitizeFlagColor(baseInput.flagColor),
-        transferAccountId,
+        transferAccountId: destAccountId,
         parentId: baseInput.parentId ?? null,
         isIncome,
         incomeMonth,
@@ -409,13 +408,9 @@ export async function createTransfer(
       .returning();
 
     await applyBalance(db, baseInput.accountId, amount);
-    await applyBalance(db, transferAccountId, -amount);
-    db.run(sql`COMMIT`);
+    await applyBalance(db, destAccountId, -amount);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -453,8 +448,7 @@ export async function createSplitWithChildren(
     }
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [parentRow] = await db
       .insert(transactions)
       .values({
@@ -534,12 +528,8 @@ export async function createSplitWithChildren(
       }
       childRows.push(child);
     }
-    db.run(sql`COMMIT`);
     return { parent: parentRow, children: childRows };
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -655,8 +645,11 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  let shouldLearnRenameRule = false;
+  let oldPayee = "";
+  let newPayee = "";
+
+  const row = await withTransaction(db, async () => {
     const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
     const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
 
@@ -737,7 +730,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       }
     }
 
-    const [row] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
+    const [updatedRow] = await db.update(transactions).set(p).where(eq(transactions.id, id)).returning();
 
     // If this row is a split parent and date changed, propagate date to children
     if (isSplitParent && "date" in p && p.date != null) {
@@ -756,7 +749,6 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       }
     }
 
-    db.run(sql`COMMIT`);
     // Learn an automatic rename rule from a deliberate payee rename on a
     // plain regular transaction. Runs after the commit so a rule-learning
     // failure never rolls back (or blocks) the transaction edit itself.
@@ -767,17 +759,22 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       existing.parentId == null &&
       !isSplitParent
     ) {
-      try {
-        await learnRenameRuleFromPayees(db, existing.payee, String(patch.payee));
-      } catch (learnErr) {
-        console.error("[transactions] failed to learn rename rule:", learnErr);
-      }
+      shouldLearnRenameRule = true;
+      oldPayee = existing.payee;
+      newPayee = String(patch.payee);
     }
-    return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
+    return updatedRow;
+  });
+
+  if (shouldLearnRenameRule) {
+    try {
+      await learnRenameRuleFromPayees(db, oldPayee, newPayee);
+    } catch (learnErr) {
+      console.error("[transactions] failed to learn rename rule:", learnErr);
+    }
   }
+
+  return row;
 }
 
 /**
@@ -837,8 +834,11 @@ export async function updateSplit(
     throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  let shouldLearnRenameRule = false;
+  let learnedOldPayee = "";
+  let learnedNewPayee = "";
+
+  const res = await withTransaction(db, async () => {
     for (const c of oldChildren) {
       await applyBalance(db, c.accountId, -Number(c.amount));
       if (c.transferAccountId != null) {
@@ -933,23 +933,27 @@ export async function updateSplit(
       newChildren.push(row);
     }
 
-    db.run(sql`COMMIT`);
     // Learn a rename rule when a split's display payee is changed.
     if (
       parentFields.payee != null &&
       String(parentFields.payee).trim() !== parent.payee.trim()
     ) {
-      try {
-        await learnRenameRuleFromPayees(db, parent.payee, String(parentFields.payee));
-      } catch (learnErr) {
-        console.error("[transactions] failed to learn rename rule:", learnErr);
-      }
+      shouldLearnRenameRule = true;
+      learnedOldPayee = parent.payee;
+      learnedNewPayee = String(parentFields.payee);
     }
     return { parent: { ...parent, ...pf }, children: newChildren };
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
+  });
+
+  if (shouldLearnRenameRule) {
+    try {
+      await learnRenameRuleFromPayees(db, learnedOldPayee, learnedNewPayee);
+    } catch (learnErr) {
+      console.error("[transactions] failed to learn rename rule:", learnErr);
+    }
   }
+
+  return res;
 }
 
 /**
@@ -973,8 +977,7 @@ export async function deleteTransaction(db: Database, id: number) {
     );
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     if (existing.parentId != null) {
       await applyBalance(db, existing.accountId, -Number(existing.amount));
       if (existing.transferAccountId != null) {
@@ -1033,12 +1036,8 @@ export async function deleteTransaction(db: Database, id: number) {
       await db.delete(transactions).where(eq(transactions.id, id));
     }
 
-    db.run(sql`COMMIT`);
     return existing;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -1047,9 +1046,8 @@ export async function deleteTransaction(db: Database, id: number) {
  */
 export async function bulkDeleteTransactions(db: Database, ids: number[]) {
   if (!ids || ids.length === 0) return [];
-  const deleted: any[] = [];
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
+    const deleted: any[] = [];
     for (const id of ids) {
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
@@ -1118,12 +1116,8 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         deleted.push(existing);
       }
     }
-    db.run(sql`COMMIT`);
     return deleted;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
@@ -1140,11 +1134,10 @@ export async function bulkUpdateTransactions(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"
     );
   }
-  const updated: any[] = [];
   const renameRulesToLearn: { from: string; to: string }[] = [];
 
-  db.run(sql`BEGIN`);
-  try {
+  const updated = await withTransaction(db, async () => {
+    const updatedRows: any[] = [];
     for (const id of ids) {
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
@@ -1305,7 +1298,7 @@ export async function bulkUpdateTransactions(
           .set(setFields)
           .where(eq(transactions.id, id))
           .returning();
-        if (row) updated.push(row);
+        if (row) updatedRows.push(row);
 
         if (isSplitParent && "date" in setFields && setFields.date != null) {
           await db
@@ -1325,19 +1318,16 @@ export async function bulkUpdateTransactions(
         renameRulesToLearn.push({ from: existing.payee, to: String(patch.payee) });
       }
     }
-    db.run(sql`COMMIT`);
+    return updatedRows;
+  });
 
-    for (const rule of renameRulesToLearn) {
-      try {
-        await learnRenameRuleFromPayees(db, rule.from, rule.to);
-      } catch (learnErr) {
-        console.error("[transactions] failed to learn rename rule in bulk update:", learnErr);
-      }
+  for (const rule of renameRulesToLearn) {
+    try {
+      await learnRenameRuleFromPayees(db, rule.from, rule.to);
+    } catch (learnErr) {
+      console.error("[transactions] failed to learn rename rule in bulk update:", learnErr);
     }
-
-    return updated;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
   }
+
+  return updated;
 }

@@ -94,3 +94,6 @@ export const db: Db = new Proxy<Db>({} as Db, {
     return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(real) : value;
   },
 });
+
+export { withTransaction, AsyncMutex, getDbMutex } from "./transaction.js";
+
