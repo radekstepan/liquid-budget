@@ -147,11 +147,16 @@ type IndexedBudgetData = {
   surplusByMonth: Map<string, number>;
 };
 
+export const BUDGET_INDEX_VERSION = 1;
+
+let globalCacheEpoch = 1;
 let budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+const serializedIndexEpochs = new WeakMap<SerializedBudgetIndex, number>();
 
 /**
  * Invalidate the cached budget index for a BudgetData object (or all cached data if no object is provided).
- * Also clears the optional hydrated `data.budgetIndex` reference if data is provided.
+ * Also clears the optional hydrated `data.budgetIndex` reference if data is provided, or advances the global
+ * cache epoch so any attached serialized indexes from previous epochs are rejected.
  */
 export function invalidateBudgetIndex(data?: BudgetData): void {
   if (data) {
@@ -159,6 +164,7 @@ export function invalidateBudgetIndex(data?: BudgetData): void {
     data.budgetIndex = undefined;
   } else {
     budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+    globalCacheEpoch++;
   }
 }
 
@@ -593,7 +599,8 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     serializedCarryover[m] = Object.fromEntries(map);
   }
 
-  return {
+  const result: SerializedBudgetIndex = {
+    version: BUDGET_INDEX_VERSION,
     assignedByMonth: serializedAssigned,
     assignedTotalByMonth: Object.fromEntries(index.assignedTotalByMonth),
     outflowByMonth: serializedOutflow,
@@ -603,6 +610,9 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     overspentByMonth: Object.fromEntries(index.overspentByMonth),
     surplusByMonth: Object.fromEntries(index.surplusByMonth),
   };
+
+  serializedIndexEpochs.set(result, globalCacheEpoch);
+  return result;
 }
 
 function getOrBuildIndex(
@@ -616,9 +626,22 @@ function getOrBuildIndex(
   if (cached) return cached;
 
   if (data.budgetIndex) {
-    cached = hydrateBudgetIndex(data.budgetIndex, data);
-    budgetDataIndexCache.set(data, cached);
-    return cached;
+    const indexEpoch = serializedIndexEpochs.get(data.budgetIndex);
+    const isValidEpoch = indexEpoch === undefined || indexEpoch === globalCacheEpoch;
+    const isValidVersion =
+      data.budgetIndex.version === undefined ||
+      data.budgetIndex.version === BUDGET_INDEX_VERSION;
+
+    if (isValidEpoch && isValidVersion) {
+      if (indexEpoch === undefined) {
+        serializedIndexEpochs.set(data.budgetIndex, globalCacheEpoch);
+      }
+      cached = hydrateBudgetIndex(data.budgetIndex, data);
+      budgetDataIndexCache.set(data, cached);
+      return cached;
+    } else {
+      data.budgetIndex = undefined;
+    }
   }
 
   const rawData = buildRawIndexData(data, splitParentIds, accountMap, ccAccountIds);

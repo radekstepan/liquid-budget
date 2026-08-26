@@ -168,6 +168,7 @@ export type RecurringSubTransaction = {
 };
 
 export type SerializedBudgetIndex = {
+  version?: number;
   assignedByMonth: Record<string, Record<string | number, number>>;
   assignedTotalByMonth: Record<string, number>;
   outflowByMonth: Record<string, Record<string | number, number>>;

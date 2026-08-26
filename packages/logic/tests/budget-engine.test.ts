@@ -1785,6 +1785,146 @@ describe("computeBudget", () => {
       expect(res2.tbb).toBe(20000);
     });
 
+    it("resets global cache and invalidates pre-attached data.budgetIndex on global invalidateBudgetIndex() (BUG-05)", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [{ id: 1, categoryId: category.id, month: "2026-07", amount: "10000" }],
+        transactions: [{
+          id: 1,
+          accountId: account.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Employer",
+          memo: "Salary",
+          amount: "50000",
+          status: "c" as const,
+        }],
+        recurring: [],
+      };
+
+      // Attach precomputed budget index
+      data.budgetIndex = buildBudgetIndex(data);
+      expect(data.budgetIndex).toBeDefined();
+
+      const res1 = computeBudget(data, "2026-07");
+      expect(res1.tbb).toBe(40000);
+      expect(res1.groups[0]?.rows[0]?.assigned).toBe(10000);
+
+      // Mutate assignments in-place
+      data.assignments[0]!.amount = "30000";
+
+      // Call global invalidation with no arguments (BUG-05 reproduction)
+      invalidateBudgetIndex();
+
+      // Next computeBudget MUST recompute and reflect the mutated assignment
+      const res2 = computeBudget(data, "2026-07");
+      expect(res2.tbb).toBe(20000);
+      expect(res2.groups[0]?.rows[0]?.assigned).toBe(30000);
+      // Serialized index was cleared from data
+      expect(data.budgetIndex).toBeUndefined();
+    });
+
+    it("discards serialized index with mismatched schema version", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const seedData: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [{ id: 1, categoryId: category.id, month: "2026-07", amount: "10000" }],
+        transactions: [{
+          id: 1,
+          accountId: account.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Employer",
+          memo: "Salary",
+          amount: "50000",
+          status: "c" as const,
+        }],
+        recurring: [],
+      };
+
+      const builtIndex = buildBudgetIndex(seedData);
+
+      // Create a new data object with corrupted/incompatible version and different assignments
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [{ id: 1, categoryId: category.id, month: "2026-07", amount: "35000" }],
+        transactions: [{
+          id: 1,
+          accountId: account.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Employer",
+          memo: "Salary",
+          amount: "50000",
+          status: "c" as const,
+        }],
+        recurring: [],
+        budgetIndex: { ...builtIndex, version: 999 },
+      };
+
+      // computeBudget should detect mismatched schema version and recompute fresh
+      const res = computeBudget(data, "2026-07");
+      expect(res.tbb).toBe(15000);
+      expect(res.groups[0]?.rows[0]?.assigned).toBe(35000);
+      expect(data.budgetIndex).toBeUndefined();
+    });
+
+    it("invalidates all pre-attached budgetIndex objects across multiple datasets on global invalidation", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const cat1 = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+      const cat2 = makeCategory({ id: 11, groupId: 1, name: "Rent" });
+
+      const data1: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [cat1],
+        assignments: [{ id: 1, categoryId: cat1.id, month: "2026-07", amount: "10000" }],
+        transactions: [{ id: 1, accountId: account.id, categoryId: null, date: "2026-07-01", payee: "Employer", memo: "Salary", amount: "50000", status: "c" }],
+        recurring: [],
+      };
+
+      const data2: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [cat2],
+        assignments: [{ id: 2, categoryId: cat2.id, month: "2026-07", amount: "20000" }],
+        transactions: [{ id: 2, accountId: account.id, categoryId: null, date: "2026-07-01", payee: "Employer", memo: "Salary", amount: "80000", status: "c" }],
+        recurring: [],
+      };
+
+      data1.budgetIndex = buildBudgetIndex(data1);
+      data2.budgetIndex = buildBudgetIndex(data2);
+
+      expect(computeBudget(data1, "2026-07").tbb).toBe(40000);
+      expect(computeBudget(data2, "2026-07").tbb).toBe(60000);
+
+      // Mutate both datasets
+      data1.assignments[0]!.amount = "15000";
+      data2.assignments[0]!.amount = "25000";
+
+      // Global invalidation
+      invalidateBudgetIndex();
+
+      expect(computeBudget(data1, "2026-07").tbb).toBe(35000);
+      expect(computeBudget(data2, "2026-07").tbb).toBe(55000);
+      expect(data1.budgetIndex).toBeUndefined();
+      expect(data2.budgetIndex).toBeUndefined();
+    });
+
     it("updates WeakMap cache when buildBudgetIndex(data) is called", () => {
       const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
       const group = makeGroup({ id: 1, name: "Everyday" });

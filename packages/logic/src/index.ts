@@ -11,6 +11,7 @@ export {
   invalidateBudgetIndex,
   isIncomeTransaction,
   getMonthsWithData,
+  BUDGET_INDEX_VERSION,
 } from "./budget-engine.js";
 // Register (per-row running balance)
 export { computeRunningBalances } from "./register.js";
