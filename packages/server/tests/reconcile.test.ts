@@ -715,5 +715,61 @@ describe("reconcile queries", () => {
       expect(child1Restored?.status).toBe("c");
       expect(child1Restored?.reconciliationId).toBeNull();
     });
+
+    it("BUG-14: fallback unreconcile flips all reconciled transactions with different dates on or before lastReconciledAt", async () => {
+      const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+
+      // Directly insert multiple reconciled transactions with different dates and reconciledAt timestamps
+      // simulating legacy or imported data without a reconciliations table row
+      await db.insert(schema.transactions).values([
+        {
+          accountId: acct.id,
+          date: "2026-04-01",
+          payee: "April Tx 1",
+          amount: 10000,
+          status: "r",
+          reconciledAt: "2026-04-01",
+        },
+        {
+          accountId: acct.id,
+          date: "2026-04-15",
+          payee: "April Tx 2",
+          amount: 20000,
+          status: "r",
+          reconciledAt: "2026-04-15",
+        },
+        {
+          accountId: acct.id,
+          date: "2026-05-01",
+          payee: "May Tx 1",
+          amount: 30000,
+          status: "r",
+          reconciledAt: "2026-05-01",
+        },
+      ]);
+
+      // Set account lastReconciledAt to 2026-05-01
+      await db
+        .update(schema.accounts)
+        .set({ lastReconciledAt: "2026-05-01", lastReconciledBalance: 60000 })
+        .where(eq(schema.accounts.id, acct.id));
+
+      // No row in schema.reconciliations, so unreconcileAccount uses fallback branch
+      const unrecResult = await unreconcileAccount(db, acct.id);
+      expect(unrecResult.flipped).toBe(3);
+
+      const txs = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(txs.every((t) => t.status === "c" && t.reconciledAt === null)).toBe(true);
+
+      const [updatedAcct] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, acct.id));
+      expect(updatedAcct?.lastReconciledAt).toBeNull();
+      expect(updatedAcct?.lastReconciledBalance).toBeNull();
+    });
   });
 });

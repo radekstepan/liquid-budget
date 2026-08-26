@@ -314,7 +314,7 @@ export async function unreconcileAccount(
               eq(transactions.transferAccountId, accountId)
             ),
             eq(transactions.status, "r"),
-            sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
+            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
             sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
           )
         )
@@ -328,7 +328,7 @@ export async function unreconcileAccount(
           and(
             eq(transactions.accountId, accountId),
             eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
-            sql`(${transactions.reconciledAt} = ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
+            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
           )
         )
         .orderBy(desc(transactions.date), desc(transactions.id))

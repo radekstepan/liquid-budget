@@ -997,4 +997,116 @@ describe("accounts queries", () => {
       expect(selectCall?.table).toBe("accounts");
     });
   });
+
+  describe("BUG-15: kind and onBudget invariants and mutation guards (integration)", () => {
+    let db: Db;
+    beforeEach(() => {
+      db = openMigratedDb();
+    });
+
+    it("rejects creating an account with contradictory kind and onBudget", async () => {
+      await expect(
+        createAccount(db, { name: "Bad Offbudget", kind: "offbudget", onBudget: true })
+      ).rejects.toMatchObject({
+        name: "AccountError",
+        status: 400,
+      });
+
+      await expect(
+        createAccount(db, { name: "Bad Liquid", kind: "liquid", onBudget: false })
+      ).rejects.toMatchObject({
+        name: "AccountError",
+        status: 400,
+      });
+    });
+
+    it("defaults onBudget to false for offbudget accounts when omitted", async () => {
+      const row = await createAccount(db, { name: "Investments", kind: "offbudget" });
+      expect(row.onBudget).toBe(false);
+      expect(row.kind).toBe("offbudget");
+    });
+
+    it("disallows changing kind or onBudget when transactions exist on the account", async () => {
+      const acct = await createAccount(db, {
+        name: "Liquid Checking",
+        kind: "liquid",
+        balance: 10000,
+      });
+
+      // The starting balance created 1 transaction
+      await expect(
+        updateAccount(db, acct.id, { kind: "offbudget" })
+      ).rejects.toMatchObject({
+        name: "AccountError",
+        status: 422,
+        message: "Cannot change account type or budget participation when transactions exist",
+      });
+
+      await expect(
+        updateAccount(db, acct.id, { onBudget: false })
+      ).rejects.toMatchObject({
+        name: "AccountError",
+        status: 422,
+      });
+    });
+
+    it("disallows changing kind or onBudget when transfer counterparty transactions exist", async () => {
+      const src = await createAccount(db, { name: "Source", kind: "liquid", balance: 50000 });
+      const dest = await createAccount(db, { name: "Dest", kind: "liquid", balance: 0 });
+
+      // Create a transfer from src to dest
+      await createTransaction(db, {
+        accountId: src.id,
+        transferAccountId: dest.id,
+        amount: -10000,
+        date: "2026-06-01",
+      });
+
+      // dest has no direct transactions where accountId === dest.id, but has a transfer pointing to it
+      await expect(
+        updateAccount(db, dest.id, { kind: "offbudget" })
+      ).rejects.toMatchObject({
+        name: "AccountError",
+        status: 422,
+      });
+    });
+
+    it("allows updating name, archived, groupLabel, or unchanged kind when transactions exist", async () => {
+      const acct = await createAccount(db, {
+        name: "Liquid Checking",
+        kind: "liquid",
+        balance: 10000,
+      });
+
+      const updated = await updateAccount(db, acct.id, {
+        name: "Renamed Checking",
+        kind: "liquid",
+        archived: true,
+      });
+      expect(updated).toMatchObject({
+        id: acct.id,
+        name: "Renamed Checking",
+        kind: "liquid",
+        archived: true,
+      });
+    });
+
+    it("allows changing kind on an empty account and synchronizes onBudget", async () => {
+      const acct = await createAccount(db, { name: "Empty", kind: "liquid", balance: 0 });
+
+      const updated = await updateAccount(db, acct.id, { kind: "offbudget" });
+      expect(updated).toMatchObject({
+        id: acct.id,
+        kind: "offbudget",
+        onBudget: false,
+      });
+
+      const updatedBack = await updateAccount(db, acct.id, { kind: "credit" });
+      expect(updatedBack).toMatchObject({
+        id: acct.id,
+        kind: "credit",
+        onBudget: true,
+      });
+    });
+  });
 });
