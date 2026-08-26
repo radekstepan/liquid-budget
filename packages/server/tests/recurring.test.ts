@@ -547,6 +547,32 @@ describe("recurring queries", () => {
       expect(set).toEqual({ categoryId: null });
     });
 
+    it("BUG-19: does not overwrite categoryId or delete subTransactions when keys have undefined values", async () => {
+      mock.respondWith("select:recurring", [existingRow]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [existingRow]);
+      await updateRecurring(mock.db, 1, {
+        accountId: undefined,
+        categoryId: undefined,
+        payee: undefined,
+        memo: undefined,
+        amount: undefined,
+        frequency: undefined,
+        nextDate: undefined,
+        anchorDay: undefined,
+        active: undefined,
+        flagColor: "red",
+        transferAccountId: undefined,
+        subTransactions: undefined,
+      });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toEqual({ flagColor: "red" });
+      const deleteCalls = mock.calls.filter((c) => c.op === "delete");
+      expect(deleteCalls).toHaveLength(0);
+    });
+
     it("replaces sub-transactions when the key is present", async () => {
       const splitRow = { ...existingRow, amount: -20000, categoryId: null };
       mock.respondWith("select:recurring", [splitRow]);

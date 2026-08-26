@@ -161,6 +161,19 @@ describe("categories queries", () => {
       expect(updateCall).toBeUndefined();
       expect(row).toMatchObject({ id: 1, name: "Groceries", sort: 2 });
     });
+
+    it("BUG-19: does not overwrite goalTarget, carryover, or overspendCarriesOver when keys have undefined values", async () => {
+      mock.respondWith("update:categories", [{ id: 1 }]);
+      await updateCategory(mock.db, 1, {
+        name: "Renamed",
+        goalTarget: undefined,
+        carryover: undefined,
+        sort: undefined,
+        overspendCarriesOver: undefined,
+      });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ name: "Renamed" });
+    });
   });
 
   describe("updateCategoryGroupSort", () => {

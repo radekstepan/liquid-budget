@@ -918,6 +918,57 @@ describe("transactions queries", () => {
       expect(update?.set).toMatchObject({ categoryId: 7, isIncome: false, incomeMonth: null });
     });
 
+    it("BUG-19: preserves categoryId on expense when updating single field (e.g. status) with undefined fields", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: -5000, payee: "Groceries", date: "2026-07-01", categoryId: 4, transferAccountId: null, parentId: null, status: "u", isIncome: false, incomeMonth: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [{ id: 1, status: "c", categoryId: 4 }]);
+
+      await updateTransaction(mock.db, 1, {
+        accountId: undefined,
+        categoryId: undefined,
+        date: undefined,
+        payee: undefined,
+        memo: undefined,
+        amount: undefined,
+        status: "c",
+        flagColor: undefined,
+        incomeMonth: undefined,
+      });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ status: "c", isIncome: false });
+      expect(update?.set).not.toHaveProperty("categoryId");
+    });
+
+    it("BUG-19: preserves incomeMonth on income transaction when updating single field (e.g. status) with undefined fields", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 1, amount: 5000, payee: "Employer", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "u", isIncome: true, incomeMonth: "2026-08" },
+      ]);
+      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
+      mock.respondWith("update:transactions", [{ id: 1, status: "c", incomeMonth: "2026-08" }]);
+
+      await updateTransaction(mock.db, 1, {
+        accountId: undefined,
+        categoryId: undefined,
+        date: undefined,
+        payee: undefined,
+        memo: undefined,
+        amount: undefined,
+        status: "c",
+        flagColor: undefined,
+        incomeMonth: undefined,
+      });
+
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ status: "c", isIncome: true });
+      expect(update?.set).not.toHaveProperty("incomeMonth");
+      expect(update?.set).not.toHaveProperty("categoryId");
+    });
+
     it("rejects setting status to 'r' via updateTransaction", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, amount: -5000, status: "c", payee: "Store", date: "2026-07-01" },

@@ -164,12 +164,13 @@ export async function PATCH(req: Request) {
     }
     try {
       const db = getDefaultDb();
+      const cleanPatch: Parameters<typeof updateRecurring>[2] = {};
+      if (patch.flagColor !== undefined) cleanPatch.flagColor = patch.flagColor;
+      if (patch.active !== undefined) cleanPatch.active = patch.active;
+      if (patch.categoryId !== undefined) cleanPatch.categoryId = patch.categoryId;
+
       for (const id of ids) {
-        await updateRecurring(db, Number(id), {
-          flagColor: patch.flagColor,
-          active: patch.active,
-          categoryId: patch.categoryId,
-        });
+        await updateRecurring(db, Number(id), cleanPatch);
       }
       return Response.json({ updatedCount: ids.length });
     } catch (e) {
@@ -184,25 +185,28 @@ export async function PATCH(req: Request) {
   const body = parseResult.data;
 
   try {
-    const row = await updateRecurring(getDefaultDb(), body.id, {
-      accountId: body.accountId,
-      categoryId: body.categoryId !== undefined ? body.categoryId : undefined,
-      payee: body.payee,
-      memo: body.memo !== undefined ? (body.memo ?? undefined) : undefined,
-      amount: body.amount,
-      frequency: body.frequency,
-      nextDate: body.nextDate,
-      anchorDay: body.anchorDay !== undefined ? body.anchorDay : undefined,
-      active: body.active,
-      flagColor: body.flagColor !== undefined ? body.flagColor : undefined,
-      transferAccountId: body.transferAccountId !== undefined ? body.transferAccountId : undefined,
-      subTransactions: body.subTransactions?.map((c) => ({
+    const patch: Parameters<typeof updateRecurring>[2] = {};
+    if (body.accountId !== undefined) patch.accountId = body.accountId;
+    if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if (body.payee !== undefined) patch.payee = body.payee;
+    if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
+    if (body.amount !== undefined) patch.amount = body.amount;
+    if (body.frequency !== undefined) patch.frequency = body.frequency;
+    if (body.nextDate !== undefined) patch.nextDate = body.nextDate;
+    if (body.anchorDay !== undefined) patch.anchorDay = body.anchorDay;
+    if (body.active !== undefined) patch.active = body.active;
+    if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
+    if (body.transferAccountId !== undefined) patch.transferAccountId = body.transferAccountId;
+    if (body.subTransactions !== undefined) {
+      patch.subTransactions = body.subTransactions.map((c) => ({
         categoryId: c.categoryId ?? null,
         transferAccountId: c.transferAccountId ?? null,
         amount: c.amount,
         memo: c.memo,
-      })),
-    });
+      }));
+    }
+
+    const row = await updateRecurring(getDefaultDb(), body.id, patch);
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);
   } catch (e) {

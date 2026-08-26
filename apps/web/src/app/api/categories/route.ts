@@ -61,10 +61,11 @@ export async function PATCH(req: Request) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
     const body = parseResult.data;
-    const row = await updateCategoryGroup(db, body.id, {
-      name: body.name,
-      sort: body.sort,
-    });
+    const patch: Parameters<typeof updateCategoryGroup>[2] = {};
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.sort !== undefined) patch.sort = body.sort;
+
+    const row = await updateCategoryGroup(db, body.id, patch);
     return Response.json(row);
   }
 
@@ -73,13 +74,14 @@ export async function PATCH(req: Request) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
   const body = parseResult.data;
-  const row = await updateCategory(db, body.id, {
-    name: body.name,
-    goalTarget: body.goalTarget,
-    carryover: body.carryover,
-    sort: body.sort,
-    overspendCarriesOver: body.overspendCarriesOver,
-  });
+  const patch: Parameters<typeof updateCategory>[2] = {};
+  if (body.name !== undefined) patch.name = body.name;
+  if (body.goalTarget !== undefined) patch.goalTarget = body.goalTarget;
+  if (body.carryover !== undefined) patch.carryover = body.carryover;
+  if (body.sort !== undefined) patch.sort = body.sort;
+  if (body.overspendCarriesOver !== undefined) patch.overspendCarriesOver = body.overspendCarriesOver;
+
+  const row = await updateCategory(db, body.id, patch);
   return Response.json(row);
 }
 

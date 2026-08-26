@@ -114,35 +114,35 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
   isTransfer: boolean;
   isSplit: boolean;
   effectiveCategoryId: number | null | undefined;
-  effectiveTransferAccountId: number | null;
-  effectiveAccountId: number | null;
+  effectiveTransferAccountId: number | null | undefined;
+  effectiveAccountId: number | null | undefined;
   subTransactions: TxnSubTransactionInput[] | undefined;
 } {
   const isTransfer =
-    "transferAccountId" in input && (input as CreateRecurringInput).transferAccountId != null;
+    input.transferAccountId !== undefined && input.transferAccountId != null;
   const isSplit =
-    "subTransactions" in input &&
-    Array.isArray((input as CreateRecurringInput).subTransactions) &&
-    ((input as CreateRecurringInput).subTransactions!.length ?? 0) > 0;
+    input.subTransactions !== undefined &&
+    Array.isArray(input.subTransactions) &&
+    input.subTransactions.length > 0;
 
   if (isTransfer && isSplit) {
     throw new RecurringError("recurring cannot be both a transfer and a split");
   }
 
-  const effectiveTransferAccountId = isTransfer
-    ? Number((input as CreateRecurringInput).transferAccountId)
-    : null;
+  const effectiveTransferAccountId =
+    input.transferAccountId !== undefined
+      ? (input.transferAccountId != null ? Number(input.transferAccountId) : null)
+      : undefined;
   const effectiveAccountId =
-    "accountId" in input && (input as CreateRecurringInput).accountId != null
-      ? Number((input as CreateRecurringInput).accountId)
-      : null;
+    input.accountId !== undefined
+      ? (input.accountId != null ? Number(input.accountId) : null)
+      : undefined;
 
   if (isTransfer && effectiveAccountId != null && effectiveTransferAccountId === effectiveAccountId) {
     throw new RecurringError("transfer account must differ from source account");
   }
 
-  const explicitCategoryId =
-    "categoryId" in input ? (input as CreateRecurringInput).categoryId : undefined;
+  const explicitCategoryId = input.categoryId;
   const effectiveCategoryId =
     isSplit
       ? null
@@ -153,7 +153,7 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
         : undefined;
 
   const subTransactions = isSplit
-    ? ((input as CreateRecurringInput).subTransactions as TxnSubTransactionInput[])
+    ? (input.subTransactions as TxnSubTransactionInput[])
     : undefined;
 
   return {
@@ -227,7 +227,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         anchorDay,
         active: input.active ?? true,
         flagColor: sanitizeFlagColor(input.flagColor),
-        transferAccountId: norm.effectiveTransferAccountId,
+        transferAccountId: norm.effectiveTransferAccountId ?? null,
       })
       .returning();
 
@@ -288,13 +288,13 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   const norm = normaliseInput(patch);
 
   const effectiveAccountId =
-    "accountId" in patch && patch.accountId != null
+    patch.accountId !== undefined && patch.accountId != null
       ? Number(patch.accountId)
       : existing.accountId;
 
   const effectiveTransferAccountId =
-    "transferAccountId" in patch
-      ? norm.effectiveTransferAccountId
+    patch.transferAccountId !== undefined
+      ? (norm.effectiveTransferAccountId ?? null)
       : existing.transferAccountId;
 
   const isTransfer = effectiveTransferAccountId != null;
@@ -306,8 +306,8 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   // Validate split children if supplied.
   if (norm.isSplit) {
     const parentAmount =
-      "amount" in patch && (patch as UpdateRecurringInput).amount != null
-        ? assertValidAmount((patch as UpdateRecurringInput).amount)
+      patch.amount !== undefined && patch.amount != null
+        ? assertValidAmount(patch.amount)
         : assertValidAmount(existing.amount);
     assertSplitsBalanced(parentAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
@@ -323,37 +323,37 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (
     !norm.isTransfer &&
     !norm.isSplit &&
-    !("subTransactions" in patch) &&
-    "amount" in patch &&
-    (patch as UpdateRecurringInput).amount != null
+    patch.subTransactions === undefined &&
+    patch.amount !== undefined &&
+    patch.amount != null
   ) {
     const existingChildren = await db
       .select()
       .from(recurringSubTransactions)
       .where(eq(recurringSubTransactions.recurringId, id));
     if (existingChildren.length > 0) {
-      assertSplitsBalanced(assertValidAmount((patch as UpdateRecurringInput).amount), existingChildren);
+      assertSplitsBalanced(assertValidAmount(patch.amount), existingChildren);
     }
   }
 
   const effectiveAmount =
-    "amount" in patch && patch.amount != null
+    patch.amount !== undefined && patch.amount != null
       ? assertValidAmount(patch.amount)
       : Number(existing.amount);
 
   const p: Record<string, unknown> = {};
-  if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if (patch.payee != null) p.payee = String(patch.payee);
-  if ("memo" in patch && patch.memo !== undefined) p.memo = String(patch.memo ?? "");
-  if (patch.amount != null) p.amount = effectiveAmount;
-  if (patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
-  if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
-  if ("anchorDay" in patch && patch.anchorDay !== undefined) {
+  if (patch.accountId !== undefined && patch.accountId != null) p.accountId = Number(patch.accountId);
+  if (patch.payee !== undefined && patch.payee != null) p.payee = String(patch.payee);
+  if (patch.memo !== undefined) p.memo = String(patch.memo ?? "");
+  if (patch.amount !== undefined && patch.amount != null) p.amount = effectiveAmount;
+  if (patch.frequency !== undefined && patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
+  if (patch.nextDate !== undefined && patch.nextDate != null) p.nextDate = String(patch.nextDate);
+  if (patch.anchorDay !== undefined) {
     p.anchorDay = patch.anchorDay != null ? Number(patch.anchorDay) : null;
   }
-  if (patch.active != null) p.active = !!patch.active;
-  if ("flagColor" in patch && patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
-  if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
+  if (patch.active !== undefined && patch.active != null) p.active = !!patch.active;
+  if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
+  if (patch.transferAccountId !== undefined) p.transferAccountId = norm.effectiveTransferAccountId ?? null;
 
   db.run(sql`BEGIN`);
   try {
@@ -369,7 +369,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       const netOnBudgetDelta = (srcOnBudget ? effectiveAmount : 0) + (destOnBudget ? -effectiveAmount : 0);
 
       const candidateCatId =
-        "categoryId" in patch && norm.effectiveCategoryId !== undefined
+        patch.categoryId !== undefined && norm.effectiveCategoryId !== undefined
           ? norm.effectiveCategoryId
           : existing.categoryId;
 
@@ -387,7 +387,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       }
     } else if (!srcOnBudget) {
       p.categoryId = null;
-    } else if ("categoryId" in patch && norm.effectiveCategoryId !== undefined) {
+    } else if (patch.categoryId !== undefined && norm.effectiveCategoryId !== undefined) {
       p.categoryId = norm.effectiveCategoryId;
     }
 
@@ -395,7 +395,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       await db.update(recurring).set(p).where(eq(recurring.id, id));
     }
 
-    if (norm.isTransfer || "subTransactions" in patch) {
+    if ((patch.transferAccountId !== undefined && norm.isTransfer) || (patch.subTransactions !== undefined)) {
       await db
         .delete(recurringSubTransactions)
         .where(eq(recurringSubTransactions.recurringId, id));

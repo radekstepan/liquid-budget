@@ -140,4 +140,32 @@ describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
     const json = await res.json();
     expect(json.carryover).toBe(0);
   });
+
+  it("BUG-19: preserves goalTarget, carryover, and overspendCarriesOver when updating sort or name", async () => {
+    const db = getDefaultDb();
+    const group = await createCategoryGroup(db, { name: "Test Group" });
+    const cat = await createCategory(db, {
+      groupId: group!.id,
+      name: "Emergency Fund",
+      goalTarget: 100000,
+      carryover: 5000,
+      overspendCarriesOver: true,
+    });
+    expect(cat!.goalTarget).toBe(100000);
+    expect(cat!.overspendCarriesOver).toBe(true);
+
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cat!.id, sort: 10 }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.sort).toBe(10);
+    expect(json.name).toBe("Emergency Fund");
+    expect(json.goalTarget).toBe(100000);
+    expect(json.carryover).toBe(5000);
+    expect(json.overspendCarriesOver).toBe(true);
+  });
 });
