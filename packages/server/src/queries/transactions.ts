@@ -609,22 +609,22 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   }
 
   const p: Record<string, unknown> = {};
-  if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if ("categoryId" in patch) {
+  if (patch.accountId !== undefined && patch.accountId != null) p.accountId = Number(patch.accountId);
+  if (patch.categoryId !== undefined) {
     p.categoryId = patch.categoryId ?? null;
   }
-  if (patch.date != null) p.date = String(patch.date);
-  if (patch.payee != null) p.payee = String(patch.payee);
-  if (patch.memo != null) p.memo = String(patch.memo);
-  if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
-  if (patch.status != null) {
+  if (patch.date !== undefined && patch.date != null) p.date = String(patch.date);
+  if (patch.payee !== undefined && patch.payee != null) p.payee = String(patch.payee);
+  if (patch.memo !== undefined) p.memo = patch.memo == null ? "" : String(patch.memo);
+  if (patch.amount !== undefined && patch.amount != null) p.amount = assertValidAmount(patch.amount);
+  if (patch.status !== undefined && patch.status != null) {
     p.status = patch.status;
     p.reconciledAt = null;
     p.reconciliationId = null;
   }
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
-  if ("incomeMonth" in patch) p.incomeMonth = patch.incomeMonth ?? null;
-  if ("isIncome" in patch) p.isIncome = patch.isIncome;
+  if (patch.incomeMonth !== undefined) p.incomeMonth = patch.incomeMonth ?? null;
+  if (patch.isIncome !== undefined) p.isIncome = patch.isIncome;
 
   const isParent = existing.parentId == null && existing.transferAccountId == null;
   // Always query child count for cleanliness; the count is used to decide
@@ -850,10 +850,10 @@ export async function updateSplit(
     }
 
     const pf: Record<string, unknown> = {};
-    if (parentFields.date != null) pf.date = String(parentFields.date);
-    if (parentFields.payee != null) pf.payee = String(parentFields.payee);
-    if (parentFields.memo != null) pf.memo = String(parentFields.memo);
-    if (parentFields.status != null) {
+    if (parentFields.date !== undefined && parentFields.date != null) pf.date = String(parentFields.date);
+    if (parentFields.payee !== undefined && parentFields.payee != null) pf.payee = String(parentFields.payee);
+    if (parentFields.memo !== undefined) pf.memo = parentFields.memo == null ? "" : String(parentFields.memo);
+    if (parentFields.status !== undefined && parentFields.status != null) {
       pf.status = parentFields.status;
       pf.reconciledAt = null;
       pf.reconciliationId = null;
@@ -1216,23 +1216,23 @@ export async function bulkUpdateTransactions(
       }
 
       const setFields: Record<string, unknown> = {};
-      if (patch.status !== undefined) {
+      if (patch.status !== undefined && patch.status != null) {
         setFields.status = patch.status;
         setFields.reconciledAt = null;
         setFields.reconciliationId = null;
       }
-      if ("categoryId" in patch) {
+      if (patch.categoryId !== undefined) {
         setFields.categoryId = patch.categoryId ?? null;
       }
-      if ("flagColor" in patch && patch.flagColor !== undefined) {
+      if (patch.flagColor !== undefined) {
         setFields.flagColor = sanitizeFlagColor(patch.flagColor);
       }
-      if (patch.date != null) setFields.date = String(patch.date);
-      if (patch.payee != null) setFields.payee = String(patch.payee);
-      if ("memo" in patch) setFields.memo = patch.memo ?? null;
-      if (patch.amount != null) setFields.amount = newAmount;
-      if (patch.accountId != null) setFields.accountId = newAccountId;
-      if ("incomeMonth" in patch) setFields.incomeMonth = patch.incomeMonth ?? null;
+      if (patch.date !== undefined && patch.date != null) setFields.date = String(patch.date);
+      if (patch.payee !== undefined && patch.payee != null) setFields.payee = String(patch.payee);
+      if (patch.memo !== undefined) setFields.memo = patch.memo == null ? "" : String(patch.memo);
+      if (patch.amount !== undefined && patch.amount != null) setFields.amount = newAmount;
+      if (patch.accountId !== undefined && patch.accountId != null) setFields.accountId = newAccountId;
+      if (patch.incomeMonth !== undefined) setFields.incomeMonth = patch.incomeMonth ?? null;
 
       const srcOnBudget = await isAccountOnBudget(db, newAccountId);
       const destOnBudget =
@@ -1283,7 +1283,7 @@ export async function bulkUpdateTransactions(
           existing.parentId == null &&
           finalCatId == null;
 
-        if (patch.accountId != null || patch.amount != null || "categoryId" in patch) {
+        if (patch.accountId != null || patch.amount != null || patch.categoryId !== undefined) {
           const isIncome = isEligibleForIncome && newAmount > 0;
           setFields.isIncome = isIncome;
           if (!isIncome) {

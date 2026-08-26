@@ -48,14 +48,15 @@ export async function PATCH(req: Request) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
   const body = parseResult.data;
-  const row = await updateAccount(getDefaultDb(), body.id, {
-    name: body.name,
-    kind: body.kind,
-    groupLabel: body.groupLabel,
-    onBudget: body.onBudget,
-    sort: body.sort,
-    archived: body.archived,
-  });
+  const patch: Parameters<typeof updateAccount>[2] = {};
+  if (body.name !== undefined) patch.name = body.name;
+  if (body.kind !== undefined) patch.kind = body.kind;
+  if (body.groupLabel !== undefined) patch.groupLabel = body.groupLabel;
+  if (body.onBudget !== undefined) patch.onBudget = body.onBudget;
+  if (body.sort !== undefined) patch.sort = body.sort;
+  if (body.archived !== undefined) patch.archived = body.archived;
+
+  const row = await updateAccount(getDefaultDb(), body.id, patch);
   return Response.json(row);
 }
 

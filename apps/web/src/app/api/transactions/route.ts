@@ -177,16 +177,17 @@ export async function PATCH(req: Request) {
 
   if (body.subTransactions && body.subTransactions.length > 0) {
     try {
+      const parentFields: Parameters<typeof updateSplit>[2] = {};
+      if (body.date !== undefined) parentFields.date = body.date;
+      if (body.payee !== undefined) parentFields.payee = body.payee;
+      if (body.memo !== undefined) parentFields.memo = body.memo ?? undefined;
+      if (body.status !== undefined) parentFields.status = body.status;
+      if (body.flagColor !== undefined) parentFields.flagColor = body.flagColor;
+
       const result = await updateSplit(
         db,
         body.id,
-        {
-          date: body.date,
-          payee: body.payee,
-          memo: body.memo ?? undefined,
-          status: body.status,
-          flagColor: "flagColor" in body ? (body.flagColor ?? null) : undefined,
-        },
+        parentFields,
         body.subTransactions.map((c) => ({
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
@@ -201,17 +202,18 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const row = await updateTransaction(db, body.id, {
-      accountId: body.accountId,
-      categoryId: body.categoryId !== undefined ? body.categoryId : undefined,
-      date: body.date,
-      payee: body.payee,
-      memo: body.memo !== undefined ? (body.memo ?? undefined) : undefined,
-      amount: body.amount,
-      status: body.status,
-      flagColor: "flagColor" in body ? (body.flagColor ?? null) : undefined,
-      incomeMonth: body.incomeMonth,
-    });
+    const patch: Parameters<typeof updateTransaction>[2] = {};
+    if (body.accountId !== undefined) patch.accountId = body.accountId;
+    if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if (body.date !== undefined) patch.date = body.date;
+    if (body.payee !== undefined) patch.payee = body.payee;
+    if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
+    if (body.amount !== undefined) patch.amount = body.amount;
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
+    if (body.incomeMonth !== undefined) patch.incomeMonth = body.incomeMonth;
+
+    const row = await updateTransaction(db, body.id, patch);
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);
   } catch (e) {

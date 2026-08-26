@@ -83,12 +83,12 @@ export async function getAccount(db: Database, id: number) {
 
 export async function updateAccount(db: Database, id: number, patch: UpdateAccountInput) {
   const p: Record<string, unknown> = {};
-  if (patch.name != null) p.name = String(patch.name);
-  if (patch.kind != null) p.kind = String(patch.kind);
-  if (patch.groupLabel != null) p.groupLabel = String(patch.groupLabel);
-  if (patch.onBudget != null) p.onBudget = !!patch.onBudget;
-  if (patch.sort != null) p.sort = Number(patch.sort);
-  if (patch.archived != null) p.archived = !!patch.archived;
+  if (patch.name !== undefined && patch.name != null) p.name = String(patch.name);
+  if (patch.kind !== undefined && patch.kind != null) p.kind = String(patch.kind);
+  if (patch.groupLabel !== undefined && patch.groupLabel != null) p.groupLabel = String(patch.groupLabel);
+  if (patch.onBudget !== undefined && patch.onBudget != null) p.onBudget = !!patch.onBudget;
+  if (patch.sort !== undefined && patch.sort != null) p.sort = Number(patch.sort);
+  if (patch.archived !== undefined && patch.archived != null) p.archived = !!patch.archived;
   if (Object.keys(p).length === 0) {
     const [row] = await db.select().from(accounts).where(eq(accounts.id, id));
     return row;

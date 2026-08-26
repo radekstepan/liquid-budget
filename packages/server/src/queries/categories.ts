@@ -117,15 +117,15 @@ export async function updateCategory(
   }
 ) {
   const p: Record<string, unknown> = {};
-  if (patch.name != null) p.name = String(patch.name);
-  if ("goalTarget" in patch) {
+  if (patch.name !== undefined && patch.name != null) p.name = String(patch.name);
+  if (patch.goalTarget !== undefined) {
     p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget);
   }
-  if ("carryover" in patch && patch.carryover !== undefined) {
+  if (patch.carryover !== undefined) {
     p.carryover = patch.carryover == null ? 0 : assertValidAmount(patch.carryover);
   }
-  if (patch.sort != null) p.sort = Number(patch.sort);
-  if ("overspendCarriesOver" in patch) {
+  if (patch.sort !== undefined && patch.sort != null) p.sort = Number(patch.sort);
+  if (patch.overspendCarriesOver !== undefined) {
     p.overspendCarriesOver = patch.overspendCarriesOver === true;
   }
   if (Object.keys(p).length === 0) {
