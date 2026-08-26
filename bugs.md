@@ -34,7 +34,7 @@ The test suite does not exercise concurrent HTTP mutations, failure between comm
 
 ### [BUG-01] Legacy databases fail normal startup when `__drizzle_migrations` table is absent
 - **Severity**: High
-- **Status**: Unresolved
+- **Status**: Resolved
 - **Category**: Database & API
 - **Location**: `packages/server/src/client.ts:76`; `packages/server/src/migrate.ts:37`; `packages/server/src/migrate-bootstrap.ts:62-64`
 - **Description & Root Cause**: `bootstrapMigrationJournal()` handles two cases correctly: fresh installs (no `accounts` table) and already-migrated DBs (hashes present). For the legacy upgrade case — `accounts` exists but `__drizzle_migrations` table is absent — it returns `"noop"` (line 64) with a comment stating "Caller should call `migrate()` first, then call this again." Neither `getDefaultDb()` nor the `migrate.ts` CLI follows this two-step sequence; both call bootstrap once then `migrate()`. Drizzle creates `__drizzle_migrations` and then applies migration `0000`, which fails because `accounts` already exists.

@@ -19,7 +19,6 @@ CREATE TABLE `__new_recurring` (
 INSERT INTO `__new_recurring`("id", "account_id", "category_id", "payee", "payee_id", "amount", "frequency", "next_date", "active", "transfer_account_id") SELECT "id", "account_id", "category_id", "payee", "payee_id", "amount", "frequency", "next_date", "active", "transfer_account_id" FROM `recurring`;--> statement-breakpoint
 DROP TABLE `recurring`;--> statement-breakpoint
 ALTER TABLE `__new_recurring` RENAME TO `recurring`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE INDEX `recurring_account_id_idx` ON `recurring` (`account_id`);--> statement-breakpoint
 CREATE INDEX `recurring_next_date_idx` ON `recurring` (`next_date`);--> statement-breakpoint
 CREATE TABLE `__new_recurring_sub_transactions` (
@@ -59,7 +58,7 @@ CREATE TABLE `__new_transactions` (
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`payee_id`) REFERENCES `payees`(`id`) ON UPDATE no action ON DELETE set null,
-	FOREIGN KEY (`parent_id`) REFERENCES `transactions`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`parent_id`) REFERENCES `__new_transactions`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`transfer_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "transactions_status_check" CHECK("__new_transactions"."status" IN ('u', 'c', 'r'))
 );
@@ -70,4 +69,5 @@ ALTER TABLE `__new_transactions` RENAME TO `transactions`;--> statement-breakpoi
 CREATE INDEX `transactions_account_date_idx` ON `transactions` (`account_id`,`date`);--> statement-breakpoint
 CREATE INDEX `transactions_date_idx` ON `transactions` (`date`);--> statement-breakpoint
 CREATE INDEX `transactions_parent_id_idx` ON `transactions` (`parent_id`);--> statement-breakpoint
-CREATE INDEX `transactions_reconciliation_id_idx` ON `transactions` (`reconciliation_id`);
+CREATE INDEX `transactions_reconciliation_id_idx` ON `transactions` (`reconciliation_id`);--> statement-breakpoint
+PRAGMA foreign_keys=ON;

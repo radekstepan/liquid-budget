@@ -74,7 +74,12 @@ export function getDefaultDb(): Db {
     // we first bootstrap the journal so `migrate()` becomes a no-op
     // instead of failing with "table already exists".
     bootstrapMigrationJournal(db);
-    migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    db.$client.pragma("foreign_keys = OFF");
+    try {
+      migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    } finally {
+      db.$client.pragma("foreign_keys = ON");
+    }
     globalForDb.__ynabDb = db;
   }
   return globalForDb.__ynabDb;

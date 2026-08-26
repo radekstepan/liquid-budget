@@ -55,21 +55,11 @@ describe("bootstrapMigrationJournal", () => {
     expect(() => migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })).not.toThrow();
   });
 
-  it("is a no-op when the legacy tables exist but the journal table is missing", () => {
+  it("bootstraps a legacy database when __drizzle_migrations is absent and allows migrate() to succeed", () => {
     const { db, raw } = openRaw();
     initLegacyTables(raw);
-    // The journal table does not exist yet — migrate() must create it
-    // before the bootstrap row can be inserted, so this call defers.
-    expect(bootstrapMigrationJournal(db)).toBe("noop");
-  });
 
-  it("inserts the synthetic journal row for a legacy database", () => {
-    const { db, raw } = openRaw();
-    initLegacyTables(raw);
-    raw.exec(
-      `CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC)`
-    );
-
+    // Legacy database has tables (e.g. accounts) but __drizzle_migrations does not exist yet.
     expect(bootstrapMigrationJournal(db)).toBe("bootstrapped");
 
     const rows = raw.prepare("SELECT hash, created_at FROM __drizzle_migrations").all() as Array<{
@@ -85,6 +75,39 @@ describe("bootstrapMigrationJournal", () => {
 
     // And a second bootstrap call is a no-op.
     expect(bootstrapMigrationJournal(db)).toBe("noop");
+  });
+
+  it("bootstraps and preserves data in a populated legacy database", () => {
+    const { db, raw } = openRaw();
+    initLegacyTables(raw);
+
+    // Insert legacy user data before migration
+    raw.prepare(
+      "INSERT INTO accounts (id, name, kind, group_label, balance, on_budget, sort) VALUES (1, 'Legacy Checking', 'liquid', 'Checking', 50000, 1, 0)"
+    ).run();
+    raw.prepare(
+      "INSERT INTO transactions (id, account_id, date, payee, memo, amount, status) VALUES (1, 1, '2026-01-01', 'Opening Balance', '', 50000, 'c')"
+    ).run();
+
+    // Bootstrap and migrate
+    expect(bootstrapMigrationJournal(db)).toBe("bootstrapped");
+    raw.pragma("foreign_keys = OFF");
+    try {
+      expect(() => migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })).not.toThrow();
+    } finally {
+      raw.pragma("foreign_keys = ON");
+    }
+
+    // Verify data is completely intact and accessible
+    const accounts = raw.prepare("SELECT * FROM accounts WHERE id = 1").all() as Array<{ name: string; balance: number }>;
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]!.name).toBe("Legacy Checking");
+    expect(accounts[0]!.balance).toBe(50000);
+
+    const txs = raw.prepare("SELECT * FROM transactions WHERE id = 1").all() as Array<{ payee: string; amount: number }>;
+    expect(txs).toHaveLength(1);
+    expect(txs[0]!.payee).toBe("Opening Balance");
+    expect(txs[0]!.amount).toBe(50000);
   });
 
   it("is a no-op when the migration hash is already recorded", () => {
