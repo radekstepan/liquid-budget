@@ -31,8 +31,9 @@ export type CreateRecurringInput = {
   /**
    * If set, this recurring entry is a transfer: it lives on `accountId`
    * and the corresponding balance movement lands on `transferAccountId`
-   * when posted. `categoryId` is forced to null and `subTransactions`
-   * must be omitted.
+   * when posted. For boundary-crossing transfers to off-budget accounts,
+   * `categoryId` is preserved/required; for same-boundary transfers,
+   * `categoryId` is forced to null. `subTransactions` must be omitted.
    */
   transferAccountId?: number | null;
   /**
@@ -113,7 +114,7 @@ function assertSplitsBalanced(
 function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
   isTransfer: boolean;
   isSplit: boolean;
-  effectiveCategoryId: number | null;
+  effectiveCategoryId: number | null | undefined;
   effectiveTransferAccountId: number | null;
   effectiveAccountId: number | null;
   subTransactions: TxnSubTransactionInput[] | undefined;
@@ -144,7 +145,13 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
   const explicitCategoryId =
     "categoryId" in input ? (input as CreateRecurringInput).categoryId : undefined;
   const effectiveCategoryId =
-    isTransfer || isSplit ? null : (explicitCategoryId ?? null);
+    isSplit
+      ? null
+      : explicitCategoryId !== undefined
+        ? explicitCategoryId != null
+          ? Number(explicitCategoryId)
+          : null
+        : undefined;
 
   const subTransactions = isSplit
     ? ((input as CreateRecurringInput).subTransactions as TxnSubTransactionInput[])
@@ -175,8 +182,34 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
 
   db.run(sql`BEGIN`);
   try {
-    const onBudget = await isAccountOnBudget(db, input.accountId);
-    const categoryId = onBudget ? norm.effectiveCategoryId : null;
+    const srcOnBudget = await isAccountOnBudget(db, input.accountId);
+    let categoryId: number | null = null;
+
+    if (norm.isSplit) {
+      categoryId = null;
+    } else if (norm.isTransfer && norm.effectiveTransferAccountId != null) {
+      const destOnBudget = await isAccountOnBudget(db, norm.effectiveTransferAccountId);
+      const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+      const netOnBudgetDelta = (srcOnBudget ? validatedAmount : 0) + (destOnBudget ? -validatedAmount : 0);
+
+      if (isBoundaryCrossing) {
+        if (netOnBudgetDelta < 0) {
+          if (norm.effectiveCategoryId == null) {
+            throw new RecurringError("Boundary transfer outflow requires a category", 422);
+          }
+          categoryId = norm.effectiveCategoryId;
+        } else {
+          categoryId = norm.effectiveCategoryId ?? null;
+        }
+      } else {
+        categoryId = null;
+      }
+    } else if (!srcOnBudget) {
+      categoryId = null;
+    } else {
+      categoryId = norm.effectiveCategoryId ?? null;
+    }
+
     const [parent] = await db
       .insert(recurring)
       .values({
@@ -197,7 +230,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       let sort = 0;
       for (const c of norm.subTransactions!) {
         const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-        const categoryId = transferAccountId ? null : (onBudget && c.categoryId ? Number(c.categoryId) : null);
+        const categoryId = transferAccountId ? null : (srcOnBudget && c.categoryId ? Number(c.categoryId) : null);
         await db.insert(recurringSubTransactions).values({
           recurringId: parent.id,
           categoryId,
@@ -229,7 +262,14 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       ? Number(patch.accountId)
       : existing.accountId;
 
-  if (norm.isTransfer && norm.effectiveTransferAccountId === effectiveAccountId) {
+  const effectiveTransferAccountId =
+    "transferAccountId" in patch
+      ? norm.effectiveTransferAccountId
+      : existing.transferAccountId;
+
+  const isTransfer = effectiveTransferAccountId != null;
+
+  if (isTransfer && effectiveTransferAccountId === effectiveAccountId) {
     throw new RecurringError("transfer account must differ from source account");
   }
 
@@ -266,33 +306,56 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
     }
   }
 
+  const effectiveAmount =
+    "amount" in patch && patch.amount != null
+      ? assertValidAmount(patch.amount)
+      : Number(existing.amount);
+
   const p: Record<string, unknown> = {};
   if (patch.accountId != null) p.accountId = Number(patch.accountId);
-  if ("categoryId" in patch) p.categoryId = norm.effectiveCategoryId;
   if (patch.payee != null) p.payee = String(patch.payee);
-  if ("memo" in patch) p.memo = String(patch.memo ?? "");
-  if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
+  if ("memo" in patch && patch.memo !== undefined) p.memo = String(patch.memo ?? "");
+  if (patch.amount != null) p.amount = effectiveAmount;
   if (patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
-  if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);
+  if ("flagColor" in patch && patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
-
-  if (norm.isSplit) {
-    p.transferAccountId = null;
-    p.categoryId = null;
-  }
-  if (norm.isTransfer) {
-    p.transferAccountId = norm.effectiveTransferAccountId;
-    p.categoryId = null;
-  }
 
   db.run(sql`BEGIN`);
   try {
     const targetAccountId = (p.accountId as number | undefined) ?? existing.accountId;
-    const onBudget = await isAccountOnBudget(db, targetAccountId);
-    if (!onBudget) {
+    const srcOnBudget = await isAccountOnBudget(db, targetAccountId);
+
+    if (norm.isSplit) {
+      p.transferAccountId = null;
       p.categoryId = null;
+    } else if (isTransfer) {
+      const destOnBudget = await isAccountOnBudget(db, effectiveTransferAccountId!);
+      const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+      const netOnBudgetDelta = (srcOnBudget ? effectiveAmount : 0) + (destOnBudget ? -effectiveAmount : 0);
+
+      const candidateCatId =
+        "categoryId" in patch && norm.effectiveCategoryId !== undefined
+          ? norm.effectiveCategoryId
+          : existing.categoryId;
+
+      if (isBoundaryCrossing) {
+        if (netOnBudgetDelta < 0) {
+          if (candidateCatId == null) {
+            throw new RecurringError("Boundary transfer outflow requires a category", 422);
+          }
+          p.categoryId = candidateCatId;
+        } else {
+          p.categoryId = candidateCatId ?? null;
+        }
+      } else {
+        p.categoryId = null;
+      }
+    } else if (!srcOnBudget) {
+      p.categoryId = null;
+    } else if ("categoryId" in patch && norm.effectiveCategoryId !== undefined) {
+      p.categoryId = norm.effectiveCategoryId;
     }
 
     if (Object.keys(p).length > 0) {
@@ -307,7 +370,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         let sort = 0;
         for (const c of norm.subTransactions!) {
           const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-          const categoryId = transferAccountId ? null : (onBudget && c.categoryId ? Number(c.categoryId) : null);
+          const categoryId = transferAccountId ? null : (srcOnBudget && c.categoryId ? Number(c.categoryId) : null);
           await db.insert(recurringSubTransactions).values({
             recurringId: id,
             categoryId,
