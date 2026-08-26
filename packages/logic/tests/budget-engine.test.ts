@@ -1134,6 +1134,178 @@ describe("computeBudget", () => {
           }
         }
       });
+
+      it("BUG-07: funded credit card spending preserves buffer and envelope invariant when no CC payment group or category exists", () => {
+        // Reproduction scenario: Charge 10000 cents to a credit account in a funded category without a valid linked CC payment category.
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        expect(june.tbb).toBe(40000);
+
+        const everyday = june.groups.find((g) => !g.group.isCreditCardPayments)!;
+        const grocJune = everyday.rows.find((r) => r.category.name === "Groceries")!;
+        expect(grocJune.assigned).toBe(10000);
+        expect(grocJune.outflow).toBe(-10000);
+        expect(grocJune.available).toBe(0);
+
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments);
+        expect(ccGroup).toBeDefined();
+        const visaCat = ccGroup!.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(visaCat).toBeDefined();
+        expect(visaCat.ccBuffer).toBe(10000);
+        expect(visaCat.available).toBe(10000);
+
+        // Budget integrity invariant: Checking liquid cash (50000) = Envelopes (0 + 10000) + TBB (40000)
+        const totalEnvelopesJune = june.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopesJune + june.tbb).toBe(50000);
+
+        // Multi-month carryover to July
+        const july = computeBudget(data, "2025-07");
+        expect(july.tbb).toBe(40000);
+        const ccGroupJuly = july.groups.find((g) => g.group.isCreditCardPayments)!;
+        const visaJuly = ccGroupJuly.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(visaJuly.carryoverIn).toBe(10000);
+        expect(visaJuly.available).toBe(10000);
+        const totalEnvelopesJuly = july.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopesJuly + july.tbb).toBe(50000);
+
+        // Subsequent bill payment in July from Checking to Visa
+        const dataWithPayment: BudgetData = {
+          ...data,
+          transactions: [
+            ...data.transactions,
+            { id: 3, accountId: 1, categoryId: null, transferAccountId: 2, date: "2025-07-10", payee: "Payment: Visa", memo: "", amount: "-10000", status: "c" },
+          ],
+        };
+
+        const julyWithPayment = computeBudget(dataWithPayment, "2025-07");
+        const ccGroupJulyPaid = julyWithPayment.groups.find((g) => g.group.isCreditCardPayments)!;
+        const visaJulyPaid = ccGroupJulyPaid.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(visaJulyPaid.carryoverIn).toBe(10000);
+        expect(visaJulyPaid.ccBuffer).toBe(-10000);
+        expect(visaJulyPaid.available).toBe(0);
+        expect(julyWithPayment.tbb).toBe(40000);
+        // Checking cash is now 40000 (50000 - 10000 transfer). Invariant: 40000 = Envelopes (0) + TBB (40000)
+        const totalEnvelopesJulyPaid = julyWithPayment.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopesJulyPaid + julyWithPayment.tbb).toBe(40000);
+      });
+
+      it("BUG-07: unlinked credit card attaches to existing CC Payments group when group exists without category", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Mastercard", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.id === 2)!;
+        expect(ccGroup).toBeDefined();
+        const mcCat = ccGroup.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(mcCat).toBeDefined();
+        expect(mcCat.category.name).toBe("Mastercard");
+        expect(mcCat.ccBuffer).toBe(10000);
+        expect(mcCat.available).toBe(10000);
+      });
+
+      it("BUG-08: duplicate payment categories linked to same credit account do not double-count buffer", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 2, name: "Visa Payment 1", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            { id: 3, groupId: 2, name: "Visa Payment 2", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments)!;
+        const v1 = ccGroup.rows.find((r) => r.category.id === 2)!;
+        const v2 = ccGroup.rows.find((r) => r.category.id === 3)!;
+        expect(v1.ccBuffer).toBe(10000);
+        expect(v1.available).toBe(10000);
+        expect(v2.ccBuffer).toBe(0);
+        expect(v2.available).toBe(0);
+
+        // Invariant: Checking cash (50000) = Envelopes (0 + 10000 + 0) + TBB (40000)
+        const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopes + june.tbb).toBe(50000);
+      });
+
+      it("off-budget credit card account does not synthesize CC payment category", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Tracking Card", kind: "credit", groupLabel: "Tracking", balance: "0", onBudget: false, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+          ],
+          recurring: [],
+        };
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments);
+        expect(ccGroup).toBeUndefined();
+      });
     });
   });
 
