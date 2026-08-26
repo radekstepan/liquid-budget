@@ -130,6 +130,7 @@ type RawIndexData = {
   outflowByMonth: Map<string, Map<number, number>>;
   incomeByMonth: Map<string, number>;
   cardPaymentsByAccountMonth: Map<string, Map<number, number>>;
+  cardAdvancesByAccountMonth: Map<string, Map<number, number>>;
   cashDeltaByCatMonth: Map<string, Map<number, number>>;
   ccTransactionsByCatMonth: Map<string, Map<number, CCTransactionEntry[]>>;
 };
@@ -303,6 +304,7 @@ function buildRawIndexData(
   const outflowByMonth = new Map<string, Map<number, number>>();
   const incomeByMonth = new Map<string, number>();
   const cardPaymentsByAccountMonth = new Map<string, Map<number, number>>();
+  const cardAdvancesByAccountMonth = new Map<string, Map<number, number>>();
   const cashDeltaByCatMonth = new Map<string, Map<number, number>>();
   const ccTransactionsByCatMonth = new Map<string, Map<number, CCTransactionEntry[]>>();
 
@@ -367,19 +369,35 @@ function buildRawIndexData(
       incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + incomeAmt));
     }
 
-    // Payments to credit cards
-    if (t.transferAccountId != null) {
+    // Transfers involving credit cards
+    if (t.transferAccountId != null && isInternalTransfer) {
+      const sending = amt < 0 ? t.accountId : t.transferAccountId;
       const receiving = amt < 0 ? t.transferAccountId : t.accountId;
+      const transferAmount = Math.abs(amt);
+
+      // Payment into a credit card (from checking, cash, or another card)
       if (ccAccountIds.has(receiving)) {
         let pm = cardPaymentsByAccountMonth.get(mk);
         if (!pm) {
           pm = new Map();
           cardPaymentsByAccountMonth.set(mk, pm);
         }
-        const paymentAmount = Math.abs(amt);
         pm.set(
           receiving,
-          Math.round((pm.get(receiving) ?? 0) + paymentAmount)
+          Math.round((pm.get(receiving) ?? 0) + transferAmount)
+        );
+      }
+
+      // Cash advance from a credit card to an on-budget liquid/cash account
+      if (ccAccountIds.has(sending) && !ccAccountIds.has(receiving)) {
+        let am = cardAdvancesByAccountMonth.get(mk);
+        if (!am) {
+          am = new Map();
+          cardAdvancesByAccountMonth.set(mk, am);
+        }
+        am.set(
+          sending,
+          Math.round((am.get(sending) ?? 0) + transferAmount)
         );
       }
     }
@@ -391,6 +409,7 @@ function buildRawIndexData(
     outflowByMonth,
     incomeByMonth,
     cardPaymentsByAccountMonth,
+    cardAdvancesByAccountMonth,
     cashDeltaByCatMonth,
     ccTransactionsByCatMonth,
   };
@@ -422,6 +441,7 @@ function computeAllMonths(
     const cashDeltaMap = rawData.cashDeltaByCatMonth.get(month) ?? new Map<number, number>();
     const ccTxMap = rawData.ccTransactionsByCatMonth.get(month) ?? new Map<number, CCTransactionEntry[]>();
     const cardPayments = rawData.cardPaymentsByAccountMonth.get(month) ?? new Map<number, number>();
+    const cardAdvances = rawData.cardAdvancesByAccountMonth.get(month) ?? new Map<number, number>();
 
     const monthFundedCCByAccount = new Map<number, number>();
     let monthCashOverspent = 0;
@@ -504,8 +524,9 @@ function computeAllMonths(
       const linkedAcc = c.linkedAccountId;
       if (linkedAcc != null) {
         const fundedCC = monthFundedCCByAccount.get(linkedAcc) ?? 0;
+        const cardAdvance = cardAdvances.get(linkedAcc) ?? 0;
         const cardPayment = cardPayments.get(linkedAcc) ?? 0;
-        ccBuffer = Math.round(fundedCC - cardPayment);
+        ccBuffer = Math.round(fundedCC + cardAdvance - cardPayment);
         monthSpendByAccount.set(linkedAcc, ccBuffer);
       }
 
