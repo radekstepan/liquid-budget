@@ -29,21 +29,40 @@ export const CalendarView = memo(function CalendarView({
     () => new Map(data.categories.map((c) => [c.id, c.name])),
     [data.categories]
   );
+  const accountMap = useMemo(
+    () => new Map(data.accounts.map((a) => [a.id, a])),
+    [data.accounts]
+  );
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
 
   const firstDay = new Date(year, month0, 1).getDay();
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
 
-  const byDay = new Map<number, { payee: string; amount: number; cat: string }[]>();
+  const byDay = new Map<
+    number,
+    { payee: string; amount: number; cat: string; netDelta: number }[]
+  >();
   for (const t of data.transactions) {
     if (t.parentId != null) continue;
     if (!t.date.startsWith(month)) continue;
     const day = Number(t.date.slice(8, 10));
     const arr = byDay.get(day) ?? [];
+    const amt = num(t.amount);
+    const accA = accountMap.get(t.accountId);
+    const onA = accA ? accA.onBudget : true;
+    let netDelta: number;
+    if (t.transferAccountId != null) {
+      const accB = accountMap.get(t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+      netDelta = (onA ? amt : 0) + (onB ? -amt : 0);
+    } else {
+      netDelta = onA ? amt : 0;
+    }
     arr.push({
       payee: t.payee,
-      amount: num(t.amount),
+      amount: amt,
       cat: t.categoryId ? catMap.get(t.categoryId) ?? "" : "",
+      netDelta,
     });
     byDay.set(day, arr);
   }
@@ -53,9 +72,12 @@ export const CalendarView = memo(function CalendarView({
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const monthTotal = data.transactions
-    .filter((t) => t.parentId == null && t.date.startsWith(month))
-    .reduce((s, t) => s + num(t.amount), 0);
+  let monthTotal = 0;
+  for (const dayItems of byDay.values()) {
+    for (const item of dayItems) {
+      monthTotal += item.netDelta;
+    }
+  }
 
   const dateIso = (d: number) => {
     const yyyy = year;
@@ -117,7 +139,7 @@ export const CalendarView = memo(function CalendarView({
           ))}
           {cells.map((d, i) => {
             const items = d ? byDay.get(d) ?? [] : [];
-            const dayNet = items.reduce((s, x) => s + x.amount, 0);
+            const dayNet = items.reduce((s, x) => s + x.netDelta, 0);
             const expanded = expandedDay === d;
             const visible = expanded ? items : items.slice(0, 3);
             const overflow = items.length - visible.length;
