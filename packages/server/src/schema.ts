@@ -59,6 +59,7 @@ export const categories = sqliteTable(
   },
   (t) => ({
     groupNameUniq: uniqueIndex("categories_group_name_uniq").on(t.groupId, t.name),
+    linkedAccountUniq: uniqueIndex("categories_linked_account_uniq").on(t.linkedAccountId),
   })
 );
 
@@ -125,6 +126,10 @@ export const transactions = sqliteTable(
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
     reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),
     statusCheck: check("transactions_status_check", sql`${t.status} IN ('u', 'c', 'r')`),
+    transferNotSelfCheck: check(
+      "transactions_transfer_not_self_check",
+      sql`${t.transferAccountId} IS NULL OR ${t.accountId} != ${t.transferAccountId}`
+    ),
   })
 );
 

@@ -174,16 +174,23 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
 
+  // Invariant: at most one category linked per credit account.
+  // Detect if any accounts are linked more than once.
   const linkedAccountIds = new Set<number>();
+  let hasDuplicateLinks = false;
   for (const c of data.categories) {
-    if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
-      linkedAccountIds.add(c.linkedAccountId);
+    if (c.linkedAccountId != null) {
+      if (linkedAccountIds.has(c.linkedAccountId)) {
+        hasDuplicateLinks = true;
+      } else {
+        linkedAccountIds.add(c.linkedAccountId);
+      }
     }
   }
 
   const missingAccounts = ccAccounts.filter((a) => !linkedAccountIds.has(a.id));
 
-  if (missingAccounts.length === 0) {
+  if (missingAccounts.length === 0 && !hasDuplicateLinks) {
     normalizedDataCache.set(data, data);
     return data;
   }
@@ -202,7 +209,18 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     groups.push(ccGroup);
   }
 
-  const categories = [...data.categories];
+  // Deduplicate linked categories so only the first one keeps the link
+  const seenLinks = new Set<number>();
+  const categories = data.categories.map((c) => {
+    if (c.linkedAccountId != null) {
+      if (seenLinks.has(c.linkedAccountId)) {
+        return { ...c, linkedAccountId: null };
+      }
+      seenLinks.add(c.linkedAccountId);
+    }
+    return c;
+  });
+
   let maxCatId = categories.reduce((max, c) => Math.max(max, c.id), 0);
   let maxCatSort = categories
     .filter((c) => c.groupId === ccGroup!.id)
@@ -267,8 +285,11 @@ function getCCAccountIds(data: BudgetData): Set<number> {
   const ccGroupIds = new Set(
     data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
+  const seenLinked = new Set<number>();
   for (const c of data.categories) {
     if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
+      if (seenLinked.has(c.linkedAccountId)) continue;
+      seenLinked.add(c.linkedAccountId);
       const acc = accountMap.get(c.linkedAccountId);
       if (!acc || (acc.kind === "credit" && acc.onBudget !== false)) {
         ccAccountIds.add(c.linkedAccountId);

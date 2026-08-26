@@ -1187,6 +1187,14 @@ export async function bulkUpdateTransactions(
         throw new TransactionError("cannot change account of a split child");
       }
 
+      if (
+        existing.transferAccountId != null &&
+        patch.accountId != null &&
+        Number(patch.accountId) === existing.transferAccountId
+      ) {
+        throw new TransactionError("transfer account must differ from source account");
+      }
+
       const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
       const newAmount = patch.amount != null ? assertValidAmount(patch.amount) : Number(existing.amount);
 

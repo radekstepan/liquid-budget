@@ -1,4 +1,10 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "path";
+import { fileURLToPath } from "url";
+import * as schema from "../src/schema.js";
 import {
   CategoryError,
   createCategory,
@@ -412,6 +418,44 @@ describe("categories queries", () => {
       expect(sqls[0]).toBe("BEGIN");
       expect(sqls[sqls.length - 1]).toBe("ROLLBACK");
       expect(sqls).not.toContain("COMMIT");
+    });
+  });
+
+  describe("BUG-08: unique linkedAccountId constraint", () => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+    function openMigratedDb() {
+      const raw = new Database(":memory:");
+      raw.pragma("foreign_keys = ON");
+      const db = drizzle(raw, { schema });
+      migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      return db;
+    }
+
+    it("enforces unique linkedAccountId across categories in SQLite", async () => {
+      const db = openMigratedDb();
+      const [acc] = await db
+        .insert(schema.accounts)
+        .values({ name: "Visa", kind: "credit", groupLabel: "Credit Cards", sort: 0 })
+        .returning();
+
+      const [group] = await db
+        .insert(schema.categoryGroups)
+        .values({ name: "Credit Card Payments", isCreditCardPayments: true, sort: 0 })
+        .returning();
+
+      await db
+        .insert(schema.categories)
+        .values({ name: "Visa Payment 1", groupId: group!.id, linkedAccountId: acc!.id, sort: 0 });
+
+      // Attempting to insert a second category linked to the same account should fail unique constraint
+      await expect(
+        db
+          .insert(schema.categories)
+          .values({ name: "Visa Payment 2", groupId: group!.id, linkedAccountId: acc!.id, sort: 1 })
+      ).rejects.toThrow(/UNIQUE constraint failed/);
     });
   });
 });
