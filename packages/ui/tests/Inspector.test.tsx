@@ -104,6 +104,24 @@ describe("Inspector", () => {
       expect(screen.getByText("+$5,000.00")).toBeInTheDocument();
       expect(screen.getByText("-$3,500.00")).toBeInTheDocument();
     });
+
+    it("renders positive formatted outflow with plus sign when net category refunds result in negative outflow (BUG-11)", () => {
+      render(
+        <Inspector
+          {...baseProps}
+          cashFlow={{
+            month: "2026-06",
+            income: 50000,
+            outflow: -10000,
+            net: 60000,
+            savingsRate: 100,
+          }}
+        />
+      );
+      expect(screen.getByText("+$100.00")).toBeInTheDocument();
+      expect(screen.getByText("+$600.00")).toBeInTheDocument();
+      expect(screen.queryByText(/--\$100\.00/)).not.toBeInTheDocument();
+    });
   });
 
   describe("12-Month Net Worth Card", () => {

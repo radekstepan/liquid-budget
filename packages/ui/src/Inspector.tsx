@@ -282,7 +282,9 @@ export const Inspector = memo(function Inspector({
           <div className="flex justify-between">
             <span style={{ color: "var(--y-ink-soft)" }}>Expenses (Outflow)</span>
             <span className="y-num font-medium" style={{ color: "var(--y-ink)" }}>
-              -{money(effectiveCashFlow.outflow)}
+              {effectiveCashFlow.outflow >= 0
+                ? `-${money(effectiveCashFlow.outflow)}`
+                : `+${money(Math.abs(effectiveCashFlow.outflow))}`}
             </span>
           </div>
         </div>
