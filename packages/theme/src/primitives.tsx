@@ -14,12 +14,13 @@ export const cx = (...c: (string | false | undefined | null)[]) =>
 
 /* -------------------------------------------------- money */
 export const money = (n: number, showZero = true) => {
-  if (n === 0 && !showZero) return "";
-  const s = (Math.abs(n) / 100).toLocaleString("en-US", {
+  const rounded = Math.round(n);
+  if (rounded === 0) return showZero ? "$0.00" : "";
+  const s = (Math.abs(rounded) / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return `${n < 0 ? "-" : ""}$${s}`;
+  return `${rounded < 0 ? "-" : ""}$${s}`;
 };
 
 /* -------------------------------------------------- Button */

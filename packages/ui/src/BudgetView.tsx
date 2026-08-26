@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo, Fragment } from "react";
 import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
-import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO } from "@ynab/logic";
+import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -808,10 +808,7 @@ function CategoryMonthCell({
           const n = evalAmount(draft);
           if (n == null || !Number.isFinite(n)) return undefined;
           if (!/[+\-*/]/.test(draft.replace(/^[+-]/, ""))) return undefined;
-          return `= $${n.toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}`;
+          return `= ${fmt(dollarsToCents(n))}`;
         })()}
         className="y-inline-amt"
       />

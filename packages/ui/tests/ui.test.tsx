@@ -1,7 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { money } from "@ynab/theme";
 import { Modal, Field } from "../src/ui.js";
 import { AmountPreview } from "../src/AmountInput.js";
+
+describe("money (BUG-09)", () => {
+  it("formats positive, negative, and zero cents correctly", () => {
+    expect(money(0)).toBe("$0.00");
+    expect(money(0, false)).toBe("");
+    expect(money(123450)).toBe("$1,234.50");
+    expect(money(-123450)).toBe("-$1,234.50");
+  });
+
+  it("handles small negative cents without returning -$0.00", () => {
+    expect(money(-0.2)).toBe("$0.00");
+    expect(money(-0.2, false)).toBe("");
+    expect(money(-0.01)).toBe("$0.00");
+    expect(money(-0.49)).toBe("$0.00");
+    expect(money(-0.5)).toBe("$0.00");
+    expect(money(-0.51)).toBe("-$0.01");
+    expect(money(-0)).toBe("$0.00");
+    expect(money(0.2)).toBe("$0.00");
+    expect(money(0.49)).toBe("$0.00");
+    expect(money(0.5)).toBe("$0.01");
+  });
+});
 
 describe("AmountPreview", () => {
   it("shows the evaluated result for an expression", () => {
