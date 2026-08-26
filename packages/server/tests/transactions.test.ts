@@ -1415,17 +1415,25 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
       ]);
-      // remaining children after deleting 2: [3, 4]
+      // Parent check for id 2
       mock.respondWithNth("select:transactions", 2, [
+        { id: 1, status: "c", amount: -10000 },
+      ]);
+      // remaining children after deleting 2: [3, 4]
+      mock.respondWithNth("select:transactions", 3, [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
         { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
       ]);
       // Second id: 3
-      mock.respondWithNth("select:transactions", 3, [
+      mock.respondWithNth("select:transactions", 4, [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 10 },
       ]);
+      // Parent check for id 3
+      mock.respondWithNth("select:transactions", 5, [
+        { id: 1, status: "c", amount: -7000 },
+      ]);
       // remaining children after deleting 3: [4]
-      mock.respondWithNth("select:transactions", 4, [
+      mock.respondWithNth("select:transactions", 6, [
         { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
       ]);
       mock.respondWith("update:accounts", [{}, {}, {}]);
@@ -3052,6 +3060,245 @@ describe("transactions queries", () => {
               amount: -5000,
             })
           ).rejects.toThrow(/CHECK constraint failed/);
+        });
+      });
+
+      describe("BUG-10: Split-child amount edit restrictions and atomic full-split updates", () => {
+        it("updateTransaction: rejects changing amount of a split child and rolls back", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Costco",
+              memo: "Groceries & Household",
+              amount: -10000,
+            },
+            [
+              { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+              { categoryId: cat2Id, amount: -4000, memo: "household" },
+            ]
+          );
+
+          const child1 = split.children[0]!;
+
+          // Attempt to update child amount via updateTransaction
+          await expect(
+            updateTransaction(db, child1.id, { amount: -5000 })
+          ).rejects.toMatchObject({
+            status: 400,
+            name: "TransactionError",
+            message: /cannot change amount of a split child; edit the split/i,
+          });
+
+          // Verify parent, children, and account balance are untouched
+          const [parent] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, split.parent.id));
+          expect(parent?.amount).toBe(-10000);
+
+          const [child] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, child1.id));
+          expect(child?.amount).toBe(-6000);
+
+          const [acct] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(-10000);
+        });
+
+        it("bulkUpdateTransactions: rejects changing amount of a split child and preserves split invariants", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Costco",
+              memo: "Groceries & Household",
+              amount: -10000,
+            },
+            [
+              { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+              { categoryId: cat2Id, amount: -4000, memo: "household" },
+            ]
+          );
+
+          const child1 = split.children[0]!;
+
+          // Attempt to bulk update child amount
+          await expect(
+            bulkUpdateTransactions(db, [child1.id], { amount: -5000 })
+          ).rejects.toMatchObject({
+            status: 400,
+            name: "TransactionError",
+            message: /cannot change amount of a split child; edit the split/i,
+          });
+
+          // Verify invariant sum(children) === parent.amount
+          const [parent] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, split.parent.id));
+          expect(parent?.amount).toBe(-10000);
+
+          const [child] = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.id, child1.id));
+          expect(child?.amount).toBe(-6000);
+
+          const [acct] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(-10000);
+        });
+
+        it("updateSplit: atomically updates total parent amount and replaced children", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Costco",
+              memo: "Original split",
+              amount: -10000,
+            },
+            [
+              { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+              { categoryId: cat2Id, amount: -4000, memo: "household" },
+            ]
+          );
+
+          // Update split with new total amount (-12000) and new child amounts (-7000, -5000)
+          const result = await updateSplit(
+            db,
+            split.parent.id,
+            {
+              amount: -12000,
+              memo: "Updated split with higher amount",
+            },
+            [
+              { categoryId: cat1Id, amount: -7000, memo: "more groceries" },
+              { categoryId: cat2Id, amount: -5000, memo: "more household" },
+            ]
+          );
+
+          expect(result.parent.amount).toBe(-12000);
+          expect(result.children).toHaveLength(2);
+          expect(result.children[0]?.amount).toBe(-7000);
+          expect(result.children[1]?.amount).toBe(-5000);
+
+          const [acct] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(-12000);
+        });
+      });
+
+      describe("BUG-11: Deleting split child respects reconciled parent lock", () => {
+        it("deleteTransaction: rejects deleting child of a reconciled parent with 422 even if child is uncleared", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Target",
+              memo: "Shopping",
+              amount: -5000,
+              status: "c",
+            },
+            [
+              { categoryId: cat1Id, amount: -3000, memo: "clothes" },
+              { categoryId: cat2Id, amount: -2000, memo: "groceries" },
+            ]
+          );
+
+          const child1 = split.children[0]!;
+
+          // Set child 1 to uncleared ("u") and parent to reconciled ("r")
+          await db
+            .update(schema.transactions)
+            .set({ status: "u" })
+            .where(eq(schema.transactions.id, child1.id));
+          await db
+            .update(schema.transactions)
+            .set({ status: "r", reconciledAt: "2026-08-01" })
+            .where(eq(schema.transactions.id, split.parent.id));
+
+          // Attempt to delete uncleared child1 individually via deleteTransaction
+          await expect(deleteTransaction(db, child1.id)).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Verify transactions still exist
+          const allTx = await db.select().from(schema.transactions);
+          expect(allTx).toHaveLength(3);
+
+          const [acct] = await db
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(-5000);
+        });
+
+        it("bulkDeleteTransactions: rejects deleting child of a reconciled parent with 422", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Target",
+              memo: "Shopping",
+              amount: -5000,
+              status: "c",
+            },
+            [
+              { categoryId: cat1Id, amount: -3000, memo: "clothes" },
+              { categoryId: cat2Id, amount: -2000, memo: "groceries" },
+            ]
+          );
+
+          const child1 = split.children[0]!;
+
+          // Mark parent as reconciled ("r")
+          await db
+            .update(schema.transactions)
+            .set({ status: "r", reconciledAt: "2026-08-01" })
+            .where(eq(schema.transactions.id, split.parent.id));
+
+          // Attempt to bulk-delete child1
+          await expect(bulkDeleteTransactions(db, [child1.id])).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+
+          // Verify transactions still exist
+          const allTx = await db.select().from(schema.transactions);
+          expect(allTx).toHaveLength(3);
         });
       });
     });
