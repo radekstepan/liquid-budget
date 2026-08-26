@@ -373,6 +373,25 @@ describe("parseCsvImport", () => {
     expect(rows[0]!.amountCents).toBe(-1050);
     expect(rows[1]!.amountCents).toBe(50000);
   });
+
+  it("parses CSV files with text month date formats", () => {
+    const csv = [
+      "Date,Payee,Amount",
+      "15-Aug-2026,Store A,-10.00",
+      '"Aug 15, 2026",Store B,-20.00',
+      "Aug 15 2026,Store C,-25.00",
+      "15-AUG-2026,Store D,-30.00",
+      "2026-Aug-15,Store E,-40.00",
+    ].join("\n");
+    const { rows, headerError } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toMatchObject({ date: "2026-08-15", amountCents: -1000, error: null });
+    expect(rows[1]).toMatchObject({ date: "2026-08-15", amountCents: -2000, error: null });
+    expect(rows[2]).toMatchObject({ date: "2026-08-15", amountCents: -2500, error: null });
+    expect(rows[3]).toMatchObject({ date: "2026-08-15", amountCents: -3000, error: null });
+    expect(rows[4]).toMatchObject({ date: "2026-08-15", amountCents: -4000, error: null });
+  });
 });
 
 describe("detectDateFormat", () => {
@@ -389,6 +408,24 @@ describe("detectDateFormat", () => {
     const rows = [
       ["Date", "Payee", "Amount"],
       ["13/08/2026", "Store", "-10.00"],
+      ["05/08/2026", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
+  });
+
+  it("detects MDY from month-first text month dates", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["Aug 15, 2026", "Store", "-10.00"],
+      ["08/05/2026", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("mdy");
+  });
+
+  it("detects DMY from day-first text month dates", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["15-Aug-2026", "Store", "-10.00"],
       ["05/08/2026", "Store", "-20.00"],
     ];
     expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
@@ -422,10 +459,54 @@ describe("parseDate", () => {
     expect(parseDate("2026-08-05", "dmy")).toBe("2026-08-05");
   });
 
+  it("parses standard text month abbreviations and names in Day-Month-Year format", () => {
+    expect(parseDate("15-Aug-2026")).toBe("2026-08-15");
+    expect(parseDate("15-AUG-2026")).toBe("2026-08-15");
+    expect(parseDate("15-aug-2026")).toBe("2026-08-15");
+    expect(parseDate("15 Aug 2026")).toBe("2026-08-15");
+    expect(parseDate("15/Aug/2026")).toBe("2026-08-15");
+    expect(parseDate("15.Aug.2026")).toBe("2026-08-15");
+    expect(parseDate("15. Aug. 2026")).toBe("2026-08-15");
+    expect(parseDate("15-Aug-26")).toBe("2026-08-15");
+    expect(parseDate("15 August 2026")).toBe("2026-08-15");
+    expect(parseDate("15th August 2026")).toBe("2026-08-15");
+    expect(parseDate("1st Jan 2026")).toBe("2026-01-01");
+  });
+
+  it("parses standard text month abbreviations and names in Month-Day-Year format", () => {
+    expect(parseDate("Aug 15, 2026")).toBe("2026-08-15");
+    expect(parseDate("Aug 15 2026")).toBe("2026-08-15");
+    expect(parseDate("AUG 15, 2026")).toBe("2026-08-15");
+    expect(parseDate("aug 15, 2026")).toBe("2026-08-15");
+    expect(parseDate("Aug-15-2026")).toBe("2026-08-15");
+    expect(parseDate("Aug/15/2026")).toBe("2026-08-15");
+    expect(parseDate("Aug. 15, 2026")).toBe("2026-08-15");
+    expect(parseDate("August 15, 2026")).toBe("2026-08-15");
+    expect(parseDate("August 15th, 2026")).toBe("2026-08-15");
+    expect(parseDate("Aug 15, 26")).toBe("2026-08-15");
+    expect(parseDate("Sept 4, 2026")).toBe("2026-09-04");
+  });
+
+  it("parses Year-Month-Day text formats", () => {
+    expect(parseDate("2026-Aug-15")).toBe("2026-08-15");
+    expect(parseDate("2026 Aug 15")).toBe("2026-08-15");
+    expect(parseDate("2026/AUG/15")).toBe("2026-08-15");
+    expect(parseDate("2026-August-15")).toBe("2026-08-15");
+  });
+
+  it("handles leap years and month boundaries with text dates", () => {
+    expect(parseDate("29-Feb-2024")).toBe("2024-02-29"); // leap year
+    expect(parseDate("29-Feb-2025")).toBeNull(); // non-leap year
+    expect(parseDate("31-Sep-2026")).toBeNull(); // Sep has 30 days
+    expect(parseDate("31-Aug-2026")).toBe("2026-08-31"); // Aug has 31 days
+  });
+
   it("rejects invalid date strings", () => {
     expect(parseDate("invalid")).toBeNull();
     expect(parseDate("2026-02-30")).toBeNull();
     expect(parseDate("32/01/2026", "dmy")).toBeNull();
+    expect(parseDate("15-Foo-2026")).toBeNull();
+    expect(parseDate("Foo 15, 2026")).toBeNull();
   });
 });
 
