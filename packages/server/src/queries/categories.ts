@@ -111,7 +111,7 @@ export async function updateCategory(
   patch: {
     name?: string;
     goalTarget?: number | null;
-    carryover?: number;
+    carryover?: number | null;
     sort?: number;
     overspendCarriesOver?: boolean | null;
   }
@@ -121,7 +121,9 @@ export async function updateCategory(
   if ("goalTarget" in patch) {
     p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget);
   }
-  if (patch.carryover != null) p.carryover = assertValidAmount(patch.carryover);
+  if ("carryover" in patch && patch.carryover !== undefined) {
+    p.carryover = patch.carryover == null ? 0 : assertValidAmount(patch.carryover);
+  }
   if (patch.sort != null) p.sort = Number(patch.sort);
   if ("overspendCarriesOver" in patch) {
     p.overspendCarriesOver = patch.overspendCarriesOver === true;

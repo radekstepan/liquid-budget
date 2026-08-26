@@ -936,7 +936,7 @@ export function CategoryModal({
                   onSave({
                     name: name.trim(),
                     goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
-                    carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : undefined,
+                    carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : 0,
                     overspendCarriesOver,
                   })
                 }
