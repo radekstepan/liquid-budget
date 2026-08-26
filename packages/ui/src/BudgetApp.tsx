@@ -910,9 +910,15 @@ export function BudgetApp({
           transactionIds={modal.transactionIds}
           transactions={data.transactions.filter((t) => modal.transactionIds.includes(t.id))}
           onClose={() => setModal({ kind: "none" })}
-          onSave={async (patch) => {
+          onSave={async (patch, ids) => {
             if (api.bulkUpdateTransactions) {
-              await api.bulkUpdateTransactions(modal.transactionIds, patch);
+              const targetIds = ids ?? modal.transactionIds.filter((id) => {
+                const tx = data.transactions.find((t) => t.id === id);
+                return !tx || tx.status !== "r";
+              });
+              if (targetIds.length > 0) {
+                await api.bulkUpdateTransactions(targetIds, patch);
+              }
             }
             setModal({ kind: "none" });
           }}

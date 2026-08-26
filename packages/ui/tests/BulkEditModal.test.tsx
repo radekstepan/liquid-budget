@@ -89,9 +89,12 @@ describe("BulkEditTransactionsModal", () => {
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        payee: "Whole Foods Market",
-      });
+      expect(onSave).toHaveBeenCalledWith(
+        {
+          payee: "Whole Foods Market",
+        },
+        [10, 20]
+      );
     });
   });
 
@@ -134,16 +137,20 @@ describe("BulkEditTransactionsModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm & update 2 transactions/i }));
 
     await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        categoryId: 2,
-        incomeMonth: null,
-        memo: "Team Dinner",
-        status: "u",
-      });
+      expect(onSave).toHaveBeenCalledWith(
+        {
+          categoryId: 2,
+          incomeMonth: null,
+          memo: "Team Dinner",
+          status: "u",
+        },
+        [10, 20]
+      );
     });
   });
 
-  it("shows warning when a reconciled transaction is among the selection", () => {
+  it("shows warning and excludes reconciled transactions from update payload on mixed selection", async () => {
+    const onSave = vi.fn();
     const txWithReconciled: Transaction[] = [
       ...sampleTransactions,
       { id: 30, accountId: 1, categoryId: 1, date: "2026-08-01", payee: "Bank", memo: "", amount: "-100", status: "r" },
@@ -157,10 +164,73 @@ describe("BulkEditTransactionsModal", () => {
         categories={sampleCategories}
         groups={sampleGroups}
         onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+
+    // Warning banner explains that 1 transaction will be skipped
+    expect(screen.getByText(/reconciled transactions selected/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 selected transaction is reconciled and locked.*will be skipped/i)).toBeInTheDocument();
+
+    // Enable Memo
+    fireEvent.click(screen.getByRole("checkbox", { name: /^memo$/i }));
+    const memoInput = screen.getByPlaceholderText(/leave empty to clear memo/i);
+    fireEvent.change(memoInput, { target: { value: "Updated Note" } });
+
+    // Review changes
+    const reviewBtn = screen.getByRole("button", { name: /review changes \(1\)/i });
+    expect(reviewBtn).toBeEnabled();
+    fireEvent.click(reviewBtn);
+
+    // Confirm view shows 2 of 3 transactions
+    expect(screen.getByText("Confirm Changes (2 of 3 Transactions)")).toBeInTheDocument();
+    expect(screen.getByText(/1 reconciled transaction is locked and will be skipped/i)).toBeInTheDocument();
+    expect(screen.getByText("Target Transactions (2)")).toBeInTheDocument();
+
+    // Confirm button
+    const confirmBtn = screen.getByRole("button", { name: /confirm & update 2 of 3 transactions/i });
+    fireEvent.click(confirmBtn);
+
+    // Verify onSave was called with only editable IDs [10, 20], excluding 30
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        {
+          memo: "Updated Note",
+        },
+        [10, 20]
+      );
+    });
+  });
+
+  it("disables Review Changes button when all selected transactions are reconciled", () => {
+    const allReconciledTx: Transaction[] = [
+      { id: 30, accountId: 1, categoryId: 1, date: "2026-08-01", payee: "Bank 1", memo: "", amount: "-100", status: "r" },
+      { id: 40, accountId: 1, categoryId: 1, date: "2026-08-02", payee: "Bank 2", memo: "", amount: "-200", status: "r" },
+    ];
+
+    render(
+      <BulkEditTransactionsModal
+        transactionIds={[30, 40]}
+        transactions={allReconciledTx}
+        accounts={sampleAccounts}
+        categories={sampleCategories}
+        groups={sampleGroups}
+        onClose={() => {}}
         onSave={() => {}}
       />
     );
 
-    expect(screen.getByText(/reconciled transactions selected/i)).toBeInTheDocument();
+    expect(screen.getByText("Edit 2 Transactions")).toBeInTheDocument();
+    expect(screen.getByText(/all selected transactions are reconciled and locked/i)).toBeInTheDocument();
+
+    // Enable Payee checkbox and fill value
+    const payeeCheckbox = screen.getByRole("checkbox", { name: /^payee$/i });
+    fireEvent.click(payeeCheckbox);
+    const payeeInput = openSearchlistByPlaceholder("e.g. Target");
+    fireEvent.change(payeeInput, { target: { value: "New Payee" } });
+
+    // Review Changes button remains disabled because all transactions are reconciled
+    const reviewBtn = screen.getByRole("button", { name: /review changes \(1\)/i });
+    expect(reviewBtn).toBeDisabled();
   });
 });

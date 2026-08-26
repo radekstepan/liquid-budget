@@ -51,7 +51,7 @@ export function BulkEditTransactionsModal({
   groups?: CategoryGroup[];
   payees?: SearchListOption[];
   onClose: () => void;
-  onSave: (patch: BulkUpdateTransactionPatch) => Promise<void> | void;
+  onSave: (patch: BulkUpdateTransactionPatch, ids?: number[]) => Promise<void> | void;
 }) {
   const [step, setStep] = useState<"edit" | "confirm">("edit");
   const [saving, setSaving] = useState(false);
@@ -82,10 +82,32 @@ export function BulkEditTransactionsModal({
   const [status, setStatus] = useState<ClearedStatus>("c");
   const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(null);
 
-  const hasReconciled = useMemo(
-    () => transactions.some((t) => t.status === "r"),
-    [transactions]
-  );
+  const editableTransactions = useMemo(() => {
+    if (transactions && transactions.length > 0) {
+      return transactions.filter((t) => t.status !== "r");
+    }
+    return [];
+  }, [transactions]);
+
+  const reconciledCount = useMemo(() => {
+    if (transactions && transactions.length > 0) {
+      return transactions.filter((t) => t.status === "r").length;
+    }
+    return 0;
+  }, [transactions]);
+
+  const hasReconciled = reconciledCount > 0;
+  const allReconciled =
+    transactions && transactions.length > 0 && editableTransactions.length === 0;
+
+  const editableIds = useMemo(() => {
+    if (transactions && transactions.length > 0) {
+      return editableTransactions.map((t) => t.id);
+    }
+    return transactionIds;
+  }, [transactions, editableTransactions, transactionIds]);
+
+  const editableCount = editableIds.length;
 
   const activeFieldCount =
     (editDate ? 1 : 0) +
@@ -98,6 +120,7 @@ export function BulkEditTransactionsModal({
     (editFlag ? 1 : 0);
 
   const isValid = useMemo(() => {
+    if (allReconciled) return false;
     if (activeFieldCount === 0) return false;
     if (editPayee && !payee.trim()) return false;
     if (editAmount) {
@@ -106,7 +129,7 @@ export function BulkEditTransactionsModal({
     }
     if (editAccount && !accountId) return false;
     return true;
-  }, [activeFieldCount, editPayee, payee, editAmount, amount, editAccount, accountId]);
+  }, [allReconciled, activeFieldCount, editPayee, payee, editAmount, amount, editAccount, accountId]);
 
   const categoryLabel = useMemo(() => {
     if (categoryId === "") return "Income: Available this month";
@@ -121,7 +144,7 @@ export function BulkEditTransactionsModal({
   }, [accountId, accounts]);
 
   const handleSave = async () => {
-    if (!isValid || saving) return;
+    if (!isValid || saving || editableIds.length === 0) return;
     setSaving(true);
     try {
       const patch: BulkUpdateTransactionPatch = {};
@@ -145,7 +168,7 @@ export function BulkEditTransactionsModal({
       if (editStatus) patch.status = status;
       if (editFlag) patch.flagColor = flagColor;
 
-      await onSave(patch);
+      await onSave(patch, editableIds);
     } finally {
       setSaving(false);
     }
@@ -158,7 +181,7 @@ export function BulkEditTransactionsModal({
       wide={step === "confirm"}
       title={
         step === "confirm"
-          ? `Confirm Changes (${count} Transactions)`
+          ? `Confirm Changes (${hasReconciled ? `${editableCount} of ${count}` : count} Transactions)`
           : `Edit ${count} Transactions`
       }
       onClose={onClose}
@@ -171,8 +194,12 @@ export function BulkEditTransactionsModal({
               </Btn>
             </div>
             <div className="flex items-center gap-2 ml-auto">
-              <Btn variant="primary" onClick={handleSave} disabled={saving}>
-                {saving ? "Updating…" : `Confirm & Update ${count} Transactions`}
+              <Btn variant="primary" onClick={handleSave} disabled={saving || editableCount === 0}>
+                {saving
+                  ? "Updating…"
+                  : hasReconciled
+                  ? `Confirm & Update ${editableCount} of ${count} Transactions`
+                  : `Confirm & Update ${count} Transactions`}
               </Btn>
             </div>
           </>
@@ -196,8 +223,13 @@ export function BulkEditTransactionsModal({
     >
       {step === "confirm" ? (
         <div className="space-y-4 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
-          <Notice tone="info" title={`Updating ${count} transaction${count === 1 ? "" : "s"}`}>
+          <Notice tone="info" title={`Updating ${editableCount} transaction${editableCount === 1 ? "" : "s"}`}>
             Only the fields listed below will be modified. All other fields (such as dates and amounts not explicitly edited) will remain unchanged on each transaction.
+            {hasReconciled && (
+              <div className="mt-1 font-normal">
+                {reconciledCount} reconciled transaction{reconciledCount === 1 ? " is" : "s are"} locked and will be skipped.
+              </div>
+            )}
           </Notice>
 
           <div
@@ -266,11 +298,11 @@ export function BulkEditTransactionsModal({
             </div>
           </div>
 
-          {transactions.length > 0 && (
+          {editableTransactions.length > 0 && (
             <div>
               <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--y-ink-soft)] mb-1.5 flex items-center justify-between">
-                <span>Target Transactions ({transactions.length})</span>
-                {transactions.length > 10 && (
+                <span>Target Transactions ({editableTransactions.length})</span>
+                {editableTransactions.length > 10 && (
                   <span className="text-[10.5px] font-normal normal-case text-[var(--y-ink-soft)]">
                     Showing first 10
                   </span>
@@ -292,7 +324,7 @@ export function BulkEditTransactionsModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.slice(0, 10).map((t, idx) => (
+                    {editableTransactions.slice(0, 10).map((t, idx) => (
                       <tr
                         key={t.id}
                         className={cx("y-row", idx % 2 === 1 && "alt")}
@@ -308,7 +340,7 @@ export function BulkEditTransactionsModal({
                     ))}
                   </tbody>
                 </table>
-                {transactions.length > 10 && (
+                {editableTransactions.length > 10 && (
                   <div
                     className="px-2.5 py-1.5 text-[11px] text-[var(--y-ink-soft)] text-center border-t"
                     style={{
@@ -316,7 +348,7 @@ export function BulkEditTransactionsModal({
                       backgroundColor: "var(--y-row-alt, #f4f4f2)",
                     }}
                   >
-                    + {transactions.length - 10} more transactions will be updated
+                    + {editableTransactions.length - 10} more transactions will be updated
                   </div>
                 )}
               </div>
@@ -331,7 +363,9 @@ export function BulkEditTransactionsModal({
 
           {hasReconciled && (
             <Notice tone="warn" title="Reconciled transactions selected">
-              One or more selected transactions are reconciled and locked. They cannot be modified unless unreconciled.
+              {allReconciled
+                ? "All selected transactions are reconciled and locked. They cannot be modified unless unreconciled."
+                : `${reconciledCount} selected transaction${reconciledCount === 1 ? " is" : "s are"} reconciled and locked. ${reconciledCount === 1 ? "It" : "They"} will be skipped and remain unchanged (${editableCount} of ${count} will be updated).`}
             </Notice>
           )}
 
