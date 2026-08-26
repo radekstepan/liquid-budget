@@ -77,9 +77,6 @@ export function validateSubTransactions(
     if (!c.categoryId && !c.transferAccountId && Number(c.amount) <= 0) {
       return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
     }
-    if (c.categoryId && c.transferAccountId) {
-      return `Sub-transaction ${i + 1} cannot have both a category and transfer account.`;
-    }
     if (!Number.isFinite(Number(c.amount))) {
       return `Sub-transaction ${i + 1} amount is not a valid number.`;
     }

@@ -148,13 +148,13 @@ describe("validateSubTransactions", () => {
     ).toMatch(/missing a category/i);
   });
 
-  it("rejects a child with both a category and a transfer account", () => {
+  it("accepts a child with both a category and a transfer account (boundary transfer leg)", () => {
     expect(
       validateSubTransactions(-5000, [
         { categoryId: 1, amount: -3000 },
         { categoryId: 1, transferAccountId: 2, amount: -2000 },
       ])
-    ).toMatch(/cannot have both/i);
+    ).toBeNull();
   });
 
   it("rejects non-finite amounts (NaN)", () => {

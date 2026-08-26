@@ -97,9 +97,6 @@ function assertSplitsBalanced(
     const c = children[i]!;
     const childAmount = assertValidAmount(c.amount);
     sum += childAmount;
-    if (c.categoryId && c.transferAccountId) {
-      throw new RecurringError(`sub-transaction ${i + 1} cannot have both a category and transfer account`);
-    }
     if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
       throw new RecurringError(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
@@ -230,11 +227,36 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       let sort = 0;
       for (const c of norm.subTransactions!) {
         const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-        const categoryId = transferAccountId ? null : (srcOnBudget && c.categoryId ? Number(c.categoryId) : null);
+        let categoryId: number | null = null;
+        const childAmount = assertValidAmount(c.amount);
+
+        if (transferAccountId) {
+          const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+          const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+          const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
+
+          if (isBoundaryCrossing) {
+            if (netOnBudgetDelta < 0) {
+              if (c.categoryId == null) {
+                throw new RecurringError("Boundary transfer outflow requires a category", 422);
+              }
+              categoryId = Number(c.categoryId);
+            } else {
+              categoryId = c.categoryId ? Number(c.categoryId) : null;
+            }
+          } else {
+            categoryId = null;
+          }
+        } else if (!srcOnBudget) {
+          categoryId = null;
+        } else {
+          categoryId = c.categoryId ? Number(c.categoryId) : null;
+        }
+
         await db.insert(recurringSubTransactions).values({
           recurringId: parent.id,
           categoryId,
-          amount: assertValidAmount(c.amount),
+          amount: childAmount,
           memo: c.memo ?? "",
           sort: sort++,
           transferAccountId,
@@ -370,11 +392,36 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         let sort = 0;
         for (const c of norm.subTransactions!) {
           const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
-          const categoryId = transferAccountId ? null : (srcOnBudget && c.categoryId ? Number(c.categoryId) : null);
+          let categoryId: number | null = null;
+          const childAmount = assertValidAmount(c.amount);
+
+          if (transferAccountId) {
+            const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+            const isBoundaryCrossing = srcOnBudget !== destOnBudget;
+            const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
+
+            if (isBoundaryCrossing) {
+              if (netOnBudgetDelta < 0) {
+                if (c.categoryId == null) {
+                  throw new RecurringError("Boundary transfer outflow requires a category", 422);
+                }
+                categoryId = Number(c.categoryId);
+              } else {
+                categoryId = c.categoryId ? Number(c.categoryId) : null;
+              }
+            } else {
+              categoryId = null;
+            }
+          } else if (!srcOnBudget) {
+            categoryId = null;
+          } else {
+            categoryId = c.categoryId ? Number(c.categoryId) : null;
+          }
+
           await db.insert(recurringSubTransactions).values({
             recurringId: id,
             categoryId,
-            amount: assertValidAmount(c.amount),
+            amount: childAmount,
             memo: c.memo ?? "",
             sort: sort++,
             transferAccountId,

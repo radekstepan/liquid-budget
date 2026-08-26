@@ -363,6 +363,67 @@ describe("recurring queries", () => {
       });
     });
 
+    it("creates a recurring split containing an off-budget transfer child preserving categoryId (BUG-02)", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("insert:recurring", [{ id: 9 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+
+      await createRecurring(mock.db, {
+        accountId: 1,
+        categoryId: null,
+        payee: "Paycheck with RRSP Transfer",
+        amount: 350000,
+        frequency: "monthly",
+        nextDate: "2026-07-15",
+        subTransactions: [
+          { categoryId: null, amount: 400000, memo: "gross pay" },
+          { categoryId: 15, transferAccountId: 2, amount: -50000, memo: "RRSP contribution" },
+        ],
+      });
+
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      expect(subInserts[0]?.values).toMatchObject({
+        categoryId: null,
+        transferAccountId: null,
+        amount: 400000,
+      });
+      expect(subInserts[1]?.values).toMatchObject({
+        categoryId: 15,
+        transferAccountId: 2,
+        amount: -50000,
+      });
+    });
+
+    it("rejects a recurring split with a boundary transfer outflow child missing a category with 422 (BUG-02)", async () => {
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("insert:recurring", [{ id: 9 }]);
+
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: null,
+          payee: "Paycheck with RRSP Transfer",
+          amount: 350000,
+          frequency: "monthly",
+          nextDate: "2026-07-15",
+          subTransactions: [
+            { categoryId: null, amount: 400000, memo: "gross pay" },
+            { categoryId: null, transferAccountId: 2, amount: -50000, memo: "RRSP contribution" },
+          ],
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Boundary transfer outflow requires a category",
+        status: 422,
+      });
+    });
+
     it("creates a mixed-sign split with a positive null-category income leg", async () => {
       mock.respondWith("insert:recurring", [{ id: 8 }]);
       mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
@@ -522,6 +583,60 @@ describe("recurring queries", () => {
       ).rejects.toMatchObject({
         name: "RecurringError",
         message: "transfer account must differ from source account",
+      });
+    });
+
+    it("updates a recurring split with a boundary-crossing transfer child preserving categoryId (BUG-02)", async () => {
+      const splitRow = { ...existingRow, amount: 350000, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("delete:recurring_sub_transactions", []);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 1 }]);
+      mock.respondWith("insert:recurring_sub_transactions", [{ id: 2 }]);
+      mock.respondWith("select:recurring", [splitRow]);
+
+      await updateRecurring(mock.db, 1, {
+        subTransactions: [
+          { categoryId: null, amount: 400000 },
+          { categoryId: 15, transferAccountId: 2, amount: -50000 },
+        ],
+      });
+
+      const subInserts = mock.calls.filter(
+        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
+      );
+      expect(subInserts).toHaveLength(2);
+      expect(subInserts[0]?.values).toMatchObject({
+        categoryId: null,
+        transferAccountId: null,
+        amount: 400000,
+      });
+      expect(subInserts[1]?.values).toMatchObject({
+        categoryId: 15,
+        transferAccountId: 2,
+        amount: -50000,
+      });
+    });
+
+    it("rejects updating a recurring split with a boundary transfer outflow child missing a category with 422 (BUG-02)", async () => {
+      const splitRow = { ...existingRow, amount: 350000, categoryId: null };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ onBudget: false }]);
+
+      await expect(
+        updateRecurring(mock.db, 1, {
+          subTransactions: [
+            { categoryId: null, amount: 400000 },
+            { categoryId: null, transferAccountId: 2, amount: -50000 },
+          ],
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "Boundary transfer outflow requires a category",
+        status: 422,
       });
     });
 
@@ -728,6 +843,47 @@ describe("recurring queries", () => {
       expect(subTxInserts[1]?.values).toMatchObject({
         amount: -100000,
         categoryId: 11,
+        isIncome: false,
+      });
+    });
+
+    it("materializes a recurring split containing an off-budget transfer child with category (BUG-02)", async () => {
+      const splitRecurring = {
+        id: 12,
+        accountId: 1,
+        categoryId: null,
+        payee: "Employer Inc",
+        amount: 350000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [splitRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", [
+        { id: 121, recurringId: 12, categoryId: null, amount: 400000, memo: "Gross", sort: 0, transferAccountId: null },
+        { id: 122, recurringId: 12, categoryId: 15, amount: -50000, memo: "RRSP deduction", sort: 1, transferAccountId: 2 },
+      ]);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWithNth("select:accounts", 2, [{ name: "RRSP Off-Budget" }]);
+      mock.respondWithNth("select:accounts", 3, [{ onBudget: false }]);
+      mock.respondWith("insert:transactions", [{ id: 120, date: "2026-07-01", amount: 350000 }]);
+      mock.respondWith("insert:transactions", [{ id: 121, amount: 400000, isIncome: true }]);
+      mock.respondWith("insert:transactions", [{ id: 122, amount: -50000, isIncome: false, categoryId: 15, transferAccountId: 2 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...splitRecurring, nextDate: "2026-08-01" }]);
+
+      const res = await postRecurringTransaction(mock.db, 12);
+      expect(res.nextDate).toBe("2026-08-01");
+      const subTxInserts = mock.calls.filter((c) => c.op === "insert" && c.table === "transactions").slice(1);
+      expect(subTxInserts).toHaveLength(2);
+      expect(subTxInserts[1]?.values).toMatchObject({
+        amount: -50000,
+        categoryId: 15,
+        transferAccountId: 2,
+        payee: "Transfer : RRSP Off-Budget",
         isIncome: false,
       });
     });

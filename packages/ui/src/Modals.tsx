@@ -286,12 +286,24 @@ export function TransactionModal({
         amount: amountCents,
         status: cleared ? "c" : "u",
         flagColor: savedFlagColor,
-        subTransactions: subRows.map((r) => ({
-          categoryId: isOffBudget ? null : (r.categoryId ?? null),
-          transferAccountId: r.transferAccountId ?? null,
-          amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
-          memo: r.memo,
-        })),
+        subTransactions: subRows.map((r) => {
+          const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
+          const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
+          let finalCatId: number | null = null;
+          if (r.transferAccountId) {
+            finalCatId = isBoundary ? (r.categoryId ? Number(r.categoryId) : null) : null;
+          } else if (isOffBudget) {
+            finalCatId = null;
+          } else {
+            finalCatId = r.categoryId ? Number(r.categoryId) : null;
+          }
+          return {
+            categoryId: finalCatId,
+            transferAccountId: r.transferAccountId ?? null,
+            amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+            memo: r.memo,
+          };
+        }),
       });
       return;
     }
@@ -327,6 +339,20 @@ export function TransactionModal({
       return true;
     }
     if (mode === "split") {
+      const hasInvalidBoundaryChild = subRows.some((r) => {
+        if (!r.transferAccountId) return false;
+        const dest = otherAccounts.find((a) => a.id === r.transferAccountId);
+        if (!dest) return false;
+        const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
+        if (!isBoundary) return false;
+        const rAmount = Math.round((evalAmount(String(r.amount)) ?? 0) * 100);
+        const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
+        if (netDelta <= 0) {
+          return !r.categoryId;
+        }
+        return false;
+      });
+      if (hasInvalidBoundaryChild) return false;
       return Boolean(payee.trim()) && subValidation === null;
     }
     return Boolean(payee.trim());
@@ -578,113 +604,165 @@ export function TransactionModal({
               <div className="y-label mb-1.5 block">Sub-transactions</div>
               <div className="space-y-1.5">
                 {subRows.map((row, i) => {
+                  const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
+                  const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
+                  const rowAmtCents = Math.round((evalAmount(String(row.amount)) ?? 0) * 100);
+                  const rowNetOnBudget = isRowBoundary
+                    ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
+                    : 0;
+                  const isRowBoundaryOutflow = isRowBoundary && rowNetOnBudget <= 0;
+
                   const selectValue = row.transferAccountId
                     ? `transfer:${row.transferAccountId}`
                     : row.categoryId
                       ? `category:${row.categoryId}`
                       : "";
                   return (
-                    <div key={i} className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
-                      <Select
-                        value={selectValue}
-                        onChange={(v) => {
-                          if (v.startsWith("transfer:")) {
-                            const nextAcc = Number(v.slice("transfer:".length));
-                            setSubRows((rs) =>
-                              rs.map((r, j) =>
-                                i === j
-                                  ? { ...r, transferAccountId: nextAcc, categoryId: null }
-                                  : r
-                              )
-                            );
-                          } else if (v.startsWith("category:")) {
-                            const nextCat = Number(v.slice("category:".length));
-                            setSubRows((rs) =>
-                              rs.map((r, j) =>
-                                i === j
-                                  ? { ...r, categoryId: nextCat, transferAccountId: null }
-                                  : r
-                              )
-                            );
-                          } else {
-                            setSubRows((rs) =>
-                              rs.map((r, j) =>
-                                i === j
-                                  ? { ...r, categoryId: null, transferAccountId: null }
-                                  : r
-                              )
-                            );
-                          }
-                        }}
-                        className="w-full"
-                        searchable
-                      >
-                        <option value="">Category or Transfer…</option>
-                        {!isOffBudget && (groups && groups.length > 0 ? (
-                          groups.map((g) => (
-                            <optgroup key={g.id} label={g.name}>
-                              {categories
-                                .filter((c) => c.groupId === g.id)
-                                .map((c) => (
-                                  <option key={c.id} value={`category:${c.id}`}>
-                                    {c.name}
-                                  </option>
-                                ))}
+                    <div key={i} className="space-y-1">
+                      <div className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
+                        <Select
+                          value={selectValue}
+                          onChange={(v) => {
+                            if (v.startsWith("transfer:")) {
+                              const nextAcc = Number(v.slice("transfer:".length));
+                              const target = otherAccounts.find((a) => a.id === nextAcc);
+                              const isBoundary = target != null && Boolean(selectedAccount?.onBudget) !== Boolean(target.onBudget);
+                              setSubRows((rs) =>
+                                rs.map((r, j) =>
+                                  i === j
+                                    ? { ...r, transferAccountId: nextAcc, categoryId: isBoundary ? r.categoryId : null }
+                                    : r
+                                )
+                              );
+                            } else if (v.startsWith("category:")) {
+                              const nextCat = Number(v.slice("category:".length));
+                              setSubRows((rs) =>
+                                rs.map((r, j) =>
+                                  i === j
+                                    ? { ...r, categoryId: nextCat, transferAccountId: null }
+                                    : r
+                                )
+                              );
+                            } else {
+                              setSubRows((rs) =>
+                                rs.map((r, j) =>
+                                  i === j
+                                    ? { ...r, categoryId: null, transferAccountId: null }
+                                    : r
+                                )
+                              );
+                            }
+                          }}
+                          className="w-full"
+                          searchable
+                        >
+                          <option value="">Category or Transfer…</option>
+                          {!isOffBudget && (groups && groups.length > 0 ? (
+                            groups.map((g) => (
+                              <optgroup key={g.id} label={g.name}>
+                                {categories
+                                  .filter((c) => c.groupId === g.id)
+                                  .map((c) => (
+                                    <option key={c.id} value={`category:${c.id}`}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            ))
+                          ) : (
+                            <optgroup label="Categories">
+                              {categories.map((c) => (
+                                <option key={c.id} value={`category:${c.id}`}>
+                                  {c.name}
+                                </option>
+                              ))}
                             </optgroup>
-                          ))
-                        ) : (
-                          <optgroup label="Categories">
-                            {categories.map((c) => (
-                              <option key={c.id} value={`category:${c.id}`}>
-                                {c.name}
+                          ))}
+                          <optgroup label="Transfers">
+                            {otherAccounts.map((a) => (
+                              <option key={a.id} value={`transfer:${a.id}`}>
+                                Transfer : {a.name}
                               </option>
                             ))}
                           </optgroup>
-                        ))}
-                        <optgroup label="Transfers">
-                          {otherAccounts.map((a) => (
-                            <option key={a.id} value={`transfer:${a.id}`}>
-                              Transfer : {a.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </Select>
-                      <TextField
-                        value={row.memo ?? ""}
-                        onChange={(e) => {
-                          const memoVal = e.target.value;
-                          setSubRows((rs) =>
-                            rs.map((r, j) => (i === j ? { ...r, memo: memoVal } : r))
-                          );
-                        }}
-                        placeholder="Memo"
-                        className={inputClass}
-                        aria-label={`Sub-transaction ${i + 1} memo`}
-                      />
-                      <TextField
-                        value={row.amount === 0 ? "" : String(row.amount)}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSubRows((rs) =>
-                            rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
-                          );
-                        }}
-                        placeholder="0.00"
-                        inputMode="decimal"
-                        className={inputClass}
-                        aria-label={`Sub-transaction ${i + 1} amount`}
-                      />
-                      <button
-                        type="button"
-                        aria-label="Remove sub-transaction"
-                        className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
-                        onClick={() =>
-                          setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
-                        }
-                        disabled={subRows.length <= 2}
-                      >
-                        ×
-                      </button>
+                        </Select>
+                        <TextField
+                          value={row.memo ?? ""}
+                          onChange={(e) => {
+                            const memoVal = e.target.value;
+                            setSubRows((rs) =>
+                              rs.map((r, j) => (i === j ? { ...r, memo: memoVal } : r))
+                            );
+                          }}
+                          placeholder="Memo"
+                          className={inputClass}
+                          aria-label={`Sub-transaction ${i + 1} memo`}
+                        />
+                        <TextField
+                          value={row.amount === 0 ? "" : String(row.amount)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSubRows((rs) =>
+                              rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
+                            );
+                          }}
+                          placeholder="0.00"
+                          inputMode="decimal"
+                          className={inputClass}
+                          aria-label={`Sub-transaction ${i + 1} amount`}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Remove sub-transaction"
+                          className="y-btn y-btn--default px-2 py-[3px] text-[12px]"
+                          onClick={() =>
+                            setSubRows((rs) => (rs.length > 2 ? rs.filter((_, j) => j !== i) : rs))
+                          }
+                          disabled={subRows.length <= 2}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      {isRowBoundary && (
+                        <div className="pl-2">
+                          <Field label={isRowBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
+                            <Select
+                              value={row.categoryId ?? ""}
+                              onChange={(v) => {
+                                const nextCat = v === "" || v === "__deferred__" ? null : Number(v);
+                                setSubRows((rs) =>
+                                  rs.map((r, j) => (i === j ? { ...r, categoryId: nextCat } : r))
+                                );
+                              }}
+                              className="w-full"
+                              searchable
+                            >
+                              {isRowBoundaryOutflow ? (
+                                <option value="" disabled>Select category…</option>
+                              ) : (
+                                <option value="">Income: Available this month</option>
+                              )}
+                              {groups && groups.length > 0 ? (
+                                groups.map((g) => (
+                                  <optgroup key={g.id} label={g.name}>
+                                    {categories
+                                      .filter((c) => c.groupId === g.id)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                ))
+                              ) : (
+                                categories.map((c) => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))
+                              )}
+                            </Select>
+                          </Field>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1203,12 +1281,24 @@ export function RecurringModal({
         nextDate,
         active,
         flagColor,
-        subTransactions: subRows.map((r) => ({
-          categoryId: isOffBudget ? null : (r.categoryId ?? null),
-          transferAccountId: r.transferAccountId ?? null,
-          amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
-          memo: r.memo,
-        })),
+        subTransactions: subRows.map((r) => {
+          const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
+          const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
+          let finalCatId: number | null = null;
+          if (r.transferAccountId) {
+            finalCatId = isBoundary ? (r.categoryId ? Number(r.categoryId) : null) : null;
+          } else if (isOffBudget) {
+            finalCatId = null;
+          } else {
+            finalCatId = r.categoryId ? Number(r.categoryId) : null;
+          }
+          return {
+            categoryId: finalCatId,
+            transferAccountId: r.transferAccountId ?? null,
+            amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+            memo: r.memo,
+          };
+        }),
       });
       return;
     }
@@ -1240,6 +1330,20 @@ export function RecurringModal({
       return true;
     }
     if (mode === "split") {
+      const hasInvalidBoundaryChild = subRows.some((r) => {
+        if (!r.transferAccountId) return false;
+        const dest = otherAccounts.find((a) => a.id === r.transferAccountId);
+        if (!dest) return false;
+        const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
+        if (!isBoundary) return false;
+        const rAmount = Math.round((evalAmount(String(r.amount)) ?? 0) * 100);
+        const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
+        if (netDelta <= 0) {
+          return !r.categoryId;
+        }
+        return false;
+      });
+      if (hasInvalidBoundaryChild) return false;
       return Boolean(payee.trim()) && subValidation === null;
     }
     return Boolean(payee.trim());
@@ -1444,22 +1548,33 @@ export function RecurringModal({
           <div className="y-label mb-1.5 block">Sub-transactions</div>
           <div className="space-y-1.5">
             {subRows.map((row, i) => {
+              const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
+              const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
+              const rowAmtCents = Math.round((evalAmount(String(row.amount)) ?? 0) * 100);
+              const rowNetOnBudget = isRowBoundary
+                ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
+                : 0;
+              const isRowBoundaryOutflow = isRowBoundary && rowNetOnBudget <= 0;
+
               const selectValue = row.transferAccountId
                 ? `transfer:${row.transferAccountId}`
                 : row.categoryId
                   ? `category:${row.categoryId}`
                   : "";
               return (
-                  <div key={i} className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
+                <div key={i} className="space-y-1">
+                  <div className="grid grid-cols-[1fr_1fr_92px_28px] gap-2 items-start">
                     <Select
                       value={selectValue}
                       onChange={(v) => {
                         if (v.startsWith("transfer:")) {
                           const nextAcc = Number(v.slice("transfer:".length));
+                          const target = otherAccounts.find((a) => a.id === nextAcc);
+                          const isBoundary = target != null && Boolean(selectedAccount?.onBudget) !== Boolean(target.onBudget);
                           setSubRows((rs) =>
                             rs.map((r, j) =>
                               i === j
-                                ? { ...r, transferAccountId: nextAcc, categoryId: null }
+                                ? { ...r, transferAccountId: nextAcc, categoryId: isBoundary ? r.categoryId : null }
                                 : r
                             )
                           );
@@ -1552,6 +1667,47 @@ export function RecurringModal({
                       ×
                     </button>
                   </div>
+                  {isRowBoundary && (
+                    <div className="pl-2">
+                      <Field label={isRowBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
+                        <Select
+                          value={row.categoryId ?? ""}
+                          onChange={(v) => {
+                            const nextCat = v === "" ? null : Number(v);
+                            setSubRows((rs) =>
+                              rs.map((r, j) => (i === j ? { ...r, categoryId: nextCat } : r))
+                            );
+                          }}
+                          className="w-full"
+                          searchable
+                        >
+                          {isRowBoundaryOutflow ? (
+                            <option value="" disabled>Select category…</option>
+                          ) : (
+                            <option value="">Income: Available this month</option>
+                          )}
+                          {groups && groups.length > 0 ? (
+                            groups.map((g) => (
+                              <optgroup key={g.id} label={g.name}>
+                                {categories
+                                  .filter((c) => c.groupId === g.id)
+                                  .map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            ))
+                          ) : (
+                            categories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))
+                          )}
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

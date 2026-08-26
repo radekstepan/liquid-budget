@@ -1002,6 +1002,49 @@ describe("TransactionModal", () => {
       expect(payload.subTransactions[1]).toMatchObject({ categoryId: null, transferAccountId: 2, amount: -4000 });
     });
 
+    it("requires category for boundary transfer outflow in split mode and emits categoryId", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+        target: { value: "Split with Off-Budget Transfer" },
+      });
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const parent = allZeros[0]!;
+      fireEvent.change(parent, { target: { value: "-100" } });
+
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "transfer:3");
+      fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+      // Boundary transfer outflow (from Chequing to Brokerage) has no category yet, save is disabled.
+      expect(saveBtn).toBeDisabled();
+
+      // Pick category for the boundary transfer leg.
+      pickFromOpenSearchableByValue(/Category \(required for boundary transfer outflow\)/i, "11");
+      expect(saveBtn).not.toBeDisabled();
+
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        amount: number;
+        subTransactions: { categoryId: number | null; transferAccountId: number | null; amount: number }[];
+      };
+      expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: -6000 });
+      expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, transferAccountId: 3, amount: -4000 });
+    });
+
     it("pre-populates sub-rows when editing an existing split parent", () => {
       const onSave = vi.fn();
       const initial: Transaction = {
@@ -1440,6 +1483,49 @@ describe("RecurringModal", () => {
       amount: -50000,
       memo: "Tax",
     });
+  });
+
+  it("requires category for boundary transfer outflow in recurring split mode and emits categoryId (BUG-02)", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={1}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Paycheck with RRSP" },
+    });
+    const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+    const parent = allZeros[0]!;
+    fireEvent.change(parent, { target: { value: "3500" } });
+
+    const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+    pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "transfer:3");
+    fireEvent.change(subAmounts[0]!, { target: { value: "4000" } });
+    fireEvent.change(subAmounts[1]!, { target: { value: "-500" } });
+
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    // Boundary transfer outflow (from Chequing to Brokerage) has no category yet, save is disabled.
+    expect(saveBtn).toBeDisabled();
+
+    // Pick category for the boundary transfer leg.
+    pickFromOpenSearchableByValue(/Category \(required for boundary transfer outflow\)/i, "11");
+    expect(saveBtn).not.toBeDisabled();
+
+    fireEvent.click(saveBtn);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![0] as {
+      amount: number;
+      subTransactions: { categoryId: number | null; transferAccountId: number | null; amount: number }[];
+    };
+    expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: 400000 });
+    expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, transferAccountId: 3, amount: -50000 });
   });
 });
 

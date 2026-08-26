@@ -240,6 +240,15 @@ describe("validateRecurringSubTransactions", () => {
       ])
     ).toMatch(/sum to/);
   });
+
+  it("accepts a sub-transaction with both a category and a transfer account (boundary transfer leg)", () => {
+    expect(
+      validateRecurringSubTransactions(-5000, [
+        { categoryId: 1, amount: -3000 },
+        { categoryId: 2, transferAccountId: 3, amount: -2000 },
+      ])
+    ).toBeNull();
+  });
 });
 
 describe("RECURRING_FREQUENCIES and frequencyLabel (UNI-23 / F-13 / BUG-19)", () => {
