@@ -8,6 +8,7 @@ export * from "./reconcile.js";
 export {
   computeBudget,
   buildBudgetIndex,
+  invalidateBudgetIndex,
   isIncomeTransaction,
   getMonthsWithData,
 } from "./budget-engine.js";

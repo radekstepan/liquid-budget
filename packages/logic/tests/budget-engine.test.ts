@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeBudget,
   buildBudgetIndex,
+  invalidateBudgetIndex,
   getMonthsWithData,
   isIncomeTransaction,
 } from "../src/budget-engine.js";
@@ -1574,6 +1575,184 @@ describe("computeBudget", () => {
           expect(fast.groups[g]?.assigned).toBe(standard.groups[g]?.assigned);
         }
       }
+    });
+
+    it("invalidates cache on in-place mutation when invalidateBudgetIndex(data) is called", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const incomeTx = {
+        id: 1,
+        accountId: account.id,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Employer",
+        memo: "Salary",
+        amount: "100000", // $1,000
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [
+          { id: 1, categoryId: category.id, month: "2026-07", amount: "40000" }, // $400
+        ],
+        transactions: [incomeTx],
+        recurring: [],
+      };
+
+      // Initial compute (populates WeakMap cache)
+      const res1 = computeBudget(data, "2026-07");
+      expect(res1.tbb).toBe(60000);
+      expect(res1.groups[0]?.rows[0]?.outflow).toBe(0);
+
+      // Mutate data in-place: add an expense
+      data.transactions.push({
+        id: 2,
+        accountId: account.id,
+        categoryId: category.id,
+        date: "2026-07-15",
+        payee: "Supermarket",
+        memo: "Food",
+        amount: "-15000", // -$150
+        status: "c",
+      });
+
+      // Without invalidating, cache returns stale result
+      const staleRes = computeBudget(data, "2026-07");
+      expect(staleRes.groups[0]?.rows[0]?.outflow).toBe(0);
+
+      // Invalidate the cache for this data object
+      invalidateBudgetIndex(data);
+
+      // After invalidation, computation reflects the in-place mutated transaction
+      const freshRes = computeBudget(data, "2026-07");
+      expect(freshRes.groups[0]?.rows[0]?.outflow).toBe(-15000);
+      expect(freshRes.groups[0]?.rows[0]?.available).toBe(25000);
+    });
+
+    it("invalidates pre-attached data.budgetIndex and clears it", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const incomeTx = {
+        id: 1,
+        accountId: account.id,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Employer",
+        memo: "Salary",
+        amount: "100000",
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [
+          { id: 1, categoryId: category.id, month: "2026-07", amount: "40000" },
+        ],
+        transactions: [incomeTx],
+        recurring: [],
+      };
+
+      data.budgetIndex = buildBudgetIndex(data);
+      expect(data.budgetIndex).toBeDefined();
+
+      const res1 = computeBudget(data, "2026-07");
+      expect(res1.tbb).toBe(60000);
+
+      // In-place mutate assignments
+      data.assignments.push({
+        id: 2,
+        categoryId: category.id,
+        month: "2026-07",
+        amount: "20000",
+      });
+
+      // Invalidate
+      invalidateBudgetIndex(data);
+      expect(data.budgetIndex).toBeUndefined();
+
+      const res2 = computeBudget(data, "2026-07");
+      expect(res2.tbb).toBe(40000);
+      expect(res2.groups[0]?.rows[0]?.assigned).toBe(60000);
+    });
+
+    it("resets global cache when invalidateBudgetIndex() is called with no arguments", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [{ id: 1, categoryId: category.id, month: "2026-07", amount: "10000" }],
+        transactions: [{
+          id: 1,
+          accountId: account.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Employer",
+          memo: "Salary",
+          amount: "50000",
+          status: "c" as const,
+        }],
+        recurring: [],
+      };
+
+      const res1 = computeBudget(data, "2026-07");
+      expect(res1.tbb).toBe(40000);
+
+      // Mutate in-place
+      data.assignments[0]!.amount = "30000";
+
+      // Global invalidation
+      invalidateBudgetIndex();
+
+      const res2 = computeBudget(data, "2026-07");
+      expect(res2.tbb).toBe(20000);
+    });
+
+    it("updates WeakMap cache when buildBudgetIndex(data) is called", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [account],
+        groups: [group],
+        categories: [category],
+        assignments: [{ id: 1, categoryId: category.id, month: "2026-07", amount: "10000" }],
+        transactions: [{
+          id: 1,
+          accountId: account.id,
+          categoryId: null,
+          date: "2026-07-01",
+          payee: "Employer",
+          memo: "Salary",
+          amount: "50000",
+          status: "c" as const,
+        }],
+        recurring: [],
+      };
+
+      const res1 = computeBudget(data, "2026-07");
+      expect(res1.tbb).toBe(40000);
+
+      // Mutate in-place and call buildBudgetIndex
+      data.assignments[0]!.amount = "25000";
+      buildBudgetIndex(data);
+
+      // computeBudget should now immediately use the index computed by buildBudgetIndex
+      const res2 = computeBudget(data, "2026-07");
+      expect(res2.tbb).toBe(25000);
     });
   });
 

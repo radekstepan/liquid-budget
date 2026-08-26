@@ -146,7 +146,20 @@ type IndexedBudgetData = {
   surplusByMonth: Map<string, number>;
 };
 
-const budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+let budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+
+/**
+ * Invalidate the cached budget index for a BudgetData object (or all cached data if no object is provided).
+ * Also clears the optional hydrated `data.budgetIndex` reference if data is provided.
+ */
+export function invalidateBudgetIndex(data?: BudgetData): void {
+  if (data) {
+    budgetDataIndexCache.delete(data);
+    data.budgetIndex = undefined;
+  } else {
+    budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+  }
+}
 
 function getCCAccountIds(data: BudgetData): Set<number> {
   const ccAccountIds = new Set<number>();
@@ -540,6 +553,7 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
   );
 
   const index = computeAllMonths(data, rawData, months, ccGroupIds);
+  budgetDataIndexCache.set(data, index);
 
   const serializedAssigned: Record<string, Record<string | number, number>> = {};
   for (const [m, map] of index.assignedByMonth) {
