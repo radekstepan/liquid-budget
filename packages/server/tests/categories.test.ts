@@ -132,6 +132,14 @@ describe("categories queries", () => {
       const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
       expect(set).toEqual({ overspendCarriesOver: true });
     });
+
+    it("BUG-04: returns existing row if patch is empty", async () => {
+      mock.respondWith("select:categories", [{ id: 1, name: "Groceries", sort: 2 }]);
+      const row = await updateCategory(mock.db, 1, {});
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      expect(updateCall).toBeUndefined();
+      expect(row).toMatchObject({ id: 1, name: "Groceries", sort: 2 });
+    });
   });
 
   describe("updateCategoryGroupSort", () => {

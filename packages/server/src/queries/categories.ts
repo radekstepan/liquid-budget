@@ -126,6 +126,10 @@ export async function updateCategory(
   if ("overspendCarriesOver" in patch) {
     p.overspendCarriesOver = patch.overspendCarriesOver === true;
   }
+  if (Object.keys(p).length === 0) {
+    const [row] = await db.select().from(categories).where(eq(categories.id, id));
+    return row;
+  }
   const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
   return row;
 }

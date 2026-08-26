@@ -1,11 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { createCategoryGroup, getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
+import { createCategory, createCategoryGroup, getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
 import { PATCH } from "../src/app/api/categories/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
-describe("PATCH /api/categories (BUG-5.2)", () => {
+describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
     await resetDatabase(db);
@@ -80,5 +80,22 @@ describe("PATCH /api/categories (BUG-5.2)", () => {
     const json = await res.json();
     expect(json.name).toBe("After Both");
     expect(json.sort).toBe(99);
+  });
+
+  it("handles empty patch for category without throwing 'No values to set' (BUG-04)", async () => {
+    const db = getDefaultDb();
+    const group = await createCategoryGroup(db, { name: "Test Group" });
+    const cat = await createCategory(db, { groupId: group!.id, name: "Dining Out" });
+
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cat!.id }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.id).toBe(cat!.id);
+    expect(json.name).toBe("Dining Out");
   });
 });

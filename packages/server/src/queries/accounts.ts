@@ -89,6 +89,10 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
   if (patch.onBudget != null) p.onBudget = !!patch.onBudget;
   if (patch.sort != null) p.sort = Number(patch.sort);
   if (patch.archived != null) p.archived = !!patch.archived;
+  if (Object.keys(p).length === 0) {
+    const [row] = await db.select().from(accounts).where(eq(accounts.id, id));
+    return row;
+  }
   const [row] = await db.update(accounts).set(p).where(eq(accounts.id, id)).returning();
   return row;
 }
