@@ -1007,5 +1007,88 @@ describe("recurring queries", () => {
         transferAccountId: 2,
       });
     });
+
+    it("prevents monthly schedule drift across February when posting recurring transactions (BUG-06)", async () => {
+      const janRow = {
+        id: 60,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Month End Bill",
+        amount: -10000,
+        frequency: "monthly",
+        nextDate: "2026-01-31",
+        anchorDay: 31,
+        active: true,
+        transferAccountId: null,
+      };
+      const febRow = { ...janRow, nextDate: "2026-02-28" };
+      const marRow = { ...janRow, nextDate: "2026-03-31" };
+
+      // 1. Post Jan 31 -> advances to Feb 28
+      mock.respondWithNth("select:recurring", 1, [janRow]);
+      mock.respondWithNth("select:recurring", 2, [febRow]);
+      mock.respondWithNth("select:recurring", 3, [marRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 601, date: "2026-01-31", amount: -10000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{}]);
+
+      const res1 = await postRecurringTransaction(mock.db, 60);
+      expect(res1.nextDate).toBe("2026-02-28");
+
+      // 2. Post Feb 28 -> advances to Mar 31 (NOT Mar 28!)
+      const res2 = await postRecurringTransaction(mock.db, 60);
+      expect(res2.nextDate).toBe("2026-03-31");
+
+      // 3. Post Mar 31 -> advances to Apr 30 (NOT Apr 28!)
+      const res3 = await postRecurringTransaction(mock.db, 60);
+      expect(res3.nextDate).toBe("2026-04-30");
+    });
+
+    it("prevents semimonthly schedule drift across February (BUG-06)", async () => {
+      // Starting from 2026-01-28 (anchorDay: 28)
+      const r28 = {
+        id: 61,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Bi-monthly Pay",
+        amount: 200000,
+        frequency: "semimonthly",
+        nextDate: "2026-01-28",
+        anchorDay: 28,
+        active: true,
+        transferAccountId: null,
+      };
+      const rFeb13 = { ...r28, nextDate: "2026-02-13" };
+      const rFeb28 = { ...r28, nextDate: "2026-02-28" };
+      const rMar13 = { ...r28, nextDate: "2026-03-13" };
+
+      mock.respondWithNth("select:recurring", 1, [r28]);
+      mock.respondWithNth("select:recurring", 2, [rFeb13]);
+      mock.respondWithNth("select:recurring", 3, [rFeb28]);
+      mock.respondWithNth("select:recurring", 4, [rMar13]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 611, date: "2026-01-28", amount: 200000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{}]);
+
+      // 1. Post Jan 28 -> advances to Feb 13
+      const res1 = await postRecurringTransaction(mock.db, 61);
+      expect(res1.nextDate).toBe("2026-02-13");
+
+      // 2. Post Feb 13 -> advances to Feb 28
+      const res2 = await postRecurringTransaction(mock.db, 61);
+      expect(res2.nextDate).toBe("2026-02-28");
+
+      // 3. Post Feb 28 -> advances to Mar 13 (NOT 28 - 15 = 13, and anchor 28 preserved!)
+      const res3 = await postRecurringTransaction(mock.db, 61);
+      expect(res3.nextDate).toBe("2026-03-13");
+
+      // 4. Post Mar 13 -> advances to Mar 28
+      const res4 = await postRecurringTransaction(mock.db, 61);
+      expect(res4.nextDate).toBe("2026-03-28");
+    });
   });
 });

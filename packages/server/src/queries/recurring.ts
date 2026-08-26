@@ -26,6 +26,7 @@ export type CreateRecurringInput = {
   amount: number;
   frequency: string;
   nextDate: string;
+  anchorDay?: number | null;
   active?: boolean;
   flagColor?: TransactionFlagColor | null;
   /**
@@ -53,6 +54,7 @@ export type UpdateRecurringInput = {
   amount?: number;
   frequency?: string;
   nextDate?: string;
+  anchorDay?: number | null;
   active?: boolean;
   flagColor?: TransactionFlagColor | null;
   transferAccountId?: number | null;
@@ -207,6 +209,11 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       categoryId = norm.effectiveCategoryId ?? null;
     }
 
+    const anchorDay =
+      input.anchorDay !== undefined && input.anchorDay !== null
+        ? Number(input.anchorDay)
+        : parseInt(input.nextDate.slice(8, 10), 10);
+
     const [parent] = await db
       .insert(recurring)
       .values({
@@ -217,6 +224,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         amount: validatedAmount,
         frequency: validatedFrequency,
         nextDate: input.nextDate,
+        anchorDay,
         active: input.active ?? true,
         flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: norm.effectiveTransferAccountId,
@@ -340,6 +348,9 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.amount != null) p.amount = effectiveAmount;
   if (patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
+  if ("anchorDay" in patch && patch.anchorDay !== undefined) {
+    p.anchorDay = patch.anchorDay != null ? Number(patch.anchorDay) : null;
+  }
   if (patch.active != null) p.active = !!patch.active;
   if ("flagColor" in patch && patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if ("transferAccountId" in patch) p.transferAccountId = norm.effectiveTransferAccountId;
@@ -518,7 +529,8 @@ export async function postRecurringTransaction(
 
   const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
   const isOneOff = normFreq === "never" || normFreq === "once";
-  const next = nextDateFor(r.frequency, r.nextDate);
+  const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
+  const next = nextDateFor(r.frequency, r.nextDate, anchor);
   const updatePayload: { nextDate: string; active?: boolean } = { nextDate: next };
   if (isOneOff) {
     updatePayload.active = false;

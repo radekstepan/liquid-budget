@@ -136,6 +136,7 @@ export async function POST(req: Request) {
       amount: body.amount,
       frequency: body.frequency,
       nextDate: body.nextDate,
+      anchorDay: body.anchorDay,
       flagColor: body.flagColor,
       transferAccountId: body.transferAccountId ?? null,
       subTransactions: body.subTransactions?.map((c) => ({
@@ -191,6 +192,7 @@ export async function PATCH(req: Request) {
       amount: body.amount,
       frequency: body.frequency,
       nextDate: body.nextDate,
+      anchorDay: body.anchorDay !== undefined ? body.anchorDay : undefined,
       active: body.active,
       flagColor: body.flagColor !== undefined ? body.flagColor : undefined,
       transferAccountId: body.transferAccountId !== undefined ? body.transferAccountId : undefined,

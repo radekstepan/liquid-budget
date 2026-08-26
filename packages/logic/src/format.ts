@@ -350,10 +350,30 @@ export function todayISO(): string {
  * Monthly and yearly advances clamp the day to the last valid day of the
  * target month — e.g. Jan 31 + 1 month → Feb 28, mirroring how YNAB handles
  * "31st of every month" recurring entries in short months.
+ *
+ * When `anchor` is provided (day of month 1..31 or ISO date string), month-based
+ * advances clamp against the anchor day rather than the previous output string,
+ * preventing permanent schedule drift after February or shorter months (BUG-06).
  */
-export function nextDateFor(frequency: string, iso: string): string {
+export function nextDateFor(
+  frequency: string,
+  iso: string,
+  anchor?: number | string
+): string {
   const d = new Date(iso + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return iso;
+
+  let anchorDay: number;
+  if (typeof anchor === "number" && !Number.isNaN(anchor) && anchor >= 1 && anchor <= 31) {
+    anchorDay = Math.floor(anchor);
+  } else if (typeof anchor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(anchor)) {
+    anchorDay = parseInt(anchor.slice(8, 10), 10);
+  } else if (typeof anchor === "string" && /^\d+$/.test(anchor)) {
+    anchorDay = Math.min(31, Math.max(1, parseInt(anchor, 10)));
+  } else {
+    anchorDay = d.getUTCDate();
+  }
+
   const norm = (frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
   switch (norm) {
     case "daily":
@@ -368,17 +388,20 @@ export function nextDateFor(frequency: string, iso: string): string {
       break;
     case "twiceamonth":
     case "semimonthly": {
-      const originalDay = d.getUTCDate();
-      if (originalDay <= 15) {
-        const targetDay = originalDay + 15;
-        const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-        d.setUTCDate(Math.min(targetDay, lastDay));
+      const d1 = anchorDay <= 15 ? anchorDay : anchorDay - 15;
+      const d2 = anchorDay <= 15 ? anchorDay + 15 : anchorDay;
+      const currentDay = d.getUTCDate();
+      const isFirstHalf = currentDay <= 15 || (currentDay === 16 && d1 === 16);
+
+      if (isFirstHalf) {
+        const lastDay = new Date(
+          Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+        ).getUTCDate();
+        d.setUTCDate(Math.min(d2, lastDay));
       } else {
-        const targetDay = originalDay - 15;
         d.setUTCDate(1);
         d.setUTCMonth(d.getUTCMonth() + 1);
-        const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-        d.setUTCDate(Math.min(targetDay, lastDay));
+        d.setUTCDate(d1);
       }
       break;
     }
@@ -387,64 +410,71 @@ export function nextDateFor(frequency: string, iso: string): string {
       break;
     case "everyothermonth":
     case "bimonthly": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 2);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "every3months":
     case "quarterly": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 3);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "every4months": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 4);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "twiceayear":
     case "semiannually": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 6);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "every2years":
     case "everyotheryear": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCFullYear(d.getUTCFullYear() + 2);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "yearly":
     case "annually": {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCFullYear(d.getUTCFullYear() + 1);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
     case "monthly":
     default: {
-      const originalDay = d.getUTCDate();
       d.setUTCDate(1);
       d.setUTCMonth(d.getUTCMonth() + 1);
-      const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-      d.setUTCDate(Math.min(originalDay, lastDay));
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
   }

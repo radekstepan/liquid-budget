@@ -138,8 +138,48 @@ describe("format", () => {
       expect(nextDateFor("monthly", "2026-01-31")).toBe("2026-02-28");
     });
 
+    it("prevents monthly schedule drift after February and short months (BUG-06)", () => {
+      // Starting from Jan 31 with anchor 31:
+      // Jan 31 -> Feb 28 -> Mar 31 -> Apr 30 -> May 31 -> Jun 30 -> Jul 31
+      let d = "2026-01-31";
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-02-28");
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-03-31");
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-04-30");
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-05-31");
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-06-30");
+      d = nextDateFor("monthly", d, 31);
+      expect(d).toBe("2026-07-31");
+
+      // Also supports ISO string as anchor
+      expect(nextDateFor("monthly", "2026-02-28", "2026-01-31")).toBe("2026-03-31");
+    });
+
     it("advances yearly by one year", () => {
       expect(nextDateFor("yearly", "2026-07-01")).toBe("2027-07-01");
+    });
+
+    it("restores leap year Feb 29 for yearly and every2years without drift (BUG-06)", () => {
+      let d = "2024-02-29";
+      d = nextDateFor("yearly", d, 29);
+      expect(d).toBe("2025-02-28");
+      d = nextDateFor("yearly", d, 29);
+      expect(d).toBe("2026-02-28");
+      d = nextDateFor("yearly", d, 29);
+      expect(d).toBe("2027-02-28");
+      d = nextDateFor("yearly", d, 29);
+      expect(d).toBe("2028-02-29");
+
+      // every2years with anchor 29
+      let d2 = "2024-02-29";
+      d2 = nextDateFor("every2years", d2, 29);
+      expect(d2).toBe("2026-02-28");
+      d2 = nextDateFor("every2years", d2, 29);
+      expect(d2).toBe("2028-02-29");
     });
 
     it("advances twiceamonth correctly (alternating between two anchors 15 days apart)", () => {
@@ -152,6 +192,67 @@ describe("format", () => {
       // Clamping in February
       expect(nextDateFor("twiceamonth", "2026-02-14")).toBe("2026-02-28");
       expect(nextDateFor("twiceamonth", "2026-02-15")).toBe("2026-02-28");
+    });
+
+    it("prevents semimonthly schedule drift across February (BUG-06)", () => {
+      // Starting from 2026-01-28 (anchor 28): pair is 13th and 28th
+      let d = "2026-01-28";
+      d = nextDateFor("semimonthly", d, 28);
+      expect(d).toBe("2026-02-13");
+      d = nextDateFor("semimonthly", d, 28);
+      expect(d).toBe("2026-02-28");
+      d = nextDateFor("semimonthly", d, 28);
+      expect(d).toBe("2026-03-13");
+      d = nextDateFor("semimonthly", d, 28);
+      expect(d).toBe("2026-03-28");
+
+      // Starting from 2026-01-14 (anchor 14): pair is 14th and 29th
+      let d14 = "2026-01-14";
+      d14 = nextDateFor("semimonthly", d14, 14);
+      expect(d14).toBe("2026-01-29");
+      d14 = nextDateFor("semimonthly", d14, 14);
+      expect(d14).toBe("2026-02-14");
+      d14 = nextDateFor("semimonthly", d14, 14);
+      expect(d14).toBe("2026-02-28"); // clamped from 29
+      d14 = nextDateFor("semimonthly", d14, 14);
+      expect(d14).toBe("2026-03-14"); // restored from 28 - 15 = 13!
+      d14 = nextDateFor("semimonthly", d14, 14);
+      expect(d14).toBe("2026-03-29");
+
+      // Starting from 2026-01-31 (anchor 31): pair is 16th and 31st (month-end)
+      let d31 = "2026-01-31";
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-02-16");
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-02-28"); // clamped from 31
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-03-16");
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-03-31");
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-04-16");
+      d31 = nextDateFor("semimonthly", d31, 31);
+      expect(d31).toBe("2026-04-30");
+    });
+
+    it("prevents quarterly and multi-month schedule drift (BUG-06)", () => {
+      // Quarterly starting 2025-11-30 (anchor 30):
+      let d = "2025-11-30";
+      d = nextDateFor("quarterly", d, 30);
+      expect(d).toBe("2026-02-28"); // clamped in Feb
+      d = nextDateFor("quarterly", d, 30);
+      expect(d).toBe("2026-05-30"); // restored to 30th!
+      d = nextDateFor("quarterly", d, 30);
+      expect(d).toBe("2026-08-30");
+
+      // Every 4 months starting 2025-10-31 (anchor 31):
+      let d4 = "2025-10-31";
+      d4 = nextDateFor("every4months", d4, 31);
+      expect(d4).toBe("2026-02-28"); // clamped
+      d4 = nextDateFor("every4months", d4, 31);
+      expect(d4).toBe("2026-06-30"); // clamped to 30
+      d4 = nextDateFor("every4months", d4, 31);
+      expect(d4).toBe("2026-10-31"); // restored to 31st!
     });
 
     it("advances daily by 1 day", () => {

@@ -99,6 +99,13 @@
       "when": 1787203000000,
       "tag": "0013_add_recurring_memo_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787204000000,
+      "tag": "0014_add_recurring_anchor_day",
+      "breakpoints": true
     }
   ]
 }
