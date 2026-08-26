@@ -272,7 +272,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.payee != null) p.payee = String(patch.payee);
   if ("memo" in patch) p.memo = String(patch.memo ?? "");
   if (patch.amount != null) p.amount = assertValidAmount(patch.amount);
-  if ("frequency" in patch) p.frequency = assertValidFrequency(patch.frequency);
+  if (patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
   if (patch.nextDate != null) p.nextDate = String(patch.nextDate);
   if (patch.active != null) p.active = !!patch.active;
   if ("flagColor" in patch) p.flagColor = sanitizeFlagColor(patch.flagColor);

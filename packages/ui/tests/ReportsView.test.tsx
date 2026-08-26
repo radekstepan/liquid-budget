@@ -178,6 +178,20 @@ describe("ReportsView", () => {
     expect(scope.getByText("$150.00")).toBeInTheDocument();
   });
 
+  it("excludes Starting Balance from Top Payees on Overview", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      transactions: [
+        txn("2026-04", 1, "Starting Balance", -50000),
+        txn("2026-04", 5, "Groceries", -350, 10),
+      ],
+    };
+    renderView({ data });
+    const scope = within(findPanel("Top Payees")!);
+    expect(scope.getByText("Groceries")).toBeInTheDocument();
+    expect(scope.queryByText("Starting Balance")).not.toBeInTheDocument();
+  });
+
   it("Spending tab shows sorted bars with percents", () => {
     renderView();
     clickTab("Spending by Category");

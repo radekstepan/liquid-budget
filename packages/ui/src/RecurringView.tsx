@@ -307,8 +307,8 @@ export function RecurringView({
               <Btn onClick={() => setDeletingId(null)}>Cancel</Btn>
               <Btn
                 variant="danger"
-                onClick={() => {
-                  onDelete(deletingRecurring.id);
+                onClick={async () => {
+                  await onDelete(deletingRecurring.id);
                   setDeletingId(null);
                 }}
               >

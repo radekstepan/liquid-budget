@@ -28,16 +28,15 @@ const SWAP_CSV = [
   "13/08/2026,UBER TRIP,,Toronto,18.63,",
 ].join("\n");
 
-async function resetToDemo(baseURL: string) {
-  const res = await fetch(`${baseURL}/api/reset`, { method: "POST" });
-  expect(res.ok).toBe(true);
+async function resetToDemo(request: import("@playwright/test").APIRequestContext) {
+  const res = await request.post("/api/reset");
+  expect(res.ok()).toBe(true);
 }
 
 test("POST /api/import/csv imports the sample file and updates the account", async ({
   request,
 }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
-  await resetToDemo(base);
+  await resetToDemo(request);
 
   const budget = await (await request.get("/api/budget")).json();
   const chequing = budget.accounts.find(
@@ -64,14 +63,13 @@ test("POST /api/import/csv imports the sample file and updates the account", asy
   );
   expect(Number(chequingAfter.balance)).not.toBe(Number(balanceBefore));
 
-  await resetToDemo(base);
+  await resetToDemo(request);
 });
 
 test("POST /api/import/csv rejects malformed CSV without touching the DB", async ({
   request,
 }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
-  await resetToDemo(base);
+  await resetToDemo(request);
 
   const budget = await (await request.get("/api/budget")).json();
   const countBefore = budget.transactions.length;
@@ -84,12 +82,11 @@ test("POST /api/import/csv rejects malformed CSV without touching the DB", async
   const after = await (await request.get("/api/budget")).json();
   expect(after.transactions.length).toBe(countBefore);
 
-  await resetToDemo(base);
+  await resetToDemo(request);
 });
 
 test("POST /api/import/csv skips duplicate rows on a second import", async ({ request }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
-  await resetToDemo(base);
+  await resetToDemo(request);
 
   const budget = await (await request.get("/api/budget")).json();
   const chequing = budget.accounts.find(
@@ -111,15 +108,14 @@ test("POST /api/import/csv skips duplicate rows on a second import", async ({ re
   expect(secondBody.skipped).toHaveLength(2);
   expect(secondBody.skipped[0].reason).toBe("Matches an existing transaction");
 
-  await resetToDemo(base);
+  await resetToDemo(request);
 });
 
 test("importing through the Settings menu previews, swaps Payee/Memo, and imports", async ({
   page,
   request,
 }) => {
-  const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
-  await resetToDemo(base);
+  await resetToDemo(request);
 
   await page.goto("/");
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -152,5 +148,5 @@ test("importing through the Settings menu previews, swaps Payee/Memo, and import
   await page.getByRole("button", { name: /^Transactions/ }).click();
   await expect(page.getByText("Vancouver", { exact: true })).toBeVisible();
 
-  await resetToDemo(base);
+  await resetToDemo(request);
 });
