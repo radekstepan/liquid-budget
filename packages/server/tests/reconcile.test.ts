@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { eq, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
@@ -285,7 +286,7 @@ describe("reconcile queries", () => {
         { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 },
       ]);
       mock.respondWith("delete:reconciliations", [{}]);
-      mock.respondWithNth("select:reconciliations", 1, []);
+      mock.respondWithNth("select:reconciliations", 2, []);
       mock.respondWithNth("update:accounts", 1, [{}]);
 
       const result = await unreconcileAccount(mock.db, 1);
@@ -320,7 +321,7 @@ describe("reconcile queries", () => {
       mock.respondWithNth("update:accounts", 1, [{}]);
       mock.respondWith("delete:transactions", []);
       mock.respondWith("delete:reconciliations", [{}]);
-      mock.respondWithNth("select:reconciliations", 1, []);
+      mock.respondWithNth("select:reconciliations", 2, []);
       mock.respondWithNth("update:accounts", 2, [{}]);
 
       const result = await unreconcileAccount(mock.db, 1);
@@ -786,60 +787,144 @@ describe("reconcile queries", () => {
       }
     });
 
-    it("BUG-14: fallback unreconcile flips all reconciled transactions with different dates on or before lastReconciledAt", async () => {
+    it("BUG-05: migration 0017 backfills legacy multi-round reconciliations and unreconciles round-by-round", async () => {
       const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat] = await db.insert(schema.categories).values({ groupId: group!.id, name: "Reconcile Adjustments" }).returning();
 
-      // Directly insert multiple reconciled transactions with different dates and reconciledAt timestamps
-      // simulating legacy or imported data without a reconciliations table row
-      await db.insert(schema.transactions).values([
-        {
-          accountId: acct.id,
-          date: "2026-04-01",
-          payee: "April Tx 1",
-          amount: 10000,
-          status: "r",
-          reconciledAt: "2026-04-01",
-        },
-        {
-          accountId: acct.id,
-          date: "2026-04-15",
-          payee: "April Tx 2",
-          amount: 20000,
-          status: "r",
-          reconciledAt: "2026-04-15",
-        },
-        {
-          accountId: acct.id,
-          date: "2026-05-01",
-          payee: "May Tx 1",
-          amount: 30000,
-          status: "r",
-          reconciledAt: "2026-05-01",
-        },
-      ]);
+      // Insert pre-migration Round 1 (April 2026): 1 regular tx + 1 adjustment tx
+      const [tx1] = await db.insert(schema.transactions).values({
+        accountId: acct.id,
+        date: "2026-04-01",
+        payee: "April Tx",
+        amount: 10000,
+        status: "r",
+        reconciledAt: "2026-04-01",
+        reconciliationId: null,
+      }).returning();
 
-      // Set account lastReconciledAt to 2026-05-01
+      const [adj1] = await db.insert(schema.transactions).values({
+        accountId: acct.id,
+        categoryId: cat!.id,
+        date: "2026-04-01",
+        payee: RECONCILE_ADJUSTMENT_MEMO,
+        memo: RECONCILE_ADJUSTMENT_MEMO,
+        amount: 500,
+        status: "r",
+        reconciledAt: "2026-04-01",
+        reconciliationId: null,
+      }).returning();
+
+      // Insert pre-migration Round 2 (May 2026): 1 regular tx + 1 adjustment tx
+      const [tx2] = await db.insert(schema.transactions).values({
+        accountId: acct.id,
+        date: "2026-05-01",
+        payee: "May Tx",
+        amount: 20000,
+        status: "r",
+        reconciledAt: "2026-05-01",
+        reconciliationId: null,
+      }).returning();
+
+      const [adj2] = await db.insert(schema.transactions).values({
+        accountId: acct.id,
+        categoryId: cat!.id,
+        date: "2026-05-01",
+        payee: RECONCILE_ADJUSTMENT_MEMO,
+        memo: RECONCILE_ADJUSTMENT_MEMO,
+        amount: -200,
+        status: "r",
+        reconciledAt: "2026-05-01",
+        reconciliationId: null,
+      }).returning();
+
+      // Set account lastReconciledAt to 2026-05-01 (latest round) and adjust balance
       await db
         .update(schema.accounts)
-        .set({ lastReconciledAt: "2026-05-01", lastReconciledBalance: 60000 })
+        .set({
+          balance: 30300,
+          lastReconciledAt: "2026-05-01",
+          lastReconciledBalance: 30300,
+        })
         .where(eq(schema.accounts.id, acct.id));
 
-      // No row in schema.reconciliations, so unreconcileAccount uses fallback branch
-      const unrecResult = await unreconcileAccount(db, acct.id);
-      expect(unrecResult.flipped).toBe(3);
+      // Execute migration 0017 statements to backfill reconciliations and reconciliation_ids
+      const mig17Sql = fs.readFileSync(path.resolve(MIGRATIONS_FOLDER, "0017_backfill_reconciliations.sql"), "utf8");
+      for (const stmt of mig17Sql.split("--> statement-breakpoint")) {
+        if (stmt.trim()) {
+          db.run(sql.raw(stmt));
+        }
+      }
 
-      const txs = await db
+      // Verify reconciliations table has 2 distinct rounds backfilled
+      const recRows = await db
         .select()
-        .from(schema.transactions)
-        .where(eq(schema.transactions.accountId, acct.id));
-      expect(txs.every((t) => t.status === "c" && t.reconciledAt === null)).toBe(true);
+        .from(schema.reconciliations)
+        .where(eq(schema.reconciliations.accountId, acct.id))
+        .orderBy(schema.reconciliations.id);
 
-      const [updatedAcct] = await db
-        .select()
-        .from(schema.accounts)
+      expect(recRows).toHaveLength(2);
+      expect(recRows[0]?.reconciledAt).toBe("2026-04-01");
+      expect(recRows[0]?.adjustmentTransactionId).toBe(adj1!.id);
+      expect(recRows[1]?.reconciledAt).toBe("2026-05-01");
+      expect(recRows[1]?.adjustmentTransactionId).toBe(adj2!.id);
+
+      // Verify transactions have their respective reconciliation_id stamped
+      const [tx1After] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx1!.id));
+      const [tx2After] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx2!.id));
+      expect(tx1After?.reconciliationId).toBe(recRows[0]!.id);
+      expect(tx2After?.reconciliationId).toBe(recRows[1]!.id);
+
+      // 1st Unreconcile: should only reverse Round 2 (May 2026)
+      const unrec1 = await unreconcileAccount(db, acct.id);
+      expect(unrec1.flipped).toBe(2); // tx2 + adj2 flipped before adj2 is deleted
+      expect(unrec1.deletedAdjustmentId).toBe(adj2!.id); // adj2 deleted
+
+      // tx2 is now 'c', tx1 is still 'r'
+      const [tx2Unrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx2!.id));
+      expect(tx2Unrec?.status).toBe("c");
+      expect(tx2Unrec?.reconciliationId).toBeNull();
+
+      const [tx1StillRec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx1!.id));
+      expect(tx1StillRec?.status).toBe("r");
+      expect(tx1StillRec?.reconciliationId).toBe(recRows[0]!.id);
+
+      // adj1 still exists
+      const [adj1StillExists] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, adj1!.id));
+      expect(adj1StillExists).toBeDefined();
+
+      // Account lastReconciledAt is restored to Round 1 ("2026-04-01")
+      const [acctAfterUnrec1] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+      expect(acctAfterUnrec1?.lastReconciledAt).toBe("2026-04-01");
+
+      // 2nd Unreconcile: reverses Round 1 (April 2026)
+      const unrec2 = await unreconcileAccount(db, acct.id);
+      expect(unrec2.flipped).toBe(2); // tx1 + adj1 flipped before adj1 is deleted
+      expect(unrec2.deletedAdjustmentId).toBe(adj1!.id); // adj1 deleted
+
+      const [tx1Unrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx1!.id));
+      expect(tx1Unrec?.status).toBe("c");
+      expect(tx1Unrec?.reconciliationId).toBeNull();
+
+      // Account lastReconciledAt is now null
+      const [acctAfterUnrec2] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+      expect(acctAfterUnrec2?.lastReconciledAt).toBeNull();
+      expect(acctAfterUnrec2?.lastReconciledBalance).toBeNull();
+    });
+
+    it("BUG-05: unreconcileAccount gracefully resets inconsistent lastReconciledAt when reconciliations row is missing", async () => {
+      const acct = await createAccount(db, { name: "Savings", kind: "liquid" });
+      await db
+        .update(schema.accounts)
+        .set({ lastReconciledAt: "2026-05-01", lastReconciledBalance: 50000 })
         .where(eq(schema.accounts.id, acct.id));
-      expect(updatedAcct?.lastReconciledAt).toBeNull();
-      expect(updatedAcct?.lastReconciledBalance).toBeNull();
+
+      const unrec = await unreconcileAccount(db, acct.id);
+      expect(unrec).toEqual({ flipped: 0, deletedAdjustmentId: null });
+
+      const [acctCleaned] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+      expect(acctCleaned?.lastReconciledAt).toBeNull();
+      expect(acctCleaned?.lastReconciledBalance).toBeNull();
     });
 
     it("BUG-38: foreign key cascades onDelete: 'set null' for reconciliationId and adjustmentTransactionId", async () => {

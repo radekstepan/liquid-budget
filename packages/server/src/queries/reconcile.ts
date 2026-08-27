@@ -265,136 +265,81 @@ export async function unreconcileAccount(
       .orderBy(desc(reconciliations.id))
       .limit(1);
 
-    let flippedCount = 0;
-    let deletedAdjustmentId: number | null = null;
-
-    if (lastRec) {
-      const flipped = await db
-        .update(transactions)
-        .set({ status: "c", reconciledAt: null, reconciliationId: null })
-        .where(
-          and(
-            or(
-              eq(transactions.accountId, accountId),
-              eq(transactions.transferAccountId, accountId)
-            ),
-            eq(transactions.status, "r"),
-            eq(transactions.reconciliationId, lastRec.id),
-            sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-          )
-        )
-        .returning({ id: transactions.id });
-      flippedCount = flipped.length;
-
-      // Also flip split parents back to cleared if any of their children are cleared
-      await db
-        .update(transactions)
-        .set({ status: "c", reconciledAt: null, reconciliationId: null })
-        .where(
-          and(
-            eq(transactions.accountId, accountId),
-            eq(transactions.status, "r"),
-            eq(transactions.reconciliationId, lastRec.id),
-            sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status = 'c')`
-          )
-        );
-
-      if (lastRec.adjustmentTransactionId) {
-        const [adjTxn] = await db
-          .select({ id: transactions.id, amount: transactions.amount })
-          .from(transactions)
-          .where(eq(transactions.id, lastRec.adjustmentTransactionId));
-        if (adjTxn) {
-          await db
-            .update(accounts)
-            .set({ balance: sql`${accounts.balance} - ${Math.round(Number(adjTxn.amount))}` })
-            .where(eq(accounts.id, accountId));
-          await db.delete(transactions).where(eq(transactions.id, adjTxn.id));
-          deletedAdjustmentId = adjTxn.id;
-        } else {
-          throw new TransactionError(
-            `Adjustment transaction ${lastRec.adjustmentTransactionId} referenced by reconciliation ${lastRec.id} was not found`,
-            409
-          );
-        }
-      }
-
-      await db.delete(reconciliations).where(eq(reconciliations.id, lastRec.id));
-
-      const [prevRec] = await db
-        .select()
-        .from(reconciliations)
-        .where(eq(reconciliations.accountId, accountId))
-        .orderBy(desc(reconciliations.id))
-        .limit(1);
-
-      await db
-        .update(accounts)
-        .set({
-          lastReconciledAt: prevRec?.reconciledAt ?? null,
-          lastReconciledBalance: prevRec?.statementBalance ?? null,
-        })
-        .where(eq(accounts.id, accountId));
-    } else {
-      const lastDate = acct.lastReconciledAt;
-      const flipped = await db
-        .update(transactions)
-        .set({ status: "c", reconciledAt: null, reconciliationId: null })
-        .where(
-          and(
-            or(
-              eq(transactions.accountId, accountId),
-              eq(transactions.transferAccountId, accountId)
-            ),
-            eq(transactions.status, "r"),
-            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
-            sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-          )
-        )
-        .returning({ id: transactions.id });
-      flippedCount = flipped.length;
-
-      // Also flip split parents back to cleared if any of their children are cleared
-      await db
-        .update(transactions)
-        .set({ status: "c", reconciledAt: null, reconciliationId: null })
-        .where(
-          and(
-            eq(transactions.accountId, accountId),
-            eq(transactions.status, "r"),
-            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
-            sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status = 'c')`
-          )
-        );
-
-      const adjustmentRows = await db
-        .select({ id: transactions.id, amount: transactions.amount })
-        .from(transactions)
-        .where(
-          and(
-            eq(transactions.accountId, accountId),
-            eq(transactions.memo, RECONCILE_ADJUSTMENT_MEMO),
-            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`
-          )
-        )
-        .orderBy(desc(transactions.date), desc(transactions.id))
-        .limit(1);
-      const adjustment = adjustmentRows[0];
-
-      if (adjustment) {
-        await db
-          .update(accounts)
-          .set({ balance: sql`${accounts.balance} - ${Math.round(Number(adjustment.amount))}` })
-          .where(eq(accounts.id, accountId));
-        await db.delete(transactions).where(eq(transactions.id, adjustment.id));
-        deletedAdjustmentId = adjustment.id;
-      }
-
+    if (!lastRec) {
       await db
         .update(accounts)
         .set({ lastReconciledAt: null, lastReconciledBalance: null })
         .where(eq(accounts.id, accountId));
+      return { flipped: 0, deletedAdjustmentId: null };
     }
+
+    const flipped = await db
+      .update(transactions)
+      .set({ status: "c", reconciledAt: null, reconciliationId: null })
+      .where(
+        and(
+          or(
+            eq(transactions.accountId, accountId),
+            eq(transactions.transferAccountId, accountId)
+          ),
+          eq(transactions.status, "r"),
+          eq(transactions.reconciliationId, lastRec.id),
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+        )
+      )
+      .returning({ id: transactions.id });
+    const flippedCount = flipped.length;
+
+    // Also flip split parents back to cleared if any of their children are cleared
+    await db
+      .update(transactions)
+      .set({ status: "c", reconciledAt: null, reconciliationId: null })
+      .where(
+        and(
+          eq(transactions.accountId, accountId),
+          eq(transactions.status, "r"),
+          eq(transactions.reconciliationId, lastRec.id),
+          sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status = 'c')`
+        )
+      );
+
+    let deletedAdjustmentId: number | null = null;
+    if (lastRec.adjustmentTransactionId) {
+      const [adjTxn] = await db
+        .select({ id: transactions.id, amount: transactions.amount })
+        .from(transactions)
+        .where(eq(transactions.id, lastRec.adjustmentTransactionId));
+      if (adjTxn) {
+        await db
+          .update(accounts)
+          .set({ balance: sql`${accounts.balance} - ${Math.round(Number(adjTxn.amount))}` })
+          .where(eq(accounts.id, accountId));
+        await db.delete(transactions).where(eq(transactions.id, adjTxn.id));
+        deletedAdjustmentId = adjTxn.id;
+      } else {
+        throw new TransactionError(
+          `Adjustment transaction ${lastRec.adjustmentTransactionId} referenced by reconciliation ${lastRec.id} was not found`,
+          409
+        );
+      }
+    }
+
+    await db.delete(reconciliations).where(eq(reconciliations.id, lastRec.id));
+
+    const [prevRec] = await db
+      .select()
+      .from(reconciliations)
+      .where(eq(reconciliations.accountId, accountId))
+      .orderBy(desc(reconciliations.id))
+      .limit(1);
+
+    await db
+      .update(accounts)
+      .set({
+        lastReconciledAt: prevRec?.reconciledAt ?? null,
+        lastReconciledBalance: prevRec?.statementBalance ?? null,
+      })
+      .where(eq(accounts.id, accountId));
 
     return { flipped: flippedCount, deletedAdjustmentId };
   });

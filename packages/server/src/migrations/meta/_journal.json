@@ -120,6 +120,13 @@
       "when": 1787206000000,
       "tag": "0016_reconciliation_fks_and_nonzero_amounts",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1787207000000,
+      "tag": "0017_backfill_reconciliations",
+      "breakpoints": true
     }
   ]
 }
