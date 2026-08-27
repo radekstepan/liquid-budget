@@ -78,11 +78,30 @@ describe("format", () => {
     expect(() => num(1e21)).toThrow(RangeError);
   });
 
-  it("dollarsToCents converts dollar amounts to integer cents", () => {
+  it("dollarsToCents converts dollar amounts to integer cents with symmetric float-safe rounding (BUG-27)", () => {
     expect(dollarsToCents(3.14)).toBe(314);
     expect(dollarsToCents(-42.50)).toBe(-4250);
     expect(dollarsToCents(0)).toBe(0);
+    expect(dollarsToCents(-0)).toBe(0);
     expect(dollarsToCents(null)).toBe(0);
+    expect(dollarsToCents(undefined)).toBe(0);
+    expect(dollarsToCents(-1.005)).toBe(-101);
+    expect(dollarsToCents(1.005)).toBe(101);
+    expect(dollarsToCents(-1.004)).toBe(-100);
+    expect(dollarsToCents(1.004)).toBe(100);
+    expect(dollarsToCents(-35.855)).toBe(-3586);
+    expect(dollarsToCents(35.855)).toBe(3586);
+    expect(dollarsToCents("-1.005")).toBe(-101);
+    expect(dollarsToCents("1.005")).toBe(101);
+  });
+
+  it("round2 symmetrically rounds half away from zero without binary floating-point errors (BUG-27)", () => {
+    expect(round2(-1.005)).toBe(-1.01);
+    expect(round2(1.005)).toBe(1.01);
+    expect(round2(-35.855)).toBe(-35.86);
+    expect(round2(35.855)).toBe(35.86);
+    expect(round2(3.14159)).toBe(3.14);
+    expect(round2(-3.14159)).toBe(-3.14);
   });
 
   it("dollarsToCents throws RangeError on overflow", () => {

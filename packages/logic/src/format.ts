@@ -47,12 +47,13 @@ export function fmtSigned(cents: number): string {
 export function num(s: string | number | null | undefined): number {
   if (s == null) return 0;
   if (typeof s === "number") {
-    if (Number.isNaN(s) || s === 0) return 0;
-    const rounded = Math.round(s);
+    if (Number.isNaN(s) || s === 0 || !Number.isFinite(s)) return 0;
+    const sign = s < 0 ? -1 : 1;
+    const rounded = sign * Math.round(Math.abs(s));
     if (!Number.isSafeInteger(rounded)) {
       throw new RangeError(`Amount ${s} exceeds safe integer range`);
     }
-    return rounded;
+    return rounded === 0 ? 0 : rounded;
   }
   let str = String(s).trim();
   if (!str) return 0;
@@ -78,22 +79,38 @@ export function num(s: string | number | null | undefined): number {
   }
 
   const rawNum = Number(str);
-  if (Number.isNaN(rawNum) || rawNum === 0) return 0;
-  const rounded = Math.round(rawNum);
+  if (Number.isNaN(rawNum) || rawNum === 0 || !Number.isFinite(rawNum)) return 0;
+  const rounded = Math.round(Math.abs(rawNum));
   const finalVal = sign * rounded;
   if (!Number.isSafeInteger(finalVal)) {
     throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
   }
-  return finalVal;
+  return finalVal === 0 ? 0 : finalVal;
 }
 
-export function dollarsToCents(d: number | null | undefined): number {
-  if (d == null || Number.isNaN(d)) return 0;
-  const c = Math.round(d * 100);
+export function dollarsToCents(d: number | string | null | undefined): number {
+  if (d == null) return 0;
+  const n = typeof d === "number" ? d : Number(d);
+  if (Number.isNaN(n) || n === 0 || !Number.isFinite(n)) return 0;
+
+  if (Math.abs(n) * 100 > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(`Amount ${d} exceeds safe integer range`);
+  }
+
+  const sign = n < 0 ? -1 : 1;
+  const absStr = String(Math.abs(n));
+  let scaled: number;
+  if (absStr.includes("e") || absStr.includes("E")) {
+    scaled = Math.abs(n) * 100;
+  } else {
+    scaled = Number(`${absStr}e2`);
+  }
+
+  const c = sign * Math.round(scaled);
   if (!Number.isSafeInteger(c)) {
     throw new RangeError(`Amount ${d} exceeds safe integer range`);
   }
-  return c;
+  return c === 0 ? 0 : c;
 }
 
 type _Token = { kind: "num"; value: number } | { kind: "op"; op: string };
@@ -331,7 +348,7 @@ export function prevMonthKey(key: string): string {
 export const previousMonthKey = prevMonthKey;
 
 export function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return dollarsToCents(n) / 100;
 }
 
 export function todayISO(): string {

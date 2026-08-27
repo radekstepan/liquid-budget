@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, CategoryGroup, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES, dollarsToCents } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -160,7 +160,7 @@ export function TransactionModal({
     transferDestAccount != null &&
     Boolean(selectedAccount?.onBudget) !== Boolean(transferDestAccount.onBudget);
 
-  const transferAmountCents = Math.round((evalAmount(amount) ?? 0) * 100);
+  const transferAmountCents = dollarsToCents(evalAmount(amount));
   const srcOnBudget = Boolean(selectedAccount?.onBudget);
   const destOnBudget = Boolean(transferDestAccount?.onBudget);
   const transferNetOnBudgetDelta = isTransferBoundary
@@ -191,12 +191,12 @@ export function TransactionModal({
   const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
-    const parentCents = Math.round(parentAmount * 100);
+    const parentCents = dollarsToCents(parentAmount);
     return validateSubTransactions(
       parentCents,
       subRows.map((r) => ({
         ...r,
-        amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+        amount: dollarsToCents(evalAmount(String(r.amount))),
       }))
     );
   }, [mode, parentAmount, subRows]);
@@ -236,7 +236,7 @@ export function TransactionModal({
   const save = () => {
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
-    const amountCents = Math.round(a * 100);
+    const amountCents = dollarsToCents(a);
 
     if (mode === "transfer") {
       if (!payee.trim() && !transferAccountId) return;
@@ -300,7 +300,7 @@ export function TransactionModal({
           return {
             categoryId: finalCatId,
             transferAccountId: r.transferAccountId ?? null,
-            amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+            amount: dollarsToCents(evalAmount(String(r.amount))),
             memo: r.memo,
           };
         }),
@@ -345,7 +345,7 @@ export function TransactionModal({
         if (!dest) return false;
         const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
         if (!isBoundary) return false;
-        const rAmount = Math.round((evalAmount(String(r.amount)) ?? 0) * 100);
+        const rAmount = dollarsToCents(evalAmount(String(r.amount)));
         const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
         if (netDelta <= 0) {
           return !r.categoryId;
@@ -606,7 +606,7 @@ export function TransactionModal({
                 {subRows.map((row, i) => {
                   const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
                   const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
-                  const rowAmtCents = Math.round((evalAmount(String(row.amount)) ?? 0) * 100);
+                  const rowAmtCents = dollarsToCents(evalAmount(String(row.amount)));
                   const rowNetOnBudget = isRowBoundary
                     ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
                     : 0;
@@ -780,7 +780,7 @@ export function TransactionModal({
                   className="ml-auto text-[11.5px] y-num"
                   style={{
                     color:
-                      Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
+                      Math.abs(dollarsToCents(subTotal) - dollarsToCents(parentAmount)) === 0
                         ? "var(--y-green-dk)"
                         : "var(--y-red)",
                     fontWeight: 700,
@@ -935,8 +935,8 @@ export function CategoryModal({
                   name.trim() &&
                   onSave({
                     name: name.trim(),
-                    goalTarget: hasGoal && evalAmount(goal) != null ? Math.round((evalAmount(goal) ?? 0) * 100) : null,
-                    carryover: hasCarryover && evalAmount(carryover) != null ? Math.round((evalAmount(carryover) ?? 0) * 100) : 0,
+                    goalTarget: hasGoal && evalAmount(goal) != null ? dollarsToCents(evalAmount(goal)) : null,
+                    carryover: hasCarryover && evalAmount(carryover) != null ? dollarsToCents(evalAmount(carryover)) : 0,
                     overspendCarriesOver,
                   })
                 }
@@ -1169,7 +1169,7 @@ export function RecurringModal({
     transferDestAccount != null &&
     Boolean(selectedAccount?.onBudget) !== Boolean(transferDestAccount.onBudget);
 
-  const transferAmountCents = Math.round((evalAmount(amount) ?? 0) * 100);
+  const transferAmountCents = dollarsToCents(evalAmount(amount));
   const srcOnBudget = Boolean(selectedAccount?.onBudget);
   const destOnBudget = Boolean(transferDestAccount?.onBudget);
   const transferNetOnBudgetDelta = isTransferBoundary
@@ -1199,12 +1199,12 @@ export function RecurringModal({
   const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
-    const parentCents = Math.round(parentAmount * 100);
+    const parentCents = dollarsToCents(parentAmount);
     return validateRecurringSubTransactions(
       parentCents,
       subRows.map((r) => ({
         ...r,
-        amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+        amount: dollarsToCents(evalAmount(String(r.amount))),
       }))
     );
   }, [mode, parentAmount, subRows]);
@@ -1234,7 +1234,7 @@ export function RecurringModal({
   const save = () => {
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
-    const amountCents = Math.round(a * 100);
+    const amountCents = dollarsToCents(a);
 
     if (mode === "transfer") {
       if (!transferAccountId) return;
@@ -1295,7 +1295,7 @@ export function RecurringModal({
           return {
             categoryId: finalCatId,
             transferAccountId: r.transferAccountId ?? null,
-            amount: Math.round((evalAmount(String(r.amount)) ?? 0) * 100),
+            amount: dollarsToCents(evalAmount(String(r.amount))),
             memo: r.memo,
           };
         }),
@@ -1336,7 +1336,7 @@ export function RecurringModal({
         if (!dest) return false;
         const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
         if (!isBoundary) return false;
-        const rAmount = Math.round((evalAmount(String(r.amount)) ?? 0) * 100);
+        const rAmount = dollarsToCents(evalAmount(String(r.amount)));
         const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
         if (netDelta <= 0) {
           return !r.categoryId;
@@ -1550,7 +1550,7 @@ export function RecurringModal({
             {subRows.map((row, i) => {
               const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
               const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
-              const rowAmtCents = Math.round((evalAmount(String(row.amount)) ?? 0) * 100);
+              const rowAmtCents = dollarsToCents(evalAmount(String(row.amount)));
               const rowNetOnBudget = isRowBoundary
                 ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
                 : 0;
@@ -1724,7 +1724,7 @@ export function RecurringModal({
               className="ml-auto text-[11.5px] y-num"
               style={{
                 color:
-                  Math.abs(Math.round(subTotal * 100) - Math.round(parentAmount * 100)) === 0
+                  Math.abs(dollarsToCents(subTotal) - dollarsToCents(parentAmount)) === 0
                     ? "var(--y-green-dk)"
                     : "var(--y-red)",
                 fontWeight: 700,
@@ -1838,7 +1838,7 @@ export function AccountModal({
   const save = () => {
     if (!name.trim()) return;
     const b = evalAmount(balance) ?? 0;
-    const bCents = Math.round(b * 100);
+    const bCents = dollarsToCents(b);
     const finalBalance = kind === "credit" ? -Math.abs(bCents) : bCents;
     onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget" });
   };
