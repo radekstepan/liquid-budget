@@ -1,4 +1,13 @@
 import { z } from "zod";
+import { isValidISODate, isValidISOMonth } from "@ynab/logic";
+
+export const ISODateSchema = z.string().refine(isValidISODate, {
+  message: "Invalid calendar date (expected YYYY-MM-DD)",
+});
+
+export const ISOMonthSchema = z.string().refine(isValidISOMonth, {
+  message: "Invalid month format (expected YYYY-MM)",
+});
 
 export const TransactionFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple"]);
 
@@ -13,13 +22,13 @@ export const TransactionCreateSchema = z.object({
   accountId: z.number().int().positive(),
   categoryId: z.number().int().positive().nullable().optional(),
   transferAccountId: z.number().int().positive().nullable().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: ISODateSchema,
   payee: z.string().max(255).optional().default(""),
   memo: z.string().max(1000).optional().default(""),
   amount: z.number().int(),
   status: z.enum(["u", "c", "r"]).optional().default("c"),
   flagColor: TransactionFlagSchema.nullable().optional(),
-  incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
+  incomeMonth: ISOMonthSchema.nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
 
@@ -27,13 +36,13 @@ export const TransactionPatchSchema = z.object({
   id: z.number().int().positive(),
   accountId: z.number().int().positive().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date: ISODateSchema.optional(),
   payee: z.string().max(255).optional(),
   memo: z.string().max(1000).nullable().optional(),
   amount: z.number().int().optional(),
   status: z.enum(["u", "c", "r"]).optional(),
   flagColor: TransactionFlagSchema.nullable().optional(),
-  incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
+  incomeMonth: ISOMonthSchema.nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
 
@@ -48,12 +57,12 @@ export const TransactionBulkUpdateSchema = z.object({
     status: z.enum(["u", "c", "r"]).optional(),
     categoryId: z.number().int().positive().nullable().optional(),
     flagColor: TransactionFlagSchema.nullable().optional(),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    date: ISODateSchema.optional(),
     payee: z.string().max(255).optional(),
     memo: z.string().max(1000).nullable().optional(),
     amount: z.number().int().optional(),
     accountId: z.number().int().positive().optional(),
-    incomeMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
+    incomeMonth: ISOMonthSchema.nullable().optional(),
   }),
 });
 
@@ -141,7 +150,7 @@ export const CategoryPatchSchema = z.object({
 
 export const AssignmentUpsertSchema = z.object({
   categoryId: z.number().int().positive(),
-  month: z.string().regex(/^\d{4}-\d{2}$/),
+  month: ISOMonthSchema,
   amount: z.number().int(),
 });
 
@@ -164,7 +173,7 @@ export const RecurringCreateSchema = z.object({
   memo: z.string().max(1000).optional().default(""),
   amount: z.number().int(),
   frequency: z.string().min(1).max(50),
-  nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  nextDate: ISODateSchema,
   anchorDay: z.number().int().min(1).max(31).nullable().optional(),
   flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
@@ -179,18 +188,51 @@ export const RecurringPatchSchema = z.object({
   memo: z.string().max(1000).nullable().optional(),
   amount: z.number().int().optional(),
   frequency: z.string().min(1).max(50).optional(),
-  nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  nextDate: ISODateSchema.optional(),
   anchorDay: z.number().int().min(1).max(31).nullable().optional(),
   active: z.boolean().optional(),
   flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).optional(),
 });
 
+export const RecurringPostActionSchema = z.object({
+  action: z.literal("post"),
+  id: z.number().int().positive(),
+  date: ISODateSchema.optional(),
+});
+
+export const RecurringBulkPostActionSchema = z.object({
+  action: z.literal("bulk-post"),
+  ids: z.array(z.number().int().positive()).min(1),
+  date: ISODateSchema.optional(),
+});
+
+export const RecurringAutoPostActionSchema = z.object({
+  action: z.literal("autopost"),
+  asOfDate: ISODateSchema.optional(),
+});
+
+export const RecurringBulkUpdateSchema = z.object({
+  action: z.literal("bulk-update"),
+  ids: z.array(z.number().int().positive()).min(1),
+  patch: z.object({
+    flagColor: TransactionFlagSchema.nullable().optional(),
+    active: z.boolean().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    nextDate: ISODateSchema.optional(),
+  }),
+});
+
+export const RecurringBulkDeleteSchema = z.object({
+  action: z.literal("delete").optional(),
+  ids: z.array(z.number().int().positive()).min(1),
+});
+
 export const ReconcileAccountSchema = z.object({
   action: z.literal("reconcile").optional().default("reconcile"),
   accountId: z.number().int().positive(),
   statementBalance: z.number().int(),
-  statementDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  statementDate: ISODateSchema.optional(),
   adjustmentCategoryId: z.number().int().positive().nullable().optional(),
 });
 

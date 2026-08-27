@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectDateFormat,
+  parseAmount,
   parseCsv,
   parseCsvImport,
   parseDate,
@@ -529,5 +530,83 @@ describe("swapPayeeMemo", () => {
     const swapped = swapPayeeMemo(rows, true);
     expect(swapped[1]!.payee).toBe("");
     expect(swapped[1]!.memo).toBe("C");
+  });
+});
+
+describe("parseAmount (BUG-20)", () => {
+  it("parses valid integers, decimals, and negative amounts", () => {
+    expect(parseAmount("0")).toBe(0);
+    expect(parseAmount("0.00")).toBe(0);
+    expect(parseAmount("-0.00")).toBe(0);
+    expect(parseAmount("123")).toBe(123);
+    expect(parseAmount("123.45")).toBe(123.45);
+    expect(parseAmount("-123.45")).toBe(-123.45);
+    expect(parseAmount("+123.45")).toBe(123.45);
+    expect(parseAmount("(123.45)")).toBe(-123.45);
+  });
+
+  it("parses currency symbols and accounting formats ($ € £ ¥)", () => {
+    expect(parseAmount("$123.45")).toBe(123.45);
+    expect(parseAmount("-$123.45")).toBe(-123.45);
+    expect(parseAmount("$-123.45")).toBe(-123.45);
+    expect(parseAmount("($123.45)")).toBe(-123.45);
+    expect(parseAmount("123.45$")).toBe(123.45);
+    expect(parseAmount("€123.45")).toBe(123.45);
+    expect(parseAmount("£2,500.00")).toBe(2500);
+    expect(parseAmount("¥500")).toBe(500);
+  });
+
+  it("parses US and European thousands groupings and decimal commas", () => {
+    expect(parseAmount("1,234.56")).toBe(1234.56);
+    expect(parseAmount("1,234,567.89")).toBe(1234567.89);
+    expect(parseAmount("1,000")).toBe(1000);
+    expect(parseAmount("1.234,56")).toBe(1234.56);
+    expect(parseAmount("1.234.567,89")).toBe(1234567.89);
+    expect(parseAmount("12,50")).toBe(12.5);
+    expect(parseAmount(",50")).toBe(0.5);
+    expect(parseAmount(".50")).toBe(0.5);
+    expect(parseAmount("1 234.56")).toBe(1234.56);
+    expect(parseAmount("1 234,56")).toBe(1234.56);
+  });
+
+  it("rejects malformed numbers and unsupported suffixes (BUG-20)", () => {
+    expect(parseAmount("12abc")).toBeNull();
+    expect(parseAmount("123.45 USD")).toBeNull();
+    expect(parseAmount("1,23,4")).toBeNull();
+    expect(parseAmount("1-")).toBeNull();
+    expect(parseAmount("1.2.3")).toBeNull();
+    expect(parseAmount("1,,2")).toBeNull();
+    expect(parseAmount("1..2")).toBeNull();
+    expect(parseAmount("1,234,5")).toBeNull();
+    expect(parseAmount("1.234.5")).toBeNull();
+    expect(parseAmount("--123")).toBeNull();
+    expect(parseAmount("(123")).toBeNull();
+    expect(parseAmount("123)")).toBeNull();
+    expect(parseAmount("abc")).toBeNull();
+    expect(parseAmount("")).toBeNull();
+    expect(parseAmount("   ")).toBeNull();
+  });
+
+  it("flags malformed amount rows with an error in parseCsvImport (BUG-20)", () => {
+    const csv = [
+      "Date,Payee,Amount",
+      "2026-08-01,Store A,12abc",
+      "2026-08-02,Store B,123.45 USD",
+      '2026-08-03,Store C,"1,23,4"',
+      "2026-08-04,Store D,1-",
+      "2026-08-05,Store E,10.00",
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]!.error).toMatch(/Invalid amount/);
+    expect(rows[0]!.amountCents).toBeNull();
+    expect(rows[1]!.error).toMatch(/Invalid amount/);
+    expect(rows[1]!.amountCents).toBeNull();
+    expect(rows[2]!.error).toMatch(/Invalid amount/);
+    expect(rows[2]!.amountCents).toBeNull();
+    expect(rows[3]!.error).toMatch(/Invalid amount/);
+    expect(rows[3]!.amountCents).toBeNull();
+    expect(rows[4]!.error).toBeNull();
+    expect(rows[4]!.amountCents).toBe(1000);
   });
 });

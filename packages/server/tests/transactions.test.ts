@@ -22,6 +22,65 @@ import { reconcileAccount, unreconcileAccount } from "../src/queries/reconcile.j
 import { createMockDb, type MockDb } from "./mock-db.js";
 
 describe("transactions queries", () => {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+  function openMigratedDb() {
+    const raw = new Database(":memory:");
+    raw.pragma("foreign_keys = ON");
+    const db = drizzle(raw, { schema });
+    migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    return db;
+  }
+
+  async function seedTestData(db: ReturnType<typeof openMigratedDb>) {
+    const [account] = await db
+      .insert(schema.accounts)
+      .values({
+        name: "Checking",
+        kind: "liquid",
+        groupLabel: "Budget Accounts",
+        balance: 0,
+        onBudget: true,
+        sort: 0,
+      })
+      .returning();
+
+    const [group] = await db
+      .insert(schema.categoryGroups)
+      .values({
+        name: "Living",
+        sort: 0,
+      })
+      .returning();
+
+    const [cat1] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: group!.id,
+        name: "Groceries",
+        sort: 0,
+      })
+      .returning();
+
+    const [cat2] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: group!.id,
+        name: "Rent",
+        sort: 1,
+      })
+      .returning();
+
+    return {
+      accountId: account!.id,
+      groupId: group!.id,
+      cat1Id: cat1!.id,
+      cat2Id: cat2!.id,
+    };
+  }
+
   let mock: MockDb;
   beforeEach(() => {
     mock = createMockDb();
@@ -3350,6 +3409,94 @@ describe("transactions queries", () => {
           expect(child2Db2?.status).toBe("c");
         });
       });
+    });
+  });
+
+  describe("BUG-19: Strict calendar date validation", () => {
+    it("rejects createTransaction with invalid calendar date or incomeMonth", async () => {
+      const db = openMigratedDb();
+      const { accountId } = await seedTestData(db);
+
+      await expect(
+        createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-02-31",
+          payee: "Test",
+          memo: "",
+          amount: -1000,
+        })
+      ).rejects.toThrow(/Invalid calendar date/);
+
+      await expect(
+        createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-06-15",
+          payee: "Income",
+          memo: "",
+          amount: 1000,
+          incomeMonth: "2026-13",
+        })
+      ).rejects.toThrow(/Invalid month format/);
+    });
+
+    it("rejects createSplitWithChildren with invalid calendar date", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      await expect(
+        createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-02-31",
+            payee: "Split",
+            memo: "",
+            amount: -2000,
+          },
+          [
+            { categoryId: cat1Id, amount: -1000 },
+            { categoryId: cat2Id, amount: -1000 },
+          ]
+        )
+      ).rejects.toThrow(/Invalid calendar date/);
+    });
+
+    it("rejects updateTransaction with invalid calendar date", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id } = await seedTestData(db);
+
+      const txn = await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-06-15",
+        payee: "Valid",
+        memo: "",
+        amount: -1000,
+      });
+
+      await expect(
+        updateTransaction(db, txn!.id, { date: "2026-04-31" })
+      ).rejects.toThrow(/Invalid calendar date/);
+    });
+
+    it("rejects bulkUpdateTransactions with invalid calendar date", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id } = await seedTestData(db);
+
+      const txn = await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-06-15",
+        payee: "Valid",
+        memo: "",
+        amount: -1000,
+      });
+
+      await expect(
+        bulkUpdateTransactions(db, [txn!.id], { date: "2026-02-29" })
+      ).rejects.toThrow(/Invalid calendar date/);
     });
   });
 });

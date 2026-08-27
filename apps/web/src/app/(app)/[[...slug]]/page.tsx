@@ -1,4 +1,5 @@
 import { BudgetAppShell } from "@/components/BudgetAppShell";
+import { isValidISOMonth } from "@ynab/logic";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function AppPage({
       const validViews = ["budget", "reports", "calendar", "projections", "transactions", "recurring"];
       if (validViews.includes(first)) {
         initialView = first;
-        if (first === "budget" && slug[1] && /^\d{4}-\d{2}$/.test(slug[1])) {
+        if (first === "budget" && slug[1] && isValidISOMonth(slug[1])) {
           initialMonth = slug[1];
         }
         if (first === "transactions" && slug[1]) {

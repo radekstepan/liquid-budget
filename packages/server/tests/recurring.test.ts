@@ -1168,6 +1168,46 @@ describe("recurring queries", () => {
         status: 409,
       });
     });
+
+    it("rejects postRecurringTransaction and autoPostDueRecurringTransactions with invalid calendar dates (BUG-19)", async () => {
+      await expect(
+        postRecurringTransaction(mock.db, 1, "2026-02-31")
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 400,
+      });
+
+      await expect(
+        autoPostDueRecurringTransactions(mock.db, "2026-04-31")
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 400,
+      });
+    });
+
+    it("rejects createRecurring and updateRecurring with invalid calendar dates (BUG-19)", async () => {
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: 2,
+          amount: -5000,
+          frequency: "monthly",
+          nextDate: "2026-02-31",
+          payee: "Test",
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 400,
+      });
+
+      mock.respondWith("select:recurring", [{ id: 1, accountId: 1, amount: -5000 }]);
+      await expect(
+        updateRecurring(mock.db, 1, { nextDate: "2026-02-29" })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        status: 400,
+      });
+    });
   });
 });
 

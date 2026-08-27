@@ -345,6 +345,32 @@ export function todayISO(): string {
   return d.toISOString().slice(0, 10);
 }
 
+export function isValidISODate(str: unknown): str is string {
+  if (typeof str !== "string") return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (!m) return false;
+  const y = parseInt(m[1]!, 10);
+  const mo = parseInt(m[2]!, 10);
+  const d = parseInt(m[3]!, 10);
+  if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === mo - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+export function isValidISOMonth(str: unknown): str is string {
+  if (typeof str !== "string") return false;
+  const m = /^(\d{4})-(\d{2})$/.exec(str);
+  if (!m) return false;
+  const y = parseInt(m[1]!, 10);
+  const mo = parseInt(m[2]!, 10);
+  if (y < 1 || mo < 1 || mo > 12) return false;
+  return true;
+}
+
 /**
  * Advance an ISO date (YYYY-MM-DD) by one step of the given frequency.
  * Supported frequencies: "daily", "weekly", "biweekly", "twiceamonth",
@@ -365,13 +391,14 @@ export function nextDateFor(
   iso: string,
   anchor?: number | string
 ): string {
+  if (!isValidISODate(iso)) return iso;
   const d = new Date(iso + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return iso;
 
   let anchorDay: number;
   if (typeof anchor === "number" && !Number.isNaN(anchor) && anchor >= 1 && anchor <= 31) {
     anchorDay = Math.floor(anchor);
-  } else if (typeof anchor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(anchor)) {
+  } else if (typeof anchor === "string" && isValidISODate(anchor)) {
     anchorDay = parseInt(anchor.slice(8, 10), 10);
   } else if (typeof anchor === "string" && /^\d+$/.test(anchor)) {
     anchorDay = Math.min(31, Math.max(1, parseInt(anchor, 10)));
@@ -495,8 +522,8 @@ export function nextDateFor(
  *   `y` or `Y`: +1 year
  */
 export function adjustDateShortcut(dateStr: string, key: string): string | null {
-  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    if (key.toLowerCase() === "t") return todayISO();
+  if (key.toLowerCase() === "t") return todayISO();
+  if (!isValidISODate(dateStr)) {
     return null;
   }
 
@@ -518,10 +545,6 @@ export function adjustDateShortcut(dateStr: string, key: string): string | null 
     case "_": {
       date.setUTCDate(date.getUTCDate() - 1);
       break;
-    }
-    case "t":
-    case "T": {
-      return todayISO();
     }
     case "m":
     case "M": {

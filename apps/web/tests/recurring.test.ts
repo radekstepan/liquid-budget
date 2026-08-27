@@ -8,11 +8,11 @@ import {
   getDefaultDb,
   resetAndSeedDatabase,
 } from "@ynab/server";
-import { PATCH } from "../src/app/api/recurring/route";
+import { PATCH, POST } from "../src/app/api/recurring/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
-describe("PATCH /api/recurring (BUG-19)", () => {
+describe("PATCH & POST /api/recurring (BUG-19)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
     await resetAndSeedDatabase(db);
@@ -85,5 +85,56 @@ describe("PATCH /api/recurring (BUG-19)", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.updatedCount).toBe(2);
+  });
+
+  it("BUG-19: rejects invalid calendar dates in recurring route actions", async () => {
+    const db = getDefaultDb();
+    const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+    // 1. Create with invalid nextDate
+    const createReq = new NextRequest("http://localhost:3000/api/recurring", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: account!.id,
+        amount: -1500,
+        frequency: "monthly",
+        nextDate: "2026-02-31",
+      }),
+    });
+    const createRes = await POST(createReq);
+    expect(createRes.status).toBe(400);
+
+    // 2. Action post with invalid date query param
+    const postQueryReq = new NextRequest("http://localhost:3000/api/recurring?action=post&id=1&date=2026-04-31", {
+      method: "POST",
+    });
+    const postQueryRes = await POST(postQueryReq);
+    expect(postQueryRes.status).toBe(400);
+
+    // 3. Action autopost with invalid asOfDate
+    const autopostReq = new NextRequest("http://localhost:3000/api/recurring", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "autopost",
+        asOfDate: "2026-02-29",
+      }),
+    });
+    const autopostRes = await POST(autopostReq);
+    expect(autopostRes.status).toBe(400);
+
+    // 4. Action bulk-update with invalid nextDate
+    const bulkUpdateReq = new NextRequest("http://localhost:3000/api/recurring", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "bulk-update",
+        ids: [1],
+        patch: { nextDate: "2026-02-31" },
+      }),
+    });
+    const bulkUpdateRes = await PATCH(bulkUpdateReq);
+    expect(bulkUpdateRes.status).toBe(400);
   });
 });

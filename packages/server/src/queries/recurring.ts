@@ -1,5 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
-import { isValidRecurringFrequency, nextDateFor, todayISO, type TransactionFlagColor } from "@ynab/logic";
+import {
+  isValidISODate,
+  isValidRecurringFrequency,
+  nextDateFor,
+  todayISO,
+  type TransactionFlagColor,
+} from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { recurring, recurringSubTransactions } from "../schema.js";
@@ -17,6 +23,13 @@ function assertValidFrequency(frequency: unknown): string {
     throw new RecurringError(`invalid frequency: ${frequency}`, 422);
   }
   return String(frequency);
+}
+
+function assertValidISODate(date: unknown, fieldName: string = "date"): string {
+  if (!isValidISODate(date)) {
+    throw new RecurringError(`Invalid calendar date for ${fieldName}: ${date}`, 400);
+  }
+  return String(date);
 }
 
 export type CreateRecurringInput = {
@@ -171,6 +184,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
   const norm = normaliseInput(input);
   const validatedAmount = assertValidAmount(input.amount);
   const validatedFrequency = assertValidFrequency(input.frequency);
+  const validatedNextDate = assertValidISODate(input.nextDate, "nextDate");
   if (norm.isSplit) {
     assertSplitsBalanced(validatedAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
@@ -212,7 +226,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
     const anchorDay =
       input.anchorDay !== undefined && input.anchorDay !== null
         ? Number(input.anchorDay)
-        : parseInt(input.nextDate.slice(8, 10), 10);
+        : parseInt(validatedNextDate.slice(8, 10), 10);
 
     const [parent] = await db
       .insert(recurring)
@@ -223,7 +237,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         memo: input.memo ?? "",
         amount: validatedAmount,
         frequency: validatedFrequency,
-        nextDate: input.nextDate,
+        nextDate: validatedNextDate,
         anchorDay,
         active: input.active ?? true,
         flagColor: sanitizeFlagColor(input.flagColor),
@@ -343,7 +357,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.memo !== undefined) p.memo = String(patch.memo ?? "");
   if (patch.amount !== undefined && patch.amount != null) p.amount = effectiveAmount;
   if (patch.frequency !== undefined && patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
-  if (patch.nextDate !== undefined && patch.nextDate != null) p.nextDate = String(patch.nextDate);
+  if (patch.nextDate !== undefined && patch.nextDate != null) p.nextDate = assertValidISODate(patch.nextDate, "nextDate");
   if (patch.anchorDay !== undefined) {
     p.anchorDay = patch.anchorDay != null ? Number(patch.anchorDay) : null;
   }
@@ -457,15 +471,16 @@ export async function postRecurringTransaction(
   recurringId: number,
   postDate?: string
 ) {
+  const validatedPostDate = postDate ? assertValidISODate(postDate, "date") : undefined;
   return withTransaction(db, async () => {
     const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
     if (!r) throw new RecurringError("Recurring transaction not found", 404);
     if (!r.active) throw new RecurringError("Recurring transaction is inactive", 400);
-    if (postDate && postDate < r.nextDate) {
-      throw new RecurringError(`Recurring transaction occurrence for ${postDate} has already been posted`, 409);
+    if (validatedPostDate && validatedPostDate < r.nextDate) {
+      throw new RecurringError(`Recurring transaction occurrence for ${validatedPostDate} has already been posted`, 409);
     }
 
-    const dateToUse = postDate || r.nextDate;
+    const dateToUse = validatedPostDate || r.nextDate;
     const children = await db
       .select()
       .from(recurringSubTransactions)
@@ -553,16 +568,17 @@ export async function autoPostDueRecurringTransactions(
   db: Database,
   asOfDate: string = todayISO()
 ) {
+  const validatedAsOfDate = assertValidISODate(asOfDate, "asOfDate");
   return withTransaction(db, async () => {
     const due = await db
       .select()
       .from(recurring)
-      .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${asOfDate}`));
+      .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${validatedAsOfDate}`));
 
     const posted = [];
     for (const r of due) {
       let currentNextDate = r.nextDate;
-      while (currentNextDate <= asOfDate) {
+      while (currentNextDate <= validatedAsOfDate) {
         const res = await postRecurringTransaction(db, r.id, currentNextDate);
         posted.push(res.transaction);
         if (!res.active || res.nextDate <= currentNextDate) break;
