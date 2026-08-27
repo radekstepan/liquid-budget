@@ -1,5 +1,6 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { accounts, categories, reconciliations, transactions } from "../schema.js";
 import { TransactionError } from "./transactions.js";
 import { todayISO, type ReconcileState } from "@ynab/logic";
@@ -132,8 +133,7 @@ export async function reconcileAccount(
 
   const today = todayISO();
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [rec] = await db
       .insert(reconciliations)
       .values({
@@ -181,17 +181,13 @@ export async function reconcileAccount(
       .set({ lastReconciledAt: today, lastReconciledBalance: input.statementBalance })
       .where(eq(accounts.id, input.accountId));
 
-    db.run(sql`COMMIT`);
     return {
       reconciledCount: flip.length + (adjustmentTransactionId ? 1 : 0),
       adjustmentTransactionId,
       finalDiff: 0,
       lastReconciledAt: today,
     };
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 async function postAdjustment(
@@ -251,8 +247,7 @@ export async function unreconcileAccount(
     .orderBy(desc(reconciliations.id))
     .limit(1);
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     let flippedCount = 0;
     let deletedAdjustmentId: number | null = null;
 
@@ -351,10 +346,6 @@ export async function unreconcileAccount(
         .where(eq(accounts.id, accountId));
     }
 
-    db.run(sql`COMMIT`);
     return { flipped: flippedCount, deletedAdjustmentId };
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }

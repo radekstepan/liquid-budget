@@ -1,5 +1,6 @@
 export * from "./schema.js";
 export { openDb, createDb, getDefaultDb, resetDefaultDb, getDbPath, db, type Db, type Database } from "./client.js";
+export * from "./transaction.js";
 export * from "./queries/budget.js";
 export * from "./queries/accounts.js";
 export * from "./queries/assignments.js";

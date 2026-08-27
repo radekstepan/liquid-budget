@@ -1,7 +1,8 @@
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import type { RenameRule as RenameRuleView } from "@ynab/logic";
 import { learnRenameRule as pureLearn } from "@ynab/logic";
 import type { Db } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { renameRules } from "../schema.js";
 
 export type RenameRuleRow = typeof renameRules.$inferSelect;
@@ -94,8 +95,7 @@ export async function learnRenameRuleFromPayees(
 
   const keepIds = new Set(next.filter((r) => r.id != null).map((r) => r.id));
 
-  db.run(sql`BEGIN`);
-  try {
+  await withTransaction(db, async () => {
     for (const r of all) {
       if (!keepIds.has(r.id)) {
         db.delete(renameRules).where(eq(renameRules.id, r.id)).run();
@@ -109,11 +109,7 @@ export async function learnRenameRuleFromPayees(
         });
       }
     }
-    db.run(sql`COMMIT`);
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 
   return { generalised, rules: getRenameRules(db) };
 }

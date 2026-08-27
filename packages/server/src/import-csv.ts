@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
 import { applyRenameRules, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
+import { withTransaction } from "./transaction.js";
 import { accounts, categories, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
 import { getRenameRules } from "./queries/rename-rules.js";
@@ -69,8 +70,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     );
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const created: number[] = [];
     const skipped: ImportSkippedEntry[] = [];
     // First occurrence of a fingerprint in this batch -> source row number.
@@ -155,10 +155,6 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         .set({ balance: sql`${accounts.balance} + ${amount}` })
         .where(eq(accounts.id, input.accountId));
     }
-    db.run(sql`COMMIT`);
     return { count: created.length, skipped };
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }

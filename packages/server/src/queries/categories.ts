@@ -1,5 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
+import { withTransaction } from "../transaction.js";
 import { assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
@@ -26,16 +27,9 @@ export type CreateCategoryInput = {
  * two concurrent callers can both observe the same max and both insert
  * at the same sort, corrupting the user's manual ordering. Wrap the
  * pair in a transaction so the SELECT and the INSERT are atomic.
- *
- * We use manual `BEGIN` / `COMMIT` rather than `db.transaction()` because
- * better-sqlite3's transaction wrapper commits the moment the callback
- * returns, ignoring microtask-deferred `await`s — and our drizzle calls
- * are all `await`ed. The SQL itself executes synchronously under the
- * hood, so the BEGIN/COMMIT pair correctly brackets the work.
  */
 export async function createCategoryGroup(db: Database, input: CreateCategoryGroupInput) {
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${categoryGroups.sort}), -1)` })
       .from(categoryGroups);
@@ -43,22 +37,17 @@ export async function createCategoryGroup(db: Database, input: CreateCategoryGro
       .insert(categoryGroups)
       .values({ name: String(input.name ?? "New Group"), sort: Number(maxRow?.max ?? -1) + 1 })
       .returning();
-    db.run(sql`COMMIT`);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 /**
  * Same read-then-write race as `createCategoryGroup`, scoped to a
  * single group via the `groupId` WHERE clause. Wrapped in
- * BEGIN/COMMIT for the same reason.
+ * withTransaction for the same reason.
  */
 export async function createCategory(db: Database, input: CreateCategoryInput) {
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${categories.sort}), -1)` })
       .from(categories)
@@ -74,12 +63,8 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
         overspendCarriesOver: input.overspendCarriesOver === true,
       })
       .returning();
-    db.run(sql`COMMIT`);
     return row;
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function updateCategoryGroup(
@@ -184,8 +169,7 @@ export async function deleteCategory(
     }
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     if (opts?.moveToCategoryId) {
       await db
         .update(transactions)
@@ -202,11 +186,7 @@ export async function deleteCategory(
     }
     await db.delete(assignments).where(eq(assignments.categoryId, id));
     await db.delete(categories).where(eq(categories.id, id));
-    db.run(sql`COMMIT`);
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
 export async function deleteCategoryGroup(
@@ -260,8 +240,7 @@ export async function deleteCategoryGroup(
     }
   }
 
-  db.run(sql`BEGIN`);
-  try {
+  return withTransaction(db, async () => {
     if (catIds.length > 0) {
       if (opts?.moveToCategoryId) {
         await db
@@ -281,10 +260,6 @@ export async function deleteCategoryGroup(
       await db.delete(categories).where(inArray(categories.id, catIds));
     }
     await db.delete(categoryGroups).where(eq(categoryGroups.id, id));
-    db.run(sql`COMMIT`);
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
+  });
 }
 
