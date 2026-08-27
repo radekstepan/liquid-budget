@@ -1279,6 +1279,14 @@ describe("computeBudget", () => {
         // Invariant: Checking cash (50000) = Envelopes (0 + 10000 + 0) + TBB (40000)
         const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
         expect(totalEnvelopes + june.tbb).toBe(50000);
+
+        // Verify that buildBudgetIndex produces identical result
+        const idx = buildBudgetIndex(data);
+        const fastJune = computeBudget({ ...data, budgetIndex: idx }, "2025-06");
+        expect(fastJune.tbb).toBe(june.tbb);
+        const fastCcGroup = fastJune.groups.find((g) => g.group.isCreditCardPayments)!;
+        expect(fastCcGroup.rows.find((r) => r.category.id === 2)!.available).toBe(10000);
+        expect(fastCcGroup.rows.find((r) => r.category.id === 3)!.available).toBe(0);
       });
 
       it("off-budget credit card account does not synthesize CC payment category", () => {

@@ -1537,6 +1537,16 @@ describe("transactions queries", () => {
       ).rejects.toThrow(/split child/);
     });
 
+    it("rejects changing accountId to transferAccountId on a transfer transaction in bulk update", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 10, parentId: null, accountId: 1, amount: -5000, payee: "Transfer : Savings", categoryId: null, date: "2026-07-01", transferAccountId: 2 },
+      ]);
+
+      await expect(
+        bulkUpdateTransactions(mock.db, [10], { accountId: 2 })
+      ).rejects.toThrow(/transfer account must differ from source account/);
+    });
+
     it("rejects setting status to 'r' via bulkUpdateTransactions", async () => {
       await expect(
         bulkUpdateTransactions(mock.db, [1, 2], { status: "r" })
@@ -2987,6 +2997,61 @@ describe("transactions queries", () => {
             name: "TransactionError",
             message: /reconciled and locked/i,
           });
+        });
+      });
+
+      describe("BUG-09: bulkUpdateTransactions self-transfer prevention", () => {
+        it("rejects bulk updating a transfer's source account to its transferAccountId", async () => {
+          const db = openMigratedDb();
+          const [acctA] = await db
+            .insert(schema.accounts)
+            .values({ name: "Account A", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 })
+            .returning();
+          const [acctB] = await db
+            .insert(schema.accounts)
+            .values({ name: "Account B", kind: "liquid", groupLabel: "Budget Accounts", sort: 1 })
+            .returning();
+
+          const transfer = await createTransfer(
+            db,
+            {
+              accountId: acctA!.id,
+              date: "2026-08-01",
+              payee: "Transfer : Account B",
+              memo: "",
+              amount: -5000,
+              categoryId: null,
+            },
+            acctB!.id
+          );
+
+          // Attempt to bulk-patch transfer with accountId = acctB.id
+          await expect(
+            bulkUpdateTransactions(db, [transfer.id], { accountId: acctB!.id })
+          ).rejects.toMatchObject({
+            name: "TransactionError",
+            message: /transfer account must differ from source account/i,
+          });
+        });
+
+        it("enforces database check constraint rejecting transactions where accountId === transferAccountId", async () => {
+          const db = openMigratedDb();
+          const [acct] = await db
+            .insert(schema.accounts)
+            .values({ name: "Single Account", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 })
+            .returning();
+
+          // Direct database insert where accountId === transferAccountId must fail check constraint
+          await expect(
+            db.insert(schema.transactions).values({
+              accountId: acct!.id,
+              transferAccountId: acct!.id,
+              date: "2026-08-01",
+              payee: "Self Transfer",
+              memo: "",
+              amount: -5000,
+            })
+          ).rejects.toThrow(/CHECK constraint failed/);
         });
       });
     });
