@@ -174,23 +174,26 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
 
-  // Invariant: at most one category linked per credit account.
-  // Detect if any accounts are linked more than once.
-  const linkedAccountIds = new Set<number>();
+  // Invariant: at most one category linked per credit account, and it must belong
+  // to a Credit Card Payments group.
+  const validLinkedAccountIds = new Set<number>();
   let hasDuplicateLinks = false;
+  let hasInvalidLinks = false;
   for (const c of data.categories) {
     if (c.linkedAccountId != null) {
-      if (linkedAccountIds.has(c.linkedAccountId)) {
+      if (!ccGroupIds.has(c.groupId)) {
+        hasInvalidLinks = true;
+      } else if (validLinkedAccountIds.has(c.linkedAccountId)) {
         hasDuplicateLinks = true;
       } else {
-        linkedAccountIds.add(c.linkedAccountId);
+        validLinkedAccountIds.add(c.linkedAccountId);
       }
     }
   }
 
-  const missingAccounts = ccAccounts.filter((a) => !linkedAccountIds.has(a.id));
+  const missingAccounts = ccAccounts.filter((a) => !validLinkedAccountIds.has(a.id));
 
-  if (missingAccounts.length === 0 && !hasDuplicateLinks) {
+  if (missingAccounts.length === 0 && !hasDuplicateLinks && !hasInvalidLinks) {
     normalizedDataCache.set(data, data);
     return data;
   }
@@ -209,11 +212,12 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     groups.push(ccGroup);
   }
 
-  // Deduplicate linked categories so only the first one keeps the link
+  // Deduplicate linked categories so only the first category within a CC Payments group
+  // keeps the link; clear links on categories outside CC Payments groups.
   const seenLinks = new Set<number>();
   const categories = data.categories.map((c) => {
     if (c.linkedAccountId != null) {
-      if (seenLinks.has(c.linkedAccountId)) {
+      if (!ccGroupIds.has(c.groupId) || seenLinks.has(c.linkedAccountId)) {
         return { ...c, linkedAccountId: null };
       }
       seenLinks.add(c.linkedAccountId);
