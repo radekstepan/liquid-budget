@@ -19,8 +19,10 @@ describe("server package public surface", () => {
     expect(typeof server.recomputeAccountBalances).toBe("function");
   });
 
-  it("re-exports seedDatabase and DEMO_MONTH", () => {
+  it("re-exports seedDatabase, resetDatabase, resetAndSeedDatabase and DEMO_MONTH", () => {
     expect(typeof server.seedDatabase).toBe("function");
+    expect(typeof server.resetDatabase).toBe("function");
+    expect(typeof server.resetAndSeedDatabase).toBe("function");
     expect(server.DEMO_MONTH).toBe("2026-06");
   });
 

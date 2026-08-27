@@ -8,14 +8,15 @@
  * e2e suite relies on (account/group/category counts, the TD
  * reconcile stamp, and idempotence).
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
-import { seedDatabase, resetDatabase, DEMO_MONTH } from "../src/seed.js";
+import { seedDatabase, resetDatabase, resetAndSeedDatabase, DEMO_MONTH } from "../src/seed.js";
 import { getBudgetData, isSeeded } from "../src/queries/budget.js";
+import * as diagnostics from "../src/queries/diagnostics.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -137,4 +138,62 @@ describe("seedDatabase", () => {
     expect(await db.select().from(schema.payees)).toHaveLength(0);
     expect(await db.select().from(schema.reconciliations)).toHaveLength(0);
   });
+
+  describe("resetAndSeedDatabase", () => {
+    it("atomically wipes and reseeds a populated database", async () => {
+      // Start with custom data
+      await db.insert(schema.accounts).values({
+        name: "Custom Account",
+        kind: "liquid",
+        groupLabel: "Budget Accounts",
+        balance: 12345,
+        onBudget: true,
+        sort: 0,
+      });
+      expect(await isSeeded(db)).toBe(true);
+
+      await resetAndSeedDatabase(db);
+
+      const data = await getBudgetData(db);
+      expect(data.accounts).toHaveLength(18);
+      expect(data.accounts.some((a) => a.name === "Custom Account")).toBe(false);
+      expect(data.accounts.some((a) => a.name === "TD Unlimited Chequing")).toBe(true);
+    });
+
+    it("atomically rolls back the entire wipe if seeding fails", async () => {
+      // Seed initial custom accounts and payees
+      const [customAccount] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "My Custom Checking",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          balance: 99900,
+          onBudget: true,
+          sort: 0,
+        })
+        .returning();
+
+      await db.insert(schema.payees).values({ name: "Custom Payee" });
+
+      // Inject a failure into recomputeAccountBalances which is called at the end of seedDatabase
+      const recomputeSpy = vi
+        .spyOn(diagnostics, "recomputeAccountBalances")
+        .mockRejectedValueOnce(new Error("Injected seed failure"));
+
+      await expect(resetAndSeedDatabase(db)).rejects.toThrow("Injected seed failure");
+      recomputeSpy.mockRestore();
+
+      // Verify the entire wipe was rolled back and the original data is intact
+      const existingAccounts = await db.select().from(schema.accounts);
+      expect(existingAccounts).toHaveLength(1);
+      expect(existingAccounts[0].name).toBe("My Custom Checking");
+      expect(existingAccounts[0].balance).toBe(99900);
+
+      const existingPayees = await db.select().from(schema.payees);
+      expect(existingPayees).toHaveLength(1);
+      expect(existingPayees[0].name).toBe("Custom Payee");
+    });
+  });
 });
+

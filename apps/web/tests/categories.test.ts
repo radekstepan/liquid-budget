@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { createCategory, createCategoryGroup, getDefaultDb, resetDatabase, seedDatabase } from "@ynab/server";
+import { createCategory, createCategoryGroup, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 import { PATCH } from "../src/app/api/categories/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
@@ -8,8 +8,7 @@ vi.stubEnv("DATABASE_URL", ":memory:");
 describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
   beforeEach(async () => {
     const db = getDefaultDb();
-    await resetDatabase(db);
-    await seedDatabase(db);
+    await resetAndSeedDatabase(db);
   });
 
   it("rejects group PATCH with no fields (400 Bad Request)", async () => {
