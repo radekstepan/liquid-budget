@@ -79,13 +79,20 @@ export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
   return normalizeRenameText(pattern) === normalizeRenameText(raw);
 }
 
-/** Apply rules to a raw payee. Exact rules take precedence over patterns. */
+/** Apply rules to a raw payee. Exact rules take precedence over patterns; newer rules take precedence over older rules. */
 export function applyRenameRules(rules: RenameRule[], payee: string): string {
   if (rules.length === 0) return payee;
   const sorted = [...rules].sort((a, b) => {
     const aExact = !isPatternRule(a.sourcePattern) ? 1 : 0;
     const bExact = !isPatternRule(b.sourcePattern) ? 1 : 0;
-    return bExact - aExact;
+    if (bExact !== aExact) return bExact - aExact;
+    if (a.createdAt && b.createdAt && a.createdAt !== b.createdAt) {
+      return b.createdAt.localeCompare(a.createdAt);
+    }
+    if (a.id != null && b.id != null && a.id !== b.id) {
+      return b.id - a.id;
+    }
+    return 0;
   });
   for (const rule of sorted) {
     if (matchesRenameRule(rule, payee)) return rule.targetPayee.trim();
@@ -169,15 +176,21 @@ export function learnRenameRule(
     return { rules, generalised: false };
   }
 
-  const sameTarget = rules.filter(
+  // Strip conflicting exact rules matching this normalized source payee
+  // so the latest explicit rename replaces any older exact mapping.
+  const cleanRules = rules.filter(
+    (r) => isPatternRule(r.sourcePattern) || normalizeRenameText(r.sourcePattern) !== normalizeRenameText(source)
+  );
+
+  const sameTarget = cleanRules.filter(
     (r) => normalizeRenameText(r.targetPayee) === normalizeRenameText(target)
   );
 
-  // If an existing rule already maps this exact source to the target,
-  // nothing changes.
+  // If an existing rule for this target already covers this source,
+  // we do not need to add a duplicate rule.
   for (const r of sameTarget) {
     if (matchesRenameRule(r, source)) {
-      return { rules, generalised: false };
+      return { rules: cleanRules, generalised: false };
     }
   }
 
@@ -186,25 +199,25 @@ export function learnRenameRule(
   const existingSources = sameTarget.map((r) => r.sourcePattern);
   const inferred = inferRenameRule(existingSources, source);
   if (inferred) {
-  const kept = rules.filter((r) => {
-    if (normalizeRenameText(r.targetPayee) !== normalizeRenameText(target)) {
-      return true;
-    }
-    return !matchesRenameRule(
-      { ...r, sourcePattern: inferred.sourcePattern },
-      r.sourcePattern
-    );
-  });
-  return {
-    rules: [...kept, { ...inferred, targetPayee: target }],
-    generalised: true,
-  };
+    const kept = cleanRules.filter((r) => {
+      if (normalizeRenameText(r.targetPayee) !== normalizeRenameText(target)) {
+        return true;
+      }
+      return !matchesRenameRule(
+        { ...r, sourcePattern: inferred.sourcePattern },
+        r.sourcePattern
+      );
+    });
+    return {
+      rules: [...kept, { ...inferred, targetPayee: target }],
+      generalised: true,
+    };
   }
 
-  // No generalisation: add (or keep) an exact rule.
+  // No generalisation: add an exact rule.
   return {
     rules: [
-      ...rules,
+      ...cleanRules,
       { sourcePattern: source, targetPayee: target },
     ],
     generalised: false,

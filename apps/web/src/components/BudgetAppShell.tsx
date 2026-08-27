@@ -76,18 +76,38 @@ export function BudgetAppShell({
   }, [addToast]);
 
   const runMutation = useCallback(
-    async <T,>(action: () => Promise<T>, messages: MutationMessages<T>): Promise<T> => {
+    async <T,>(
+      action: () => Promise<T>,
+      messages: MutationMessages<T>,
+      options?: {
+        onRollback?: () => void;
+        skipReload?: boolean;
+      }
+    ): Promise<T> => {
+      let result: T;
       try {
-        const result = await action();
-        if (messages.success) addToast(messages.success, "ok");
-        messages.onSuccess?.(result);
-        return result;
+        result = await action();
       } catch (e) {
+        options?.onRollback?.();
         if (messages.notifyFailure !== false) addToast(messages.failure, "danger");
         throw e;
       }
+
+      if (messages.success) addToast(messages.success, "ok");
+      messages.onSuccess?.(result);
+
+      if (!options?.skipReload) {
+        try {
+          await reload();
+        } catch (refreshErr) {
+          console.error("Budget reload failed after successful mutation:", refreshErr);
+          addToast("Saved changes, but failed to refresh latest budget data.", "warn");
+        }
+      }
+
+      return result;
     },
-    [addToast]
+    [addToast, reload]
   );
 
   const withSync = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
@@ -123,19 +143,24 @@ export function BudgetAppShell({
             ];
         return { ...prev, assignments, budgetIndex: undefined };
       });
-      return withSync(async () => {
-        try {
-          await jsonReq("/api/assignments", {
-            method: "PUT",
-            body: JSON.stringify({ categoryId, month, amount }),
-          });
-        } catch (e) {
-          if (snapshot) setData(snapshot);
-          await reload().catch(() => {});
-          addToast("Failed to save assignment. Please try again.", "danger");
-          throw e;
-        }
-      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq("/api/assignments", {
+              method: "PUT",
+              body: JSON.stringify({ categoryId, month, amount }),
+            });
+          },
+          { failure: "Failed to save assignment. Please try again." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
+            skipReload: true,
+          }
+        )
+      );
     },
     addTransaction: async (t) => {
       const successMsg = "Transaction added.";
@@ -159,18 +184,35 @@ export function BudgetAppShell({
         };
         return { ...prev, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
       });
-      return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/transactions", { method: "POST", body: JSON.stringify(t) });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            await reload().catch(() => {});
-            throw e;
+      return withSync(async () => {
+        await runMutation(
+          async () => {
+            const res = await jsonReq<Transaction | { parent: Transaction; children: Transaction[] }>("/api/transactions", {
+              method: "POST",
+              body: JSON.stringify(t),
+            });
+            if (res && "id" in res && typeof res.id === "number") {
+              setData((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  transactions: prev.transactions.map((tx) =>
+                    tx.id === tempId ? { ...tx, id: (res as Transaction).id } : tx
+                  ),
+                };
+              });
+            }
+            return res;
+          },
+          { success: successMsg, failure: "Failed to add transaction. Please try again." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
           }
-        }, { success: successMsg, failure: "Failed to add transaction. Please try again." })
-      );
+        );
+      });
     },
     updateTransaction: async (id, t) => {
       let snapshot: BudgetData | null = null;
@@ -209,21 +251,22 @@ export function BudgetAppShell({
         t.amount === undefined &&
         t.subTransactions === undefined;
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/transactions", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/transactions", {
               method: "PATCH",
               body: JSON.stringify({ id, ...t }),
             });
-            if (t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined || t.date !== undefined) {
-              await reload();
-            }
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            await reload().catch(() => {});
-            throw e;
+          },
+          { success: isStatusOrFlagOnly ? undefined : "Transaction updated.", failure: "Failed to update transaction." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
+            skipReload: !(t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined || t.date !== undefined),
           }
-        }, { success: isStatusOrFlagOnly ? undefined : "Transaction updated.", failure: "Failed to update transaction." })
+        )
       );
     },
     deleteTransaction: async (id) => {
@@ -237,16 +280,18 @@ export function BudgetAppShell({
         return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            await reload().catch(() => {});
-            throw e;
+        runMutation(
+          async () => {
+            return await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
+          },
+          { success: "Transaction deleted.", failure: "Failed to delete transaction." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
           }
-        }, { success: "Transaction deleted.", failure: "Failed to delete transaction." })
+        )
       );
     },
     bulkDeleteTransactions: async (ids: number[]) => {
@@ -261,19 +306,21 @@ export function BudgetAppShell({
         return { ...prev, transactions, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/transactions?action=bulk-delete", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/transactions?action=bulk-delete", {
               method: "POST",
               body: JSON.stringify({ ids }),
             });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            await reload().catch(() => {});
-            throw e;
+          },
+          { success: `Deleted ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete transactions." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
           }
-        }, { success: `Deleted ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete transactions." })
+        )
       );
     },
     bulkUpdateTransactions: async (
@@ -320,27 +367,31 @@ export function BudgetAppShell({
         patch.flagColor === undefined &&
         patch.incomeMonth === undefined;
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/transactions?action=bulk-update", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/transactions?action=bulk-update", {
               method: "POST",
               body: JSON.stringify({ ids, patch }),
             });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            await reload().catch(() => {});
-            throw e;
+          },
+          { success: isStatusOnly ? undefined : `Updated ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update transactions." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+              reload().catch(() => {});
+            },
           }
-        }, { success: isStatusOnly ? undefined : `Updated ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update transactions." })
+        )
       );
     },
     addRecurring: async (v) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });
-          await reload();
-        }, { success: "Recurring transaction scheduled.", failure: "Failed to create recurring transaction." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/recurring", { method: "POST", body: JSON.stringify(v) });
+          },
+          { success: "Recurring transaction scheduled.", failure: "Failed to create recurring transaction." }
+        )
       );
     },
     updateRecurring: async (id, v) => {
@@ -372,18 +423,20 @@ export function BudgetAppShell({
         return { ...prev, recurring, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/recurring", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/recurring", {
               method: "PATCH",
               body: JSON.stringify({ id, ...v }),
             });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+          },
+          { success: "Recurring transaction updated.", failure: "Failed to update recurring transaction." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: "Recurring transaction updated.", failure: "Failed to update recurring transaction." })
+        )
       );
     },
     deleteRecurring: async (id) => {
@@ -395,48 +448,56 @@ export function BudgetAppShell({
         return { ...prev, recurring, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq(`/api/recurring?id=${id}`, { method: "DELETE" });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+        runMutation(
+          async () => {
+            return await jsonReq(`/api/recurring?id=${id}`, { method: "DELETE" });
+          },
+          { success: "Recurring transaction deleted.", failure: "Failed to delete recurring transaction." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: "Recurring transaction deleted.", failure: "Failed to delete recurring transaction." })
+        )
       );
     },
     postRecurring: async (id: number, date?: string) => {
       return withSync(() =>
-        runMutation(async () => {
-          const url = date
-            ? `/api/recurring?action=post&id=${id}&date=${encodeURIComponent(date)}`
-            : `/api/recurring?action=post&id=${id}`;
-          await jsonReq(url, { method: "POST" });
-          await reload();
-        }, { success: "Scheduled transaction entered.", failure: "Failed to post recurring transaction." })
+        runMutation(
+          async () => {
+            const url = date
+              ? `/api/recurring?action=post&id=${id}&date=${encodeURIComponent(date)}`
+              : `/api/recurring?action=post&id=${id}`;
+            return await jsonReq(url, { method: "POST" });
+          },
+          { success: "Scheduled transaction entered.", failure: "Failed to post recurring transaction." }
+        )
       );
     },
     bulkPostRecurring: async (ids: number[], date?: string) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/recurring", {
-            method: "POST",
-            body: JSON.stringify({ action: "bulk-post", ids, date }),
-          });
-          await reload();
-        }, { success: `Entered ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to enter scheduled transactions." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/recurring", {
+              method: "POST",
+              body: JSON.stringify({ action: "bulk-post", ids, date }),
+            });
+          },
+          { success: `Entered ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to enter scheduled transactions." }
+        )
       );
     },
     bulkUpdateRecurring: async (ids: number[], patch: { flagColor?: any; active?: boolean }) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/recurring", {
-            method: "PATCH",
-            body: JSON.stringify({ action: "bulk-update", ids, patch }),
-          });
-          await reload();
-        }, { success: `Updated ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update scheduled transactions." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/recurring", {
+              method: "PATCH",
+              body: JSON.stringify({ action: "bulk-update", ids, patch }),
+            });
+          },
+          { success: `Updated ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update scheduled transactions." }
+        )
       );
     },
     bulkDeleteRecurring: async (ids: number[]) => {
@@ -449,18 +510,20 @@ export function BudgetAppShell({
         return { ...prev, recurring, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/recurring", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/recurring", {
               method: "DELETE",
               body: JSON.stringify({ ids }),
             });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+          },
+          { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." })
+        )
       );
     },
     saveCategory: async (groupId, categoryId, v) => {
@@ -484,10 +547,10 @@ export function BudgetAppShell({
         });
       }
       return withSync(() =>
-        runMutation(async () => {
-          try {
+        runMutation(
+          async () => {
             if (categoryId) {
-              await jsonReq("/api/categories", {
+              return await jsonReq("/api/categories", {
                 method: "PATCH",
                 body: JSON.stringify({
                   id: categoryId,
@@ -498,7 +561,7 @@ export function BudgetAppShell({
                 }),
               });
             } else {
-              await jsonReq("/api/categories", {
+              return await jsonReq("/api/categories", {
                 method: "POST",
                 body: JSON.stringify({
                   groupId,
@@ -509,12 +572,14 @@ export function BudgetAppShell({
                 }),
               });
             }
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+          },
+          { success: categoryId ? "Category updated." : "Category created.", failure: "Failed to save category." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: categoryId ? "Category updated." : "Category created.", failure: "Failed to save category." })
+        )
       );
     },
     deleteCategory: async (id, opts) => {
@@ -526,70 +591,86 @@ export function BudgetAppShell({
         return { ...prev, categories, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
+        runMutation(
+          async () => {
             const url = opts?.moveToCategoryId
               ? `/api/categories?id=${id}&moveToCategoryId=${opts.moveToCategoryId}`
               : `/api/categories?id=${id}`;
-            await jsonReq(url, { method: "DELETE" });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+            return await jsonReq(url, { method: "DELETE" });
+          },
+          { success: "Category deleted.", failure: "Failed to delete category." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: "Category deleted.", failure: "Failed to delete category." })
+        )
       );
     },
     reorderCategory: async (id, sort) => {
-      return withSync(async () => {
-        await jsonReq("/api/categories", {
-          method: "PATCH",
-          body: JSON.stringify({ id, sort }),
-        });
-        await reload();
-      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq("/api/categories", {
+              method: "PATCH",
+              body: JSON.stringify({ id, sort }),
+            });
+          },
+          { failure: "Failed to reorder category." }
+        )
+      );
     },
     reorderGroup: async (id, sort) => {
-      return withSync(async () => {
-        await jsonReq("/api/categories", {
-          method: "PATCH",
-          body: JSON.stringify({ id, type: "group", sort }),
-        });
-        await reload();
-      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq("/api/categories", {
+              method: "PATCH",
+              body: JSON.stringify({ id, type: "group", sort }),
+            });
+          },
+          { failure: "Failed to reorder category group." }
+        )
+      );
     },
     saveGroup: async (groupId, name) => {
       return withSync(() =>
-        runMutation(async () => {
-          if (groupId) {
-            await jsonReq("/api/categories", {
-              method: "PATCH",
-              body: JSON.stringify({ id: groupId, type: "group", name }),
-            });
-          } else {
-            await jsonReq("/api/categories", {
-              method: "POST",
-              body: JSON.stringify({ type: "group", name }),
-            });
-          }
-          await reload();
-        }, { success: groupId ? "Category group updated." : "Category group created.", failure: "Failed to save category group." })
+        runMutation(
+          async () => {
+            if (groupId) {
+              return await jsonReq("/api/categories", {
+                method: "PATCH",
+                body: JSON.stringify({ id: groupId, type: "group", name }),
+              });
+            } else {
+              return await jsonReq("/api/categories", {
+                method: "POST",
+                body: JSON.stringify({ type: "group", name }),
+              });
+            }
+          },
+          { success: groupId ? "Category group updated." : "Category group created.", failure: "Failed to save category group." }
+        )
       );
     },
     deleteGroup: async (id) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq(`/api/categories?type=group&id=${id}`, { method: "DELETE" });
-          await reload();
-        }, { success: "Category group deleted.", failure: "Failed to delete category group." })
+        runMutation(
+          async () => {
+            return await jsonReq(`/api/categories?type=group&id=${id}`, { method: "DELETE" });
+          },
+          { success: "Category group deleted.", failure: "Failed to delete category group." }
+        )
       );
     },
     addAccount: async (v) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/accounts", { method: "POST", body: JSON.stringify(v) });
-          await reload();
-        }, { success: "Account created.", failure: "Failed to create account." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/accounts", { method: "POST", body: JSON.stringify(v) });
+          },
+          { success: "Account created.", failure: "Failed to create account." }
+        )
       );
     },
     deleteAccount: async (id) => {
@@ -601,15 +682,17 @@ export function BudgetAppShell({
         return { ...prev, accounts, budgetIndex: undefined };
       });
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq(`/api/accounts?id=${id}`, { method: "DELETE" });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+        runMutation(
+          async () => {
+            return await jsonReq(`/api/accounts?id=${id}`, { method: "DELETE" });
+          },
+          { success: "Account deleted.", failure: "Failed to delete account." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: "Account deleted.", failure: "Failed to delete account." })
+        )
       );
     },
     updateAccount: async (id, patch) => {
@@ -627,154 +710,177 @@ export function BudgetAppShell({
             ? "Account restored."
             : "Account updated.";
       return withSync(() =>
-        runMutation(async () => {
-          try {
-            await jsonReq("/api/accounts", {
+        runMutation(
+          async () => {
+            return await jsonReq("/api/accounts", {
               method: "PATCH",
               body: JSON.stringify({ id, ...patch }),
             });
-            await reload();
-          } catch (e) {
-            if (snapshot) setData(snapshot);
-            throw e;
+          },
+          { success: successMsg, failure: "Failed to update account." },
+          {
+            onRollback: () => {
+              if (snapshot) setData(snapshot);
+            },
           }
-        }, { success: successMsg, failure: "Failed to update account." })
+        )
       );
     },
     reorderAccount: async (id, sort) => {
-      return withSync(async () => {
-        await jsonReq("/api/accounts", {
-          method: "PATCH",
-          body: JSON.stringify({ id, sort }),
-        });
-        await reload();
-      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq("/api/accounts", {
+              method: "PATCH",
+              body: JSON.stringify({ id, sort }),
+            });
+          },
+          { failure: "Failed to reorder account." }
+        )
+      );
     },
     reconcileAccount: async ({ accountId, statementBalance, adjustmentCategoryId }) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/reconcile", {
-            method: "POST",
-            body: JSON.stringify({
-              action: "reconcile",
-              accountId,
-              statementBalance,
-              adjustmentCategoryId,
-            }),
-          });
-          await reload();
-        }, { success: "Account reconciled.", failure: "Failed to reconcile account." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/reconcile", {
+              method: "POST",
+              body: JSON.stringify({
+                action: "reconcile",
+                accountId,
+                statementBalance,
+                adjustmentCategoryId,
+              }),
+            });
+          },
+          { success: "Account reconciled.", failure: "Failed to reconcile account." }
+        )
       );
     },
     unreconcileAccount: async (accountId) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/reconcile", {
-            method: "POST",
-            body: JSON.stringify({ action: "unreconcile", accountId }),
-          });
-          await reload();
-        }, { success: "Reconciliation undone.", failure: "Failed to undo reconciliation." })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/reconcile", {
+              method: "POST",
+              body: JSON.stringify({ action: "unreconcile", accountId }),
+            });
+          },
+          { success: "Reconciliation undone.", failure: "Failed to undo reconciliation." }
+        )
       );
     },
     importYnab4: async (file: File) => {
       return withSync(() =>
-        runMutation(async () => {
-          const formData = new FormData();
-          formData.append("file", file);
-          const res = await fetch("/api/import", {
-            method: "POST",
-            body: formData,
-          });
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`Import failed (${res.status}): ${text}`);
-          }
-          const json = (await res.json()) as { summary?: ImportSummary };
-          await reload();
-          return json?.summary;
-        }, {
-          success: undefined,
-          failure: "Failed to import YNAB4 backup.",
-          onSuccess: (summary?: ImportSummary) => {
-            if (summary && !summary.duplicatesSkipped?.length) {
-              addToast(`Imported ${summary.transactions} transaction${summary.transactions === 1 ? "" : "s"}.`, "ok");
+        runMutation(
+          async () => {
+            const formData = new FormData();
+            formData.append("file", file);
+            const res = await fetch("/api/import", {
+              method: "POST",
+              body: formData,
+            });
+            if (!res.ok) {
+              const text = await res.text().catch(() => "");
+              throw new Error(`Import failed (${res.status}): ${text}`);
             }
+            const json = (await res.json()) as { summary?: ImportSummary };
+            return json?.summary;
           },
-        })
+          {
+            success: undefined,
+            failure: "Failed to import YNAB4 backup.",
+            onSuccess: (summary?: ImportSummary) => {
+              if (summary && !summary.duplicatesSkipped?.length) {
+                addToast(`Imported ${summary.transactions} transaction${summary.transactions === 1 ? "" : "s"}.`, "ok");
+              }
+            },
+          }
+        )
       );
     },
     importCsv: async ({ accountId, swap, dateFormat, csv }) => {
       return withSync(() =>
-        runMutation(async () => {
-          const res = await fetch("/api/import/csv", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accountId, swap, dateFormat, csv }),
-          });
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`Import failed (${res.status}): ${text}`);
-          }
-          const json = (await res.json()) as {
-            imported?: number;
-            skipped?: ImportSkippedEntry[];
-          };
-          const count = json.imported ?? 0;
-          const skipped = json.skipped?.length ?? 0;
-          await reload();
-          return { count, skipped };
-        }, {
-          success: undefined,
-          failure: "Failed to import CSV.",
-          onSuccess: ({ count, skipped }) => {
-            addToast(
-              skipped > 0
-                ? `Imported ${count} transaction${count === 1 ? "" : "s"} (${skipped} duplicate${skipped === 1 ? "" : "s"} skipped).`
-                : `Imported ${count} transaction${count === 1 ? "" : "s"}.`,
-              "ok"
-            );
+        runMutation(
+          async () => {
+            const res = await fetch("/api/import/csv", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ accountId, swap, dateFormat, csv }),
+            });
+            if (!res.ok) {
+              const text = await res.text().catch(() => "");
+              throw new Error(`Import failed (${res.status}): ${text}`);
+            }
+            const json = (await res.json()) as {
+              imported?: number;
+              skipped?: ImportSkippedEntry[];
+            };
+            const count = json.imported ?? 0;
+            const skipped = json.skipped?.length ?? 0;
+            return { count, skipped };
           },
-        })
+          {
+            success: undefined,
+            failure: "Failed to import CSV.",
+            onSuccess: ({ count, skipped }) => {
+              addToast(
+                skipped > 0
+                  ? `Imported ${count} transaction${count === 1 ? "" : "s"} (${skipped} duplicate${skipped === 1 ? "" : "s"} skipped).`
+                  : `Imported ${count} transaction${count === 1 ? "" : "s"}.`,
+                "ok"
+              );
+            },
+          }
+        )
       ).then(({ count }) => count);
     },
     analyzeDuplicates: async () => {
-      return withSync(async () => {
-        const json = await jsonReq<DuplicateAnalysisResult>("/api/duplicates", {
-          method: "POST",
-        });
-        await reload();
-        return json;
-      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq<DuplicateAnalysisResult>("/api/duplicates", {
+              method: "POST",
+            });
+          },
+          { failure: "Failed to analyze duplicates." }
+        )
+      );
     },
     addRenameRule: async (sourcePattern, targetPayee) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/rename-rules", {
-            method: "POST",
-            body: JSON.stringify({ sourcePattern, targetPayee }),
-          });
-          await reload();
-        }, { success: "Rename rule created.", failure: "Failed to save rename rule.", notifyFailure: false })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/rename-rules", {
+              method: "POST",
+              body: JSON.stringify({ sourcePattern, targetPayee }),
+            });
+          },
+          { success: "Rename rule created.", failure: "Failed to save rename rule.", notifyFailure: false }
+        )
       );
     },
     updateRenameRule: async (id, sourcePattern, targetPayee) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq("/api/rename-rules", {
-            method: "PATCH",
-            body: JSON.stringify({ id, sourcePattern, targetPayee }),
-          });
-          await reload();
-        }, { success: "Rename rule updated.", failure: "Failed to save rename rule.", notifyFailure: false })
+        runMutation(
+          async () => {
+            return await jsonReq("/api/rename-rules", {
+              method: "PATCH",
+              body: JSON.stringify({ id, sourcePattern, targetPayee }),
+            });
+          },
+          { success: "Rename rule updated.", failure: "Failed to save rename rule.", notifyFailure: false }
+        )
       );
     },
     deleteRenameRule: async (id) => {
       return withSync(() =>
-        runMutation(async () => {
-          await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
-          await reload();
-        }, { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false })
+        runMutation(
+          async () => {
+            return await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
+          },
+          { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false }
+        )
       );
     },
   };

@@ -106,6 +106,14 @@ describe("applyRenameRules", () => {
     expect(applyRenameRules(rules, "BCF3")).toBe("BC Ferries Downtown");
   });
 
+  it("gives newer rules precedence over older rules when specificity is equal", () => {
+    const rules = [
+      { id: 1, sourcePattern: "BCF1", targetPayee: "Old", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: 2, sourcePattern: "BCF1", targetPayee: "New", createdAt: "2026-01-02T00:00:00.000Z" },
+    ];
+    expect(applyRenameRules(rules, "BCF1")).toBe("New");
+  });
+
   it("is case/whitespace-insensitive in both rule and payee", () => {
     const rules = [rule(1, "  BC FERRIES ", "BC Ferries")];
     expect(applyRenameRules(rules, "BC  FERRIES")).toBe("BC Ferries");
@@ -144,6 +152,41 @@ describe("learnRenameRule", () => {
     expect(rules).toHaveLength(1);
     expect(rules[0]!.sourcePattern).toBe("BCF1");
     expect(rules[0]!.targetPayee).toBe("BC Ferries");
+  });
+
+  it("replaces an existing conflicting exact rule with the new target", () => {
+    const existing = [rule(1, "BCF1", "Old")];
+    const { rules, generalised } = learnRenameRule(existing, "BCF1", "New");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.sourcePattern).toBe("BCF1");
+    expect(rules[0]!.targetPayee).toBe("New");
+    expect(applyRenameRules(rules as RenameRule[], "BCF1")).toBe("New");
+  });
+
+  it("generalises when a conflicting exact rule is updated to match a second target", () => {
+    const existing = [
+      rule(1, "BCF1", "Old"),
+      rule(2, "BCF2", "New"),
+    ];
+    const { rules, generalised } = learnRenameRule(existing, "BCF1", "New");
+    expect(generalised).toBe(true);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.sourcePattern).toBe("BCF[N]");
+    expect(rules[0]!.targetPayee).toBe("New");
+  });
+
+  it("removes an exact override when the payee is renamed back to the pattern target", () => {
+    const existing = [
+      rule(1, "BCF[N]", "BC Ferries"),
+      rule(2, "BCF3", "BC Ferries Downtown"),
+    ];
+    const { rules, generalised } = learnRenameRule(existing, "BCF3", "BC Ferries");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.sourcePattern).toBe("BCF[N]");
+    expect(rules[0]!.targetPayee).toBe("BC Ferries");
+    expect(applyRenameRules(rules as RenameRule[], "BCF3")).toBe("BC Ferries");
   });
 
   it("generalises the second rename into BCF[N] -> BC Ferries", () => {

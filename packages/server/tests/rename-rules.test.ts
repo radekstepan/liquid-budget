@@ -224,4 +224,38 @@ describe("CSV import applies rename rules", () => {
     expect(rulesAfter[0]!.sourcePattern).toBe("BCF[N]");
     expect(rulesAfter[0]!.targetPayee).toBe("BC Ferries");
   });
+
+  it("updates rename rule and applies the newest target when an exact source is renamed again (BUG-23)", async () => {
+    const accountId = await seedAccount();
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ payee: "BCF1", amountCents: -1000 })],
+    });
+
+    const data1 = await getBudgetData(db);
+    const txn1 = data1.transactions[0]!;
+    await updateTransaction(db, txn1.id, { payee: "Old" });
+
+    let rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.sourcePattern).toBe("BCF1");
+    expect(rules[0]!.targetPayee).toBe("Old");
+
+    // Explicitly re-learn BCF1 -> New
+    await learnRenameRuleFromPayees(db, "BCF1", "New");
+    rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.sourcePattern).toBe("BCF1");
+    expect(rules[0]!.targetPayee).toBe("New");
+
+    // A later import of BCF1 must now be renamed to "New", not "Old"
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 3, payee: "BCF1", amountCents: -3000 })],
+    });
+
+    const after = await getBudgetData(db);
+    const bcf3 = after.transactions.find((t) => t.amount === "-3000");
+    expect(bcf3?.payee).toBe("New");
+  });
 });
