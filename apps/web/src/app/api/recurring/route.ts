@@ -64,6 +64,7 @@ export async function POST(req: Request) {
         postedCount: posted.length,
         posted,
         failures: (posted as any).failures ?? [],
+        capped: (posted as any).capped ?? [],
       });
     } catch (e) {
       return apiErrorResponse(e);
@@ -121,6 +122,7 @@ export async function POST(req: Request) {
         postedCount: posted.length,
         posted,
         failures: (posted as any).failures ?? [],
+        capped: (posted as any).capped ?? [],
       });
     } catch (e) {
       return apiErrorResponse(e);

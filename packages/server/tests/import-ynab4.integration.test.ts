@@ -1139,4 +1139,123 @@ describe("importYnab4 full import", () => {
     expect(transferSub).toBeDefined();
     expect(transferSub?.categoryId).not.toBeNull();
   });
+
+  it("BUG-07: persists non-null anchorDay derived from date on YNAB4 import when anchorDay is missing", async () => {
+    const backupData = {
+      accounts: [
+        { entityId: "acc_sched", accountName: "Chequing", accountType: "Checking", onBudget: true },
+      ],
+      payees: [{ entityId: "p_sched", name: "Gym" }],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Health",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Gym Membership" }],
+        },
+      ],
+      transactions: [],
+      monthlyBudgets: [],
+      scheduledTransactions: [
+        {
+          entityId: "s_month_end",
+          accountId: "acc_sched",
+          date: "2026-01-31",
+          amount: -50,
+          frequency: "monthly",
+          payeeId: "p_sched",
+          categoryId: "sc1",
+          // anchorDay omitted
+        },
+      ],
+    };
+
+    await importYnab4(db, backupData);
+
+    const budget = await getBudgetData(db);
+    expect(budget.recurring).toHaveLength(1);
+    expect(budget.recurring[0]!.anchorDay).toBe(31);
+  });
+
+  it("BUG-08: imports reconciled split parent as 'r' with reconciliationId and allows unreconcileAccount to unlock it", async () => {
+    const backupData = {
+      accounts: [
+        {
+          entityId: "acc_rec_split",
+          accountName: "Split Checking",
+          accountType: "Checking",
+          onBudget: true,
+          // No lastReconciledDate provided; reconciliation record should be created from reconciled split
+        },
+      ],
+      payees: [{ entityId: "p_split", name: "Supermarket" }],
+      masterCategories: [
+        {
+          entityId: "mc_groceries",
+          name: "Living",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc_food", name: "Food" },
+            { entityId: "sc_house", name: "Household" },
+          ],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "tx_split_rec",
+          accountId: "acc_rec_split",
+          date: "2026-05-10",
+          amount: -100,
+          cleared: "Reconciled",
+          payeeId: "p_split",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            { entityId: "st1", categoryId: "sc_food", amount: -60, memo: "Groceries" },
+            { entityId: "st2", categoryId: "sc_house", amount: -40, memo: "Cleaning" },
+          ],
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, backupData);
+
+    const [acc] = await db.select().from(schema.accounts);
+    expect(acc).toBeDefined();
+    expect(acc?.lastReconciledAt).toBe("2026-05-10");
+
+    const recs = await db.select().from(schema.reconciliations);
+    expect(recs).toHaveLength(1);
+    const recId = recs[0]!.id;
+
+    const txs = await db.select().from(schema.transactions);
+    expect(txs).toHaveLength(3); // 1 parent + 2 children
+
+    const parent = txs.find((t) => t.parentId === null);
+    expect(parent).toBeDefined();
+    expect(parent?.status).toBe("r");
+    expect(parent?.reconciliationId).toBe(recId);
+    expect(parent?.reconciledAt).toBe("2026-05-10");
+
+    const children = txs.filter((t) => t.parentId !== null);
+    expect(children).toHaveLength(2);
+    for (const c of children) {
+      expect(c.status).toBe("r");
+      expect(c.reconciliationId).toBe(recId);
+      expect(c.reconciledAt).toBe("2026-05-10");
+    }
+
+    // Now unreconcile the account
+    const unrec = await unreconcileAccount(db, acc!.id);
+    expect(unrec.flipped).toBe(2); // 2 children flipped
+
+    // Verify all transactions (parent + children) are unlocked back to 'c'
+    const updatedTxs = await db.select().from(schema.transactions);
+    for (const t of updatedTxs) {
+      expect(t.status).toBe("c");
+      expect(t.reconciledAt).toBeNull();
+      expect(t.reconciliationId).toBeNull();
+    }
+  });
 });

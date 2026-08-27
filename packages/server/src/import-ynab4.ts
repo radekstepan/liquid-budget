@@ -150,29 +150,79 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const isArchived = Boolean(acc.hidden || acc.closed || acc.isClosed);
 
       // Check if account has reconciled transactions or lastReconciledDate
-      const reconciledTx = yTransactions.filter(
-        (t: any) => !t.isTombstone && t.accountId === acc.entityId && t.cleared === "Reconciled"
-      );
-      const hasReconciled = Boolean(acc.lastReconciledDate) || reconciledTx.length > 0;
+      const reconciledTxDates: string[] = [];
+      let reconciledSumCents = 0;
+      let hasReconciledRows = false;
+
+      for (const t of yTransactions) {
+        if (t.isTombstone) continue;
+        const isParentOnAccount = t.accountId === acc.entityId;
+        const isTopLevelReconciled = t.cleared === "Reconciled";
+        const hasSubs = Array.isArray(t.subTransactions) && t.subTransactions.length > 0;
+
+        if (isParentOnAccount) {
+          if (hasSubs) {
+            if (isTopLevelReconciled) {
+              hasReconciledRows = true;
+              if (t.date) reconciledTxDates.push(t.date);
+              reconciledSumCents += dollarsToCents(t.amount || 0);
+            } else {
+              for (const st of t.subTransactions) {
+                if (!st.isTombstone && st.cleared === "Reconciled") {
+                  hasReconciledRows = true;
+                  if (t.date) reconciledTxDates.push(t.date);
+                  reconciledSumCents += dollarsToCents(st.amount || 0);
+                }
+              }
+            }
+          } else {
+            if (isTopLevelReconciled) {
+              hasReconciledRows = true;
+              if (t.date) reconciledTxDates.push(t.date);
+              reconciledSumCents += dollarsToCents(t.amount || 0);
+            }
+          }
+        } else {
+          const isTopTransferTarget =
+            t.targetAccountId === acc.entityId ||
+            (t.payeeId && t.payeeId === `Payee/Transfer:${acc.entityId}`);
+          if (isTopTransferTarget && isTopLevelReconciled && !hasSubs) {
+            hasReconciledRows = true;
+            if (t.date) reconciledTxDates.push(t.date);
+            reconciledSumCents += -dollarsToCents(t.amount || 0);
+          } else if (hasSubs) {
+            for (const st of t.subTransactions) {
+              if (st.isTombstone) continue;
+              const isSubTransferTarget =
+                st.targetAccountId === acc.entityId ||
+                (st.payeeId && st.payeeId === `Payee/Transfer:${acc.entityId}`);
+              if (isSubTransferTarget && (isTopLevelReconciled || st.cleared === "Reconciled")) {
+                hasReconciledRows = true;
+                if (t.date) reconciledTxDates.push(t.date);
+                reconciledSumCents += -dollarsToCents(st.amount || 0);
+              }
+            }
+          }
+        }
+      }
+
+      const hasReconciled = Boolean(acc.lastReconciledDate) || hasReconciledRows;
 
       let recDate: string | null = null;
       let recBalance: number | null = null;
 
       if (hasReconciled) {
         let latestDate = acc.lastReconciledDate;
-        if (!latestDate && reconciledTx.length > 0) {
-          const dates = reconciledTx.map((t: any) => t.date).filter(Boolean).sort();
-          latestDate = dates[dates.length - 1];
+        if (!latestDate && reconciledTxDates.length > 0) {
+          reconciledTxDates.sort();
+          latestDate = reconciledTxDates[reconciledTxDates.length - 1];
         }
         recDate = latestDate || todayISO();
 
         if (acc.lastReconciledBalance != null) {
           recBalance = dollarsToCents(Number(acc.lastReconciledBalance));
         } else {
-          recBalance = reconciledTx.reduce(
-            (sum: number, t: any) => sum + dollarsToCents(t.amount || 0),
-            0
-          );
+          recBalance = reconciledSumCents;
         }
       }
 
@@ -398,6 +448,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         const parentIncomeMonth = isParentIncome
           ? (t.incomeMonth || (isParentDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
           : null;
+        const isParentReconciled = t.cleared === "Reconciled";
+        const parentRecId = isParentReconciled ? accountReconciliationIdMap.get(t.accountId) ?? null : null;
+        const parentRecDate = isParentReconciled ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null : null;
+        const effectiveParentStatus = isParentReconciled
+          ? parentRecId != null ? "r" : "c"
+          : t.cleared === "Uncleared" ? "u" : "c";
+
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -407,29 +464,24 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee,
             memo: t.memo || "",
             amount: dollarsToCents(t.amount),
-            status:
-              t.cleared === "Uncleared"
-                ? "u"
-                : "c",
+            status: effectiveParentStatus,
             flagColor: ynabFlagToColor(t.flag),
             transferAccountId: null,
             parentId: null,
             isIncome: isParentIncome,
             incomeMonth: parentIncomeMonth,
-            reconciledAt: null,
-            reconciliationId: null,
+            reconciledAt: effectiveParentStatus === "r" ? parentRecDate : null,
+            reconciliationId: effectiveParentStatus === "r" ? parentRecId : null,
           })
           .returning();
 
         totalImportedTxCount++;
 
         if (insertedT) {
-          const isReconciled = t.cleared === "Reconciled";
-          const childRecId = isReconciled ? accountReconciliationIdMap.get(t.accountId) ?? null : null;
-          const childRecDate = isReconciled ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null : null;
+          const nonTombstoneSubs = (t.subTransactions || []).filter((st: any) => !st.isTombstone);
+          let allChildrenReconciled = nonTombstoneSubs.length > 0;
 
-          for (const st of t.subTransactions) {
-            if (st.isTombstone) continue;
+          for (const st of nonTombstoneSubs) {
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let subCatId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
             let subPayee = "";
@@ -478,6 +530,17 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               ? (st.incomeMonth || (isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
               : null;
 
+            const isChildReconciled = isParentReconciled || st.cleared === "Reconciled";
+            const childRecId = isChildReconciled ? accountReconciliationIdMap.get(t.accountId) ?? null : null;
+            const childRecDate = isChildReconciled ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null : null;
+            const effectiveChildStatus = isChildReconciled
+              ? childRecId != null ? "r" : "c"
+              : (t.cleared === "Uncleared" || st.cleared === "Uncleared") ? "u" : "c";
+
+            if (effectiveChildStatus !== "r") {
+              allChildrenReconciled = false;
+            }
+
             await db.insert(transactions).values({
               accountId: accId,
               categoryId: subCatId,
@@ -485,21 +548,28 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               payee: subPayee,
               memo: st.memo || "",
               amount: dollarsToCents(st.amount),
-              status:
-                t.cleared === "Reconciled"
-                  ? "r"
-                  : t.cleared === "Uncleared"
-                    ? "u"
-                    : "c",
+              status: effectiveChildStatus,
               flagColor: ynabFlagToColor(st.flag),
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
               isIncome: isChildIncome,
               incomeMonth: childIncomeMonth,
-              reconciledAt: isReconciled ? childRecDate : null,
-              reconciliationId: isReconciled ? childRecId : null,
+              reconciledAt: effectiveChildStatus === "r" ? childRecDate : null,
+              reconciliationId: effectiveChildStatus === "r" ? childRecId : null,
             });
             totalImportedTxCount++;
+          }
+
+          // If all children are reconciled and parent is not yet 'r', reconcile parent
+          if (allChildrenReconciled && effectiveParentStatus !== "r" && parentRecId != null) {
+            await db
+              .update(transactions)
+              .set({
+                status: "r",
+                reconciledAt: parentRecDate,
+                reconciliationId: parentRecId,
+              })
+              .where(eq(transactions.id, insertedT.id));
           }
         }
       } else {
@@ -952,11 +1022,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       }
 
       const active = st.active !== undefined ? Boolean(st.active) : true;
-      const anchorDay = typeof st.anchorDay === "number"
-        ? st.anchorDay
-        : st.date
-        ? parseInt(st.date.slice(8, 10), 10)
-        : null;
+      const parsedAnchor =
+        typeof st.anchorDay === "number" && !isNaN(st.anchorDay) && st.anchorDay >= 1 && st.anchorDay <= 31
+          ? Math.floor(st.anchorDay)
+          : st.date && /^\d{4}-\d{2}-\d{2}$/.test(st.date)
+          ? parseInt(st.date.slice(8, 10), 10)
+          : 1;
+      const anchorDay = Math.min(31, Math.max(1, parsedAnchor));
 
       const [insertedR] = await db
         .insert(recurring)

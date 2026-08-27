@@ -10,9 +10,13 @@ export async function GET() {
     await seedDatabase(db);
   }
   let autoPostedCount = 0;
+  let autoPostFailures: any[] = [];
+  let autoPostCapped: any[] = [];
   try {
     const autoPosted = await autoPostDueRecurringTransactions(db);
     autoPostedCount = autoPosted.length;
+    autoPostFailures = (autoPosted as any).failures || [];
+    autoPostCapped = (autoPosted as any).capped || [];
   } catch (err) {
     console.error("autoPostDueRecurringTransactions failed in GET /api/budget:", err);
   }
@@ -20,5 +24,7 @@ export async function GET() {
   return Response.json({
     ...data,
     autoPostedRecurringCount: autoPostedCount,
+    autoPostedRecurringFailures: autoPostFailures,
+    autoPostedRecurringCapped: autoPostCapped,
   });
 }

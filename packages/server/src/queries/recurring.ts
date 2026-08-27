@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import {
+  isMonthBasedFrequency,
   isValidISODate,
   isValidRecurringFrequency,
   nextDateFor,
@@ -356,8 +357,23 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   if (patch.amount !== undefined && patch.amount != null) p.amount = effectiveAmount;
   if (patch.frequency !== undefined && patch.frequency != null) p.frequency = assertValidFrequency(patch.frequency);
   if (patch.nextDate !== undefined && patch.nextDate != null) p.nextDate = assertValidISODate(patch.nextDate, "nextDate");
+  const effectiveFreq = p.frequency !== undefined ? String(p.frequency) : existing.frequency;
   if (patch.anchorDay !== undefined) {
-    p.anchorDay = patch.anchorDay != null ? Number(patch.anchorDay) : null;
+    if (patch.anchorDay === null) {
+      if (isMonthBasedFrequency(effectiveFreq)) {
+        throw new RecurringError("anchorDay cannot be null for month-based frequencies", 422);
+      }
+      p.anchorDay = null;
+    } else {
+      const numAnchor = Math.floor(Number(patch.anchorDay));
+      if (isNaN(numAnchor) || numAnchor < 1 || numAnchor > 31) {
+        throw new RecurringError("anchorDay must be an integer between 1 and 31", 422);
+      }
+      p.anchorDay = numAnchor;
+    }
+  } else if (p.frequency !== undefined && isMonthBasedFrequency(effectiveFreq) && existing.anchorDay == null) {
+    const dateForAnchor = (p.nextDate as string | undefined) ?? existing.nextDate;
+    p.anchorDay = parseInt(dateForAnchor.slice(8, 10), 10);
   }
   if (patch.active !== undefined && patch.active != null) p.active = !!patch.active;
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
@@ -536,9 +552,12 @@ export async function postRecurringTransaction(
     const isOneOff = normFreq === "never" || normFreq === "once";
     const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
     const next = nextDateFor(r.frequency, r.nextDate, anchor);
-    const updatePayload: { nextDate: string; active?: boolean } = { nextDate: next };
+    const updatePayload: { nextDate: string; active?: boolean; anchorDay?: number } = { nextDate: next };
     if (isOneOff) {
       updatePayload.active = false;
+    }
+    if (r.anchorDay == null && isMonthBasedFrequency(r.frequency)) {
+      updatePayload.anchorDay = anchor;
     }
     const [updated] = await db
       .update(recurring)
@@ -566,15 +585,24 @@ export type AutoPostFailure = {
   error: string;
 };
 
+export type AutoPostCapped = {
+  id: number;
+  payee: string;
+  remainingDue: number;
+};
+
 /**
  * Automatically materialize all active recurring transactions whose nextDate <= asOfDate.
  * Each due rule is isolated so that a single corrupted or un-postable rule
  * does not block or roll back valid due rules. Failing rules are recorded in
  * failures and marked inactive (active = false).
+ * Catch-up occurrences are capped per rule (default maxOccurrencesPerRule: 5) to prevent
+ * runaway mass materialization when databases are opened after long gaps.
  */
 export async function autoPostDueRecurringTransactions(
   db: Database,
-  asOfDate: string = todayISO()
+  asOfDate: string = todayISO(),
+  options?: { maxOccurrencesPerRule?: number }
 ) {
   const validatedAsOfDate = assertValidISODate(asOfDate, "asOfDate");
   const due = await db
@@ -584,13 +612,25 @@ export async function autoPostDueRecurringTransactions(
 
   const posted: any[] = [];
   const failures: AutoPostFailure[] = [];
+  const capped: AutoPostCapped[] = [];
+  const maxPerRule = options?.maxOccurrencesPerRule !== undefined ? options.maxOccurrencesPerRule : 5;
 
   for (const r of due) {
     let currentNextDate = r.nextDate;
+    let occurrencesForThisRule = 0;
     while (currentNextDate <= validatedAsOfDate) {
+      if (maxPerRule > 0 && occurrencesForThisRule >= maxPerRule) {
+        capped.push({
+          id: r.id,
+          payee: r.payee,
+          remainingDue: 1,
+        });
+        break;
+      }
       try {
         const res = await postRecurringTransaction(db, r.id, currentNextDate);
         posted.push(res.transaction);
+        occurrencesForThisRule++;
         if (!res.active || res.nextDate <= currentNextDate) break;
         currentNextDate = res.nextDate;
       } catch (err: any) {
@@ -614,6 +654,7 @@ export async function autoPostDueRecurringTransactions(
   }
 
   (posted as any).failures = failures;
+  (posted as any).capped = capped;
   return posted;
 }
 

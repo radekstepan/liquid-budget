@@ -1374,6 +1374,119 @@ describe("recurring queries", () => {
       );
       expect(deactivationCall).toBeDefined();
     });
+
+    it("BUG-07: refuses anchorDay: null on month-based frequencies in updateRecurring", async () => {
+      const monthlyRow = {
+        id: 101,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Monthly Rent",
+        amount: -100000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        anchorDay: 1,
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWith("select:recurring", [monthlyRow]);
+      await expect(
+        updateRecurring(mock.db, 101, { anchorDay: null })
+      ).rejects.toThrow("anchorDay cannot be null for month-based frequencies");
+    });
+
+    it("BUG-07: allows anchorDay: null on non-month frequencies in updateRecurring", async () => {
+      const weeklyRow = {
+        id: 102,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Weekly Groceries",
+        amount: -5000,
+        frequency: "weekly",
+        nextDate: "2026-06-01",
+        anchorDay: null,
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWith("select:recurring", [weeklyRow]);
+      mock.respondWith("update:recurring", [{ id: 102 }]);
+      mock.respondWith("select:recurring", [weeklyRow]);
+      const res = await updateRecurring(mock.db, 102, { anchorDay: null });
+      expect(res).toBeDefined();
+    });
+
+    it("BUG-07: postRecurringTransaction lazily backfills anchorDay when null for month-based frequencies", async () => {
+      const legacyRow = {
+        id: 103,
+        accountId: 1,
+        categoryId: 2,
+        payee: "End of Month Bill",
+        amount: -15000,
+        frequency: "monthly",
+        nextDate: "2026-01-31",
+        anchorDay: null,
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [legacyRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 999, date: "2026-01-31", amount: -15000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...legacyRow, nextDate: "2026-02-28", anchorDay: 31 }]);
+
+      const res = await postRecurringTransaction(mock.db, 103);
+      expect(res.nextDate).toBe("2026-02-28");
+
+      const updateCall = mock.calls.find(
+        (c) => c.op === "update" && c.table === "recurring"
+      );
+      expect(updateCall?.set).toMatchObject({
+        nextDate: "2026-02-28",
+        anchorDay: 31,
+      });
+    });
+
+    it("BUG-09: autoPostDueRecurringTransactions caps catch-up occurrences per rule and collects capped metadata", async () => {
+      const dailyRow = {
+        id: 104,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Daily Coffee",
+        amount: -500,
+        frequency: "daily",
+        nextDate: "2026-06-01",
+        anchorDay: 1,
+        active: true,
+        transferAccountId: null,
+      };
+
+      // 1. Initial select:recurring
+      mock.respondWithNth("select:recurring", 1, [dailyRow]);
+
+      // We test capping at maxOccurrencesPerRule = 3 (when 10 days are overdue: 2026-06-01 to 2026-06-10)
+      for (let i = 1; i <= 3; i++) {
+        const curDate = `2026-06-0${i}`;
+        const nextDate = `2026-06-0${i + 1}`;
+        mock.respondWithNth("select:recurring", i + 1, [{ ...dailyRow, nextDate: curDate }]);
+        mock.respondWithNth("select:recurring_sub_transactions", i, []);
+        mock.respondWithNth("select:accounts", i, [{ onBudget: true }]);
+        mock.respondWith("insert:transactions", [{ id: 1000 + i, date: curDate, amount: -500 }]);
+        mock.respondWith("update:accounts", [{}]);
+        mock.respondWith("update:recurring", [{ ...dailyRow, nextDate }]);
+      }
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-10", {
+        maxOccurrencesPerRule: 3,
+      });
+
+      expect(posted).toHaveLength(3);
+      expect((posted as any).capped).toHaveLength(1);
+      expect((posted as any).capped[0]).toMatchObject({
+        id: 104,
+        payee: "Daily Coffee",
+        remainingDue: 1,
+      });
+    });
   });
 });
 
