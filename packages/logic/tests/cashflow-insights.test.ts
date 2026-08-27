@@ -166,28 +166,28 @@ describe("computeMonthlyInsights", () => {
     expect(insights[1]?.pctChange).toBe(20);
   });
 
-  it("averages over only active prior months for newly created categories (Issue #17)", () => {
+  it("includes zero-spend months in the three-month baseline average (BUG-36)", () => {
     const data: BudgetData = {
       accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
       groups: [{ id: 1, name: "Daily", sort: 1, isCreditCardPayments: false }],
       categories: [
-        { id: 10, groupId: 1, name: "New Category", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 10, groupId: 1, name: "Category A", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
       ],
       assignments: [],
       recurring: [],
       transactions: [
-        // Category only has 1 prior month of data ($100 in May)
-        { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-10000", status: "c" },
-        // Current month spend is $100 in June -> 0% change, not +200%
-        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-10000", status: "c" },
+        // Spend 30000 cents ($300) in one prior month (May) and zero in March and April
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
+        // Current month spend is $300 in June -> 3-mo baseline is 30000 / 3 = 10000, % change is +200%
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
       ],
     };
 
     const insights = computeMonthlyInsights(data, "2026-06");
     expect(insights).toHaveLength(1);
-    expect(insights[0]?.categoryName).toBe("New Category");
-    expect(insights[0]?.avgAmount).toBe(10000); // Divided by 1, not 3
-    expect(insights[0]?.pctChange).toBe(0);
+    expect(insights[0]?.categoryName).toBe("Category A");
+    expect(insights[0]?.avgAmount).toBe(10000); // 30000 / 3 = 10000
+    expect(insights[0]?.pctChange).toBe(200); // (30000 - 10000) / 10000 = +200%
   });
 
   it("factors in refunds and returns to reduce net category spend (UNI-35 / BUG-28)", () => {
@@ -200,11 +200,13 @@ describe("computeMonthlyInsights", () => {
       assignments: [],
       recurring: [],
       transactions: [
-        // Prior month: $200 spent in May
-        { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "BestBuy", memo: "", amount: "-20000", status: "c" },
-        // Current month: $200 purchase + $100 return/refund in June -> net spend $100 (-50% vs May)
-        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "BestBuy", memo: "Purchase", amount: "-20000", status: "c" },
-        { id: 3, accountId: 1, categoryId: 10, date: "2026-06-15", payee: "BestBuy Return", memo: "Refund", amount: "10000", status: "c" },
+        // Prior 3 months: $200 spent each month (March, April, May) -> avg $200 (20000 cents)
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-03-10", payee: "BestBuy", memo: "", amount: "-20000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-04-10", payee: "BestBuy", memo: "", amount: "-20000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "BestBuy", memo: "", amount: "-20000", status: "c" },
+        // Current month: $200 purchase + $100 return/refund in June -> net spend $100 (-50% vs $200 3-mo avg)
+        { id: 4, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "BestBuy", memo: "Purchase", amount: "-20000", status: "c" },
+        { id: 5, accountId: 1, categoryId: 10, date: "2026-06-15", payee: "BestBuy Return", memo: "Refund", amount: "10000", status: "c" },
       ],
     };
 

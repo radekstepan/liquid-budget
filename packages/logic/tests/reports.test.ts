@@ -451,29 +451,37 @@ describe("computeSpendingTrends", () => {
     expect(result.total).toBe(300000 - 33826992);
   });
 
-  it("nets deposit + immediate withdrawal in the same month to zero", () => {
+  it("sets pctOfTotal to 0 for constituents when overall total is negative (BUG-37)", () => {
     const data: BudgetData = {
       accounts: [
         { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
-        { id: 2, name: "Savings Account", kind: "offbudget", groupLabel: "Savings", balance: "0", onBudget: false, sort: 1 },
+        { id: 2, name: "Brokerage", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 1 },
       ],
-      groups: [{ id: 1, name: "Savings", sort: 0, isCreditCardPayments: false }],
-      categories: [{ id: 10, groupId: 1, name: "Emergency Fund", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      groups: [
+        { id: 1, name: "Groceries Group", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Investments Group", sort: 1, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Food", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 20, groupId: 2, name: "Stocks", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
       assignments: [],
       transactions: [
-        { id: 1, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-04-05", payee: "Transfer : Savings", memo: "deposit", amount: "-100000", status: "c" },
-        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 10, date: "2026-04-10", payee: "Transfer : Savings", memo: "withdraw", amount: "100000", status: "c" },
+        // Group 1 contributes +10000 ($100 spend)
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+        // Group 2 contributes -20000 ($200 liquidation / refund)
+        { id: 2, accountId: 1, transferAccountId: 2, categoryId: 20, date: "2026-04-10", payee: "Transfer : Brokerage", memo: "", amount: "20000", status: "c" },
       ],
       recurring: [],
     };
 
     const result = computeSpendingTrends(data, "2026-04", "2026-04");
-    expect(result.months).toHaveLength(1);
-    expect(result.months[0]?.total).toBe(0);
-    expect(result.months[0]?.segments).toEqual([]);
-    expect(result.maxMonthSpend).toBe(0);
-    expect(result.minMonthSpend).toBe(0);
-    expect(result.total).toBe(0);
+    expect(result.total).toBe(-10000);
+    expect(result.constituents).toHaveLength(2);
+    // When overallTotal is non-positive, pctOfTotal must not produce inverted -100% or 200%
+    for (const c of result.constituents) {
+      expect(c.pctOfTotal).toBe(0);
+    }
   });
 });
 

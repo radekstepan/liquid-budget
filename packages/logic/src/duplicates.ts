@@ -174,6 +174,53 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
  * payee and the canonical renamed payee so subsequent imports match regardless
  * of when the rename rule was defined.
  */
+export class ExistingImportFingerprints {
+  private keyToTxIndices = new Map<string, number[]>();
+  private consumedTx = new Set<number>();
+
+  add(txIndex: number, keys: string[]): void {
+    for (const k of keys) {
+      let list = this.keyToTxIndices.get(k);
+      if (!list) {
+        list = [];
+        this.keyToTxIndices.set(k, list);
+      }
+      list.push(txIndex);
+    }
+  }
+
+  has(key: string): boolean {
+    const list = this.keyToTxIndices.get(key);
+    if (!list) return false;
+    return list.some((idx) => !this.consumedTx.has(idx));
+  }
+
+  matchAndConsume(keys: string[]): boolean {
+    for (const k of keys) {
+      const list = this.keyToTxIndices.get(k);
+      if (list) {
+        for (const idx of list) {
+          if (!this.consumedTx.has(idx)) {
+            this.consumedTx.add(idx);
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+}
+
+/**
+ * Build a fingerprint tracker from existing transactions for import deduplication.
+ * Includes plain regular rows, split parents, and transfers. Split children
+ * are excluded on the source account because their parent already represents
+ * the full bank transaction amount.
+ *
+ * When rename rules are provided, fingerprints are added for both the stored
+ * payee and the canonical renamed payee so subsequent imports match regardless
+ * of when the rename rule was defined.
+ */
 export function buildExistingImportFingerprints(
   accountId: number,
   existing: Array<{
@@ -187,17 +234,20 @@ export function buildExistingImportFingerprints(
   }>,
   accountNameById?: Map<number, string>,
   renameRules?: RenameRule[]
-): Set<string> {
-  const fingerprints = new Set<string>();
+): ExistingImportFingerprints {
+  const tracker = new ExistingImportFingerprints();
 
-  for (const t of existing) {
+  for (let i = 0; i < existing.length; i++) {
+    const t = existing[i]!;
     const amt = typeof t.amount === "number" ? Math.round(t.amount) : Math.round(Number(t.amount));
+    const keys: string[] = [];
+
     if (t.accountId === accountId) {
       // Direct transaction on this account:
       // Exclude split children (t.parentId != null) because their split parent
       // (t.parentId == null) already represents the complete bank transaction.
       if (t.parentId != null) continue;
-      fingerprints.add(
+      keys.push(
         duplicateFingerprint({
           accountId,
           date: t.date,
@@ -209,7 +259,7 @@ export function buildExistingImportFingerprints(
       if (renameRules && renameRules.length > 0) {
         const renamed = applyRenameRules(renameRules, t.payee);
         if (renamed !== t.payee) {
-          fingerprints.add(
+          keys.push(
             duplicateFingerprint({
               accountId,
               date: t.date,
@@ -224,7 +274,7 @@ export function buildExistingImportFingerprints(
       // Transfer where this account is the destination:
       // The incoming amount is opposite in sign to the stored transfer row.
       const destAmount = -amt;
-      fingerprints.add(
+      keys.push(
         duplicateFingerprint({
           accountId,
           date: t.date,
@@ -236,7 +286,7 @@ export function buildExistingImportFingerprints(
       if (renameRules && renameRules.length > 0) {
         const renamed = applyRenameRules(renameRules, t.payee);
         if (renamed !== t.payee) {
-          fingerprints.add(
+          keys.push(
             duplicateFingerprint({
               accountId,
               date: t.date,
@@ -250,7 +300,7 @@ export function buildExistingImportFingerprints(
       if (accountNameById && accountNameById.has(t.accountId)) {
         const sourceName = accountNameById.get(t.accountId)!;
         const transferPayee = `Transfer : ${sourceName}`;
-        fingerprints.add(
+        keys.push(
           duplicateFingerprint({
             accountId,
             date: t.date,
@@ -262,7 +312,7 @@ export function buildExistingImportFingerprints(
         if (renameRules && renameRules.length > 0) {
           const renamed = applyRenameRules(renameRules, transferPayee);
           if (renamed !== transferPayee) {
-            fingerprints.add(
+            keys.push(
               duplicateFingerprint({
                 accountId,
                 date: t.date,
@@ -275,14 +325,19 @@ export function buildExistingImportFingerprints(
         }
       }
     }
+
+    if (keys.length > 0) {
+      tracker.add(i, keys);
+    }
   }
 
-  return fingerprints;
+  return tracker;
 }
 
 /**
- * Identify which incoming import rows duplicate existing transactions or
- * previous rows within the same batch.
+ * Identify which incoming import rows duplicate existing transactions.
+ * Legitimate identical transactions within the same CSV batch are preserved,
+ * while rows matching existing transactions in the ledger are flagged.
  */
 export function identifyImportDuplicates<
   T extends {
@@ -295,7 +350,7 @@ export function identifyImportDuplicates<
   }
 >(
   accountId: number,
-  existingFingerprints: Set<string>,
+  existingFingerprints: ExistingImportFingerprints | Set<string>,
   rows: T[]
 ): {
   duplicateRowNumbers: Set<number>;
@@ -303,7 +358,6 @@ export function identifyImportDuplicates<
 } {
   const duplicateRowNumbers = new Set<number>();
   const duplicates: Array<{ rowNumber: number; reason: string; matchRowNumber?: number }> = [];
-  const batchSeen = new Map<string, number>();
 
   for (const row of rows) {
     if (row.error || row.date == null || row.amountCents == null) continue;
@@ -318,19 +372,17 @@ export function identifyImportDuplicates<
       amount,
     });
 
-    const matchRowNumber = batchSeen.get(fp);
-    if (existingFingerprints.has(fp) || matchRowNumber != null) {
+    const isMatch =
+      "matchAndConsume" in existingFingerprints && typeof existingFingerprints.matchAndConsume === "function"
+        ? existingFingerprints.matchAndConsume([fp])
+        : existingFingerprints.has(fp);
+
+    if (isMatch) {
       duplicateRowNumbers.add(row.rowNumber);
       duplicates.push({
         rowNumber: row.rowNumber,
-        reason:
-          matchRowNumber != null
-            ? `Duplicate of row ${matchRowNumber} in this file`
-            : "Matches an existing transaction",
-        matchRowNumber,
+        reason: "Matches an existing transaction",
       });
-    } else {
-      batchSeen.set(fp, row.rowNumber);
     }
   }
 

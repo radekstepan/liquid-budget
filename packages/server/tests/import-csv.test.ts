@@ -247,30 +247,54 @@ describe("importCsvTransactions", () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 
-  it("skips duplicate rows within the same file and keeps the first", async () => {
+  it("imports multiple identical legitimate transactions in the same CSV batch (BUG-35)", async () => {
     const accountId = await seedAccount();
     const out = await importCsvTransactions(db, {
       accountId,
       rows: [
-        row({ rowNumber: 2, payee: "Store", amountCents: -1000 }),
-        row({ rowNumber: 3, payee: "Store", amountCents: -1000 }),
+        row({ rowNumber: 2, payee: "Transit", amountCents: -250 }),
+        row({ rowNumber: 3, payee: "Transit", amountCents: -250 }),
         row({ rowNumber: 4, payee: "Other", amountCents: -2000 }),
       ],
     });
-    expect(out.count).toBe(2);
-    expect(out.skipped).toHaveLength(1);
-    expect(out.skipped[0]).toMatchObject({
-      rowNumber: 3,
-      payee: "Store",
-      amount: -1000,
-      reason: "Duplicate of row 2 in this file",
-      accountName: "Chequing",
-    });
+    expect(out.count).toBe(3);
+    expect(out.skipped).toHaveLength(0);
 
     const data = await getBudgetData(db);
-    expect(data.transactions).toHaveLength(2);
+    expect(data.transactions).toHaveLength(3);
     expect(data.accounts.find((a) => a.id === accountId)?.balance).toBe(
-      String(100000 - 1000 - 2000)
+      String(100000 - 250 - 250 - 2000)
+    );
+
+    // Re-importing the same CSV should now skip all three as matching existing transactions
+    const secondImport = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Transit", amountCents: -250 }),
+        row({ rowNumber: 3, payee: "Transit", amountCents: -250 }),
+        row({ rowNumber: 4, payee: "Other", amountCents: -2000 }),
+      ],
+    });
+    expect(secondImport.count).toBe(0);
+    expect(secondImport.skipped).toHaveLength(3);
+    expect(secondImport.skipped.every((s) => s.reason === "Matches an existing transaction")).toBe(true);
+
+    // Importing a batch with 3 identical rows when DB has 2 should skip 2 and import 1
+    const thirdImport = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Transit", amountCents: -250 }),
+        row({ rowNumber: 3, payee: "Transit", amountCents: -250 }),
+        row({ rowNumber: 4, payee: "Transit", amountCents: -250 }),
+      ],
+    });
+    expect(thirdImport.count).toBe(1);
+    expect(thirdImport.skipped).toHaveLength(2);
+
+    const finalData = await getBudgetData(db);
+    expect(finalData.transactions).toHaveLength(4);
+    expect(finalData.accounts.find((a) => a.id === accountId)?.balance).toBe(
+      String(100000 - 250 - 250 - 2000 - 250)
     );
   });
 

@@ -692,5 +692,38 @@ describe("SpendingTrendsReport", () => {
     const tipLabels = tip.querySelectorAll(".flex.items-center.justify-between");
     expect(tipLabels.length).toBe(0);
   });
+
+  it("renders em-dash for % Share when overall total is negative (BUG-37)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Budget", balance: "500000", onBudget: true, sort: 0 },
+      ],
+      groups: [
+        { id: 1, name: "Groceries Group", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Returns Group", sort: 1, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 20, groupId: 2, name: "Electronics", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        // $100 spending
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+        // $200 refund
+        { id: 2, accountId: 1, categoryId: 20, date: "2026-04-10", payee: "Store Refund", memo: "", amount: "20000", status: "c" },
+      ],
+    };
+
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-04" />);
+
+    // Table rows should display "—" in the % Share column instead of negative or inverted percentages
+    const cells = document.querySelectorAll("tbody tr td:last-child");
+    expect(cells.length).toBe(2);
+    cells.forEach((cell) => {
+      expect(cell.textContent?.trim()).toBe("—");
+    });
+  });
 });
 

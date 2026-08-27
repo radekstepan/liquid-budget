@@ -358,11 +358,13 @@ const ConstituentTable = memo(function ConstituentTable({
   colorMap,
   onDrill,
   drillLevel = "all",
+  overallTotal = 0,
 }: {
   constituents: SpendingTrendsConstituent[];
   colorMap: Map<number, string>;
   onDrill: (id: number) => void;
   drillLevel?: "all" | "group" | "category";
+  overallTotal?: number;
 }) {
   const [hoverId, setHoverId] = useState<number | null>(null);
 
@@ -412,7 +414,7 @@ const ConstituentTable = memo(function ConstituentTable({
                 {fmt(c.total)}
               </td>
               <td className="num y-num text-[var(--y-ink-faint)] whitespace-nowrap">
-                {c.pctOfTotal}%
+                {overallTotal > 0 ? `${c.pctOfTotal}%` : "—"}
               </td>
             </tr>
           );
@@ -1483,6 +1485,7 @@ export function SpendingTrendsReport({
                 colorMap={colorMap}
                 onDrill={handleDrillSegment}
                 drillLevel={trends.drillLevel}
+                overallTotal={trends.total}
               />
             )}
           </div>

@@ -70,8 +70,6 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
   return withTransaction(db, async () => {
     const created: number[] = [];
     const skipped: ImportSkippedEntry[] = [];
-    // First occurrence of a fingerprint in this batch -> source row number.
-    const batchSeen = new Map<string, number>();
     for (const rawRow of input.rows) {
       if (rawRow.error || rawRow.date == null || rawRow.amountCents == null || !rawRow.payee?.trim()) {
         skipped.push({
@@ -124,8 +122,8 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         memo: rawRow.memo ?? "",
         amount,
       });
-      const matchRowNumber = batchSeen.get(fp) ?? batchSeen.get(rawFp);
-      if (existingFingerprints.has(fp) || existingFingerprints.has(rawFp) || matchRowNumber != null) {
+      const isDuplicate = existingFingerprints.matchAndConsume([fp, rawFp]);
+      if (isDuplicate) {
         skipped.push({
           rowNumber: row.rowNumber,
           accountName: account.name,
@@ -133,11 +131,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
           payee: row.payee ?? "",
           memo: row.memo ?? "",
           amount,
-          reason:
-            matchRowNumber != null
-              ? `Duplicate of row ${matchRowNumber} in this file`
-              : "Matches an existing transaction",
-          matchRowNumber,
+          reason: "Matches an existing transaction",
         });
         continue;
       }
@@ -163,10 +157,6 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         })
         .returning();
       created.push(inserted!.id);
-      batchSeen.set(fp, row.rowNumber);
-      batchSeen.set(rawFp, row.rowNumber);
-      existingFingerprints.add(fp);
-      existingFingerprints.add(rawFp);
       await db
         .update(accounts)
         .set({ balance: sql`${accounts.balance} + ${amount}` })
