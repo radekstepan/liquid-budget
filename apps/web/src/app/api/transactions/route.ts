@@ -178,6 +178,7 @@ export async function PATCH(req: Request) {
   if (body.subTransactions && body.subTransactions.length > 0) {
     try {
       const parentFields: Parameters<typeof updateSplit>[2] = {};
+      if (body.amount !== undefined) parentFields.amount = body.amount;
       if (body.date !== undefined) parentFields.date = body.date;
       if (body.payee !== undefined) parentFields.payee = body.payee;
       if (body.memo !== undefined) parentFields.memo = body.memo ?? undefined;

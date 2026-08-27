@@ -643,6 +643,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     if ("accountId" in p) {
       throw new TransactionError("cannot change account of a split child");
     }
+    if ("amount" in p) {
+      throw new TransactionError("cannot change amount of a split child; edit the split");
+    }
   }
 
   let shouldLearnRenameRule = false;
@@ -783,16 +786,19 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
  * parent fields, then inserts the new children. Used by PATCH when the
  * caller passes `subTransactions: []`.
  */
+export type UpdateSplitParentFields = {
+  amount?: number;
+  date?: string;
+  payee?: string;
+  memo?: string;
+  status?: ClearedStatus;
+  flagColor?: TransactionFlagColor | null;
+};
+
 export async function updateSplit(
   db: Database,
   parentId: number,
-  parentFields: {
-    date?: string;
-    payee?: string;
-    memo?: string;
-    status?: ClearedStatus;
-    flagColor?: TransactionFlagColor | null;
-  },
+  parentFields: UpdateSplitParentFields,
   children: SubTransactionInput[]
 ) {
   if (parentFields.status === "r") {
@@ -820,7 +826,10 @@ export async function updateSplit(
     throw new TransactionError("target row has no children; use a regular update");
   }
 
-  const parentAmount = assertValidAmount(parent.amount);
+  const parentAmount =
+    parentFields.amount !== undefined && parentFields.amount != null
+      ? assertValidAmount(parentFields.amount)
+      : assertValidAmount(parent.amount);
   assertSplitsBalanced(parentAmount, children);
 
   for (const c of children) {
@@ -850,6 +859,7 @@ export async function updateSplit(
     }
 
     const pf: Record<string, unknown> = {};
+    if (parentFields.amount !== undefined && parentFields.amount != null) pf.amount = parentAmount;
     if (parentFields.date !== undefined && parentFields.date != null) pf.date = String(parentFields.date);
     if (parentFields.payee !== undefined && parentFields.payee != null) pf.payee = String(parentFields.payee);
     if (parentFields.memo !== undefined) pf.memo = parentFields.memo == null ? "" : String(parentFields.memo);
@@ -977,6 +987,16 @@ export async function deleteTransaction(db: Database, id: number) {
     );
   }
 
+  if (existing.parentId != null) {
+    const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
+    if (parent && parent.status === "r") {
+      throw new TransactionError(
+        "Transaction is reconciled and locked. Unreconcile before deleting.",
+        422
+      );
+    }
+  }
+
   return withTransaction(db, async () => {
     if (existing.parentId != null) {
       await applyBalance(db, existing.accountId, -Number(existing.amount));
@@ -1058,6 +1078,13 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         );
       }
       if (existing.parentId != null) {
+        const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
+        if (parent && parent.status === "r") {
+          throw new TransactionError(
+            `Transaction ${id} is reconciled and locked. Unreconcile before deleting.`,
+            422
+          );
+        }
         await applyBalance(db, existing.accountId, -Number(existing.amount));
         if (existing.transferAccountId != null) {
           await applyBalance(db, existing.transferAccountId, Number(existing.amount));
@@ -1135,6 +1162,7 @@ export async function bulkUpdateTransactions(
     );
   }
   const renameRulesToLearn: { from: string; to: string }[] = [];
+  const modifiedParentIds = new Set<number>();
 
   const updated = await withTransaction(db, async () => {
     const updatedRows: any[] = [];
@@ -1155,6 +1183,7 @@ export async function bulkUpdateTransactions(
             422
           );
         }
+        modifiedParentIds.add(existing.parentId);
       }
       if ("flagColor" in patch && patch.flagColor !== undefined && existing.flagColor === TRANSACTION_DUPLICATE_FLAG) {
         throw new TransactionError(
@@ -1181,10 +1210,14 @@ export async function bulkUpdateTransactions(
         if ("accountId" in patch && patch.accountId !== undefined) {
           throw new TransactionError("cannot change account of a split parent");
         }
+        modifiedParentIds.add(id);
       }
 
       if (existing.parentId != null && patch.accountId !== undefined) {
         throw new TransactionError("cannot change account of a split child");
+      }
+      if (existing.parentId != null && patch.amount !== undefined) {
+        throw new TransactionError("cannot change amount of a split child; edit the split");
       }
 
       if (
@@ -1326,6 +1359,15 @@ export async function bulkUpdateTransactions(
         renameRulesToLearn.push({ from: existing.payee, to: String(patch.payee) });
       }
     }
+
+    for (const parentId of modifiedParentIds) {
+      const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
+      if (parent) {
+        const children = await getChildren(db, parentId);
+        assertSplitsBalanced(Number(parent.amount), children);
+      }
+    }
+
     return updatedRows;
   });
 
