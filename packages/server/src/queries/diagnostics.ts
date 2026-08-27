@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { accounts, transactions } from "../schema.js";
+import { withTransaction } from "../transaction.js";
 import { getBudgetData } from "./budget.js";
 import { computeBudget, getMonthsWithData, isIncomeTransaction, todayISO } from "@ynab/logic";
 
@@ -73,47 +74,52 @@ export async function verifyBalanceIntegrity(db: Database): Promise<BalanceInteg
 
 /**
  * Recompute every account's `balance` from the current set of transactions
- * and update the accounts table.
+ * and update the accounts table atomically inside a transaction.
  */
 export async function recomputeAccountBalances(
   db: Database
 ): Promise<{ updatedCount: number }> {
-  const allAccounts = await db.select().from(accounts);
-  let updatedCount = 0;
+  return withTransaction(db, async () => {
+    const rows = await db.all<{ id: number; stored_balance: number; computed_balance: number }>(
+      sql`
+        SELECT
+          a.id,
+          a.balance AS stored_balance,
+          (
+            COALESCE((
+              SELECT SUM(t.amount)
+              FROM transactions t
+              WHERE t.account_id = a.id
+                AND t.id NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)
+            ), 0)
+            -
+            COALESCE((
+              SELECT SUM(t.amount)
+              FROM transactions t
+              WHERE t.transfer_account_id = a.id
+                AND t.transfer_account_id IS NOT NULL
+                AND t.id NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)
+            ), 0)
+          ) AS computed_balance
+        FROM accounts a
+      `
+    );
 
-  for (const acct of allAccounts) {
-    const outRes = await db
-      .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.accountId, acct.id),
-          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-        )
-      );
-
-    const inRes = await db
-      .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.transferAccountId, acct.id),
-          isNotNull(transactions.transferAccountId),
-          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-        )
-      );
-
-    const outgoing = Number(outRes[0]?.sum ?? 0);
-    const incomingFromTransfers = Number(inRes[0]?.sum ?? 0);
-    const sum = outgoing - incomingFromTransfers;
-
-    if (Number(acct.balance) !== sum) {
-      await db.update(accounts).set({ balance: sum }).where(eq(accounts.id, acct.id));
-      updatedCount++;
+    let updatedCount = 0;
+    for (const row of rows) {
+      const stored = Number(row.stored_balance ?? 0);
+      const computed = Number(row.computed_balance ?? 0);
+      if (stored !== computed) {
+        await db
+          .update(accounts)
+          .set({ balance: computed })
+          .where(eq(accounts.id, row.id));
+        updatedCount++;
+      }
     }
-  }
 
-  return { updatedCount };
+    return { updatedCount };
+  });
 }
 
 /**

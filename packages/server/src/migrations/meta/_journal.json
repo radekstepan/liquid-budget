@@ -113,6 +113,13 @@
       "when": 1787205000000,
       "tag": "0015_unique_linked_account_and_transfer_check",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1787206000000,
+      "tag": "0016_reconciliation_fks_and_nonzero_amounts",
+      "breakpoints": true
     }
   ]
 }

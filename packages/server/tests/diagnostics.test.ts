@@ -185,6 +185,50 @@ describe("diagnostics queries", () => {
         .where(eq(schema.accounts.id, acct.id));
       expect(repaired?.balance).toBe(120000);
     });
+
+    it("BUG-39: executes atomically inside a transaction and does not overwrite concurrent mutations with stale values", async () => {
+      const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+      await createTransaction(db, {
+        accountId: acct.id,
+        categoryId: null,
+        date: "2026-06-01",
+        payee: "Income",
+        memo: "",
+        amount: 50000,
+      });
+
+      // Drift the balance
+      await db
+        .update(schema.accounts)
+        .set({ balance: 0 })
+        .where(eq(schema.accounts.id, acct.id));
+
+      // Run recomputeAccountBalances concurrently with adding a new transaction
+      const [recomputeResult] = await Promise.all([
+        recomputeAccountBalances(db),
+        createTransaction(db, {
+          accountId: acct.id,
+          categoryId: null,
+          date: "2026-06-02",
+          payee: "Grocery",
+          memo: "",
+          amount: -10000,
+        }),
+      ]);
+
+      expect(recomputeResult.updatedCount).toBeGreaterThanOrEqual(0);
+
+      // Verify the final balance accurately reflects both transactions (50000 - 10000 = 40000)
+      const [finalAcct] = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, acct.id));
+      expect(finalAcct?.balance).toBe(40000);
+
+      const issues = await verifyBalanceIntegrity(db);
+      expect(issues).toHaveLength(0);
+    });
   });
 
   describe("verifyBudgetIntegrity", () => {

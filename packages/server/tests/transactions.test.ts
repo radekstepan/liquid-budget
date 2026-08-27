@@ -3656,4 +3656,140 @@ describe("transactions queries", () => {
       ).rejects.toThrow(/Invalid calendar date/);
     });
   });
+
+  describe("BUG-40: Nonzero amount constraints", () => {
+    it("rejects createTransaction with amount 0", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id } = await seedTestData(db);
+
+      await expect(
+        createTransaction(db, {
+          accountId,
+          categoryId: cat1Id,
+          date: "2026-06-15",
+          payee: "Test",
+          memo: "",
+          amount: 0,
+        })
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
+
+    it("rejects updateTransaction with amount 0", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id } = await seedTestData(db);
+
+      const txn = await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-06-15",
+        payee: "Test",
+        memo: "",
+        amount: 1000,
+      });
+
+      await expect(
+        updateTransaction(db, txn!.id, { amount: 0 })
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
+
+    it("rejects createTransfer with amount 0", async () => {
+      const db = openMigratedDb();
+      const { accountId } = await seedTestData(db);
+      const [otherAcct] = await db
+        .insert(schema.accounts)
+        .values({
+          name: "Savings",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          balance: 0,
+          onBudget: true,
+          sort: 1,
+        })
+        .returning();
+
+      await expect(
+        createTransfer(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-06-15",
+          payee: "Transfer",
+          memo: "",
+          amount: 0,
+        }, otherAcct!.id)
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
+
+    it("rejects createSplitWithChildren with zero parent amount or zero child amount", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      await expect(
+        createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-06-15",
+            payee: "Split",
+            memo: "",
+            amount: 0,
+          },
+          [
+            { categoryId: cat1Id, amount: 0, memo: "c1" },
+            { categoryId: cat2Id, amount: 0, memo: "c2" },
+          ]
+        )
+      ).rejects.toThrow(/Amount cannot be zero/);
+
+      await expect(
+        createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-06-15",
+            payee: "Split",
+            memo: "",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -5000, memo: "c1" },
+            { categoryId: cat2Id, amount: 0, memo: "c2" },
+          ]
+        )
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
+
+    it("rejects bulkUpdateTransactions with amount 0", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id } = await seedTestData(db);
+
+      const txn = await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-06-15",
+        payee: "Test",
+        memo: "",
+        amount: 1000,
+      });
+
+      await expect(
+        bulkUpdateTransactions(db, [txn!.id], { amount: 0 })
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
+
+    it("enforces database CHECK constraint for amount != 0 on direct SQL insert", async () => {
+      const db = openMigratedDb();
+      const { accountId } = await seedTestData(db);
+
+      expect(() => {
+        db.insert(schema.transactions)
+          .values({
+            accountId,
+            date: "2026-06-15",
+            amount: 0,
+            status: "c",
+          })
+          .run();
+      }).toThrow(/CHECK constraint failed: transactions_amount_check/);
+    });
+  });
 });

@@ -99,7 +99,7 @@ export function assertValidISOMonth(month: unknown, fieldName: string = "month")
   return month;
 }
 
-export function assertValidAmount(amount: unknown): number {
+export function assertValidAmount(amount: unknown, options: { allowZero?: boolean } = {}): number {
   const n = Number(amount);
   if (!Number.isFinite(n)) {
     throw new TransactionError("Amount must be a valid number", 400);
@@ -107,7 +107,11 @@ export function assertValidAmount(amount: unknown): number {
   if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n) > Number.MAX_SAFE_INTEGER) {
     throw new TransactionError("Amount exceeds safe integer range", 400);
   }
-  return Math.round(n);
+  const rounded = Math.round(n);
+  if (!options.allowZero && rounded === 0) {
+    throw new TransactionError("Amount cannot be zero", 400);
+  }
+  return rounded;
 }
 
 /**

@@ -10,7 +10,7 @@ export type UpsertAssignmentInput = {
 };
 
 export async function upsertAssignment(db: Database, input: UpsertAssignmentInput) {
-  const amount = assertValidAmount(input.amount);
+  const amount = assertValidAmount(input.amount, { allowZero: true });
   const validatedMonth = assertValidISOMonth(input.month, "month");
   return withTransaction(db, async () => {
     const [row] = await db

@@ -1208,6 +1208,38 @@ describe("recurring queries", () => {
         status: 400,
       });
     });
+
+    it("BUG-40: rejects createRecurring and updateRecurring with amount 0", async () => {
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: 2,
+          amount: 0,
+          frequency: "monthly",
+          nextDate: "2026-06-15",
+          payee: "Test",
+        })
+      ).rejects.toThrow(/Amount cannot be zero/);
+
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          amount: -5000,
+          frequency: "monthly",
+          nextDate: "2026-06-15",
+          payee: "Split",
+          subTransactions: [
+            { categoryId: 2, amount: -5000 },
+            { categoryId: 3, amount: 0 },
+          ],
+        })
+      ).rejects.toThrow(/Amount cannot be zero/);
+
+      mock.respondWith("select:recurring", [{ id: 1, accountId: 1, amount: -5000 }]);
+      await expect(
+        updateRecurring(mock.db, 1, { amount: 0 })
+      ).rejects.toThrow(/Amount cannot be zero/);
+    });
   });
 });
 
