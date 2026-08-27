@@ -63,16 +63,18 @@ describe("CsvImportModal", () => {
     expect(cells[2]!.textContent).toBe("PHNOM PENH RESTAURANT");
   });
 
-  it("swaps unconditionally and flags rows with an empty payee", async () => {
+  it("swaps unconditionally and flags rows with an empty payee as error (BUG-31)", async () => {
     await renderModal("Date,Payee,Outflow\n13/08/2026,UBER TRIP,18.63\n");
     fireEvent.click(screen.getByLabelText(/swap payee and memo/i));
 
     const rows = screen.getAllByRole("row");
     const first = rows[1]!;
-    expect(first).toHaveClass("y-row--warn");
+    expect(first).toHaveClass("y-row--error");
     const cells = within(first).getAllByRole("cell");
-    expect(cells[1]!.textContent).toBe("Uncategorized");
+    expect(cells[1]!.textContent).toBe("—");
     expect(cells[2]!.textContent).toBe("UBER TRIP");
+    expect(screen.getByText("1 row(s) skipped")).toBeInTheDocument();
+    expect(screen.getByText(/Row 2: Missing payee/)).toBeInTheDocument();
   });
 
   it("imports a single-row file and defaults to the first account", async () => {
@@ -80,19 +82,24 @@ describe("CsvImportModal", () => {
     expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
   });
 
-  it("previews invalid rows with their reason while disabling import", async () => {
+  it("previews invalid rows with their reason while enabling partial import for valid rows (BUG-32)", async () => {
     await renderModal("Date,Payee,Outflow\n13/13/2026,UBER TRIP,18.63\n13/08/2026,WAL-MART,101.76\n");
     expect(screen.getByText("UBER TRIP")).toBeInTheDocument();
     expect(screen.getByText("WAL-MART")).toBeInTheDocument();
     expect(screen.getAllByText(/Invalid date/).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
     expect(screen.getByText(/1 importable · 1 skipped/)).toBeInTheDocument();
     expect(screen.getByText("1 row(s) skipped")).toBeInTheDocument();
   });
 
   it("calls onImport with the account, swap flag, and csv text", async () => {
+    const swapCsv = [
+      "Date,Payee,Category,Memo,Outflow,Inflow",
+      "13/08/2026,PHNOM PENH RESTAURANT,,Vancouver,28.08,",
+      "03/08/2026,PAYMENT RECEIVED - THANK YOU,,Refund,1908.03",
+    ].join("\n");
     const onImport = vi.fn().mockResolvedValue(undefined);
-    await renderModal(validCsv, onImport);
+    await renderModal(swapCsv, onImport);
     fireEvent.click(screen.getByLabelText(/swap payee and memo/i));
     fireEvent.click(screen.getByRole("button", { name: /^import 2 transactions$/i }));
 

@@ -316,9 +316,28 @@ export function parseAmount(input: string): number | null {
   return finalVal === 0 ? 0 : finalVal;
 }
 
+function updatePayeeError(existingError: string | null, newPayee: string): string | null {
+  const parts = existingError
+    ? existingError.split("; ").filter((p) => p !== "Missing payee" && p.trim() !== "")
+    : [];
+  if (!newPayee.trim()) {
+    parts.push("Missing payee");
+  }
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
 export function swapPayeeMemo(rows: CsvImportRow[], swap?: boolean): CsvImportRow[] {
   if (!swap) return rows;
-  return rows.map((r) => ({ ...r, payee: r.memo, memo: r.payee }));
+  return rows.map((r) => {
+    const newPayee = r.memo;
+    const newMemo = r.payee;
+    return {
+      ...r,
+      payee: newPayee,
+      memo: newMemo,
+      error: updatePayeeError(r.error, newPayee),
+    };
+  });
 }
 
 export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImportResult {
@@ -427,7 +446,7 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
     }
     if (amt == null) error = error ? `${error}; Invalid amount` : "Invalid amount";
     else if (amt === 0) error = error ? `${error}; Amount is zero` : "Amount is zero";
-    if (!payee && !memo) error = error ? `${error}; Missing payee` : "Missing payee";
+    if (!payee.trim()) error = error ? `${error}; Missing payee` : "Missing payee";
     parsedRows.push({
       rowNumber: i + 1,
       date,
