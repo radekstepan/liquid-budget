@@ -136,6 +136,35 @@ describe("reconcile queries", () => {
       expect(flipCall?.set).toMatchObject({ status: "r", reconciliationId: 10 });
     });
 
+    it("BUG-12: acquires database transaction lock (BEGIN) before reading reconcile state aggregates", async () => {
+      mock.respondWithNth("select:accounts", 1, [
+        { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },
+      ]);
+      mock.respondWithNth("select:transactions", 1, [
+        {
+          unclearedSum: 0,
+          unclearedCount: 0,
+          clearedSum: 50000,
+          clearedCount: 3,
+          reconciledSum: 0,
+          reconciledCount: 0,
+        },
+      ]);
+      mock.respondWith("insert:reconciliations", [{ id: 10 }]);
+      mock.respondWithNth("update:transactions", 1, [
+        { id: 1 }, { id: 2 }, { id: 3 },
+      ]);
+      mock.respondWith("update:accounts", [{}]);
+
+      await reconcileAccount(mock.db, {
+        accountId: 1,
+        statementBalance: 50000,
+      });
+
+      // The very first operation must be BEGIN to lock snapshot before reading aggregates
+      expect(mock.calls[0]).toMatchObject({ op: "run", sql: "BEGIN" });
+    });
+
     it("throws 422 when statement balance does not match and no adjustment category is provided", async () => {
       mock.respondWithNth("select:accounts", 1, [
         { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },
@@ -607,6 +636,84 @@ describe("reconcile queries", () => {
         unclearedTotal: 2500,
         unclearedCount: 1,
       });
+    });
+
+    it("BUG-13: excludes split parents from status flips and reconciles split children with consistent counts", async () => {
+      const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat1] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+      const [cat2] = await db.insert(schema.categories).values({ groupId: group.id, name: "Household", sort: 1 }).returning();
+
+      // Create a split transaction where the parent has status 'c'
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-06-05",
+          payee: "Target",
+          memo: "Groceries and Household",
+          amount: -5000,
+          status: "c",
+        },
+        [
+          { categoryId: cat1!.id, amount: -3000, memo: "Groceries" },
+          { categoryId: cat2!.id, amount: -2000, memo: "Household" },
+        ]
+      );
+
+      // Explicitly set one child to uncleared 'u' to test asymmetric split state
+      const [child1, child2] = split.children;
+      await db
+        .update(schema.transactions)
+        .set({ status: "u" })
+        .where(eq(schema.transactions.id, child2!.id));
+
+      // Check reconcile state: only child1 (-3000) is cleared. Parent (-5000) and child2 (-2000) are not counted in clearedCount.
+      const stateBefore = await getReconcileState(db, acct.id, "2026-06-30");
+      expect(stateBefore.clearedCount).toBe(1);
+      expect(stateBefore.workingBalance).toBe(-3000);
+      expect(stateBefore.unclearedCount).toBe(1);
+      expect(stateBefore.unclearedTotal).toBe(-2000);
+
+      // Reconcile against statement balance matching workingBalance (-3000)
+      const recResult = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: -3000,
+        statementDate: "2026-06-30",
+      });
+
+      // Reconciled count must be 1 (matching clearedCount), NOT 2 (which would happen if parent were flipped)
+      expect(recResult.reconciledCount).toBe(1);
+      expect(recResult.finalDiff).toBe(0);
+
+      // Verify child1 was flipped to 'r'
+      const [child1Db] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child1!.id));
+      expect(child1Db?.status).toBe("r");
+      expect(child1Db?.reconciliationId).toBeTruthy();
+
+      // Verify child2 remains 'u'
+      const [child2Db] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child2!.id));
+      expect(child2Db?.status).toBe("u");
+      expect(child2Db?.reconciliationId).toBeNull();
+
+      // Verify split parent was NOT flipped to 'r' (remains 'c')
+      const [parentDb] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.parent.id));
+      expect(parentDb?.status).toBe("c");
+      expect(parentDb?.reconciliationId).toBeNull();
+
+      // State after reconcile
+      const stateAfter = await getReconcileState(db, acct.id, "2026-06-30");
+      expect(stateAfter.clearedCount).toBe(0);
+      expect(stateAfter.reconciledCount).toBe(1);
+      expect(stateAfter.workingBalance).toBe(-3000);
+
+      // Unreconcile account: should flip exactly 1 child back to 'c'
+      const unrecResult = await unreconcileAccount(db, acct.id);
+      expect(unrecResult.flipped).toBe(1);
+
+      const [child1Restored] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child1!.id));
+      expect(child1Restored?.status).toBe("c");
+      expect(child1Restored?.reconciliationId).toBeNull();
     });
   });
 });

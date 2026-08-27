@@ -3300,6 +3300,55 @@ describe("transactions queries", () => {
           const allTx = await db.select().from(schema.transactions);
           expect(allTx).toHaveLength(3);
         });
+
+        it("propagates status changes from split parent to split children on updateTransaction", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Supermarket",
+              memo: "Weekly shop",
+              amount: -5000,
+              status: "c",
+            },
+            [
+              { categoryId: cat1Id, amount: -3000, memo: "food" },
+              { categoryId: cat2Id, amount: -2000, memo: "supplies" },
+            ]
+          );
+
+          // Both children start as 'c'
+          const [child1, child2] = split.children;
+
+          // Update parent status to 'u'
+          await updateTransaction(db, split.parent.id, { status: "u" });
+
+          // Verify parent and both children are now 'u'
+          const [parentDb] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.parent.id));
+          expect(parentDb?.status).toBe("u");
+
+          const [child1Db] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child1!.id));
+          expect(child1Db?.status).toBe("u");
+
+          const [child2Db] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child2!.id));
+          expect(child2Db?.status).toBe("u");
+
+          // Update parent status back to 'c'
+          await updateTransaction(db, split.parent.id, { status: "c" });
+
+          const [parentDb2] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.parent.id));
+          expect(parentDb2?.status).toBe("c");
+
+          const [child1Db2] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child1!.id));
+          expect(child1Db2?.status).toBe("c");
+
+          const [child2Db2] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child2!.id));
+          expect(child2Db2?.status).toBe("c");
+        });
       });
     });
   });
