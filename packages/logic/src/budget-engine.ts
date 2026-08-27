@@ -151,7 +151,88 @@ export const BUDGET_INDEX_VERSION = 1;
 
 let globalCacheEpoch = 1;
 let budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+let normalizedDataCache = new WeakMap<BudgetData, BudgetData>();
 const serializedIndexEpochs = new WeakMap<SerializedBudgetIndex, number>();
+
+/**
+ * Ensures that every on-budget credit card account maps to a valid payment category
+ * within a Credit Card Payments group, preventing funded CC spending from disappearing.
+ */
+export function normalizeBudgetData(data: BudgetData): BudgetData {
+  if (!data || !data.accounts || !data.groups || !data.categories) {
+    return data;
+  }
+
+  const cached = normalizedDataCache.get(data);
+  if (cached) return cached;
+
+  const ccAccounts = data.accounts.filter(
+    (a) => a.kind === "credit" && a.onBudget !== false
+  );
+
+  const ccGroupIds = new Set(
+    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
+  );
+
+  const linkedAccountIds = new Set<number>();
+  for (const c of data.categories) {
+    if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
+      linkedAccountIds.add(c.linkedAccountId);
+    }
+  }
+
+  const missingAccounts = ccAccounts.filter((a) => !linkedAccountIds.has(a.id));
+
+  if (missingAccounts.length === 0) {
+    normalizedDataCache.set(data, data);
+    return data;
+  }
+
+  const groups = [...data.groups];
+  let ccGroup = groups.find((g) => g.isCreditCardPayments);
+  if (!ccGroup) {
+    const maxGroupId = groups.reduce((max, g) => Math.max(max, g.id), 0);
+    const maxGroupSort = groups.reduce((max, g) => Math.max(max, g.sort), -1);
+    ccGroup = {
+      id: maxGroupId + 1,
+      name: "Credit Card Payments",
+      sort: maxGroupSort + 1,
+      isCreditCardPayments: true,
+    };
+    groups.push(ccGroup);
+  }
+
+  const categories = [...data.categories];
+  let maxCatId = categories.reduce((max, c) => Math.max(max, c.id), 0);
+  let maxCatSort = categories
+    .filter((c) => c.groupId === ccGroup!.id)
+    .reduce((max, c) => Math.max(max, c.sort), -1);
+
+  for (const acc of missingAccounts) {
+    maxCatId++;
+    maxCatSort++;
+    categories.push({
+      id: maxCatId,
+      groupId: ccGroup.id,
+      name: acc.name,
+      sort: maxCatSort,
+      carryover: "0",
+      goalTarget: null,
+      linkedAccountId: acc.id,
+      overspendCarriesOver: false,
+    });
+  }
+
+  const normalized: BudgetData = {
+    ...data,
+    groups,
+    categories,
+  };
+
+  normalizedDataCache.set(data, normalized);
+  normalizedDataCache.set(normalized, normalized);
+  return normalized;
+}
 
 /**
  * Invalidate the cached budget index for a BudgetData object (or all cached data if no object is provided).
@@ -162,23 +243,36 @@ export function invalidateBudgetIndex(data?: BudgetData): void {
   if (data) {
     budgetDataIndexCache.delete(data);
     data.budgetIndex = undefined;
+    const normalized = normalizedDataCache.get(data);
+    if (normalized && normalized !== data) {
+      budgetDataIndexCache.delete(normalized);
+      normalized.budgetIndex = undefined;
+    }
+    normalizedDataCache.delete(data);
   } else {
     budgetDataIndexCache = new WeakMap<BudgetData, IndexedBudgetData>();
+    normalizedDataCache = new WeakMap<BudgetData, BudgetData>();
     globalCacheEpoch++;
   }
 }
 
 function getCCAccountIds(data: BudgetData): Set<number> {
   const ccAccountIds = new Set<number>();
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
   for (const a of data.accounts) {
-    if (a.kind === "credit") ccAccountIds.add(a.id);
+    if (a.kind === "credit" && a.onBudget !== false) {
+      ccAccountIds.add(a.id);
+    }
   }
   const ccGroupIds = new Set(
     data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
   for (const c of data.categories) {
     if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
-      ccAccountIds.add(c.linkedAccountId);
+      const acc = accountMap.get(c.linkedAccountId);
+      if (!acc || (acc.kind === "credit" && acc.onBudget !== false)) {
+        ccAccountIds.add(c.linkedAccountId);
+      }
     }
   }
   return ccAccountIds;
@@ -232,12 +326,19 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
 
   const endingBalanceByMonth = new Map<string, Map<number, number>>();
   if (data) {
+    const normData = normalizeBudgetData(data);
     const ccGroupIds = new Set(
-      data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
+      normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
     );
+    const seenLinkedAccounts = new Set<number>();
     const ccPayCatToAccount = new Map<number, number>();
-    for (const c of data.categories) {
-      if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
+    for (const c of normData.categories) {
+      if (
+        ccGroupIds.has(c.groupId) &&
+        c.linkedAccountId != null &&
+        !seenLinkedAccounts.has(c.linkedAccountId)
+      ) {
+        seenLinkedAccounts.add(c.linkedAccountId);
         ccPayCatToAccount.set(c.id, c.linkedAccountId);
       }
     }
@@ -247,7 +348,7 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
       const oMap = outflowByMonth.get(m) ?? new Map<number, number>();
       const sMap = spendByAccountMonth.get(m) ?? new Map<number, number>();
       const nextBal = new Map<number, number>();
-      for (const c of data.categories) {
+      for (const c of normData.categories) {
         const prev = cMap.get(c.id) ?? 0;
         const assigned = aMap.get(c.id) ?? 0;
         const rawFlow = oMap.get(c.id) ?? 0;
@@ -522,6 +623,7 @@ function computeAllMonths(
 
     // 2. Second pass: CC payment categories
     const monthSpendByAccount = new Map<number, number>();
+    const seenLinkedAccounts = new Set<number>();
     for (const c of data.categories) {
       if (!ccGroupIds.has(c.groupId)) continue;
 
@@ -531,7 +633,8 @@ function computeAllMonths(
 
       let ccBuffer = 0;
       const linkedAcc = c.linkedAccountId;
-      if (linkedAcc != null) {
+      if (linkedAcc != null && !seenLinkedAccounts.has(linkedAcc)) {
+        seenLinkedAccounts.add(linkedAcc);
         const fundedCC = monthFundedCCByAccount.get(linkedAcc) ?? 0;
         const cardAdvance = cardAdvances.get(linkedAcc) ?? 0;
         const cardPayment = cardPayments.get(linkedAcc) ?? 0;
@@ -569,21 +672,25 @@ function computeAllMonths(
 }
 
 export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
+  const normData = normalizeBudgetData(data);
   const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
+  for (const t of normData.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
-  const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
-  const ccAccountIds = getCCAccountIds(data);
-  const rawData = buildRawIndexData(data, splitParentIds, accountMap, ccAccountIds);
+  const accountMap = new Map<number, Account>(normData.accounts.map((a) => [a.id, a]));
+  const ccAccountIds = getCCAccountIds(normData);
+  const rawData = buildRawIndexData(normData, splitParentIds, accountMap, ccAccountIds);
 
-  const months = getMonthsWithData(data);
+  const months = getMonthsWithData(normData);
   const ccGroupIds = new Set(
-    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
+    normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
 
-  const index = computeAllMonths(data, rawData, months, ccGroupIds);
+  const index = computeAllMonths(normData, rawData, months, ccGroupIds);
   budgetDataIndexCache.set(data, index);
+  if (normData !== data) {
+    budgetDataIndexCache.set(normData, index);
+  }
 
   const serializedAssigned: Record<string, Record<string | number, number>> = {};
   for (const [m, map] of index.assignedByMonth) {
@@ -674,33 +781,44 @@ function getOrBuildIndex(
  * @returns      BudgetResult with groups, TBB, and meta-data.
  */
 export function computeBudget(data: BudgetData, month: string): BudgetResult {
+  const normData = normalizeBudgetData(data);
+
   // Build split parent ID set so parent rows are skipped in all aggregations
   const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
+  for (const t of normData.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
 
-  const accountMap = new Map<number, Account>(data.accounts.map((a) => [a.id, a]));
-  const ccAccountIds = getCCAccountIds(data);
-  const index = getOrBuildIndex(data, splitParentIds, accountMap, ccAccountIds, month);
+  const accountMap = new Map<number, Account>(normData.accounts.map((a) => [a.id, a]));
+  const ccAccountIds = getCCAccountIds(normData);
+  const index = getOrBuildIndex(normData, splitParentIds, accountMap, ccAccountIds, month);
+  if (normData !== data) {
+    budgetDataIndexCache.set(data, index);
+  }
 
   // 1. Determine the ordered list of months we need to walk through.
-  const months = getMonthsWithData(data);
+  const months = getMonthsWithData(normData);
 
   // CC Payment groups and categories: Map<categoryId, linkedAccountId>
   const ccGroupIds = new Set(
-    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
+    normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
+  const seenLinkedAccounts = new Set<number>();
   const ccPayCatToAccount = new Map<number, number>();
-  for (const c of data.categories) {
-    if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
+  for (const c of normData.categories) {
+    if (
+      ccGroupIds.has(c.groupId) &&
+      c.linkedAccountId != null &&
+      !seenLinkedAccounts.has(c.linkedAccountId)
+    ) {
+      seenLinkedAccounts.add(c.linkedAccountId);
       ccPayCatToAccount.set(c.id, c.linkedAccountId);
     }
   }
 
   // Build cumulative carryover per category up to (but not including) `month`.
   const { carryoverMap, overspentPrevious } = buildCarryoverMap(
-    data,
+    normData,
     index,
     months,
     month
@@ -717,7 +835,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
 
   // 5. Build CatRow for every category.
   const catsByGroup = new Map<number, CatRow[]>();
-  for (const c of data.categories) {
+  for (const c of normData.categories) {
     const carryoverIn = carryoverMap.get(c.id) ?? 0;
     const assigned = assignMap.get(c.id) ?? 0;
     const rawFlow = outflowMap.get(c.id) ?? 0;
@@ -744,7 +862,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   }
 
   // 6. Assemble GroupRow array, sorted by group.sort then category.sort.
-  const groups: GroupRow[] = data.groups
+  const groups: GroupRow[] = normData.groups
     .slice()
     .sort((a, b) => a.sort - b.sort)
     .map((group) => {
