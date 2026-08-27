@@ -1261,6 +1261,62 @@ describe("recurring queries", () => {
         updateRecurring(mock.db, 1, { amount: 0 })
       ).rejects.toThrow(/Amount cannot be zero/);
     });
+
+    it("BUG-08: does not stamp 'Recurring' when memo is blank and preserves non-empty rule memo", async () => {
+      // 1. Regular transaction with empty memo
+      const blankRecurring = {
+        id: 80,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Landlord",
+        memo: "",
+        amount: -100000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [blankRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 801, memo: "" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...blankRecurring, nextDate: "2026-08-01" }]);
+
+      await postRecurringTransaction(mock.db, 80);
+      const blankInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(blankInsert?.values).toMatchObject({
+        memo: "",
+      });
+
+      // 2. Regular transaction with non-empty memo
+      mock.reset();
+      const namedRecurring = {
+        id: 81,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Landlord",
+        memo: "Monthly rent",
+        amount: -100000,
+        frequency: "monthly",
+        nextDate: "2026-07-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [namedRecurring]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 811, memo: "Monthly rent" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...namedRecurring, nextDate: "2026-08-01" }]);
+
+      await postRecurringTransaction(mock.db, 81);
+      const namedInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(namedInsert?.values).toMatchObject({
+        memo: "Monthly rent",
+      });
+    });
   });
 });
+
 
