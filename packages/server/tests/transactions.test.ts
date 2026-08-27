@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1972,6 +1972,163 @@ describe("transactions queries", () => {
         .from(schema.accounts)
         .where(eq(schema.accounts.id, acct2!.id));
       expect(finalAcct2?.balance).toBe(0);
+    });
+
+    describe("BUG-26: split status changes propagate atomically across parent and children", () => {
+      it("updateTransaction: cycling status on split parent propagates to all children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Split items",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { categoryId: cat2Id, amount: -2000, memo: "Household" },
+          ]
+        );
+
+        // Update parent status from 'c' to 'u'
+        await updateTransaction(db, split.parent.id, { status: "u" });
+
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(
+            or(
+              eq(schema.transactions.id, split.parent.id),
+              eq(schema.transactions.parentId, split.parent.id)
+            )
+          );
+
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("u");
+        }
+      });
+
+      it("updateTransaction: updating status on split child propagates to parent and sibling children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Split items",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { categoryId: cat2Id, amount: -2000, memo: "Household" },
+          ]
+        );
+
+        // Update child status from 'c' to 'u'
+        const child1 = split.children[0]!;
+        await updateTransaction(db, child1.id, { status: "u" });
+
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(
+            or(
+              eq(schema.transactions.id, split.parent.id),
+              eq(schema.transactions.parentId, split.parent.id)
+            )
+          );
+
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("u");
+        }
+      });
+
+      it("bulkUpdateTransactions: updating status on split parent propagates to children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Split items",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { categoryId: cat2Id, amount: -2000, memo: "Household" },
+          ]
+        );
+
+        await bulkUpdateTransactions(db, [split.parent.id], { status: "u" });
+
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(
+            or(
+              eq(schema.transactions.id, split.parent.id),
+              eq(schema.transactions.parentId, split.parent.id)
+            )
+          );
+
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("u");
+        }
+      });
+
+      it("bulkUpdateTransactions: updating status on split child propagates to parent and siblings", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Split items",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { categoryId: cat2Id, amount: -2000, memo: "Household" },
+          ]
+        );
+
+        await bulkUpdateTransactions(db, [split.children[1]!.id], { status: "u" });
+
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(
+            or(
+              eq(schema.transactions.id, split.parent.id),
+              eq(schema.transactions.parentId, split.parent.id)
+            )
+          );
+
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("u");
+        }
+      });
     });
 
     describe("Bug 2.3: transfers and split parents force categoryId to null", () => {

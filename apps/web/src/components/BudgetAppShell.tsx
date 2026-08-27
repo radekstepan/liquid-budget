@@ -40,6 +40,10 @@ export function BudgetAppShell({
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [syncingCount, setSyncingCount] = useState(0);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const reloadSeqRef = useRef(0);
+  const latestCompletedReloadSeqRef = useRef(0);
+  const mutationSeqRef = useRef(0);
+  const mutationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const addToast = useCallback((message: string, tone: ToastItem["tone"] = "info") => {
     const t = createToast(message, tone);
@@ -62,7 +66,16 @@ export function BudgetAppShell({
   }, []);
 
   const reload = useCallback(async () => {
+    const seq = ++reloadSeqRef.current;
+    const currentMutationSeq = mutationSeqRef.current;
     const json = await jsonReq<BudgetResponse>("/api/budget");
+
+    // Drop stale responses if a newer reload has completed or if a newer mutation started
+    if (seq <= latestCompletedReloadSeqRef.current || currentMutationSeq < mutationSeqRef.current) {
+      return;
+    }
+    latestCompletedReloadSeqRef.current = seq;
+
     const { autoPostedRecurringCount, ...budget } = json;
     setData(budget);
     if (autoPostedRecurringCount != null && autoPostedRecurringCount > 0) {
@@ -84,6 +97,7 @@ export function BudgetAppShell({
         skipReload?: boolean;
       }
     ): Promise<T> => {
+      mutationSeqRef.current++;
       let result: T;
       try {
         result = await action();
@@ -219,14 +233,25 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
+        const target = prev.transactions.find((x) => x.id === id);
+        const splitParentId =
+          target?.parentId ?? (prev.transactions.some((x) => x.parentId === id) ? id : null);
+
         const transactions = prev.transactions.map((x) => {
-          if (x.id !== id && x.parentId !== id) return x;
-          if (x.parentId === id) {
+          const isTarget = x.id === id;
+          const isSplitMember =
+            splitParentId != null && (x.id === splitParentId || x.parentId === splitParentId);
+
+          if (!isTarget && !isSplitMember) return x;
+
+          if (!isTarget && isSplitMember) {
             return {
               ...x,
               ...(t.date !== undefined ? { date: t.date } : {}),
+              ...(t.status !== undefined ? { status: t.status } : {}),
             };
           }
+
           return {
             ...x,
             ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
@@ -332,12 +357,24 @@ export function BudgetAppShell({
         if (!prev) return prev;
         snapshot = prev;
         const idSet = new Set(ids);
+        const affectedSplitParentIds = new Set<number>();
+        for (const tx of prev.transactions) {
+          if (idSet.has(tx.id)) {
+            if (tx.parentId != null) affectedSplitParentIds.add(tx.parentId);
+            else if (prev.transactions.some((c) => c.parentId === tx.id)) affectedSplitParentIds.add(tx.id);
+          }
+        }
+
         const transactions = prev.transactions.map((x) => {
           if (!idSet.has(x.id)) {
-            if (x.parentId != null && idSet.has(x.parentId) && patch.date !== undefined) {
+            const isSplitMember =
+              (x.parentId != null && affectedSplitParentIds.has(x.parentId)) ||
+              affectedSplitParentIds.has(x.id);
+            if (isSplitMember) {
               return {
                 ...x,
-                date: patch.date,
+                ...(patch.date !== undefined ? { date: patch.date } : {}),
+                ...(patch.status !== undefined ? { status: patch.status } : {}),
               };
             }
             return x;

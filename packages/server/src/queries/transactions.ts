@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import type {
   BulkUpdateTransactionPatch,
   ClearedStatus,
@@ -777,6 +777,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         .where(eq(transactions.parentId, id));
     }
 
+    // If this row is a child of a split and status changed, propagate status to parent and siblings
+    if (existing.parentId != null && "status" in p && p.status != null) {
+      await db
+        .update(transactions)
+        .set({ status: p.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
+        .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
+    }
+
     // If this row is a child of a split, verify that the parent is still balanced
     if (existing.parentId != null) {
       const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
@@ -1389,6 +1397,20 @@ export async function bulkUpdateTransactions(
             .update(transactions)
             .set({ date: String(setFields.date) })
             .where(eq(transactions.parentId, id));
+        }
+
+        if (isSplitParent && "status" in setFields && setFields.status != null) {
+          await db
+            .update(transactions)
+            .set({ status: setFields.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
+            .where(eq(transactions.parentId, id));
+        }
+
+        if (existing.parentId != null && "status" in setFields && setFields.status != null) {
+          await db
+            .update(transactions)
+            .set({ status: setFields.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
+            .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
         }
       }
 
