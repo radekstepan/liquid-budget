@@ -5,6 +5,8 @@ import {
   getRenameRules,
   updateRenameRule,
 } from "@ynab/server";
+import { z } from "zod";
+import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
   RenameRuleCreateSchema,
@@ -14,12 +16,20 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return Response.json(getRenameRules(getDefaultDb()));
+  try {
+    return Response.json(getRenameRules(getDefaultDb()));
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
 }
 
 export async function POST(req: Request) {
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
   const parseResult = RenameRuleCreateSchema.safeParse(json);
   if (!parseResult.success) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -31,20 +41,18 @@ export async function POST(req: Request) {
       targetPayee: body.targetPayee,
     });
     return Response.json(row);
-  } catch (e: any) {
-    if (String(e?.message ?? e).includes("UNIQUE constraint failed")) {
-      return Response.json(
-        { error: "A rule with that source pattern and target already exists" },
-        { status: 409 }
-      );
-    }
-    throw e;
+  } catch (e) {
+    return apiErrorResponse(e);
   }
 }
 
 export async function PATCH(req: Request) {
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
   const parseResult = RenameRulePatchSchema.safeParse(json);
   if (!parseResult.success) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -57,21 +65,21 @@ export async function PATCH(req: Request) {
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);
-  } catch (e: any) {
-    if (String(e?.message ?? e).includes("UNIQUE constraint failed")) {
-      return Response.json(
-        { error: "A rule with that source pattern and target already exists" },
-        { status: 409 }
-      );
-    }
-    throw e;
+  } catch (e) {
+    return apiErrorResponse(e);
   }
 }
 
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
-  const id = Number(searchParams.get("id"));
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
-  const ok = deleteRenameRule(getDefaultDb(), id);
-  return Response.json({ ok });
+  const parsedId = z.coerce.number().int().positive().safeParse(searchParams.get("id"));
+  if (!parsedId.success) {
+    return Response.json({ error: "invalid id" }, { status: 400 });
+  }
+  try {
+    const ok = deleteRenameRule(getDefaultDb(), parsedId.data);
+    return Response.json({ ok });
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
 }

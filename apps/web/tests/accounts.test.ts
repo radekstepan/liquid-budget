@@ -59,6 +59,18 @@ describe("Account API routes", () => {
       const json = await res.json();
       expect(json.error).toContain("Cannot change account type");
     });
+
+    it("BUG-43: returns 404 when patching non-existent account", async () => {
+      const req = new NextRequest("http://localhost:3000/api/accounts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: 99999, name: "Ghost Account" }),
+      });
+      const res = await PATCH(req);
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error).toContain("Account not found");
+    });
   });
 
   describe("POST /api/accounts (BUG-15)", () => {

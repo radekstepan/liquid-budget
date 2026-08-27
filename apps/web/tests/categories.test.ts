@@ -167,4 +167,28 @@ describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
     expect(json.carryover).toBe(5000);
     expect(json.overspendCarriesOver).toBe(true);
   });
+
+  it("BUG-43: returns 404 when patching non-existent category", async () => {
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 99999, name: "Ghost Category" }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toContain("Category not found");
+  });
+
+  it("BUG-43: returns 404 when patching non-existent category group", async () => {
+    const req = new NextRequest("http://localhost:3000/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "group", id: 99999, name: "Ghost Group" }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toContain("Category group not found");
+  });
 });
