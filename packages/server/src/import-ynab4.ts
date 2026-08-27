@@ -341,7 +341,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         let payee = payeeMap.get(t.payeeId) || "";
         const isParentDeferred = t.categoryId === "Category/__DeferredIncome__";
         const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || isParentDeferred) && (t.amount || 0) > 0;
-        const parentIncomeMonth = isParentDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+        const parentIncomeMonth = isParentIncome
+          ? (t.incomeMonth || (isParentDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
+          : null;
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -403,7 +405,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 isChildDeferred ||
                 (subCatId === null && subTransferAccountId === null)) &&
               (st.amount || 0) > 0;
-            const childIncomeMonth = isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+            const childIncomeMonth = isChildIncome
+              ? (st.incomeMonth || (isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
+              : null;
 
             await db.insert(transactions).values({
               accountId: accId,
@@ -580,7 +584,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               accIsOnBudget &&
               (isSpecialIncomeCat || catId === null) &&
               (t.amount || 0) > 0;
-            const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+            const txIncomeMonth = isTxIncome
+              ? (t.incomeMonth || (isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
+              : null;
 
             const isTxReconciled = cleared === "Reconciled";
             const txRecId = isTxReconciled ? accountReconciliationIdMap.get(t.accountId) ?? null : null;
@@ -643,7 +649,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           const isTxIncome =
             (srcOnBudget && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
             (isCrossBoundaryTx && (catId === null || isSpecialIncomeCat) && netOnBudgetTx > 0);
-          const txIncomeMonth = isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null;
+          const txIncomeMonth = isTxIncome
+            ? (t.incomeMonth || (isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
+            : null;
 
           let flagColor: string | null = ynabFlagToColor(t.flag);
 
@@ -762,24 +770,36 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         catId = null;
       }
 
-      let frequency = (st.frequency || "monthly").toLowerCase();
-      if (frequency === "everyotherweek") frequency = "biweekly";
-      if (frequency === "everyotheryear") frequency = "every2years";
-      if (frequency === "never") frequency = "once";
+      let rawFreq = (st.frequency || "monthly").toLowerCase().replace(/[\s_-]+/g, "");
+      let frequency = rawFreq;
+      if (rawFreq === "everyotherweek" || rawFreq === "biweekly") frequency = "biweekly";
+      else if (rawFreq === "semimonthly" || rawFreq === "twiceamonth") frequency = "twiceamonth";
+      else if (rawFreq === "everyothermonth" || rawFreq === "bimonthly") frequency = "everyothermonth";
+      else if (rawFreq === "quarterly" || rawFreq === "every3months") frequency = "every3months";
+      else if (rawFreq === "semiannually" || rawFreq === "twiceayear") frequency = "twiceayear";
+      else if (rawFreq === "annually" || rawFreq === "yearly") frequency = "yearly";
+      else if (rawFreq === "everyotheryear" || rawFreq === "every2years") frequency = "every2years";
+      else if (rawFreq === "never" || rawFreq === "once") frequency = "never";
       const validFrequencies = [
         "daily",
         "weekly",
         "biweekly",
         "everyotherweek",
         "twiceamonth",
+        "semimonthly",
         "every4weeks",
         "monthly",
         "everyothermonth",
+        "bimonthly",
         "every3months",
+        "quarterly",
         "every4months",
         "twiceayear",
+        "semiannually",
         "yearly",
+        "annually",
         "every2years",
+        "everyotheryear",
         "once",
         "never",
       ];
@@ -787,17 +807,26 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         frequency = "monthly";
       }
 
+      const active = st.active !== undefined ? Boolean(st.active) : true;
+      const anchorDay = typeof st.anchorDay === "number"
+        ? st.anchorDay
+        : st.date
+        ? parseInt(st.date.slice(8, 10), 10)
+        : null;
+
       const [insertedR] = await db
         .insert(recurring)
         .values({
           accountId: accId,
           categoryId: catId,
           payee,
+          memo: st.memo || "",
+          flagColor: ynabFlagToColor(st.flag),
           amount: dollarsToCents(st.amount),
           frequency,
           nextDate: st.date,
-          anchorDay: parseInt(st.date.slice(8, 10), 10),
-          active: true,
+          anchorDay,
+          active,
           transferAccountId,
         })
         .returning();
