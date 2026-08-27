@@ -1,6 +1,6 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
-import { applyRenameRules, duplicateFingerprint } from "@ynab/logic";
+import { applyRenameRules, buildExistingImportFingerprints, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, categories, transactions } from "./schema.js";
@@ -22,6 +22,9 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
   if (!account) {
     throw new TransactionError("Account not found", 404);
   }
+  const allAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts);
+  const accountNameById = new Map(allAccounts.map((a) => [a.id, a.name]));
+
   const categoryRows = await db
     .select({ id: categories.id, name: categories.name })
     .from(categories);
@@ -35,10 +38,9 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
   // produces clean, consistent payee names.
   const renameRules = getRenameRules(db);
 
-  // Build a fingerprint set from existing plain regular transactions in
-  // this account so re-importing a statement never doubles the rows.
-  // Split parents, split children, and transfers are excluded (their
-  // amounts/payees are shared across legitimate rows).
+  // Build a fingerprint set from existing transactions in this account so
+  // re-importing a statement never doubles rows. Top-level plain transactions,
+  // split parents, and transfers are included.
   const existingTx = await db
     .select({
       id: transactions.id,
@@ -51,24 +53,18 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       transferAccountId: transactions.transferAccountId,
     })
     .from(transactions)
-    .where(eq(transactions.accountId, input.accountId));
-  const childIds = new Set<number>();
-  for (const t of existingTx) {
-    if (t.parentId != null) childIds.add(t.parentId);
-  }
-  const existingFingerprints = new Set<string>();
-  for (const t of existingTx) {
-    if (t.parentId != null || t.transferAccountId != null || childIds.has(t.id)) continue;
-    existingFingerprints.add(
-      duplicateFingerprint({
-        accountId: t.accountId,
-        date: t.date,
-        payee: t.payee,
-        memo: t.memo,
-        amount: t.amount,
-      })
+    .where(
+      or(
+        eq(transactions.accountId, input.accountId),
+        eq(transactions.transferAccountId, input.accountId)
+      )
     );
-  }
+
+  const existingFingerprints = buildExistingImportFingerprints(
+    input.accountId,
+    existingTx,
+    accountNameById
+  );
 
   return withTransaction(db, async () => {
     const created: number[] = [];
