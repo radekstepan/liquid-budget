@@ -50,19 +50,13 @@ export function bootstrapMigrationJournal(db: Db): BootstrapResult {
     return "noop";
   }
 
-  // 2. Does the `__drizzle_migrations` table exist yet? (migrate()
-  //    creates it on the fly, so we can't always rely on it being
-  //    there. If it's missing, `migrate()` will create it and we
-  //    can insert the bootstrap row after.)
-  const migTables = db.all<{ name: string }>(
-    sql`SELECT name FROM sqlite_master WHERE type='table' AND name='${sql.raw(
+  // 2. Ensure the `__drizzle_migrations` table exists so we can inspect
+  //    and populate it if necessary.
+  db.run(
+    sql`CREATE TABLE IF NOT EXISTS ${sql.raw(
       MIGRATIONS_TABLE
-    )}'`
+    )} (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)`
   );
-  if (migTables.length === 0) {
-    // Caller should call `migrate()` first, then call this again.
-    return "noop";
-  }
 
   // 3. Read every migration's hash from the journal. If any hash
   //    is already recorded, the DB has been migrated. Otherwise

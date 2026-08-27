@@ -42,7 +42,12 @@ try {
   }
 
   console.log("⟳  Applying migrations from " + MIGRATIONS_FOLDER + " …");
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  db.$client.pragma("foreign_keys = OFF");
+  try {
+    migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  } finally {
+    db.$client.pragma("foreign_keys = ON");
+  }
   console.log("✓  Migrations complete.");
 } catch (err) {
   console.error("✗  Migration failed:", err);

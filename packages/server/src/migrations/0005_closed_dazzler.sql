@@ -16,7 +16,6 @@ CREATE TABLE `__new_accounts` (
 INSERT INTO `__new_accounts`("id", "name", "kind", "group_label", "balance", "on_budget", "sort", "last_reconciled_at", "last_reconciled_balance", "archived") SELECT "id", "name", "kind", "group_label", "balance", "on_budget", "sort", "last_reconciled_at", "last_reconciled_balance", "archived" FROM `accounts`;--> statement-breakpoint
 DROP TABLE `accounts`;--> statement-breakpoint
 ALTER TABLE `__new_accounts` RENAME TO `accounts`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE TABLE `__new_recurring` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,
@@ -71,7 +70,7 @@ CREATE TABLE `__new_transactions` (
 	`reconciliation_id` integer,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE no action ON DELETE set null,
-	FOREIGN KEY (`parent_id`) REFERENCES `transactions`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`parent_id`) REFERENCES `__new_transactions`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`transfer_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "transactions_status_check" CHECK("__new_transactions"."status" IN ('u', 'c', 'r')),
 	CONSTRAINT "transactions_amount_check" CHECK("__new_transactions"."amount" != 0)
@@ -83,4 +82,5 @@ ALTER TABLE `__new_transactions` RENAME TO `transactions`;--> statement-breakpoi
 CREATE INDEX `transactions_account_date_idx` ON `transactions` (`account_id`,`date`);--> statement-breakpoint
 CREATE INDEX `transactions_date_idx` ON `transactions` (`date`);--> statement-breakpoint
 CREATE INDEX `transactions_parent_id_idx` ON `transactions` (`parent_id`);--> statement-breakpoint
-CREATE INDEX `transactions_reconciliation_id_idx` ON `transactions` (`reconciliation_id`);
+CREATE INDEX `transactions_reconciliation_id_idx` ON `transactions` (`reconciliation_id`);--> statement-breakpoint
+PRAGMA foreign_keys=ON;
