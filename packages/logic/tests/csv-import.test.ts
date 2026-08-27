@@ -116,6 +116,55 @@ describe("parseCsvImport", () => {
     expect(rows[0]!.memo).toBe("");
   });
 
+  it("maps Description to payee and retains Memo as memo when both exist (BUG-29)", () => {
+    const csv = [
+      "Date,Description,Memo,Amount",
+      "2026-08-01,Whole Foods,Weekly groceries,-5.00",
+    ].join("\n");
+    const { headerError, rows } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      date: "2026-08-01",
+      payee: "Whole Foods",
+      memo: "Weekly groceries",
+      amountCents: -500,
+      error: null,
+    });
+  });
+
+  it("maps Description to payee and Note to memo when both exist (BUG-29)", () => {
+    const csv = [
+      "Date,Description,Note,Amount",
+      "2026-08-01,Whole Foods,Weekly groceries,-5.00",
+    ].join("\n");
+    const { headerError, rows } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      payee: "Whole Foods",
+      memo: "Weekly groceries",
+      amountCents: -500,
+      error: null,
+    });
+  });
+
+  it("maps Payee to payee and prefers Memo over Description for memo when all three exist", () => {
+    const csv = [
+      "Date,Payee,Description,Memo,Amount",
+      "2026-08-01,Supermarket,POS 1234,Weekly groceries,-5.00",
+    ].join("\n");
+    const { headerError, rows } = parseCsvImport(csv);
+    expect(headerError).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      payee: "Supermarket",
+      memo: "Weekly groceries",
+      amountCents: -500,
+      error: null,
+    });
+  });
+
   it("parses a wider slice of the sample export", () => {
     const csv = [
       "Date,Payee,Category,Memo,Outflow,Inflow",
@@ -232,6 +281,24 @@ describe("parseCsvImport", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]!.date).toBe("2026-08-13");
     expect(rows[1]!.date).toBe("2026-08-05");
+  });
+
+  it("does not let calendar-invalid dates corrupt date format detection in parseCsvImport (BUG-30)", () => {
+    const csv = [
+      "Date,Payee,Amount",
+      "31/02/2026,Store Invalid,-10.00",
+      "08/13/2026,Store A,-20.00",
+      "08/05/2026,Store B,-30.00",
+    ].join("\n");
+    const { rows, detectedDateFormat } = parseCsvImport(csv);
+    expect(detectedDateFormat).toBe("mdy");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.error).toMatch(/Invalid date/);
+    expect(rows[0]!.date).toBeNull();
+    expect(rows[1]!.error).toBeNull();
+    expect(rows[1]!.date).toBe("2026-08-13");
+    expect(rows[2]!.error).toBeNull();
+    expect(rows[2]!.date).toBe("2026-08-05");
   });
 
   it("decides date convention once per file for DD/MM files without mixing conventions", () => {
@@ -456,6 +523,27 @@ describe("detectDateFormat", () => {
       ["Date", "Payee", "Amount"],
       ["01/02/2026", "Store", "-10.00"],
       ["2026-08-01", "Store", "-20.00"],
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
+  });
+
+  it("does not count calendar-invalid dates (e.g. 31/02/2026) towards date format voting (BUG-30)", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["31/02/2026", "Invalid", "-10.00"], // Feb 31 is invalid calendar date (should not vote for DMY)
+      ["03/15/2026", "Valid MDY", "-20.00"], // March 15 (votes for MDY)
+      ["01/02/2026", "Ambiguous", "-30.00"], // Ambiguous
+    ];
+    expect(detectDateFormat(rows, 0, 0)).toBe("mdy");
+  });
+
+  it("does not count calendar-invalid leap years or month boundaries towards date format voting (BUG-30)", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["29/02/2025", "Invalid non-leap Feb 29", "-10.00"], // Invalid, 0 votes
+      ["31/04/2026", "Invalid April 31", "-10.00"], // Invalid, 0 votes
+      ["31/06/2026", "Invalid June 31", "-10.00"], // Invalid, 0 votes
+      ["15/08/2026", "Valid DMY", "-20.00"], // 1 vote for DMY
     ];
     expect(detectDateFormat(rows, 0, 0)).toBe("dmy");
   });

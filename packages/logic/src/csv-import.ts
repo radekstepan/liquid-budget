@@ -133,21 +133,23 @@ export function detectDateFormat(
     const cells = rows[i];
     if (!cells || cells.every((c) => c.trim() === "")) continue;
     const raw = (cells[dateIdx] ?? "").trim();
+    if (!raw) continue;
+
     const mNum = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(raw);
     if (mNum) {
-      const n1 = Number(mNum[1]);
-      const n2 = Number(mNum[2]);
-      if (n1 > 12 && n2 <= 12) dmyVotes++;
-      else if (n2 > 12 && n1 <= 12) mdyVotes++;
+      const dmyValid = parseDate(raw, "dmy") != null;
+      const mdyValid = parseDate(raw, "mdy") != null;
+      if (dmyValid && !mdyValid) dmyVotes++;
+      else if (mdyValid && !dmyValid) mdyVotes++;
       continue;
     }
     const mTextMDY = /^([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+(\d{2,4})$/.exec(raw);
-    if (mTextMDY && parseMonthName(mTextMDY[1]!) != null) {
+    if (mTextMDY && parseDate(raw) != null) {
       mdyVotes++;
       continue;
     }
     const mTextDMY = /^(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{2,4})$/.exec(raw);
-    if (mTextDMY && parseMonthName(mTextDMY[2]!) != null) {
+    if (mTextDMY && parseDate(raw) != null) {
       dmyVotes++;
       continue;
     }
@@ -327,8 +329,9 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   }
   const header = rows[headerIdx]!.map((h) => normHeader(h));
   let dateIdx = -1;
-  let payeeIdx = -1;
-  let memoIdx = -1;
+  let payeeCandidate = -1;
+  let memoCandidate = -1;
+  let descCandidate = -1;
   let categoryIdx = -1;
   let outflowIdx = -1;
   let inflowIdx = -1;
@@ -336,8 +339,9 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   header.forEach((h, i) => {
     if (h.includes("type") || h.includes("method")) return;
     if (dateIdx < 0 && h.includes("date")) dateIdx = i;
-    else if (payeeIdx < 0 && h.includes("payee")) payeeIdx = i;
-    else if (memoIdx < 0 && (h.includes("memo") || h.includes("note") || h.includes("description"))) memoIdx = i;
+    else if (payeeCandidate < 0 && (h.includes("payee") || h.includes("merchant") || h.includes("vendor"))) payeeCandidate = i;
+    else if (memoCandidate < 0 && (h.includes("memo") || h.includes("note"))) memoCandidate = i;
+    else if (descCandidate < 0 && (h.includes("description") || h.includes("details") || h.includes("narrative"))) descCandidate = i;
     else if (categoryIdx < 0 && h.includes("categor")) categoryIdx = i;
     else if (amountIdx < 0 && (h === "amount" || h === "value")) amountIdx = i;
     else if (outflowIdx < 0 && /outflow|debit|withdrawal|expense|spent/.test(h)) outflowIdx = i;
@@ -345,9 +349,22 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
     else if (amountIdx < 0 && (h.includes("amount") || h.includes("value"))) amountIdx = i;
     else if (outflowIdx < 0 && /payment/.test(h)) outflowIdx = i;
   });
-  if (payeeIdx < 0 && memoIdx >= 0) {
-    payeeIdx = memoIdx;
-    memoIdx = -1;
+  let payeeIdx = -1;
+  let memoIdx = -1;
+  if (payeeCandidate >= 0) {
+    payeeIdx = payeeCandidate;
+    if (memoCandidate >= 0) {
+      memoIdx = memoCandidate;
+    } else if (descCandidate >= 0) {
+      memoIdx = descCandidate;
+    }
+  } else if (descCandidate >= 0) {
+    payeeIdx = descCandidate;
+    if (memoCandidate >= 0) {
+      memoIdx = memoCandidate;
+    }
+  } else if (memoCandidate >= 0) {
+    payeeIdx = memoCandidate;
   }
   let headerError: string | null = null;
   if (dateIdx < 0) headerError = "Could not find a Date column";
