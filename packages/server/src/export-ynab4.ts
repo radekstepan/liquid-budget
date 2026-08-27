@@ -31,8 +31,11 @@ function statusToCleared(status: string | null | undefined): string {
 
 function formatFrequency(freq: string | null | undefined): string {
   if (!freq) return "Monthly";
-  const f = freq.toLowerCase();
+  const f = freq.toLowerCase().replace(/[\s_-]+/g, "");
   switch (f) {
+    case "never":
+    case "once":
+      return "Never";
     case "daily":
       return "Daily";
     case "weekly":
@@ -41,25 +44,29 @@ function formatFrequency(freq: string | null | undefined): string {
     case "everyotherweek":
       return "EveryOtherWeek";
     case "twiceamonth":
+    case "semimonthly":
       return "TwiceAMonth";
     case "every4weeks":
       return "Every4Weeks";
     case "monthly":
       return "Monthly";
     case "everyothermonth":
+    case "bimonthly":
       return "EveryOtherMonth";
     case "every3months":
+    case "quarterly":
       return "Every3Months";
     case "every4months":
       return "Every4Months";
     case "twiceayear":
+    case "semiannually":
       return "TwiceAYear";
     case "yearly":
+    case "annually":
       return "Yearly";
     case "every2years":
+    case "everyotheryear":
       return "Every2Years";
-    case "once":
-      return "Once";
     default:
       return "Monthly";
   }
@@ -327,6 +334,7 @@ export async function exportYnab4(
           transferTransactionId: subTransferTxId,
           entityType: "subTransaction",
           entityVersion: `st-v-${ch.id}`,
+          incomeMonth: ch.incomeMonth || null,
         };
       });
 
@@ -344,6 +352,7 @@ export async function exportYnab4(
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}`,
+        incomeMonth: t.incomeMonth || null,
       });
     } else if (t.transferAccountId != null) {
       // Transfer Pair
@@ -407,6 +416,7 @@ export async function exportYnab4(
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}`,
+        incomeMonth: t.incomeMonth || null,
       });
     }
   }
@@ -475,7 +485,9 @@ export async function exportYnab4(
       flag: flagToName(r.flagColor),
       cleared: "Uncleared",
       accepted: true,
-      isTombstone: !r.active,
+      isTombstone: false,
+      active: Boolean(r.active),
+      anchorDay: r.anchorDay ?? null,
       entityType: "scheduledTransaction",
       entityVersion: `sched-v-${r.id}`,
       subTransactions,

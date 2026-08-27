@@ -124,6 +124,84 @@ describe("exportYnab4 & exportYnab4Zip", () => {
       });
     }
 
+    // Insert deferred income transactions (BUG-18):
+    // 1. Regular transaction dated June with income deferred to September (3 months out)
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: null,
+      date: "2026-06-15",
+      payee: "Quarterly Bonus",
+      memo: "Deferred 3 months",
+      amount: 75000,
+      status: "c",
+      isIncome: true,
+      incomeMonth: "2026-09",
+    });
+
+    // 2. Split transaction with a child deferred to October (BUG-18)
+    const [splitIncomeParent] = await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: null,
+      date: "2026-06-20",
+      payee: "Consulting LLC",
+      memo: "Split consulting payout",
+      amount: 50000,
+      status: "c",
+    }).returning();
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: null,
+      date: "2026-06-20",
+      payee: "Consulting LLC",
+      memo: "October portion",
+      amount: 30000,
+      status: "c",
+      parentId: splitIncomeParent!.id,
+      isIncome: true,
+      incomeMonth: "2026-10",
+    });
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      date: "2026-06-20",
+      payee: "Consulting LLC",
+      memo: "Reimbursed supplies",
+      amount: 20000,
+      status: "c",
+      parentId: splitIncomeParent!.id,
+    });
+
+    // Insert scheduled transactions (BUG-17):
+    // 1. Paused / inactive scheduled transaction with memo, flag, and 'never' frequency
+    await db1.insert(schema.recurring).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      payee: "Paused Subscription",
+      memo: "Gym pause for summer",
+      flagColor: "red",
+      amount: -4500,
+      frequency: "never",
+      nextDate: "2026-09-01",
+      anchorDay: 1,
+      active: false,
+    });
+
+    // 2. Active scheduled transaction with 'never' frequency, memo, and flag
+    await db1.insert(schema.recurring).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      payee: "One-Off Future Tax",
+      memo: "Estimated payment",
+      flagColor: "orange",
+      amount: -120000,
+      frequency: "never",
+      nextDate: "2026-09-15",
+      anchorDay: 15,
+      active: true,
+    });
+
     await recomputeAccountBalances(db1);
 
     const initialData1 = await getBudgetData(db1);
@@ -168,5 +246,105 @@ describe("exportYnab4 & exportYnab4Zip", () => {
 
     const rChildren = data2.transactions.filter((t) => t.parentId === rParent!.id);
     expect(rChildren.length).toBe(accSavings ? 2 : 1);
+
+    // 5. Deferred income preservation (BUG-18)
+    const rDeferredTx = data2.transactions.find((t) => t.payee === "Quarterly Bonus");
+    expect(rDeferredTx).toBeDefined();
+    expect(rDeferredTx!.isIncome).toBe(true);
+    expect(rDeferredTx!.date).toBe("2026-06-15");
+    expect(rDeferredTx!.incomeMonth).toBe("2026-09");
+    expect(Number(rDeferredTx!.amount)).toBe(75000);
+    expect(rDeferredTx!.memo).toBe("Deferred 3 months");
+
+    const rSplitChildDeferred = data2.transactions.find((t) => t.memo === "October portion");
+    expect(rSplitChildDeferred).toBeDefined();
+    expect(rSplitChildDeferred!.isIncome).toBe(true);
+    expect(rSplitChildDeferred!.incomeMonth).toBe("2026-10");
+    expect(Number(rSplitChildDeferred!.amount)).toBe(30000);
+
+    // 6. Scheduled transaction metadata & inactive state preservation (BUG-17)
+    const rPausedSched = data2.recurring.find((r) => r.payee === "Paused Subscription");
+    expect(rPausedSched).toBeDefined();
+    expect(rPausedSched!.active).toBe(false);
+    expect(rPausedSched!.memo).toBe("Gym pause for summer");
+    expect(rPausedSched!.flagColor).toBe("red");
+    expect(rPausedSched!.frequency).toBe("never");
+    expect(rPausedSched!.nextDate).toBe("2026-09-01");
+    expect(rPausedSched!.anchorDay).toBe(1);
+    expect(Number(rPausedSched!.amount)).toBe(-4500);
+
+    const rActiveOneOff = data2.recurring.find((r) => r.payee === "One-Off Future Tax");
+    expect(rActiveOneOff).toBeDefined();
+    expect(rActiveOneOff!.active).toBe(true);
+    expect(rActiveOneOff!.memo).toBe("Estimated payment");
+    expect(rActiveOneOff!.flagColor).toBe("orange");
+    expect(rActiveOneOff!.frequency).toBe("never");
+    expect(rActiveOneOff!.nextDate).toBe("2026-09-15");
+    expect(rActiveOneOff!.anchorDay).toBe(15);
+    expect(Number(rActiveOneOff!.amount)).toBe(-120000);
+  });
+
+  it("exports scheduled transaction fields with correct format and metadata (BUG-17)", async () => {
+    const db = openMigratedDb();
+    const [acc] = await db.insert(schema.accounts).values({
+      name: "Checking",
+      kind: "liquid",
+      groupLabel: "Cash",
+      balance: 100000,
+    }).returning();
+
+    await db.insert(schema.recurring).values({
+      accountId: acc!.id,
+      payee: "One-Off Electrician",
+      memo: "Fix breaker panel",
+      flagColor: "purple",
+      amount: -15000,
+      frequency: "never",
+      nextDate: "2026-09-20",
+      anchorDay: 20,
+      active: false,
+    });
+
+    const { ynabData } = await exportYnab4(db);
+    expect(ynabData.scheduledTransactions).toHaveLength(1);
+    const sched = ynabData.scheduledTransactions[0];
+    expect(sched.frequency).toBe("Never");
+    expect(sched.memo).toBe("Fix breaker panel");
+    expect(sched.flag).toBe("Purple");
+    expect(sched.isTombstone).toBe(false);
+    expect(sched.active).toBe(false);
+    expect(sched.anchorDay).toBe(20);
+    expect(sched.amount).toBe(-150);
+  });
+
+  it("falls back to next month for legacy YNAB4 backups missing incomeMonth (BUG-18)", async () => {
+    const db = openMigratedDb();
+    const legacyYnabData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Checking", accountType: "Checking", onBudget: true },
+      ],
+      payees: [],
+      masterCategories: [],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+      transactions: [
+        {
+          entityId: "t-legacy",
+          accountId: "acc1",
+          date: "2026-06-15",
+          amount: 500,
+          cleared: "Cleared",
+          categoryId: "Category/__DeferredIncome__",
+          memo: "Legacy deferred income without incomeMonth property",
+        },
+      ],
+    };
+
+    await importYnab4(db, legacyYnabData);
+    const budget = await getBudgetData(db);
+    expect(budget.transactions).toHaveLength(1);
+    const t = budget.transactions[0]!;
+    expect(t.isIncome).toBe(true);
+    expect(t.incomeMonth).toBe("2026-07"); // Reconstructed as nextMonthKey(2026-06)
   });
 });

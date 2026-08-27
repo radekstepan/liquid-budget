@@ -325,14 +325,14 @@ describe("importYnab4 full import", () => {
     expect(Number(splitR.subTransactions[1]!.amount)).toBe(-10000);
     expect(splitR.subTransactions[1]!.transferAccountId).toBeTruthy();
 
-    // EveryOtherYear maps to every2years, Never maps to once
+    // EveryOtherYear maps to every2years, Never maps to never
     const biennial = recurring.find((r) => Number(r.amount) === -50000);
     expect(biennial).toBeTruthy();
     expect(biennial!.frequency).toBe("every2years");
 
     const oneOff = recurring.find((r) => Number(r.amount) === -60000);
     expect(oneOff).toBeTruthy();
-    expect(oneOff!.frequency).toBe("once");
+    expect(oneOff!.frequency).toBe("never");
   });
 
   it("orients liquidation transfers (off-budget→on-budget) to the on-budget account as source", async () => {
