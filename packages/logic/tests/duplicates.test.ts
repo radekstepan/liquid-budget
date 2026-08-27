@@ -235,4 +235,36 @@ describe("buildExistingImportFingerprints and identifyImportDuplicates (BUG-21, 
     const result = identifyImportDuplicates(1, fps, incoming);
     expect(result.duplicateRowNumbers.has(2)).toBe(true);
   });
+
+  it("permits multiple identical legitimate rows in the same CSV batch and matches existing occurrences 1-to-1 (BUG-35)", () => {
+    const existing = [
+      { id: 1, accountId: 1, date: "2026-08-10", payee: "Transit", memo: "", amount: -250 },
+    ];
+
+    const fps = buildExistingImportFingerprints(1, existing);
+
+    const incoming = [
+      { rowNumber: 2, date: "2026-08-10", payee: "Transit", memo: "", amountCents: -250 },
+      { rowNumber: 3, date: "2026-08-10", payee: "Transit", memo: "", amountCents: -250 },
+    ];
+
+    const result = identifyImportDuplicates(1, fps, incoming);
+    // Row 2 matches the 1 existing transaction in DB
+    expect(result.duplicateRowNumbers.has(2)).toBe(true);
+    // Row 3 is a legitimate 2nd transit charge in the batch and is NOT marked as duplicate
+    expect(result.duplicateRowNumbers.has(3)).toBe(false);
+  });
+
+  it("does not flag identical rows in a batch as duplicates when no existing ledger transaction matches (BUG-35)", () => {
+    const fps = buildExistingImportFingerprints(1, []);
+
+    const incoming = [
+      { rowNumber: 2, date: "2026-08-10", payee: "Vending", memo: "", amountCents: -175 },
+      { rowNumber: 3, date: "2026-08-10", payee: "Vending", memo: "", amountCents: -175 },
+    ];
+
+    const result = identifyImportDuplicates(1, fps, incoming);
+    expect(result.duplicateRowNumbers.size).toBe(0);
+    expect(result.duplicates).toHaveLength(0);
+  });
 });

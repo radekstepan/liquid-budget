@@ -341,7 +341,7 @@ export function computeMonthlyInsights(
   for (const [catId, currentSpend] of currentSpendByCat.entries()) {
     const mMap = priorSpendByCatMonth.get(catId);
     if (mMap && mMap.size > 0) {
-      const divisor = Math.max(1, mMap.size);
+      const divisor = priorMonths.size;
       const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
       const avg3mo = Math.round(totalPriorSpend / divisor);
       if (avg3mo > 0) {
@@ -593,7 +593,7 @@ export function computeSpendingTrends(
       name: c.name,
       total: c.total,
       avgPerMonth: Math.round(c.total / numMonths),
-      pctOfTotal: overallTotal !== 0 ? Math.round((c.total / overallTotal) * 100) : 0,
+      pctOfTotal: overallTotal > 0 ? Math.round((c.total / overallTotal) * 100) : 0,
     }))
     .sort((a, b) => b.total - a.total);
 

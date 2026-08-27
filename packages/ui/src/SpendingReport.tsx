@@ -24,7 +24,7 @@ export function SpendingReport({
   const rows = useMemo(() => {
     const maxSpend = spending.reduce((m, s) => Math.max(m, s.value), 1);
     return spending.map((s, i) => {
-      const share = total ? s.value / total : 0;
+      const share = total !== 0 ? s.value / total : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
       const color = colorAt(i);

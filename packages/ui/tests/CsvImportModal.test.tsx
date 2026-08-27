@@ -144,15 +144,36 @@ describe("CsvImportModal", () => {
     expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
   });
 
-  it("marks duplicate rows within the same file", async () => {
+  it("allows multiple identical legitimate rows in the same file and marks only those matching existing transactions (BUG-35)", async () => {
     const dupCsv = [
       "Date,Payee,Outflow",
       "13/08/2026,UBER TRIP,18.63",
       "13/08/2026,UBER TRIP,18.63",
       "13/08/2026,WAL-MART,101.76",
     ].join("\n");
-    await renderModal(dupCsv);
 
+    // 1. Initial import: both identical UBER trips are legitimate and importable
+    await renderModal(dupCsv);
+    expect(screen.getByText(/3 importable · 0 skipped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^import 3 transactions$/i })).toBeEnabled();
+
+    // 2. When one UBER trip already exists in the database: 1 duplicate matches existing and 2 rows are importable
+    const existing: Transaction[] = [
+      {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "UBER TRIP",
+        memo: "",
+        amount: "-1863",
+        status: "c",
+        flagColor: null,
+        parentId: null,
+        transferAccountId: null,
+      },
+    ];
+    await renderModal(dupCsv, vi.fn().mockResolvedValue(undefined), existing);
     expect(screen.getByText("1 row(s) are duplicates and will be skipped")).toBeInTheDocument();
     expect(screen.getByText(/2 importable · 1 skipped/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^import 2 transactions$/i })).toBeEnabled();
