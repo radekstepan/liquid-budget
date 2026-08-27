@@ -125,7 +125,7 @@ describe("importCsvTransactions", () => {
     );
   });
 
-  it("marks positive uncategorized on-budget rows as income", async () => {
+  it("marks positive uncategorized on-budget rows as income for liquid accounts", async () => {
     const accountId = await seedAccount();
     await importCsvTransactions(db, {
       accountId,
@@ -133,6 +133,33 @@ describe("importCsvTransactions", () => {
     });
     const data = await getBudgetData(db);
     expect(data.transactions[0]!.isIncome).toBe(true);
+  });
+
+  it("does not mark positive uncategorized rows on credit card accounts as income (BUG-05)", async () => {
+    const [ccAccount] = await db
+      .insert(schema.accounts)
+      .values({
+        name: "Visa Credit Card",
+        kind: "credit",
+        groupLabel: "Credit Cards",
+        balance: -50000,
+        onBudget: true,
+        sort: 1,
+      })
+      .returning();
+    const accountId = ccAccount!.id;
+
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Merchant Refund", amountCents: 2000 }),
+      ],
+    });
+    const data = await getBudgetData(db);
+    const refundTx = data.transactions.find((t) => t.payee === "Merchant Refund");
+    expect(refundTx).toBeDefined();
+    expect(refundTx!.amount).toBe("2000");
+    expect(refundTx!.isIncome).toBe(false);
   });
 
   it("does not mark positive categorized rows as income", async () => {

@@ -3791,5 +3791,83 @@ describe("transactions queries", () => {
           .run();
       }).toThrow(/CHECK constraint failed: transactions_amount_check/);
     });
+
+    describe("BUG-06: editing split children categories and fields without invalid balance failures", () => {
+      it("allows single updateTransaction on split child to set categoryId: null", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Costco",
+            memo: "Groceries & Household",
+            amount: -10000,
+          },
+          [
+            { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+            { categoryId: cat2Id, amount: -4000, memo: "household" },
+          ]
+        );
+
+        const child1 = split.children[0]!;
+        const updated = await updateTransaction(db, child1.id, { categoryId: null });
+        expect(updated).toBeDefined();
+        expect(updated!.categoryId).toBeNull();
+      });
+
+      it("allows bulkUpdateTransactions on split children to set categoryId: null", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Costco",
+            memo: "Groceries & Household",
+            amount: -10000,
+          },
+          [
+            { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+            { categoryId: cat2Id, amount: -4000, memo: "household" },
+          ]
+        );
+
+        const childIds = split.children.map((c) => c.id);
+        const updated = await bulkUpdateTransactions(db, childIds, { categoryId: null });
+        expect(updated).toHaveLength(2);
+        expect(updated.every((c) => c.categoryId === null)).toBe(true);
+      });
+
+      it("allows bulkUpdateTransactions on split children to update date and status without balance validation failure", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Costco",
+            memo: "Groceries & Household",
+            amount: -10000,
+          },
+          [
+            { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+            { categoryId: cat2Id, amount: -4000, memo: "household" },
+          ]
+        );
+
+        const child1 = split.children[0]!;
+        const updated = await bulkUpdateTransactions(db, [child1.id], { status: "u", date: "2026-08-05" });
+        expect(updated).toHaveLength(1);
+        expect(updated[0]!.status).toBe("u");
+        expect(updated[0]!.date).toBe("2026-08-05");
+      });
+    });
   });
 });
