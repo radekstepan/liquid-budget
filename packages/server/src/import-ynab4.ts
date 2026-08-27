@@ -22,13 +22,23 @@ export interface ExtractedYnab4Data {
   settings?: Ynab4Settings;
 }
 
+function unescapeXml(str: string | null | undefined): string {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
 export function parseYnab4SettingsXml(xmlStr?: string): Ynab4Settings {
   const settings: Ynab4Settings = {};
   if (!xmlStr) return settings;
 
   const matchTag = (tag: string) => {
     const match = xmlStr.match(new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`, "i"));
-    return match ? match[1]?.trim() : undefined;
+    return match ? unescapeXml(match[1]?.trim()) : undefined;
   };
 
   settings.currencySymbol = matchTag("currencySymbol");
@@ -422,6 +432,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                   : t.cleared === "Uncleared"
                     ? "u"
                     : "c",
+              flagColor: ynabFlagToColor(st.flag),
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
               isIncome: isChildIncome,

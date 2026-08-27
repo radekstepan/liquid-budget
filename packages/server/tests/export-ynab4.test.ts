@@ -107,6 +107,7 @@ describe("exportYnab4 & exportYnab4Zip", () => {
       memo: "Materials",
       amount: -5000,
       status: "c",
+      flagColor: "red",
       parentId: parentTx!.id,
     });
 
@@ -120,6 +121,7 @@ describe("exportYnab4 & exportYnab4Zip", () => {
         memo: "Transfer part",
         amount: -15000,
         status: "c",
+        flagColor: "green",
         parentId: parentTx!.id,
       });
     }
@@ -246,6 +248,14 @@ describe("exportYnab4 & exportYnab4Zip", () => {
 
     const rChildren = data2.transactions.filter((t) => t.parentId === rParent!.id);
     expect(rChildren.length).toBe(accSavings ? 2 : 1);
+    const rChild1 = rChildren.find((t) => t.memo === "Materials");
+    expect(rChild1).toBeDefined();
+    expect(rChild1!.flagColor).toBe("red");
+    if (accSavings) {
+      const rChildTransfer = rChildren.find((t) => t.memo === "Transfer part");
+      expect(rChildTransfer).toBeDefined();
+      expect(rChildTransfer!.flagColor).toBe("green");
+    }
 
     // 5. Deferred income preservation (BUG-18)
     const rDeferredTx = data2.transactions.find((t) => t.payee === "Quarterly Bonus");
@@ -346,5 +356,27 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     const t = budget.transactions[0]!;
     expect(t.isIncome).toBe(true);
     expect(t.incomeMonth).toBe("2026-07"); // Reconstructed as nextMonthKey(2026-06)
+  });
+
+  it("escapes special characters in XML and unescapes them properly on import (BUG-49)", async () => {
+    const db = openMigratedDb();
+    const specialBudgetName = `A & B < C > "D" 'E'`;
+    const { settingsXml } = await exportYnab4(db, {
+      budgetName: specialBudgetName,
+      currencySymbol: "£ & €",
+    });
+
+    // Check XML string contains escaped entities
+    expect(settingsXml).toContain("<budgetName>A &amp; B &lt; C &gt; &quot;D&quot; &apos;E&apos;</budgetName>");
+    expect(settingsXml).toContain("<currencySymbol>£ &amp; €</currencySymbol>");
+
+    // Check round-trip zip export/import preserves original values without entity corruption
+    const zipBuf = await exportYnab4Zip(db, {
+      budgetName: specialBudgetName,
+      currencySymbol: "£ & €",
+    });
+    const extracted = extractYnab4DataFromZip(zipBuf);
+    expect(extracted.settings?.budgetName).toBe(specialBudgetName);
+    expect(extracted.settings?.currencySymbol).toBe("£ & €");
   });
 });

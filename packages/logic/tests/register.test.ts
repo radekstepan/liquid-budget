@@ -210,4 +210,34 @@ describe("computeRunningBalances", () => {
     expect(byId(out, olderRow.id).runningBalance).toBe(95000);
     expect(byId(out, olderAcc2.id).runningBalance).toBe(20000);
   });
+
+  it("correctly computes running balance for multiple transfers in All Transactions (BUG-47)", () => {
+    // Acc 1: starts at 100000, Acc 2: starts at 50000
+    // Tx 1: June 30 Transfer -$200 from Acc 1 to Acc 2.
+    // Tx 2: June 25 Transfer -$100 from Acc 2 to Acc 1.
+    // Tx 3: June 20 Regular expense -$50 on Acc 1.
+    // Tx 4: June 15 Regular income +$300 on Acc 2.
+    //
+    // Balances after all txs:
+    // Acc 1: 100000 (after Tx 1: 100000; before Tx 1 / after Tx 2: 120000; before Tx 2 / after Tx 3: 110000; before Tx 3: 115000)
+    // Acc 2: 50000 (after Tx 1: 50000; before Tx 1 / after Tx 2: 30000; before Tx 2 / after Tx 4: 40000; before Tx 4: 10000)
+
+    const tx1 = t({ accountId: 1, transferAccountId: 2, date: "2026-06-30", amount: -20000 });
+    const tx2 = t({ accountId: 2, transferAccountId: 1, date: "2026-06-25", amount: -10000 });
+    const tx3 = t({ accountId: 1, date: "2026-06-20", amount: -5000 });
+    const tx4 = t({ accountId: 2, date: "2026-06-15", amount: 30000 });
+
+    const balances = new Map([
+      [1, 100000],
+      [2, 50000],
+    ]);
+
+    const out = computeRunningBalances([tx1, tx2, tx3, tx4], balances);
+
+    // In All Transactions, each row's runningBalance reflects its owning accountId
+    expect(byId(out, tx1.id).runningBalance).toBe(100000); // Acc 1 balance after tx1
+    expect(byId(out, tx2.id).runningBalance).toBe(30000);  // Acc 2 balance after tx2
+    expect(byId(out, tx3.id).runningBalance).toBe(110000); // Acc 1 balance after tx3
+    expect(byId(out, tx4.id).runningBalance).toBe(40000);  // Acc 2 balance after tx4
+  });
 });

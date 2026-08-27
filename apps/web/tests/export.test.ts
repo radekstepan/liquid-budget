@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { extractYnab4DataFromZip, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
+import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 import { GET } from "../src/app/api/export/route";
+import { POST as importPOST } from "../src/app/api/import/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
@@ -76,6 +77,42 @@ describe("GET /api/export", () => {
     expect(res.headers.get("Content-Type")).toContain("application/x-sqlite3");
     const arrayBuf = await res.arrayBuffer();
     expect(arrayBuf.byteLength).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/import", () => {
+  beforeEach(async () => {
+    const db = getDefaultDb();
+    await resetAndSeedDatabase(db);
+  }, 20000);
+
+  it("extracts and passes settingsXml, returning parsed settings in summary (BUG-49)", async () => {
+    const db = getDefaultDb();
+    const zipBuffer = await exportYnab4Zip(db, {
+      budgetName: "My Custom & Saved Budget",
+      currencySymbol: "£",
+    });
+
+    const file = new File([new Uint8Array(zipBuffer)], "budget.y4backup", {
+      type: "application/octet-stream",
+    });
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const req = new NextRequest("http://localhost:3000/api/import", {
+      method: "POST",
+      body: formData,
+    });
+
+    const res = await importPOST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.summary).toBeDefined();
+    expect(json.summary.settings).toBeDefined();
+    expect(json.summary.settings.budgetName).toBe("My Custom & Saved Budget");
+    expect(json.summary.settings.currencySymbol).toBe("£");
   });
 });
 
