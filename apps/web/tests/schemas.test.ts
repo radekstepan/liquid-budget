@@ -134,11 +134,38 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       };
       expect(AccountCreateSchema.safeParse(valid).success).toBe(true);
       expect(AccountCreateSchema.safeParse({ ...valid, kind: "invalid_kind" }).success).toBe(false);
+
+      // Rejects contradictory kind and onBudget
+      expect(AccountCreateSchema.safeParse({ ...valid, kind: "offbudget", onBudget: true }).success).toBe(false);
+      expect(AccountCreateSchema.safeParse({ ...valid, kind: "liquid", onBudget: false }).success).toBe(false);
+      expect(AccountCreateSchema.safeParse({ ...valid, kind: "credit", onBudget: false }).success).toBe(false);
+
+      // Defaults onBudget for offbudget
+      const offbudgetResult = AccountCreateSchema.safeParse({
+        name: "Investment",
+        kind: "offbudget",
+        groupLabel: "Off Budget",
+      });
+      expect(offbudgetResult.success).toBe(true);
+      if (offbudgetResult.success) {
+        expect(offbudgetResult.data.onBudget).toBe(false);
+      }
     });
 
     it("validates account patch", () => {
       expect(AccountPatchSchema.safeParse({ id: 1, name: "New Name" }).success).toBe(true);
       expect(AccountPatchSchema.safeParse({ name: "No ID" }).success).toBe(false);
+
+      // Rejects contradictory kind and onBudget in patch
+      expect(
+        AccountPatchSchema.safeParse({ id: 1, kind: "offbudget", onBudget: true }).success
+      ).toBe(false);
+      expect(
+        AccountPatchSchema.safeParse({ id: 1, kind: "liquid", onBudget: false }).success
+      ).toBe(false);
+      expect(
+        AccountPatchSchema.safeParse({ id: 1, kind: "offbudget", onBudget: false }).success
+      ).toBe(true);
     });
   });
 

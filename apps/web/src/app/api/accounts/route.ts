@@ -29,15 +29,22 @@ export async function POST(req: Request) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
   const body = parseResult.data;
-  const row = await createAccount(getDefaultDb(), {
-    name: body.name,
-    kind: body.kind,
-    groupLabel: body.groupLabel,
-    balance: body.balance,
-    onBudget: body.onBudget,
-    archived: body.archived,
-  });
-  return Response.json(row);
+  try {
+    const row = await createAccount(getDefaultDb(), {
+      name: body.name,
+      kind: body.kind,
+      groupLabel: body.groupLabel,
+      balance: body.balance,
+      onBudget: body.onBudget,
+      archived: body.archived,
+    });
+    return Response.json(row);
+  } catch (e: any) {
+    if (e instanceof AccountError || e instanceof TransactionError) {
+      return Response.json({ error: e.message }, { status: e.status });
+    }
+    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: Request) {
@@ -56,8 +63,15 @@ export async function PATCH(req: Request) {
   if (body.sort !== undefined) patch.sort = body.sort;
   if (body.archived !== undefined) patch.archived = body.archived;
 
-  const row = await updateAccount(getDefaultDb(), body.id, patch);
-  return Response.json(row);
+  try {
+    const row = await updateAccount(getDefaultDb(), body.id, patch);
+    return Response.json(row);
+  } catch (e: any) {
+    if (e instanceof AccountError || e instanceof TransactionError) {
+      return Response.json({ error: e.message }, { status: e.status });
+    }
+    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: Request) {

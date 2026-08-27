@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
@@ -32,7 +32,16 @@ export type UpdateAccountInput = {
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
   const balance = input.balance != null ? assertValidAmount(input.balance) : 0;
-  const onBudget = input.onBudget ?? true;
+  const kind = String(input.kind ?? "liquid");
+  const onBudget = input.onBudget !== undefined ? Boolean(input.onBudget) : kind !== "offbudget";
+
+  if (kind === "offbudget" && onBudget === true) {
+    throw new AccountError("Off-budget accounts cannot have onBudget set to true", 400);
+  }
+  if (kind !== "offbudget" && onBudget === false) {
+    throw new AccountError("Liquid/credit accounts cannot have onBudget set to false", 400);
+  }
+
   return withTransaction(db, async () => {
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${accounts.sort}), -1)` })
@@ -41,7 +50,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
       .insert(accounts)
       .values({
         name: String(input.name),
-        kind: String(input.kind ?? "liquid"),
+        kind,
         groupLabel: String(input.groupLabel ?? "Liquid"),
         balance,
         onBudget,
@@ -80,17 +89,71 @@ export async function getAccount(db: Database, id: number) {
 export async function updateAccount(db: Database, id: number, patch: UpdateAccountInput) {
   const p: Record<string, unknown> = {};
   if (patch.name !== undefined && patch.name != null) p.name = String(patch.name);
-  if (patch.kind !== undefined && patch.kind != null) p.kind = String(patch.kind);
   if (patch.groupLabel !== undefined && patch.groupLabel != null) p.groupLabel = String(patch.groupLabel);
-  if (patch.onBudget !== undefined && patch.onBudget != null) p.onBudget = !!patch.onBudget;
   if (patch.sort !== undefined && patch.sort != null) p.sort = Number(patch.sort);
   if (patch.archived !== undefined && patch.archived != null) p.archived = !!patch.archived;
-  if (Object.keys(p).length === 0) {
-    const [row] = await db.select().from(accounts).where(eq(accounts.id, id));
+
+  const touchesTypeOrBoundary = patch.kind !== undefined || patch.onBudget !== undefined;
+
+  return withTransaction(db, async () => {
+    if (touchesTypeOrBoundary) {
+      const [existing] = await db.select().from(accounts).where(eq(accounts.id, id));
+      if (!existing) {
+        throw new AccountError(`Account ${id} not found`, 404);
+      }
+
+      const nextKind = patch.kind !== undefined && patch.kind !== null ? String(patch.kind) : existing.kind;
+      const nextOnBudget =
+        patch.onBudget !== undefined && patch.onBudget !== null
+          ? Boolean(patch.onBudget)
+          : patch.kind !== undefined && patch.kind !== null
+          ? nextKind !== "offbudget"
+          : Boolean(existing.onBudget);
+
+      const isKindChanging = nextKind !== existing.kind;
+      const isOnBudgetChanging = nextOnBudget !== Boolean(existing.onBudget);
+
+      if (isKindChanging || isOnBudgetChanging) {
+        const [tx] = await db
+          .select({ id: transactions.id })
+          .from(transactions)
+          .where(
+            or(
+              eq(transactions.accountId, id),
+              eq(transactions.transferAccountId, id)
+            )
+          )
+          .limit(1);
+
+        if (tx) {
+          throw new AccountError(
+            "Cannot change account type or budget participation when transactions exist",
+            422
+          );
+        }
+
+        if (nextKind === "offbudget" && nextOnBudget === true) {
+          throw new AccountError("Off-budget accounts cannot have onBudget set to true", 400);
+        }
+        if (nextKind !== "offbudget" && nextOnBudget === false) {
+          throw new AccountError("Liquid/credit accounts cannot have onBudget set to false", 400);
+        }
+
+        p.kind = nextKind;
+        p.onBudget = nextOnBudget;
+      } else {
+        if (patch.kind !== undefined && patch.kind !== null) p.kind = nextKind;
+        if (patch.onBudget !== undefined && patch.onBudget !== null) p.onBudget = nextOnBudget;
+      }
+    }
+
+    if (Object.keys(p).length === 0) {
+      const [row] = await db.select().from(accounts).where(eq(accounts.id, id));
+      return row;
+    }
+    const [row] = await db.update(accounts).set(p).where(eq(accounts.id, id)).returning();
     return row;
-  }
-  const [row] = await db.update(accounts).set(p).where(eq(accounts.id, id)).returning();
-  return row;
+  });
 }
 
 /**

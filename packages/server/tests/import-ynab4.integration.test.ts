@@ -28,6 +28,7 @@ import { fileURLToPath } from "url";
 import { importYnab4 } from "../src/import-ynab4.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import { postRecurringTransaction, updateRecurring } from "../src/queries/recurring.js";
+import { unreconcileAccount } from "../src/queries/reconcile.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -806,5 +807,107 @@ describe("importYnab4 full import", () => {
     const updatedSavings = budget.accounts.find((a) => a.id === savings.id)!;
     expect(Number(updatedChecking.balance)).toBe(260000);
     expect(Number(updatedSavings.balance)).toBe(25000);
+  });
+
+  it("BUG-14: imports real reconciliations row, links transactions to reconciliationId, and unreconcile reliably unlocks all rows", async () => {
+    const importData = {
+      accounts: [
+        {
+          entityId: "acc_rec",
+          accountName: "Reconciled Chequing",
+          accountType: "Checking",
+          onBudget: true,
+          lastReconciledDate: "2026-05-15",
+          lastReconciledBalance: 500, // $500.00 = 50000 cents
+        },
+      ],
+      payees: [
+        { entityId: "p1", name: "Store A" },
+        { entityId: "p2", name: "Store B" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Daily",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Food" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "tx_r1",
+          accountId: "acc_rec",
+          date: "2026-04-10",
+          amount: 200,
+          cleared: "Reconciled",
+          payeeId: "p1",
+          categoryId: "sc1",
+        },
+        {
+          entityId: "tx_r2",
+          accountId: "acc_rec",
+          date: "2026-05-01",
+          amount: 300,
+          cleared: "Reconciled",
+          payeeId: "p2",
+          categoryId: "sc1",
+        },
+        {
+          entityId: "tx_u1",
+          accountId: "acc_rec",
+          date: "2026-05-20",
+          amount: -50,
+          cleared: "Uncleared",
+          payeeId: "p1",
+          categoryId: "sc1",
+        },
+      ],
+    };
+
+    await importYnab4(db, importData);
+
+    const [acc] = await db.select().from(schema.accounts);
+    expect(acc).toBeDefined();
+    expect(acc?.lastReconciledAt).toBe("2026-05-15");
+    expect(acc?.lastReconciledBalance).toBe(50000);
+
+    const recs = await db.select().from(schema.reconciliations);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]).toMatchObject({
+      accountId: acc!.id,
+      reconciledAt: "2026-05-15",
+      statementDate: "2026-05-15",
+      statementBalance: 50000,
+      adjustmentTransactionId: null,
+    });
+
+    const txs = await db.select().from(schema.transactions);
+    expect(txs).toHaveLength(3);
+
+    const recTxs = txs.filter((t) => t.status === "r");
+    expect(recTxs).toHaveLength(2);
+    for (const rt of recTxs) {
+      expect(rt.reconciliationId).toBe(recs[0]!.id);
+      expect(rt.reconciledAt).toBe("2026-05-15");
+    }
+
+    // Now unreconcile the account
+    const unrec = await unreconcileAccount(db, acc!.id);
+    expect(unrec.flipped).toBe(2);
+    expect(unrec.deletedAdjustmentId).toBeNull();
+
+    // Verify all transactions are unlocked back to 'c'
+    const updatedTxs = await db.select().from(schema.transactions);
+    const flippedTxs = updatedTxs.filter((t) => t.id === recTxs[0]!.id || t.id === recTxs[1]!.id);
+    for (const ft of flippedTxs) {
+      expect(ft.status).toBe("c");
+      expect(ft.reconciledAt).toBeNull();
+      expect(ft.reconciliationId).toBeNull();
+    }
+
+    // Account metadata cleared
+    const [clearedAcc] = await db.select().from(schema.accounts);
+    expect(clearedAcc?.lastReconciledAt).toBeNull();
+    expect(clearedAcc?.lastReconciledBalance).toBeNull();
   });
 });

@@ -57,24 +57,52 @@ export const TransactionBulkUpdateSchema = z.object({
   }),
 });
 
-export const AccountCreateSchema = z.object({
-  name: z.string().min(1).max(255),
-  kind: z.enum(["liquid", "credit", "offbudget"]),
-  groupLabel: z.string().min(1).max(255),
-  balance: z.number().int().optional().default(0),
-  onBudget: z.boolean().optional().default(true),
-  archived: z.boolean().optional().default(false),
-});
+export const AccountCreateSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    kind: z.enum(["liquid", "credit", "offbudget"]),
+    groupLabel: z.string().min(1).max(255),
+    balance: z.number().int().optional().default(0),
+    onBudget: z.boolean().optional(),
+    archived: z.boolean().optional().default(false),
+  })
+  .transform((data) => ({
+    ...data,
+    onBudget: data.onBudget !== undefined ? data.onBudget : data.kind !== "offbudget",
+  }))
+  .refine(
+    (data) => {
+      if (data.kind === "offbudget" && data.onBudget === true) return false;
+      if (data.kind !== "offbudget" && data.onBudget === false) return false;
+      return true;
+    },
+    {
+      message: "kind and onBudget must be consistent (offbudget requires onBudget: false, liquid/credit requires onBudget: true)",
+    }
+  );
 
-export const AccountPatchSchema = z.object({
-  id: z.number().int().positive(),
-  name: z.string().min(1).max(255).optional(),
-  kind: z.enum(["liquid", "credit", "offbudget"]).optional(),
-  groupLabel: z.string().min(1).max(255).optional(),
-  onBudget: z.boolean().optional(),
-  sort: z.number().int().optional(),
-  archived: z.boolean().optional(),
-});
+export const AccountPatchSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().min(1).max(255).optional(),
+    kind: z.enum(["liquid", "credit", "offbudget"]).optional(),
+    groupLabel: z.string().min(1).max(255).optional(),
+    onBudget: z.boolean().optional(),
+    sort: z.number().int().optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.kind !== undefined && data.onBudget !== undefined) {
+        if (data.kind === "offbudget" && data.onBudget === true) return false;
+        if (data.kind !== "offbudget" && data.onBudget === false) return false;
+      }
+      return true;
+    },
+    {
+      message: "kind and onBudget must be consistent (offbudget requires onBudget: false, liquid/credit requires onBudget: true)",
+    }
+  );
 
 export const CategoryGroupCreateSchema = z.object({
   type: z.literal("group"),
