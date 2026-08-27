@@ -143,7 +143,31 @@ export const TransactionsView = memo(function TransactionsView({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
-  const [sort, setSort] = useLocalStorage<SortState>("ynab:transactions:sort", { key: "date", dir: "desc" });
+  const [sort, setSort] = useLocalStorage<SortState>(
+    "ynab:transactions:sort",
+    { key: "date", dir: "desc" },
+    (v): v is SortState => {
+      if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+      const s = v as Record<string, unknown>;
+      const validKeys: SortKey[] = [
+        "date",
+        "account",
+        "payee",
+        "category",
+        "memo",
+        "outflow",
+        "inflow",
+        "cleared",
+        "flag",
+        "balance",
+      ];
+      return (
+        typeof s.key === "string" &&
+        validKeys.includes(s.key as SortKey) &&
+        (s.dir === "asc" || s.dir === "desc")
+      );
+    }
+  );
   const lastHandledNonce = useRef<number | null>(null);
 
   const toggleSort = useCallback((key: SortKey) => {
@@ -156,7 +180,11 @@ export const TransactionsView = memo(function TransactionsView({
   }, [setSort]);
 
   // Scheduled drawer state
-  const [showScheduledDrawer, setShowScheduledDrawer] = useLocalStorage<boolean>("ynab:transactions:showScheduledDrawer", true);
+  const [showScheduledDrawer, setShowScheduledDrawer] = useLocalStorage<boolean>(
+    "ynab:transactions:showScheduledDrawer",
+    true,
+    (v): v is boolean => typeof v === "boolean"
+  );
 
   const toggleScheduledDrawer = () => {
     setShowScheduledDrawer((prev) => !prev);

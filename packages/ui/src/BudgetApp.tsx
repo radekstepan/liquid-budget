@@ -15,6 +15,7 @@ import {
   round2,
   todayISO,
   countDueRecurring,
+  isValidISOMonth,
   DEMO_MONTH,
   type TransactionFlagColor,
 } from "@ynab/logic";
@@ -218,17 +219,26 @@ export function BudgetApp({
       : "budget"
   );
   const [month, setMonth] = useState(initialMonth ?? DEMO_MONTH);
-  const [monthCount, setMonthCount] = useLocalStorage<number>("ynab:budget:monthCount", 3);
-  const [collapsed, setCollapsed] = useLocalStorage<Record<number, boolean>>("ynab:budget:collapsed", () => {
-    const init: Record<number, boolean> = {};
-    const cc = data.groups.find((g) => g.isCreditCardPayments);
-    if (cc) init[cc.id] = true;
-    const hidden = data.groups.find(
-      (g) => g.name === "Hidden Categories" || g.name.toLowerCase() === "hidden categories"
-    );
-    if (hidden) init[hidden.id] = true;
-    return init;
-  });
+  const [monthCount, setMonthCount] = useLocalStorage<number>(
+    "ynab:budget:monthCount",
+    3,
+    (v): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 12
+  );
+  const [collapsed, setCollapsed] = useLocalStorage<Record<number, boolean>>(
+    "ynab:budget:collapsed",
+    () => {
+      const init: Record<number, boolean> = {};
+      const cc = data.groups.find((g) => g.isCreditCardPayments);
+      if (cc) init[cc.id] = true;
+      const hidden = data.groups.find(
+        (g) => g.name === "Hidden Categories" || g.name.toLowerCase() === "hidden categories"
+      );
+      if (hidden) init[hidden.id] = true;
+      return init;
+    },
+    (v): v is Record<number, boolean> =>
+      typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "boolean")
+  );
   const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
@@ -271,15 +281,23 @@ export function BudgetApp({
         setView("budget");
       }
 
-      if (segments[0] === "transactions" && segments[1]) {
-        const accId = Number(segments[1]);
-        if (!Number.isNaN(accId)) setAccountFilter(accId);
-      } else if (segments[0] !== "transactions") {
+      if (segments[0] === "transactions") {
+        if (segments[1]) {
+          const accId = Number(segments[1]);
+          if (!Number.isNaN(accId)) {
+            setAccountFilter(accId);
+          } else {
+            setAccountFilter(null);
+          }
+        } else {
+          setAccountFilter(null);
+        }
+      } else {
         setAccountFilter(null);
       }
 
-      if (segments[0] === "budget" && segments[1] && /^\d{4}-\d{2}$/.test(segments[1]!)) {
-        setMonth(segments[1]!);
+      if (segments[0] === "budget" && segments[1] && isValidISOMonth(segments[1])) {
+        setMonth(segments[1]);
       }
     };
 
@@ -771,7 +789,7 @@ export function BudgetApp({
               month={month}
               onPrev={() => shiftMonth(-1)}
               onNext={() => shiftMonth(1)}
-              onSetMonth={setMonth}
+              onSetMonth={handleSetMonth}
               minYear={minYear}
               maxYear={maxYear}
               onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
@@ -854,7 +872,7 @@ export function BudgetApp({
           cashFlow={cashFlow}
           trailingNetWorth={trailingNetWorth}
           insights={insights}
-          onSelectMonth={setMonth}
+          onSelectMonth={handleSetMonth}
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
@@ -994,9 +1012,13 @@ export function BudgetApp({
           }}
           onDelete={async () => {
             await api.deleteAccount(editingAccount.id);
-            setAccountFilter((cur) => (cur === editingAccount.id ? null : cur));
-            setView("budget");
-            setModal({ kind: "none" });
+            startTransition(() => {
+              setAccountFilter(null);
+              setView("budget");
+              setShowSettingsOverlay(false);
+              updateUrl("budget", null, month);
+              setModal({ kind: "none" });
+            });
           }}
         />
       )}

@@ -41,9 +41,45 @@ describe("useLocalStorage", () => {
     expect(JSON.parse(window.localStorage.getItem("test-key")!)).toBe(6);
   });
 
-  it("falls back to the initial value when stored JSON is corrupt", () => {
+  it("falls back to the initial value and removes key when stored JSON is corrupt", () => {
     window.localStorage.setItem("test-key", "not-json");
     const { result } = renderHook(() => useLocalStorage("test-key", "fallback"));
     expect(result.current[0]).toBe("fallback");
+    expect(window.localStorage.getItem("test-key")).toBeNull();
+  });
+
+  it("falls back to initial value and removes key when stored JSON fails validation", () => {
+    window.localStorage.setItem("test-key", JSON.stringify(null));
+    const isRecord = (v: unknown): v is Record<string, boolean> =>
+      typeof v === "object" && v !== null && !Array.isArray(v);
+    const { result } = renderHook(() =>
+      useLocalStorage<Record<string, boolean>>("test-key", { default: true }, isRecord)
+    );
+    expect(result.current[0]).toEqual({ default: true });
+    expect(window.localStorage.getItem("test-key")).toBeNull();
+  });
+
+  it("accepts valid stored value when validation succeeds", () => {
+    window.localStorage.setItem("test-key", JSON.stringify({ a: true }));
+    const isRecord = (v: unknown): v is Record<string, boolean> =>
+      typeof v === "object" && v !== null && !Array.isArray(v);
+    const { result } = renderHook(() =>
+      useLocalStorage<Record<string, boolean>>("test-key", { default: true }, isRecord)
+    );
+    expect(result.current[0]).toEqual({ a: true });
+    expect(window.localStorage.getItem("test-key")).toBe(JSON.stringify({ a: true }));
+  });
+
+  it("rejects invalid setValue and does not persist when validation fails", () => {
+    const isPositiveNumber = (v: unknown): v is number =>
+      typeof v === "number" && v > 0;
+    const { result } = renderHook(() =>
+      useLocalStorage<number>("test-key", 10, isPositiveNumber)
+    );
+    act(() => {
+      result.current[1](-5);
+    });
+    expect(result.current[0]).toBe(10);
+    expect(window.localStorage.getItem("test-key")).toBeNull();
   });
 });

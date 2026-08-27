@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import {
   fmt,
@@ -61,9 +61,33 @@ export const ReportsView = memo(function ReportsView({
   const defaultStart = allMonths[0] ?? month;
   const defaultEnd = allMonths[allMonths.length - 1] ?? month;
 
+  const [userCustomizedRange, setUserCustomizedRange] = useState(false);
   const [startMonth, setStartMonth] = useState<string>(defaultStart);
   const [endMonth, setEndMonth] = useState<string>(defaultEnd);
-  const [sub, setSub] = useLocalStorage<SubTab>("ynab:reports:subTab", "overview");
+  const [sub, setSub] = useLocalStorage<SubTab>(
+    "ynab:reports:subTab",
+    "overview",
+    (v): v is SubTab => typeof v === "string" && SUB_TABS.some((t) => t.key === v)
+  );
+
+  // Sync automatic default ranges when data changes and user has not customized the range
+  useEffect(() => {
+    if (!userCustomizedRange) {
+      setStartMonth(defaultStart);
+      setEndMonth(defaultEnd);
+    }
+  }, [defaultStart, defaultEnd, userCustomizedRange]);
+
+  // Reset customized range when resetKey changes (e.g. clicking Reports in sidebar)
+  const prevResetKeyRef = useRef(resetKey);
+  useEffect(() => {
+    if (resetKey !== undefined && resetKey !== prevResetKeyRef.current) {
+      prevResetKeyRef.current = resetKey;
+      setUserCustomizedRange(false);
+      setStartMonth(defaultStart);
+      setEndMonth(defaultEnd);
+    }
+  }, [resetKey, defaultStart, defaultEnd]);
 
   const { year: startYear, month0: startMonth0 } = parseMonthKey(startMonth);
   const { year: endYear, month0: endMonth0 } = parseMonthKey(endMonth);
@@ -187,7 +211,10 @@ export const ReportsView = memo(function ReportsView({
             <span className="y-caps">From</span>
             <Select
               value={String(startMonth0)}
-              onChange={(v) => setStartMonth(monthKey(startYear, Number(v)))}
+              onChange={(v) => {
+                setUserCustomizedRange(true);
+                setStartMonth(monthKey(startYear, Number(v)));
+              }}
               ariaLabel="From month"
             >
               {MONTHS_LONG.map((m, i) => (
@@ -198,7 +225,10 @@ export const ReportsView = memo(function ReportsView({
             </Select>
             <Select
               value={String(startYear)}
-              onChange={(v) => setStartMonth(monthKey(Number(v), startMonth0))}
+              onChange={(v) => {
+                setUserCustomizedRange(true);
+                setStartMonth(monthKey(Number(v), startMonth0));
+              }}
               ariaLabel="From year"
             >
               {years.map((y) => (
@@ -212,7 +242,10 @@ export const ReportsView = memo(function ReportsView({
             <span className="y-caps">To</span>
             <Select
               value={String(endMonth0)}
-              onChange={(v) => setEndMonth(monthKey(endYear, Number(v)))}
+              onChange={(v) => {
+                setUserCustomizedRange(true);
+                setEndMonth(monthKey(endYear, Number(v)));
+              }}
               ariaLabel="To month"
             >
               {MONTHS_LONG.map((m, i) => (
@@ -223,7 +256,10 @@ export const ReportsView = memo(function ReportsView({
             </Select>
             <Select
               value={String(endYear)}
-              onChange={(v) => setEndMonth(monthKey(Number(v), endMonth0))}
+              onChange={(v) => {
+                setUserCustomizedRange(true);
+                setEndMonth(monthKey(Number(v), endMonth0));
+              }}
               ariaLabel="To year"
             >
               {years.map((y) => (

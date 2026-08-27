@@ -638,4 +638,88 @@ describe("BudgetApp", () => {
     expect(screen.queryByText("Jan 24")).not.toBeInTheDocument();
     expect(screen.getAllByText(expectedCurrentLabel).length).toBeGreaterThan(0);
   });
+
+  it("BUG-46: popstate to /transactions clears account filter", () => {
+    const { api } = makeApi();
+    window.history.pushState(null, "", "/transactions/1");
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialView="transactions" initialAccount={1} />);
+
+    const acctBtn = screen.getByRole("button", { name: /^TD Unlimited Chequing/ });
+    expect(acctBtn.className).toContain("is-sel");
+
+    // Simulate popstate navigation to /transactions (no account ID)
+    act(() => {
+      window.history.pushState(null, "", "/transactions");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    // Account filter is cleared -> Main Transactions button in sidebar is selected
+    const txBtn = screen.getByRole("button", { name: /^transactions/i });
+    expect(txBtn.className).toContain("is-sel");
+    expect(acctBtn.className).not.toContain("is-sel");
+  });
+
+  it("BUG-46: popstate with invalid month /budget/2026-99 does not set invalid month", () => {
+    const { api } = makeApi();
+    window.history.pushState(null, "", "/budget/2026-06");
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialMonth="2026-06" />);
+
+    // Trigger popstate with invalid month
+    act(() => {
+      window.history.pushState(null, "", "/budget/2026-99");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    // Month remains 2026-06 (MonthNav trigger shows June)
+    expect(screen.getByRole("button", { name: "Month" })).toHaveTextContent("June");
+    expect(screen.getByRole("button", { name: "Year" })).toHaveTextContent("2026");
+  });
+
+  it("BUG-46: deleting an account navigates to budget view and updates URL", async () => {
+    const { api } = makeApi();
+    const pushStateSpy = vi.spyOn(window.history, "pushState");
+    const data = makeSeedBudgetData();
+    const targetAccount = data.accounts[0]!;
+    window.history.pushState(null, "", `/transactions/${targetAccount.id}`);
+
+    render(<BudgetApp data={data} api={api} initialView="transactions" initialAccount={targetAccount.id} />);
+
+    // Open Edit Account modal by clicking edit on sidebar account
+    const editBtn = screen.getByRole("button", { name: `Edit account ${targetAccount.name}` });
+    fireEvent.click(editBtn);
+
+    // Step 1: Click Delete
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+
+    // Step 2: Confirm deletion
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    expect(api.deleteAccount).toHaveBeenCalledWith(targetAccount.id);
+    expect(pushStateSpy).toHaveBeenCalledWith(null, "", expect.stringMatching(/^\/budget\/\d{4}-\d{2}$/));
+    expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
+  });
+
+  it("BUG-44: recovers from null or corrupt values in localStorage without crashing", () => {
+    window.localStorage.setItem("ynab:transactions:sort", JSON.stringify(null));
+    window.localStorage.setItem("ynab:budget:collapsed", JSON.stringify(null));
+    window.localStorage.setItem("ynab:budget:monthCount", JSON.stringify("invalid"));
+
+    const { api } = makeApi();
+    // Render BudgetApp should not crash into ErrorBoundary
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+
+    expect(screen.getByRole("button", { name: /^transactions/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
+    expect(window.localStorage.getItem("ynab:budget:collapsed")).toBeNull();
+    expect(window.localStorage.getItem("ynab:budget:monthCount")).toBeNull();
+
+    // Switch to Transactions view to verify TransactionsView handles corrupted sort gracefully
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
+    expect(screen.getByPlaceholderText("Search register")).toBeInTheDocument();
+    expect(screen.getByText("All Transactions")).toBeInTheDocument();
+    expect(window.localStorage.getItem("ynab:transactions:sort")).toBeNull();
+  });
 });
+
