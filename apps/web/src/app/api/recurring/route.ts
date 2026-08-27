@@ -6,6 +6,7 @@ import {
   postRecurringTransaction,
   RecurringError,
   updateRecurring,
+  withTransaction,
 } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
@@ -101,11 +102,14 @@ export async function POST(req: Request) {
     }
     const postDate = (json as any).date ? String((json as any).date) : undefined;
     try {
-      const results = [];
-      for (const id of ids) {
-        const res = await postRecurringTransaction(db, Number(id), postDate);
-        results.push(res);
-      }
+      const results = await withTransaction(db, async () => {
+        const list = [];
+        for (const id of ids) {
+          const res = await postRecurringTransaction(db, Number(id), postDate);
+          list.push(res);
+        }
+        return list;
+      });
       return Response.json({ postedCount: results.length, results });
     } catch (e) {
       return errorResponse(e);
