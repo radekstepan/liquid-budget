@@ -197,9 +197,16 @@ describe("accounts queries", () => {
     it("UNI-07 / F-04: cleans up transfer counterparties, recurring links, and linked categories atomically", async () => {
       mock.respondWithNth("select:accounts", 1, [{ id: 5, name: "Checking" }]);
       mock.respondWithNth("select:transactions", 1, []);
-      mock.respondWith("select:transactions", [
-        { id: 101, accountId: 2, amount: -5000, parentId: null },
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 101, accountId: 2, amount: -5000, parentId: null, status: "c", transferAccountId: 5 },
       ]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 101, accountId: 2, amount: -5000, parentId: null, status: "c", transferAccountId: 5 },
+      ]);
+      mock.respondWithNth("select:transactions", 4, []);
+      mock.respondWithNth("select:transactions", 5, []);
+      mock.respondWith("select:categories", [{ id: 50 }]);
+      mock.respondWith("select:assignments", []);
 
       const result = await deleteAccount(mock.db, 5);
       expect(result).toMatchObject({ id: 5, name: "Checking" });
@@ -1051,6 +1058,59 @@ describe("accounts queries", () => {
         .where(eq(schema.recurringSubTransactions.recurringId, splitRec!.id));
       expect(remainingSubs).toHaveLength(2);
       expect(remainingSubs.map((s) => s.amount)).toEqual(expect.arrayContaining([150000, 100000]));
+    });
+
+    it("BUG-12: deleting credit card account preserves linked category and assignments when assignments exist", async () => {
+      const cc = await createAccount(db, { name: "Visa", kind: "credit", balance: 0 });
+      const [ccGroup] = await db
+        .insert(schema.categoryGroups)
+        .values({ name: "Credit Card Payments", isCreditCardPayments: true, sort: 0 })
+        .returning();
+      const [ccCat] = await db
+        .insert(schema.categories)
+        .values({ name: "Visa Payment", groupId: ccGroup!.id, linkedAccountId: cc.id, sort: 0 })
+        .returning();
+
+      // Add monthly assignments to the Visa category
+      await db.insert(schema.assignments).values([
+        { categoryId: ccCat!.id, month: "2026-01", amount: 20000 },
+        { categoryId: ccCat!.id, month: "2026-02", amount: 20000 },
+      ]);
+
+      // Delete the account
+      await deleteAccount(db, cc.id);
+
+      // Account is deleted
+      const [deletedAccount] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, cc.id));
+      expect(deletedAccount).toBeUndefined();
+
+      // Category still exists with linkedAccountId null
+      const [retainedCat] = await db.select().from(schema.categories).where(eq(schema.categories.id, ccCat!.id));
+      expect(retainedCat).toBeDefined();
+      expect(retainedCat?.linkedAccountId).toBeNull();
+
+      // Assignments for the category are preserved
+      const assigns = await db.select().from(schema.assignments).where(eq(schema.assignments.categoryId, ccCat!.id));
+      expect(assigns).toHaveLength(2);
+      expect(assigns.map((a) => a.amount)).toEqual([20000, 20000]);
+    });
+
+    it("BUG-12: deleting credit card account deletes linked category when it has no assignments and no transactions", async () => {
+      const cc = await createAccount(db, { name: "Mastercard", kind: "credit", balance: 0 });
+      const [ccGroup] = await db
+        .insert(schema.categoryGroups)
+        .values({ name: "Credit Card Payments", isCreditCardPayments: true, sort: 0 })
+        .returning();
+      const [ccCat] = await db
+        .insert(schema.categories)
+        .values({ name: "Mastercard Payment", groupId: ccGroup!.id, linkedAccountId: cc.id, sort: 0 })
+        .returning();
+
+      // Delete the account with no assignments or transactions
+      await deleteAccount(db, cc.id);
+
+      const [catAfter] = await db.select().from(schema.categories).where(eq(schema.categories.id, ccCat!.id));
+      expect(catAfter).toBeUndefined();
     });
   });
 

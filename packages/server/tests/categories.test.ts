@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -456,6 +457,92 @@ describe("categories queries", () => {
           .insert(schema.categories)
           .values({ name: "Visa Payment 2", groupId: group!.id, linkedAccountId: acc!.id, sort: 1 })
       ).rejects.toThrow(/UNIQUE constraint failed/);
+    });
+  });
+
+  describe("BUG-11: deleteCategory and deleteCategoryGroup do not mutate reconciled transactions", () => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+    function openMigratedDb() {
+      const raw = new Database(":memory:");
+      raw.pragma("foreign_keys = ON");
+      const db = drizzle(raw, { schema });
+      migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      return db;
+    }
+
+    it("deleteCategory with moveToCategoryId moves cleared/uncleared txns but leaves reconciled txns with null categoryId", async () => {
+      const db = openMigratedDb();
+      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [catOld] = await db.insert(schema.categories).values({ name: "Old Groceries", groupId: group!.id, sort: 0 }).returning();
+      const [catNew] = await db.insert(schema.categories).values({ name: "New Groceries", groupId: group!.id, sort: 1 }).returning();
+
+      // Create 1 cleared txn and 1 reconciled txn in catOld
+      const [clearedTx] = await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -5000,
+        date: "2026-05-01",
+        status: "c",
+      }).returning();
+
+      const [reconciledTx] = await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -10000,
+        date: "2026-04-01",
+        status: "r",
+      }).returning();
+
+      // Delete catOld and move to catNew
+      await deleteCategory(db, catOld!.id, { moveToCategoryId: catNew!.id });
+
+      const [clearedAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, clearedTx!.id));
+      const [reconciledAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, reconciledTx!.id));
+
+      // Cleared transaction was moved to catNew
+      expect(clearedAfter?.categoryId).toBe(catNew!.id);
+      // Reconciled transaction was NOT re-categorized to catNew; it was set to null when catOld was deleted
+      expect(reconciledAfter?.categoryId).toBeNull();
+      expect(reconciledAfter?.status).toBe("r");
+    });
+
+    it("deleteCategoryGroup with moveToCategoryId moves cleared/uncleared txns but leaves reconciled txns with null categoryId", async () => {
+      const db = openMigratedDb();
+      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      const [groupOld] = await db.insert(schema.categoryGroups).values({ name: "Old Group", sort: 0 }).returning();
+      const [groupNew] = await db.insert(schema.categoryGroups).values({ name: "New Group", sort: 1 }).returning();
+      const [catOld] = await db.insert(schema.categories).values({ name: "Old Cat", groupId: groupOld!.id, sort: 0 }).returning();
+      const [catNew] = await db.insert(schema.categories).values({ name: "New Cat", groupId: groupNew!.id, sort: 0 }).returning();
+
+      const [clearedTx] = await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -3000,
+        date: "2026-05-01",
+        status: "c",
+      }).returning();
+
+      const [reconciledTx] = await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -7000,
+        date: "2026-04-01",
+        status: "r",
+      }).returning();
+
+      // Delete groupOld and move to catNew
+      await deleteCategoryGroup(db, groupOld!.id, { moveToCategoryId: catNew!.id });
+
+      const [clearedAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, clearedTx!.id));
+      const [reconciledAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, reconciledTx!.id));
+
+      expect(clearedAfter?.categoryId).toBe(catNew!.id);
+      expect(reconciledAfter?.categoryId).toBeNull();
+      expect(reconciledAfter?.status).toBe("r");
     });
   });
 });

@@ -95,7 +95,7 @@ export function BudgetAppShell({
         .join(", ");
       addToast(
         `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
-        "warning"
+        "warn"
       );
     }
   }, [addToast]);

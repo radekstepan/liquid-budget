@@ -1017,5 +1017,76 @@ describe("reconcile queries", () => {
         /Adjustment transaction 999999 referenced by reconciliation/
       );
     });
+
+    it("BUG-10: multi-round reconciliation and unreconciliation covering split transactions preserves consistent split-parent status across rounds without downgrade", async () => {
+      const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat1] = await db.insert(schema.categories).values({ groupId: group!.id, name: "Groceries" }).returning();
+      const [cat2] = await db.insert(schema.categories).values({ groupId: group!.id, name: "Household" }).returning();
+
+      // Round 1: Split transaction dated 2026-04-01
+      const split1 = await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-04-01",
+          payee: "Target",
+          amount: -10000,
+        },
+        [
+          { categoryId: cat1!.id, amount: -6000 },
+          { categoryId: cat2!.id, amount: -4000 },
+        ]
+      );
+
+      // Reconcile round 1
+      const rec1 = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: -10000,
+        statementDate: "2026-04-05",
+      });
+      expect(rec1.reconciledCount).toBe(2); // 2 children
+
+      const [parentAfterRec1] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split1.parent.id));
+      expect(parentAfterRec1?.status).toBe("r");
+
+      // Round 2: New regular transaction dated 2026-05-01
+      const tx2 = await createTransaction(db, {
+        accountId: acct.id,
+        date: "2026-05-01",
+        payee: "Coffee",
+        amount: -500,
+        status: "c",
+      });
+
+      // Reconcile round 2
+      const rec2 = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: -10500,
+        statementDate: "2026-05-05",
+      });
+      expect(rec2.reconciledCount).toBe(1);
+
+      // Unreconcile round 2: should only un-reconcile tx2, NOT round 1's split parent or children
+      const unrec = await unreconcileAccount(db, acct.id);
+      expect(unrec.flipped).toBe(1);
+
+      const [tx2AfterUnrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, tx2!.id));
+      expect(tx2AfterUnrec?.status).toBe("c");
+      expect(tx2AfterUnrec?.reconciliationId).toBeNull();
+
+      // Split 1 parent and children must remain 'r' belonging to round 1
+      const [parentAfterUnrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split1.parent.id));
+      const [child1AfterUnrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split1.children[0]!.id));
+      const [child2AfterUnrec] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split1.children[1]!.id));
+
+      expect(parentAfterUnrec?.status).toBe("r");
+      expect(child1AfterUnrec?.status).toBe("r");
+      expect(child2AfterUnrec?.status).toBe("r");
+
+      const [acctRestored] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+      expect(acctRestored?.lastReconciledBalance).toBe(-10000);
+      expect(acctRestored?.lastReconciledAt).toBe(rec1.lastReconciledAt);
+    });
   });
 });

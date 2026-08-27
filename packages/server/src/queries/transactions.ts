@@ -773,6 +773,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         .where(eq(transactions.parentId, id));
     }
 
+    // If this row is a child of a split and date changed, propagate date to parent and siblings
+    if (existing.parentId != null && "date" in p && p.date != null) {
+      await db
+        .update(transactions)
+        .set({ date: String(p.date) })
+        .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
+    }
+
     // If this row is a split parent and status changed, propagate status to children
     if (isSplitParent && "status" in p && p.status != null) {
       await db
@@ -1389,6 +1397,13 @@ export async function bulkUpdateTransactions(
             .update(transactions)
             .set({ date: String(setFields.date) })
             .where(eq(transactions.parentId, id));
+        }
+
+        if (existing.parentId != null && "date" in setFields && setFields.date != null) {
+          await db
+            .update(transactions)
+            .set({ date: String(setFields.date) })
+            .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
         }
 
         if (isSplitParent && "status" in setFields && setFields.status != null) {

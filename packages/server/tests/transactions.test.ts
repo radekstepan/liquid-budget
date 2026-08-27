@@ -3868,6 +3868,68 @@ describe("transactions queries", () => {
         expect(updated[0]!.status).toBe("u");
         expect(updated[0]!.date).toBe("2026-08-05");
       });
+
+      it("BUG-10: propagates date changes on split children to parent and sibling children on updateTransaction", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Costco",
+            memo: "Groceries & Household",
+            amount: -10000,
+          },
+          [
+            { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+            { categoryId: cat2Id, amount: -4000, memo: "household" },
+          ]
+        );
+
+        const child1 = split.children[0]!;
+        await updateTransaction(db, child1.id, { date: "2026-08-15" });
+
+        const [parentRow] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.parent.id));
+        const [child1Row] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.children[0]!.id));
+        const [child2Row] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.children[1]!.id));
+
+        expect(parentRow?.date).toBe("2026-08-15");
+        expect(child1Row?.date).toBe("2026-08-15");
+        expect(child2Row?.date).toBe("2026-08-15");
+      });
+
+      it("BUG-10: propagates date changes on split children to parent and sibling children on bulkUpdateTransactions", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Costco",
+            memo: "Groceries & Household",
+            amount: -10000,
+          },
+          [
+            { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+            { categoryId: cat2Id, amount: -4000, memo: "household" },
+          ]
+        );
+
+        const child1 = split.children[0]!;
+        await bulkUpdateTransactions(db, [child1.id], { date: "2026-08-20" });
+
+        const [parentRow] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.parent.id));
+        const [child1Row] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.children[0]!.id));
+        const [child2Row] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, split.children[1]!.id));
+
+        expect(parentRow?.date).toBe("2026-08-20");
+        expect(child1Row?.date).toBe("2026-08-20");
+        expect(child2Row?.date).toBe("2026-08-20");
+      });
     });
   });
 });

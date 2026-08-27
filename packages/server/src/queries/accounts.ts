@@ -2,7 +2,7 @@ import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { accounts, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { accounts, assignments, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
 export class AccountError extends Error {
@@ -350,7 +350,33 @@ export async function deleteAccount(db: Database, id: number) {
     }
 
     // 4. Clean up linked categories (e.g. credit card payment categories)
-    await db.delete(categories).where(eq(categories.linkedAccountId, id));
+    const linkedCats = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.linkedAccountId, id));
+
+    for (const cat of linkedCats) {
+      const [hasAssign] = await db
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(eq(assignments.categoryId, cat.id))
+        .limit(1);
+
+      const [hasTxn] = await db
+        .select({ id: transactions.id })
+        .from(transactions)
+        .where(eq(transactions.categoryId, cat.id))
+        .limit(1);
+
+      if (hasAssign || hasTxn) {
+        await db
+          .update(categories)
+          .set({ linkedAccountId: null })
+          .where(eq(categories.id, cat.id));
+      } else {
+        await db.delete(categories).where(eq(categories.id, cat.id));
+      }
+    }
 
     // 5. Delete the account itself (SQLite cascade handles own transactions/recurring)
     await db.delete(accounts).where(eq(accounts.id, id));
