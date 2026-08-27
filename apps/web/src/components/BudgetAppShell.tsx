@@ -863,7 +863,7 @@ export function BudgetAppShell({
             onSuccess: ({ count, skipped }) => {
               addToast(
                 skipped > 0
-                  ? `Imported ${count} transaction${count === 1 ? "" : "s"} (${skipped} duplicate${skipped === 1 ? "" : "s"} skipped).`
+                  ? `Imported ${count} transaction${count === 1 ? "" : "s"} (${skipped} row${skipped === 1 ? "" : "s"} skipped).`
                   : `Imported ${count} transaction${count === 1 ? "" : "s"}.`,
                 "ok"
               );

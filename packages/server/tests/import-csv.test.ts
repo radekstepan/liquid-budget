@@ -191,21 +191,53 @@ describe("importCsvTransactions", () => {
     expect(data.transactions[0]!.categoryId).toBeNull();
   });
 
-  it("rolls back the whole batch when a row fails", async () => {
+  it("partially imports valid rows and skips invalid or zero amount rows (BUG-32)", async () => {
     const accountId = await seedAccount();
-    await expect(
-      importCsvTransactions(db, {
-        accountId,
-        rows: [
-          row({ rowNumber: 2, payee: "Good", amountCents: -1000 }),
-          row({ rowNumber: 3, payee: "Bad", amountCents: 0 }),
-        ],
-      })
-    ).rejects.toBeInstanceOf(TransactionError);
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Good", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "Bad", amountCents: 0 }),
+      ],
+    });
+    expect(out.count).toBe(1);
+    expect(out.skipped).toHaveLength(1);
+    expect(out.skipped[0]).toMatchObject({
+      rowNumber: 3,
+      payee: "Bad",
+      reason: "Amount is zero",
+    });
 
     const data = await getBudgetData(db);
-    expect(data.transactions).toHaveLength(0);
-    expect(data.accounts[0]!.balance).toBe("100000");
+    expect(data.transactions).toHaveLength(1);
+    expect(data.transactions[0]!.payee).toBe("Good");
+    expect(data.accounts[0]!.balance).toBe(String(100000 - 1000));
+  });
+
+  it("skips rows with blank or whitespace-only payees (BUG-31)", async () => {
+    const accountId = await seedAccount();
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Valid Payee", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "", amountCents: -2000 }),
+        row({ rowNumber: 4, payee: "   ", amountCents: -3000 }),
+      ],
+    });
+    expect(out.count).toBe(1);
+    expect(out.skipped).toHaveLength(2);
+    expect(out.skipped[0]).toMatchObject({
+      rowNumber: 3,
+      reason: "Missing payee",
+    });
+    expect(out.skipped[1]).toMatchObject({
+      rowNumber: 4,
+      reason: "Missing payee",
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions).toHaveLength(1);
+    expect(data.transactions[0]!.payee).toBe("Valid Payee");
   });
 
   it("rejects a missing account with 404", async () => {

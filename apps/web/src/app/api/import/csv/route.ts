@@ -29,13 +29,6 @@ export async function POST(req: NextRequest) {
   if (result.headerError) {
     return NextResponse.json({ error: result.headerError }, { status: 400 });
   }
-  const errorCount = result.rows.filter((r) => r.error).length;
-  if (errorCount > 0) {
-    return NextResponse.json(
-      { error: `${errorCount} row(s) could not be imported` },
-      { status: 400 }
-    );
-  }
   const db = getDefaultDb();
   try {
     const out = await importCsvTransactions(db, { accountId, rows: result.rows });

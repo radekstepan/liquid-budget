@@ -72,7 +72,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     // First occurrence of a fingerprint in this batch -> source row number.
     const batchSeen = new Map<string, number>();
     for (const rawRow of input.rows) {
-      if (rawRow.error || rawRow.date == null || rawRow.amountCents == null) {
+      if (rawRow.error || rawRow.date == null || rawRow.amountCents == null || !rawRow.payee?.trim()) {
         skipped.push({
           rowNumber: rawRow.rowNumber,
           accountName: account.name,
@@ -86,7 +86,9 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
               ? "Invalid date"
               : rawRow.amountCents == null
                 ? "Invalid amount"
-                : "Invalid row"),
+                : !rawRow.payee?.trim()
+                  ? "Missing payee"
+                  : "Invalid row"),
         });
         continue;
       }
@@ -96,7 +98,16 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       };
       const amount = Math.round(row.amountCents!);
       if (amount === 0) {
-        throw new TransactionError(`Row ${row.rowNumber}: amount must be non-zero`);
+        skipped.push({
+          rowNumber: row.rowNumber,
+          accountName: account.name,
+          date: row.date!,
+          payee: row.payee ?? "",
+          memo: row.memo ?? "",
+          amount: 0,
+          reason: "Amount is zero",
+        });
+        continue;
       }
       const fp = duplicateFingerprint({
         accountId: input.accountId,

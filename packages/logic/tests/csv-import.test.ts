@@ -479,6 +479,25 @@ describe("parseCsvImport", () => {
     expect(rows[3]).toMatchObject({ date: "2026-08-15", amountCents: -3000, error: null });
     expect(rows[4]).toMatchObject({ date: "2026-08-15", amountCents: -4000, error: null });
   });
+
+  it("flags missing payee when swap is enabled and memo is empty (BUG-31)", () => {
+    const csv = [
+      "Date,Payee,Memo,Outflow",
+      "2026-08-01,Store,,10.00",
+      "2026-08-02,,Real Payee,20.00",
+    ].join("\n");
+    const unswapped = parseCsvImport(csv, { swap: false });
+    expect(unswapped.rows[0]!.error).toBeNull();
+    expect(unswapped.rows[1]!.error).toBe("Missing payee");
+
+    const swapped = parseCsvImport(csv, { swap: true });
+    expect(swapped.rows[0]!.error).toBe("Missing payee");
+    expect(swapped.rows[0]!.payee).toBe("");
+    expect(swapped.rows[0]!.memo).toBe("Store");
+    expect(swapped.rows[1]!.error).toBeNull();
+    expect(swapped.rows[1]!.payee).toBe("Real Payee");
+    expect(swapped.rows[1]!.memo).toBe("");
+  });
 });
 
 describe("detectDateFormat", () => {
@@ -618,9 +637,9 @@ describe("parseDate", () => {
   });
 });
 
-describe("swapPayeeMemo", () => {
+describe("swapPayeeMemo (BUG-31)", () => {
   const rows = parseCsvImport(
-    "Date,Payee,Memo,Outflow\n2026-08-01,A,B,-1.00\n2026-08-02,C,, -2.00\n"
+    "Date,Payee,Memo,Outflow\n2026-08-01,A,B,-1.00\n2026-08-02,C,, -2.00\n2026-08-03,,D,-3.00\n"
   ).rows;
 
   it("leaves rows unchanged when swap is false", () => {
@@ -631,12 +650,23 @@ describe("swapPayeeMemo", () => {
     const swapped = swapPayeeMemo(rows, true);
     expect(swapped[0]!.payee).toBe("B");
     expect(swapped[0]!.memo).toBe("A");
+    expect(swapped[0]!.error).toBeNull();
   });
 
-  it("swaps unconditionally, leaving an empty payee when memo is empty", () => {
+  it("flags swapped row as Missing payee when memo is empty (BUG-31)", () => {
+    expect(rows[1]!.error).toBeNull();
     const swapped = swapPayeeMemo(rows, true);
     expect(swapped[1]!.payee).toBe("");
     expect(swapped[1]!.memo).toBe("C");
+    expect(swapped[1]!.error).toBe("Missing payee");
+  });
+
+  it("clears Missing payee when swapping a row with empty payee and non-empty memo (BUG-31)", () => {
+    expect(rows[2]!.error).toBe("Missing payee");
+    const swapped = swapPayeeMemo(rows, true);
+    expect(swapped[2]!.payee).toBe("D");
+    expect(swapped[2]!.memo).toBe("");
+    expect(swapped[2]!.error).toBeNull();
   });
 });
 

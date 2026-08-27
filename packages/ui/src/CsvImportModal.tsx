@@ -98,7 +98,7 @@ export function CsvImportModal({
   );
 
   const canImport =
-    importableRows.length > 0 && errorRows.length === 0 && accountId > 0 && !importing;
+    importableRows.length > 0 && accountId > 0 && !importing;
 
   const doImport = async () => {
     if (!canImport || !text) return;
@@ -246,17 +246,12 @@ export function CsvImportModal({
                   className={cx(
                     "y-row",
                     r.error && "y-row--error",
-                    !r.error && duplicateRowNumbers.has(r.rowNumber) && "y-row--warn",
-                    swap && !r.error && !r.payee && "y-row--warn"
+                    !r.error && duplicateRowNumbers.has(r.rowNumber) && "y-row--warn"
                   )}
                 >
                   <td className="y-num whitespace-nowrap">{r.date ?? ""}</td>
                   <td>
-                    {swap && !r.error && !r.payee ? (
-                      <span className="y-hint" style={{ color: "#7d5a12" }}>
-                        Uncategorized
-                      </span>
-                    ) : r.payee ? (
+                    {r.payee ? (
                       r.payee
                     ) : (
                       <span className="y-hint">—</span>
