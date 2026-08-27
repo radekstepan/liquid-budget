@@ -1,4 +1,4 @@
-import { MONTHS, MONTHS_LONG } from "./format.js";
+import { MONTHS, MONTHS_LONG, dollarsToCents } from "./format.js";
 
 export type CsvImportRow = {
   rowNumber: number;
@@ -212,13 +212,16 @@ export function parseAmount(input: string): number | null {
   let s = input.trim();
   if (!s) return null;
 
-  let isNegative = false;
-  if (s.startsWith("(") && s.endsWith(")")) {
-    isNegative = true;
-    s = s.slice(1, -1).trim();
+  // Currency symbols ($ € £ ¥)
+  const currencyMatches = s.match(/[$€£¥]/g);
+  if (currencyMatches && currencyMatches.length > 1) {
+    return null; // Multiple currency symbols
   }
 
   let sign = 1;
+  let isNegative = false;
+
+  // 1. Optional leading/trailing sign or currency before parentheses
   if (s.startsWith("-")) {
     sign = -1;
     s = s.slice(1).trim();
@@ -226,21 +229,53 @@ export function parseAmount(input: string): number | null {
     s = s.slice(1).trim();
   }
 
-  // Currency symbols ($ € £ ¥)
-  const currencyRegex = /^[$€£¥]/;
-  if (currencyRegex.test(s)) {
+  if (/^[$€£¥]/.test(s)) {
     s = s.slice(1).trim();
-    if (s.startsWith("-")) {
-      if (sign === -1) return null;
-      sign = -1;
-      s = s.slice(1).trim();
-    } else if (s.startsWith("+")) {
-      s = s.slice(1).trim();
-    }
   } else if (/[$€£¥]$/.test(s)) {
     s = s.slice(0, -1).trim();
   }
 
+  if (s.startsWith("-")) {
+    if (sign === -1) return null;
+    sign = -1;
+    s = s.slice(1).trim();
+  } else if (s.startsWith("+")) {
+    s = s.slice(1).trim();
+  }
+
+  // 2. Parentheses (accounting format)
+  if (s.startsWith("(") && s.endsWith(")")) {
+    isNegative = true;
+    s = s.slice(1, -1).trim();
+  } else if (s.includes("(") || s.includes(")")) {
+    return null; // Unbalanced or misplaced parentheses
+  }
+
+  // 3. Inside parentheses: optional sign or currency
+  if (s.startsWith("-")) {
+    if (sign === -1) return null;
+    sign = -1;
+    s = s.slice(1).trim();
+  } else if (s.startsWith("+")) {
+    s = s.slice(1).trim();
+  }
+
+  if (/^[$€£¥]/.test(s)) {
+    s = s.slice(1).trim();
+  } else if (/[$€£¥]$/.test(s)) {
+    s = s.slice(0, -1).trim();
+  }
+
+  if (s.startsWith("-")) {
+    if (sign === -1) return null;
+    sign = -1;
+    s = s.slice(1).trim();
+  } else if (s.startsWith("+")) {
+    s = s.slice(1).trim();
+  }
+
+  // If any remaining currency symbol or sign is embedded in the number, it's invalid (e.g. 1$2, 1-2, 1+)
+  if (/[$€£¥+\-]/.test(s)) return null;
   if (!s) return null;
 
   let num: number;
@@ -382,7 +417,7 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
       payee,
       memo,
       category,
-      amountCents: amt == null ? null : Math.round(amt * 100),
+      amountCents: amt == null ? null : dollarsToCents(amt),
       error,
     });
   }

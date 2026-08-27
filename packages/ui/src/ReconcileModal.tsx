@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Category, CategoryGroup, ReconcileState } from "@ynab/logic";
-import { evalAmount, round2 } from "@ynab/logic";
+import { evalAmount, round2, dollarsToCents } from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -63,7 +63,7 @@ export function ReconcileModal({
 
   const statementBalance = useMemo(() => {
     const n = evalAmount(statementInput);
-    return n != null && Number.isFinite(n) ? Math.round(n * 100) : NaN;
+    return n != null && Number.isFinite(n) ? dollarsToCents(n) : NaN;
   }, [statementInput]);
 
   const diff = useMemo(() => {

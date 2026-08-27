@@ -16,6 +16,7 @@ import {
   nextMonthKey,
   adjustDateShortcut,
   num,
+  dollarsToCents,
 } from "@ynab/logic";
 import {
   Button,
@@ -163,7 +164,7 @@ export function BulkEditTransactionsModal({
       if (editAccount) patch.accountId = Number(accountId);
       if (editAmount) {
         const a = evalAmount(amount);
-        if (a != null) patch.amount = Math.round(a * 100);
+        if (a != null) patch.amount = dollarsToCents(a);
       }
       if (editStatus) patch.status = status;
       if (editFlag) patch.flagColor = flagColor;
@@ -278,7 +279,7 @@ export function BulkEditTransactionsModal({
                   <span className="font-semibold">Amount:</span>
                   <span className="font-mono font-bold">
                     {evalAmount(amount) != null
-                      ? money(Math.round((evalAmount(amount) ?? 0) * 100))
+                      ? money(dollarsToCents(evalAmount(amount)))
                       : amount}
                   </span>
                 </>

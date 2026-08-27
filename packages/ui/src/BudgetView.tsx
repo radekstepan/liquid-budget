@@ -788,7 +788,7 @@ function CategoryMonthCell({
 
   const commit = () => {
     const v = evalAmount(draft);
-    if (v != null) onAssign(Math.round(v * 100));
+    if (v != null) onAssign(dollarsToCents(v));
     setEditing(false);
   };
 

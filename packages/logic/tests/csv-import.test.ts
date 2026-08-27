@@ -79,6 +79,25 @@ describe("parseCsvImport", () => {
     expect(rows[0]!.amountCents).toBe(123456);
   });
 
+  it("handles European and British currency symbols and accounting formats in CSV import (BUG-28)", () => {
+    const csv = [
+      "Date,Payee,Amount",
+      '2026-08-01,Berlin Market,"€123.45"',
+      '2026-08-02,London Pub,"-£50.00"',
+      '2026-08-03,Paris Bistro,"€(75.50)"',
+      '2026-08-04,Tokyo Shop,"¥500"',
+    ].join("\n");
+    const { rows } = parseCsvImport(csv);
+    expect(rows[0]!.amountCents).toBe(12345);
+    expect(rows[0]!.error).toBeNull();
+    expect(rows[1]!.amountCents).toBe(-5000);
+    expect(rows[1]!.error).toBeNull();
+    expect(rows[2]!.amountCents).toBe(-7550);
+    expect(rows[2]!.error).toBeNull();
+    expect(rows[3]!.amountCents).toBe(50000);
+    expect(rows[3]!.error).toBeNull();
+  });
+
   it("treats a single Amount column as signed", () => {
     const csv = [
       "Date,Payee,Amount",
@@ -545,15 +564,36 @@ describe("parseAmount (BUG-20)", () => {
     expect(parseAmount("(123.45)")).toBe(-123.45);
   });
 
-  it("parses currency symbols and accounting formats ($ € £ ¥)", () => {
+  it("parses currency symbols and accounting formats ($ € £ ¥) (BUG-28)", () => {
     expect(parseAmount("$123.45")).toBe(123.45);
     expect(parseAmount("-$123.45")).toBe(-123.45);
     expect(parseAmount("$-123.45")).toBe(-123.45);
     expect(parseAmount("($123.45)")).toBe(-123.45);
+    expect(parseAmount("$(123.45)")).toBe(-123.45);
+    expect(parseAmount("$ (123.45)")).toBe(-123.45);
     expect(parseAmount("123.45$")).toBe(123.45);
     expect(parseAmount("€123.45")).toBe(123.45);
+    expect(parseAmount("-€123.45")).toBe(-123.45);
+    expect(parseAmount("€-123.45")).toBe(-123.45);
+    expect(parseAmount("€(123.45)")).toBe(-123.45);
+    expect(parseAmount("(€123.45)")).toBe(-123.45);
+    expect(parseAmount("€ (123.45)")).toBe(-123.45);
+    expect(parseAmount("€ 123.45")).toBe(123.45);
+    expect(parseAmount("123.45 €")).toBe(123.45);
+    expect(parseAmount("123.45€")).toBe(123.45);
+    expect(parseAmount("(123.45 €)")).toBe(-123.45);
+    expect(parseAmount("(123.45) €")).toBe(-123.45);
     expect(parseAmount("£2,500.00")).toBe(2500);
+    expect(parseAmount("-£2,500.00")).toBe(-2500);
+    expect(parseAmount("£-2,500.00")).toBe(-2500);
+    expect(parseAmount("£(2,500.00)")).toBe(-2500);
+    expect(parseAmount("(£2,500.00)")).toBe(-2500);
+    expect(parseAmount("£ (2,500.00)")).toBe(-2500);
     expect(parseAmount("¥500")).toBe(500);
+    expect(parseAmount("-¥500")).toBe(-500);
+    expect(parseAmount("¥-500")).toBe(-500);
+    expect(parseAmount("¥(500)")).toBe(-500);
+    expect(parseAmount("(¥500)")).toBe(-500);
   });
 
   it("parses US and European thousands groupings and decimal commas", () => {
