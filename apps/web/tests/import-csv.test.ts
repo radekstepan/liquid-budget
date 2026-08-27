@@ -97,4 +97,28 @@ describe("POST /api/import/csv", () => {
     expect(json.skipped[0].rowNumber).toBe(2);
     expect(json.skipped[0].reason).toMatch(/Missing payee/);
   });
+
+  it("BUG-51: rejects CSV with unclosed quotes with 400 and clear line error", async () => {
+    const db = getDefaultDb();
+    const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+    const csv = [
+      "Date,Payee,Amount",
+      '2026-08-01,"Store without closing quote,-10.00',
+    ].join("\n");
+
+    const req = new NextRequest("http://localhost:3000/api/import/csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: account!.id,
+        swap: false,
+        csv,
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Unclosed quote in CSV on line 2");
+  });
 });

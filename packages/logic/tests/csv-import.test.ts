@@ -32,6 +32,18 @@ describe("parseCsv", () => {
       ["c", "d"],
     ]);
   });
+
+  it("throws an error on unclosed quotes with affected line number (BUG-51)", () => {
+    expect(() => parseCsv('Date,Payee,"Amount\n2026-08-01,Store,-10.00')).toThrow(
+      "Unclosed quote in CSV on line 1"
+    );
+    expect(() => parseCsv('Date,Payee,Amount\n2026-08-01,"Store\ncontinued,-10.00')).toThrow(
+      "Unclosed quote in CSV on line 2"
+    );
+    expect(() => parseCsv('Date,Payee,Amount\n2026-08-01,Store,-10.00\n2026-08-02,"Unclosed')).toThrow(
+      "Unclosed quote in CSV on line 3"
+    );
+  });
 });
 
 describe("parseCsvImport", () => {
@@ -766,5 +778,71 @@ describe("parseAmount (BUG-20)", () => {
     expect(rows[3]!.amountCents).toBeNull();
     expect(rows[4]!.error).toBeNull();
     expect(rows[4]!.amountCents).toBe(1000);
+  });
+
+  it("returns headerError on unclosed CSV quotes (BUG-51)", () => {
+    const csv = 'Date,Payee,Amount\n2026-08-01,"Store,-10.00\n';
+    const result = parseCsvImport(csv);
+    expect(result.headerError).toBe("Unclosed quote in CSV on line 2");
+    expect(result.rows).toEqual([]);
+  });
+
+  it("parses multi-section CSV database export directly into transaction rows (BUG-50)", () => {
+    const multiSectionCsv = [
+      "Type,ID,Name,Kind,Group,Balance,On Budget,Archived",
+      "Account,1,Checking,checking,Budget Accounts,100.00,Y,N",
+      "Account,2,Savings,savings,Budget Accounts,500.00,Y,N",
+      "",
+      "Type,ID,Name,Sort,CC Payments",
+      "Group,1,Everyday Expenses,1,N",
+      "",
+      "Type,ID,GroupID,Name,Sort,Carryover,Goal,LinkedAccountID",
+      "Category,1,1,Groceries,1,0.00,,",
+      "",
+      "Type,ID,CategoryID,Month,Amount",
+      "Assignment,1,1,2026-08,50.00",
+      "",
+      "Type,ID,AccountID,CategoryID,Date,Payee,Memo,Amount,Status,Flag,TransferAccountID,ParentID,IsIncome",
+      "Transaction,1,1,1,2026-08-01,Supermarket,Weekly food,-25.50,cleared,Red,,,N",
+      "Transaction,2,1,,2026-08-02,Employer,Paycheck,2000.00,cleared,,,,,Y",
+      "Transaction,3,2,,2026-08-03,Transfer : Checking,,100.00,cleared,,1,,N",
+      "",
+      "Type,ID,AccountID,CategoryID,Payee,Amount,Frequency,NextDate,Active,TransferAccountID",
+      "Recurring,1,1,1,Landlord,-500.00,monthly,2026-09-01,Y,",
+    ].join("\n");
+
+    const result = parseCsvImport(multiSectionCsv);
+    expect(result.headerError).toBeNull();
+    expect(result.rows).toHaveLength(3);
+
+    expect(result.rows[0]).toEqual({
+      rowNumber: 15,
+      date: "2026-08-01",
+      payee: "Supermarket",
+      memo: "Weekly food",
+      category: "1",
+      amountCents: -2550,
+      error: null,
+    });
+
+    expect(result.rows[1]).toEqual({
+      rowNumber: 16,
+      date: "2026-08-02",
+      payee: "Employer",
+      memo: "Paycheck",
+      category: "",
+      amountCents: 200000,
+      error: null,
+    });
+
+    expect(result.rows[2]).toEqual({
+      rowNumber: 17,
+      date: "2026-08-03",
+      payee: "Transfer : Checking",
+      memo: "",
+      category: "",
+      amountCents: 10000,
+      error: null,
+    });
   });
 });

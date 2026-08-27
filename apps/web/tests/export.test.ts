@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 import { GET } from "../src/app/api/export/route";
 import { POST as importPOST } from "../src/app/api/import/route";
+import { POST as importCsvPOST } from "../src/app/api/import/csv/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
@@ -58,6 +59,28 @@ describe("GET /api/export", () => {
       const balField = parts[5]; // Balance column
       expect(balField).toMatch(/^-?\d+\.\d{2}$/);
     }
+  });
+
+  it("can feed multi-section CSV export back to /api/import/csv without error (BUG-50)", async () => {
+    const exportReq = new NextRequest("http://localhost:3000/api/export?format=csv");
+    const exportRes = await GET(exportReq);
+    expect(exportRes.status).toBe(200);
+    const csv = await exportRes.text();
+
+    const importReq = new NextRequest("http://localhost:3000/api/import/csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: 1,
+        swap: false,
+        csv,
+      }),
+    });
+    const importRes = await importCsvPOST(importReq);
+    expect(importRes.status).toBe(200);
+    const json = await importRes.json();
+    expect(json.ok).toBe(true);
+    expect(json.imported).toBeGreaterThanOrEqual(0);
   });
 
   it("exports JSON budget data", async () => {

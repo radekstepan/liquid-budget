@@ -154,6 +154,8 @@ const ynabData = {
       frequency: "monthly",
       payeeId: "p1",
       categoryId: "sc1",
+      memo: "Monthly groceries recurring",
+      flag: "Red",
     },
     {
       entityId: "s2",
@@ -182,8 +184,8 @@ const ynabData = {
       payeeId: "p1",
       categoryId: "Category/__Split__",
       subTransactions: [
-        { categoryId: "sc1", amount: -200 },
-        { categoryId: null, targetAccountId: "acc2", amount: -100 },
+        { categoryId: "sc1", amount: -200, memo: "Split recurring child 1" },
+        { categoryId: null, targetAccountId: "acc2", amount: -100, memo: "Split recurring child 2" },
       ],
     },
     {
@@ -194,6 +196,8 @@ const ynabData = {
       frequency: "EveryOtherYear",
       payeeId: "p3",
       categoryId: "sc1",
+      memo: "Biennial policy",
+      flag: "Blue",
     },
     {
       entityId: "s6",
@@ -329,6 +333,16 @@ describe("importYnab4 full import", () => {
     const biennial = recurring.find((r) => Number(r.amount) === -50000);
     expect(biennial).toBeTruthy();
     expect(biennial!.frequency).toBe("every2years");
+    expect(biennial!.memo).toBe("Biennial policy");
+    expect(biennial!.flagColor).toBe("blue");
+
+    const groceriesR = recurring.find((r) => r.payee === "Grocery Store" && r.memo === "Monthly groceries recurring");
+    expect(groceriesR).toBeTruthy();
+    expect(groceriesR!.memo).toBe("Monthly groceries recurring");
+    expect(groceriesR!.flagColor).toBe("red");
+
+    expect(splitR.subTransactions[0]!.memo).toBe("Split recurring child 1");
+    expect(splitR.subTransactions[1]!.memo).toBe("Split recurring child 2");
 
     const oneOff = recurring.find((r) => Number(r.amount) === -60000);
     expect(oneOff).toBeTruthy();
