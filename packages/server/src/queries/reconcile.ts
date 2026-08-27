@@ -179,6 +179,20 @@ export async function reconcileAccount(
       )
       .returning({ id: transactions.id });
 
+    // Also flip split parents on this account to reconciled if all their children are reconciled
+    await db
+      .update(transactions)
+      .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
+      .where(
+        and(
+          eq(transactions.accountId, input.accountId),
+          eq(transactions.status, "c"),
+          sql`${transactions.date} <= ${statementDate}`,
+          sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`,
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status != 'r')`
+        )
+      );
+
     await db
       .update(accounts)
       .set({ lastReconciledAt: today, lastReconciledBalance: input.statementBalance })
@@ -272,6 +286,19 @@ export async function unreconcileAccount(
         .returning({ id: transactions.id });
       flippedCount = flipped.length;
 
+      // Also flip split parents back to cleared if any of their children are cleared
+      await db
+        .update(transactions)
+        .set({ status: "c", reconciledAt: null, reconciliationId: null })
+        .where(
+          and(
+            eq(transactions.accountId, accountId),
+            eq(transactions.status, "r"),
+            eq(transactions.reconciliationId, lastRec.id),
+            sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status = 'c')`
+          )
+        );
+
       if (lastRec.adjustmentTransactionId) {
         const [adjTxn] = await db
           .select({ id: transactions.id, amount: transactions.amount })
@@ -321,6 +348,19 @@ export async function unreconcileAccount(
         )
         .returning({ id: transactions.id });
       flippedCount = flipped.length;
+
+      // Also flip split parents back to cleared if any of their children are cleared
+      await db
+        .update(transactions)
+        .set({ status: "c", reconciledAt: null, reconciliationId: null })
+        .where(
+          and(
+            eq(transactions.accountId, accountId),
+            eq(transactions.status, "r"),
+            sql`(${transactions.reconciledAt} <= ${lastDate} or (${transactions.reconciledAt} is null and ${transactions.date} <= ${lastDate}))`,
+            sql`${transactions.id} IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL AND status = 'c')`
+          )
+        );
 
       const adjustmentRows = await db
         .select({ id: transactions.id, amount: transactions.amount })

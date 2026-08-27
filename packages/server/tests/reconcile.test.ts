@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -714,6 +714,76 @@ describe("reconcile queries", () => {
       const [child1Restored] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, child1!.id));
       expect(child1Restored?.status).toBe("c");
       expect(child1Restored?.reconciliationId).toBeNull();
+    });
+
+    it("BUG-26: reconciling an account with a fully cleared split flips both parent and children to 'r', and unreconciling restores them to 'c'", async () => {
+      const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Everyday Expenses", sort: 1 }).returning();
+      const [cat1] = await db.insert(schema.categories).values({ groupId: group!.id, name: "Groceries", sort: 1 }).returning();
+      const [cat2] = await db.insert(schema.categories).values({ groupId: group!.id, name: "Household", sort: 2 }).returning();
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId: acct.id,
+          date: "2026-06-05",
+          payee: "Target",
+          memo: "Groceries and Household",
+          amount: -5000,
+          status: "c",
+        },
+        [
+          { categoryId: cat1!.id, amount: -3000, memo: "Groceries" },
+          { categoryId: cat2!.id, amount: -2000, memo: "Household" },
+        ]
+      );
+
+      // Reconcile with matching workingBalance (-5000)
+      const recResult = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: -5000,
+        statementDate: "2026-06-30",
+      });
+
+      expect(recResult.reconciledCount).toBe(2); // 2 children counted
+
+      // Verify all split rows (parent and children) are now 'r'
+      const rowsAfterRec = await db
+        .select()
+        .from(schema.transactions)
+        .where(
+          or(
+            eq(schema.transactions.id, split.parent.id),
+            eq(schema.transactions.parentId, split.parent.id)
+          )
+        );
+
+      expect(rowsAfterRec).toHaveLength(3);
+      for (const row of rowsAfterRec) {
+        expect(row.status).toBe("r");
+        expect(row.reconciliationId).toBeTruthy();
+      }
+
+      // Unreconcile
+      const unrecResult = await unreconcileAccount(db, acct.id);
+      expect(unrecResult.flipped).toBe(2);
+
+      // Verify all split rows (parent and children) are restored to 'c'
+      const rowsAfterUnrec = await db
+        .select()
+        .from(schema.transactions)
+        .where(
+          or(
+            eq(schema.transactions.id, split.parent.id),
+            eq(schema.transactions.parentId, split.parent.id)
+          )
+        );
+
+      expect(rowsAfterUnrec).toHaveLength(3);
+      for (const row of rowsAfterUnrec) {
+        expect(row.status).toBe("c");
+        expect(row.reconciliationId).toBeNull();
+      }
     });
 
     it("BUG-14: fallback unreconcile flips all reconciled transactions with different dates on or before lastReconciledAt", async () => {
