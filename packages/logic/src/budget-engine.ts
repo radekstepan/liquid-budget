@@ -474,23 +474,21 @@ function computeAllMonths(
         grossCashSpent = -cashDelta;
       }
 
-      let cashOverspent: number;
       let remainingCashPool: number;
       if (grossCashSpent > 0) {
-        const fundedCash = Math.min(Math.max(0, cashPool), grossCashSpent);
-        cashOverspent = grossCashSpent - fundedCash;
         remainingCashPool = Math.max(0, cashPool - grossCashSpent);
       } else {
-        cashOverspent = 0;
         remainingCashPool = Math.max(0, cashPool);
       }
 
+      let catFundedCC = 0;
       const sortedCCTxs = ccTxs.slice().sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
       for (const tx of sortedCCTxs) {
         if (tx.amount < 0) {
           const spend = -tx.amount;
           const funded = Math.min(remainingCashPool, spend);
           remainingCashPool -= funded;
+          catFundedCC += funded;
           monthFundedCCByAccount.set(
             tx.accountId,
             (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
@@ -501,6 +499,7 @@ function computeAllMonths(
             (monthFundedCCByAccount.get(tx.accountId) ?? 0) - tx.amount
           );
           remainingCashPool += tx.amount;
+          catFundedCC -= tx.amount;
         }
       }
 
@@ -512,6 +511,10 @@ function computeAllMonths(
           nextBalance.set(c.id, endAvailable);
         } else {
           nextBalance.set(c.id, 0);
+          const totalDeficit = -endAvailable;
+          const netCCSpend = ccTxs.reduce((sum, tx) => sum - tx.amount, 0);
+          const ccOverspent = Math.max(0, Math.min(totalDeficit, netCCSpend - catFundedCC));
+          const cashOverspent = totalDeficit - ccOverspent;
           monthCashOverspent += cashOverspent;
         }
       }

@@ -1601,6 +1601,188 @@ describe("computeBudget", () => {
       // TBB is NOT deducted by $150
       expect(febRedArrow.tbb).toBe(45000);
     });
+
+    describe("BUG-06: Opening negative category carryover handling", () => {
+      it("records opening negative carryover as cash overspending and deducts from next month's TBB when overspendCarriesOver is false", () => {
+        const group = makeGroup({ id: 1, name: "Living" });
+        const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", carryover: "-10000", overspendCarriesOver: false });
+        const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "50000", onBudget: true, sort: 0 };
+        const incomeTx = {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-01-01",
+          payee: "Income",
+          memo: "",
+          amount: "50000",
+          status: "c" as const,
+          isIncome: true,
+        };
+
+        const data: BudgetData = {
+          accounts: [account],
+          groups: [group],
+          categories: [cat],
+          assignments: [],
+          transactions: [incomeTx],
+          recurring: [],
+        };
+
+        // Month 1 (Jan): Category starts with -$100 carryover, no activity -> available is -$100
+        const jan = computeBudget(data, "2026-01");
+        expect(jan.groups[0]?.rows[0]?.carryoverIn).toBe(-10000);
+        expect(jan.groups[0]?.rows[0]?.available).toBe(-10000);
+        expect(jan.tbb).toBe(50000);
+
+        // Month 2 (Feb): Category resets to $0 (clamped), overspentPrevious is $100, TBB deducted by $100
+        const feb = computeBudget(data, "2026-02");
+        expect(feb.groups[0]?.rows[0]?.carryoverIn).toBe(0);
+        expect(feb.groups[0]?.rows[0]?.available).toBe(0);
+        expect(feb.overspentPrevious).toBe(10000);
+        expect(feb.priorSurplus).toBe(50000 - 10000); // 40000
+        expect(feb.tbb).toBe(40000);
+      });
+
+      it("carries opening negative carryover forward into next month when overspendCarriesOver is true", () => {
+        const group = makeGroup({ id: 1, name: "Living" });
+        const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", carryover: "-10000", overspendCarriesOver: true });
+        const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "50000", onBudget: true, sort: 0 };
+        const incomeTx = {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-01-01",
+          payee: "Income",
+          memo: "",
+          amount: "50000",
+          status: "c" as const,
+          isIncome: true,
+        };
+
+        const data: BudgetData = {
+          accounts: [account],
+          groups: [group],
+          categories: [cat],
+          assignments: [],
+          transactions: [incomeTx],
+          recurring: [],
+        };
+
+        const jan = computeBudget(data, "2026-01");
+        expect(jan.groups[0]?.rows[0]?.carryoverIn).toBe(-10000);
+        expect(jan.groups[0]?.rows[0]?.available).toBe(-10000);
+        expect(jan.tbb).toBe(50000);
+
+        // Month 2 (Feb): Category carries forward -$100 carryover, TBB is unaffected
+        const feb = computeBudget(data, "2026-02");
+        expect(feb.groups[0]?.rows[0]?.carryoverIn).toBe(-10000);
+        expect(feb.groups[0]?.rows[0]?.available).toBe(-10000);
+        expect(feb.overspentPrevious).toBe(0);
+        expect(feb.priorSurplus).toBe(50000);
+        expect(feb.tbb).toBe(50000);
+      });
+
+      it("deducts remaining uncovered deficit from next month's TBB when partially assigned", () => {
+        const group = makeGroup({ id: 1, name: "Living" });
+        const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", carryover: "-10000", overspendCarriesOver: false });
+        const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "50000", onBudget: true, sort: 0 };
+        const incomeTx = {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-01-01",
+          payee: "Income",
+          memo: "",
+          amount: "50000",
+          status: "c" as const,
+          isIncome: true,
+        };
+
+        const data: BudgetData = {
+          accounts: [account],
+          groups: [group],
+          categories: [cat],
+          assignments: [{ id: 1, categoryId: 10, month: "2026-01", amount: "4000" }], // Assign $40 to cover part of -$100 deficit
+          transactions: [incomeTx],
+          recurring: [],
+        };
+
+        const jan = computeBudget(data, "2026-01");
+        expect(jan.groups[0]?.rows[0]?.carryoverIn).toBe(-10000);
+        expect(jan.groups[0]?.rows[0]?.assigned).toBe(4000);
+        expect(jan.groups[0]?.rows[0]?.available).toBe(-6000);
+        expect(jan.tbb).toBe(50000 - 4000); // 46000
+
+        const feb = computeBudget(data, "2026-02");
+        expect(feb.groups[0]?.rows[0]?.carryoverIn).toBe(0);
+        expect(feb.groups[0]?.rows[0]?.available).toBe(0);
+        expect(feb.overspentPrevious).toBe(6000);
+        // Jan surplus after assignment (46000) minus overspent (6000) = 40000
+        expect(feb.priorSurplus).toBe(40000);
+        expect(feb.tbb).toBe(40000);
+      });
+
+      it("separates opening negative carryover and CC spending into cash overspent vs CC debt", () => {
+        const livingGroup = makeGroup({ id: 1, name: "Living" });
+        const ccGroup = makeGroup({ id: 2, name: "Credit Card Payments", isCreditCardPayments: true });
+        const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", carryover: "-10000", overspendCarriesOver: false });
+        const ccPayCat = makeCategory({ id: 20, groupId: 2, name: "Visa Payment", linkedAccountId: 2 });
+        const checkingAcc = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 };
+        const ccAcc = { id: 2, name: "Visa", kind: "credit" as const, groupLabel: "Budget", balance: "-5000", onBudget: true, sort: 1 };
+
+        const incomeTx = {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-01-01",
+          payee: "Income",
+          memo: "",
+          amount: "50000",
+          status: "c" as const,
+          isIncome: true,
+        };
+        const ccSpendTx = {
+          id: 2,
+          accountId: 2,
+          categoryId: 10,
+          date: "2026-01-15",
+          payee: "Restaurant",
+          memo: "",
+          amount: "-5000", // $50 CC spend
+          status: "c" as const,
+        };
+
+        const data: BudgetData = {
+          accounts: [checkingAcc, ccAcc],
+          groups: [livingGroup, ccGroup],
+          categories: [cat, ccPayCat],
+          assignments: [],
+          transactions: [incomeTx, ccSpendTx],
+          recurring: [],
+        };
+
+        const jan = computeBudget(data, "2026-01");
+        // Total available in Jan = -$100 opening carryover - $50 CC spend = -$150
+        expect(jan.groups[0]?.rows[0]?.available).toBe(-15000);
+        expect(jan.tbb).toBe(50000);
+
+        const feb = computeBudget(data, "2026-02");
+        // In Feb: Category resets to 0.
+        // Cash overspent is $100 (opening deficit). CC overspent is $50 (stays on card).
+        // Feb TBB reduced only by $100 cash deficit, not CC debt.
+        expect(feb.groups[0]?.rows[0]?.available).toBe(0);
+        expect(feb.overspentPrevious).toBe(10000);
+        expect(feb.priorSurplus).toBe(40000);
+        expect(feb.tbb).toBe(40000);
+
+        // Pre-indexed parity
+        const index = buildBudgetIndex(data);
+        const fastJan = computeBudget({ ...data, budgetIndex: index }, "2026-01");
+        const fastFeb = computeBudget({ ...data, budgetIndex: index }, "2026-02");
+        expect(fastJan).toEqual(jan);
+        expect(fastFeb).toEqual(feb);
+      });
+    });
   });
 
   describe("buildBudgetIndex & pre-indexing", () => {
