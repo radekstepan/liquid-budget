@@ -7,7 +7,8 @@ import { fileURLToPath } from "url";
 import type { CsvImportRow } from "@ynab/logic";
 import { importCsvTransactions } from "../src/import-csv.js";
 import { getBudgetData } from "../src/queries/budget.js";
-import { TransactionError } from "../src/queries/transactions.js";
+import { eq, sql } from "drizzle-orm";
+import { TransactionError, createSplitWithChildren, createTransfer } from "../src/queries/transactions.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -311,5 +312,113 @@ describe("importCsvTransactions", () => {
     const data = await getBudgetData(db);
     expect(data.transactions).toHaveLength(1);
     expect(data.transactions[0]!.payee).toBe("Valid Store");
+  });
+
+  it("skips re-import of a transaction that was converted to a split (BUG-21)", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [c1] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+    const [c2] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Household", sort: 1, carryover: 0 })
+      .returning();
+
+    // 1. Initial import of bank row
+    const first = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Costco", amountCents: -5000, memo: "Weekly run" })],
+    });
+    expect(first.count).toBe(1);
+
+    // 2. Delete plain row and recreate as split with children (simulates user converting it)
+    const initialData = await getBudgetData(db);
+    const plainTx = initialData.transactions[0]!;
+    await db.delete(schema.transactions).where(eq(schema.transactions.id, plainTx.id));
+    await db
+      .update(schema.accounts)
+      .set({ balance: sql`${schema.accounts.balance} - ${Number(plainTx.amount)}` })
+      .where(eq(schema.accounts.id, accountId));
+
+    await createSplitWithChildren(
+      db,
+      {
+        accountId,
+        date: "2026-08-13",
+        payee: "Costco",
+        memo: "Weekly run",
+        amount: -5000,
+      },
+      [
+        { categoryId: c1!.id, amount: -3000, memo: "Food" },
+        { categoryId: c2!.id, amount: -2000, memo: "Household" },
+      ]
+    );
+
+    // 3. Re-import statement containing the same row
+    const second = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Costco", amountCents: -5000, memo: "Weekly run" })],
+    });
+    expect(second.count).toBe(0);
+    expect(second.skipped).toHaveLength(1);
+    expect(second.skipped[0]!.reason).toBe("Matches an existing transaction");
+
+    // Balance should remain unchanged (100000 - 5000 = 95000)
+    const afterData = await getBudgetData(db);
+    expect(afterData.accounts.find((a) => a.id === accountId)?.balance).toBe("95000");
+  });
+
+  it("skips re-import of a transaction that was converted to a transfer (BUG-21)", async () => {
+    const accountId = await seedAccount();
+    const [savings] = await db
+      .insert(schema.accounts)
+      .values({
+        name: "Savings",
+        kind: "liquid",
+        groupLabel: "Budget Accounts",
+        balance: 50000,
+        onBudget: true,
+        sort: 1,
+      })
+      .returning();
+
+    // 1. Create a transfer from accountId to savings
+    await createTransfer(
+      db,
+      {
+        accountId,
+        transferAccountId: savings!.id,
+        date: "2026-08-13",
+        payee: "Transfer : Savings",
+        memo: "Monthly savings",
+        amount: -20000,
+        categoryId: null,
+      },
+      savings!.id
+    );
+
+    // 2. Re-import statement on source account (Chequing)
+    const sourceImport = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Transfer : Savings", memo: "Monthly savings", amountCents: -20000 })],
+    });
+    expect(sourceImport.count).toBe(0);
+    expect(sourceImport.skipped).toHaveLength(1);
+    expect(sourceImport.skipped[0]!.reason).toBe("Matches an existing transaction");
+
+    // 3. Re-import statement on destination account (Savings)
+    const destImport = await importCsvTransactions(db, {
+      accountId: savings!.id,
+      rows: [row({ rowNumber: 2, payee: "Transfer : Chequing", memo: "Monthly savings", amountCents: 20000 })],
+    });
+    expect(destImport.count).toBe(0);
+    expect(destImport.skipped).toHaveLength(1);
+    expect(destImport.skipped[0]!.reason).toBe("Matches an existing transaction");
   });
 });

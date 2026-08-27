@@ -92,6 +92,7 @@ export function normalizeText(value: string): string {
 /**
  * A conservative "exact match" identity for a transaction:
  * account + date + amount + normalized payee + normalized memo.
+ * Serialized as JSON array to prevent delimiter collision issues.
  */
 export function duplicateFingerprint(f: {
   accountId: number;
@@ -100,13 +101,13 @@ export function duplicateFingerprint(f: {
   payee: string;
   memo: string;
 }): string {
-  return [
+  return JSON.stringify([
     f.accountId,
     f.date,
     f.amount,
     normalizeText(f.payee),
     normalizeText(f.memo),
-  ].join("|");
+  ]);
 }
 
 /**
@@ -149,4 +150,129 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
     groups.push({ fingerprint: fp, keeper: list[0]!, duplicates: list.slice(1) });
   }
   return groups;
+}
+
+/**
+ * Build a fingerprint set from existing transactions for import deduplication.
+ * Includes plain regular rows, split parents, and transfers. Split children
+ * are excluded on the source account because their parent already represents
+ * the full bank transaction amount.
+ */
+export function buildExistingImportFingerprints(
+  accountId: number,
+  existing: Array<{
+    accountId: number;
+    transferAccountId?: number | null;
+    parentId?: number | null;
+    date: string;
+    payee: string;
+    memo?: string | null;
+    amount: number | string;
+  }>,
+  accountNameById?: Map<number, string>
+): Set<string> {
+  const fingerprints = new Set<string>();
+
+  for (const t of existing) {
+    const amt = typeof t.amount === "number" ? Math.round(t.amount) : Math.round(Number(t.amount));
+    if (t.accountId === accountId) {
+      // Direct transaction on this account:
+      // Exclude split children (t.parentId != null) because their split parent
+      // (t.parentId == null) already represents the complete bank transaction.
+      if (t.parentId != null) continue;
+      fingerprints.add(
+        duplicateFingerprint({
+          accountId,
+          date: t.date,
+          amount: amt,
+          payee: t.payee,
+          memo: t.memo ?? "",
+        })
+      );
+    } else if (t.transferAccountId === accountId) {
+      // Transfer where this account is the destination:
+      // The incoming amount is opposite in sign to the stored transfer row.
+      const destAmount = -amt;
+      fingerprints.add(
+        duplicateFingerprint({
+          accountId,
+          date: t.date,
+          amount: destAmount,
+          payee: t.payee,
+          memo: t.memo ?? "",
+        })
+      );
+      if (accountNameById && accountNameById.has(t.accountId)) {
+        const sourceName = accountNameById.get(t.accountId)!;
+        fingerprints.add(
+          duplicateFingerprint({
+            accountId,
+            date: t.date,
+            amount: destAmount,
+            payee: `Transfer : ${sourceName}`,
+            memo: t.memo ?? "",
+          })
+        );
+      }
+    }
+  }
+
+  return fingerprints;
+}
+
+/**
+ * Identify which incoming import rows duplicate existing transactions or
+ * previous rows within the same batch.
+ */
+export function identifyImportDuplicates<
+  T extends {
+    rowNumber: number;
+    date?: string | null;
+    payee?: string | null;
+    memo?: string | null;
+    amountCents?: number | null;
+    error?: string | null;
+  }
+>(
+  accountId: number,
+  existingFingerprints: Set<string>,
+  rows: T[]
+): {
+  duplicateRowNumbers: Set<number>;
+  duplicates: Array<{ rowNumber: number; reason: string; matchRowNumber?: number }>;
+} {
+  const duplicateRowNumbers = new Set<number>();
+  const duplicates: Array<{ rowNumber: number; reason: string; matchRowNumber?: number }> = [];
+  const batchSeen = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.error || row.date == null || row.amountCents == null) continue;
+    const amount = Math.round(row.amountCents);
+    if (amount === 0) continue;
+
+    const fp = duplicateFingerprint({
+      accountId,
+      date: row.date,
+      payee: row.payee ?? "",
+      memo: row.memo ?? "",
+      amount,
+    });
+
+    const matchRowNumber = batchSeen.get(fp);
+    if (existingFingerprints.has(fp) || matchRowNumber != null) {
+      duplicateRowNumbers.add(row.rowNumber);
+      duplicates.push({
+        rowNumber: row.rowNumber,
+        reason:
+          matchRowNumber != null
+            ? `Duplicate of row ${matchRowNumber} in this file`
+            : "Matches an existing transaction",
+        matchRowNumber,
+      });
+    } else {
+      batchSeen.set(fp, row.rowNumber);
+    }
+  }
+
+  return { duplicateRowNumbers, duplicates };
 }

@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Account, DuplicateEntry, RenameRule, Transaction } from "@ynab/logic";
-import { applyRenameRules, parseCsvImport, swapPayeeMemo, findDuplicateGroups } from "@ynab/logic";
+import type { Account, RenameRule, Transaction } from "@ynab/logic";
+import {
+  applyRenameRules,
+  parseCsvImport,
+  swapPayeeMemo,
+  buildExistingImportFingerprints,
+  identifyImportDuplicates,
+} from "@ynab/logic";
 import { Checkbox, Notice, Select, money, cx } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 
@@ -46,6 +52,7 @@ export function CsvImportModal({
   }, [file]);
 
   const availableAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
+  const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
   const [accountId, setAccountId] = useState<number>(
     defaultAccountId ?? availableAccounts[0]?.id ?? 0
   );
@@ -68,35 +75,18 @@ export function CsvImportModal({
   // row in this file. These will be skipped on import.
   const duplicateRowNumbers = useMemo(() => {
     if (validRows.length === 0) return new Set<number>();
-    const existing: DuplicateEntry[] = transactions
-      .filter((t) => t.accountId === accountId)
-      .map((t) => ({
-        id: t.id,
-        accountId: t.accountId,
-        date: t.date,
-        payee: t.payee,
-        memo: t.memo,
-        amount: Number(t.amount),
-        parentId: t.parentId ?? null,
-        transferAccountId: t.transferAccountId ?? null,
-      }));
-    const incoming: DuplicateEntry[] = validRows.map((r) => ({
-      rowNumber: r.rowNumber,
+    const existingFingerprints = buildExistingImportFingerprints(
       accountId,
-      date: r.date ?? "",
-      payee: r.payee ?? "",
-      memo: r.memo ?? "",
-      amount: r.amountCents ?? 0,
-    }));
-    const groups = findDuplicateGroups([...existing, ...incoming]);
-    const set = new Set<number>();
-    for (const g of groups) {
-      for (const d of g.duplicates) {
-        if (d.rowNumber != null) set.add(d.rowNumber);
-      }
-    }
-    return set;
-  }, [transactions, accountId, validRows]);
+      transactions,
+      accountNameById
+    );
+    const { duplicateRowNumbers: dupSet } = identifyImportDuplicates(
+      accountId,
+      existingFingerprints,
+      validRows
+    );
+    return dupSet;
+  }, [transactions, accountId, validRows, accountNameById]);
 
   const duplicateRows = useMemo(
     () => validRows.filter((r) => duplicateRowNumbers.has(r.rowNumber)),

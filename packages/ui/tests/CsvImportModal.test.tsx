@@ -235,4 +235,80 @@ describe("CsvImportModal", () => {
       expect(screen.getByText("2026-05-08")).toBeInTheDocument();
     });
   });
+
+  it("marks rows that duplicate an existing split parent transaction (BUG-21)", async () => {
+    const existing: Transaction[] = [
+      // Split parent
+      {
+        id: 10,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "PHNOM PENH RESTAURANT",
+        memo: "Vancouver",
+        amount: "-2808",
+        status: "c",
+        flagColor: null,
+        parentId: null,
+        transferAccountId: null,
+      },
+      // Split children
+      {
+        id: 11,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "PHNOM PENH RESTAURANT",
+        memo: "Food",
+        amount: "-1808",
+        status: "c",
+        flagColor: null,
+        parentId: 10,
+        transferAccountId: null,
+      },
+      {
+        id: 12,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-13",
+        payee: "PHNOM PENH RESTAURANT",
+        memo: "Drinks",
+        amount: "-1000",
+        status: "c",
+        flagColor: null,
+        parentId: 10,
+        transferAccountId: null,
+      },
+    ];
+
+    await renderModal(validCsv, vi.fn().mockResolvedValue(undefined), existing);
+
+    expect(screen.getByText("1 row(s) are duplicates and will be skipped")).toBeInTheDocument();
+    expect(screen.getByText(/1 importable · 1 skipped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
+  });
+
+  it("marks rows that duplicate an existing transfer transaction (BUG-21)", async () => {
+    const existing: Transaction[] = [
+      {
+        id: 20,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-03",
+        payee: "PAYMENT RECEIVED - THANK YOU",
+        memo: "",
+        amount: "190803",
+        status: "c",
+        flagColor: null,
+        parentId: null,
+        transferAccountId: 2,
+      },
+    ];
+
+    await renderModal(validCsv, vi.fn().mockResolvedValue(undefined), existing);
+
+    expect(screen.getByText("1 row(s) are duplicates and will be skipped")).toBeInTheDocument();
+    expect(screen.getByText(/1 importable · 1 skipped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^import 1 transaction$/i })).toBeEnabled();
+  });
 });
