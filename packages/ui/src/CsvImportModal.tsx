@@ -78,7 +78,8 @@ export function CsvImportModal({
     const existingFingerprints = buildExistingImportFingerprints(
       accountId,
       transactions,
-      accountNameById
+      accountNameById,
+      renameRules
     );
     const { duplicateRowNumbers: dupSet } = identifyImportDuplicates(
       accountId,
@@ -86,7 +87,7 @@ export function CsvImportModal({
       validRows
     );
     return dupSet;
-  }, [transactions, accountId, validRows, accountNameById]);
+  }, [transactions, accountId, validRows, accountNameById, renameRules]);
 
   const duplicateRows = useMemo(
     () => validRows.filter((r) => duplicateRowNumbers.has(r.rowNumber)),

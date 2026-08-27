@@ -63,7 +63,8 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
   const existingFingerprints = buildExistingImportFingerprints(
     input.accountId,
     existingTx,
-    accountNameById
+    accountNameById,
+    renameRules
   );
 
   return withTransaction(db, async () => {
@@ -116,8 +117,15 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         memo: row.memo ?? "",
         amount,
       });
-      const matchRowNumber = batchSeen.get(fp);
-      if (existingFingerprints.has(fp) || matchRowNumber != null) {
+      const rawFp = duplicateFingerprint({
+        accountId: input.accountId,
+        date: rawRow.date!,
+        payee: rawRow.payee ?? "",
+        memo: rawRow.memo ?? "",
+        amount,
+      });
+      const matchRowNumber = batchSeen.get(fp) ?? batchSeen.get(rawFp);
+      if (existingFingerprints.has(fp) || existingFingerprints.has(rawFp) || matchRowNumber != null) {
         skipped.push({
           rowNumber: row.rowNumber,
           accountName: account.name,
@@ -156,7 +164,9 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         .returning();
       created.push(inserted!.id);
       batchSeen.set(fp, row.rowNumber);
+      batchSeen.set(rawFp, row.rowNumber);
       existingFingerprints.add(fp);
+      existingFingerprints.add(rawFp);
       await db
         .update(accounts)
         .set({ balance: sql`${accounts.balance} + ${amount}` })

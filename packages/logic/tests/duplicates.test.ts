@@ -127,9 +127,31 @@ describe("findDuplicateGroups", () => {
     expect(groups[0]!.keeper.rowNumber).toBe(2);
     expect(groups[0]!.duplicates.map((d) => d.rowNumber)).toEqual([3, 4]);
   });
+
+  it("prefers reconciled rows as keeper over earlier mutable rows (BUG-33)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, status: "c" }),
+      row({ id: 2, status: "r" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.keeper.id).toBe(2);
+    expect(groups[0]!.duplicates.map((d) => d.id)).toEqual([1]);
+  });
+
+  it("preserves relative order among multiple reconciled rows when choosing keeper (BUG-33)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, status: "c" }),
+      row({ id: 2, status: "r" }),
+      row({ id: 3, status: "r" }),
+      row({ id: 4, status: "u" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.keeper.id).toBe(2);
+    expect(groups[0]!.duplicates.map((d) => d.id)).toEqual([3, 1, 4]);
+  });
 });
 
-describe("buildExistingImportFingerprints and identifyImportDuplicates (BUG-21)", () => {
+describe("buildExistingImportFingerprints and identifyImportDuplicates (BUG-21, BUG-34)", () => {
   it("includes split parents in import fingerprints and matches incoming rows", () => {
     const existing = [
       // Split parent: total amount -5000, Costco
@@ -186,5 +208,31 @@ describe("buildExistingImportFingerprints and identifyImportDuplicates (BUG-21)"
     ];
     const destResult = identifyImportDuplicates(2, destFps, destIncoming);
     expect(destResult.duplicateRowNumbers.has(5)).toBe(true);
+  });
+
+  it("includes both raw and renamed fingerprints when rename rules are provided (BUG-34)", () => {
+    const existing = [
+      {
+        id: 1,
+        accountId: 1,
+        date: "2026-08-10",
+        payee: "BCF1",
+        memo: "",
+        amount: -2808,
+      },
+    ];
+    const renameRules = [
+      { id: 1, sourcePattern: "BCF[N]", targetPayee: "BC Ferries", createdAt: "2026-01-01T00:00:00.000Z" },
+    ];
+
+    const fps = buildExistingImportFingerprints(1, existing, undefined, renameRules);
+    expect(fps.has(duplicateFingerprint({ accountId: 1, date: "2026-08-10", payee: "BCF1", memo: "", amount: -2808 }))).toBe(true);
+    expect(fps.has(duplicateFingerprint({ accountId: 1, date: "2026-08-10", payee: "BC Ferries", memo: "", amount: -2808 }))).toBe(true);
+
+    const incoming = [
+      { rowNumber: 2, date: "2026-08-10", payee: "BC Ferries", memo: "", amountCents: -2808 },
+    ];
+    const result = identifyImportDuplicates(1, fps, incoming);
+    expect(result.duplicateRowNumbers.has(2)).toBe(true);
   });
 });

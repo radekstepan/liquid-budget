@@ -69,10 +69,11 @@ describe("analyzeUnflaggedDuplicates", () => {
     await insertTx(db, { payee: "Store" });
     await insertTx(db, { payee: "Store", flagColor: "red" });
     await insertTx(db, { payee: "Store", status: "r" });
+    await insertTx(db, { payee: "Store", status: "r" });
 
     const result = await analyzeUnflaggedDuplicates(db);
-    expect(result.duplicateCount).toBe(3);
-    expect(result.flaggedCount).toBe(1);
+    expect(result.duplicateCount).toBe(4);
+    expect(result.flaggedCount).toBe(2);
     expect(result.alreadyFlaggedCount).toBe(1);
     expect(result.lockedCount).toBe(1);
     expect(result.clearedCount).toBe(0);
@@ -80,8 +81,9 @@ describe("analyzeUnflaggedDuplicates", () => {
 
     const data = await getBudgetData(db);
     const cleared = data.transactions.filter((t) => t.status === "c");
-    expect(new Set(cleared.map((t) => t.flagColor))).toEqual(new Set([null, "duplicate", "red"]));
-    expect(data.transactions.find((t) => t.status === "r")!.flagColor).toBeNull();
+    expect(new Set(cleared.map((t) => t.flagColor))).toEqual(new Set(["duplicate", "red"]));
+    const reconciled = data.transactions.filter((t) => t.status === "r");
+    expect(reconciled.every((t) => t.flagColor === null)).toBe(true);
     expect(data.transactions.find((t) => t.flagColor === "red")).toBeTruthy();
     expect(data.transactions.find((t) => t.flagColor === "duplicate")).toBeTruthy();
   });
@@ -202,5 +204,25 @@ describe("analyzeUnflaggedDuplicates", () => {
     expect(result.groups[0]!.keeper.accountName).toBe("Chequing");
     expect(result.groups[0]!.duplicates[0]!.accountName).toBe("Chequing");
   });
+
+  it("keeps reconciled row as keeper and flags older mutable duplicate (BUG-33)", async () => {
+    // ID 1 is mutable ("c"), ID 2 is reconciled ("r")
+    const mutableId = await insertTx(db, { payee: "Store", status: "c" });
+    const reconciledId = await insertTx(db, { payee: "Store", status: "r" });
+
+    const result = await analyzeUnflaggedDuplicates(db);
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]!.keeper.id).toBe(reconciledId);
+    expect(result.groups[0]!.duplicates[0]!.id).toBe(mutableId);
+    expect(result.flaggedCount).toBe(1);
+    expect(result.lockedCount).toBe(0);
+
+    const data = await getBudgetData(db);
+    const mutableRow = data.transactions.find((t) => t.id === mutableId)!;
+    const reconciledRow = data.transactions.find((t) => t.id === reconciledId)!;
+    expect(mutableRow.flagColor).toBe("duplicate");
+    expect(reconciledRow.flagColor).toBeNull();
+  });
 });
+
 

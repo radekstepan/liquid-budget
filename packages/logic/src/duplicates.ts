@@ -1,4 +1,5 @@
-import type { ClearedStatus, TransactionFlagState } from "./types.js";
+import type { ClearedStatus, RenameRule, TransactionFlagState } from "./types.js";
+import { applyRenameRules } from "./rename-rules.js";
 
 /**
  * A single row that participates in duplicate detection.
@@ -112,8 +113,9 @@ export function duplicateFingerprint(f: {
 
 /**
  * Group rows into duplicate candidates. Only plain regular rows are
- * considered (see {@link DuplicateEntry}). Input order is preserved, so
- * the first occurrence in the input is the keeper of its group.
+ * considered (see {@link DuplicateEntry}). Reconciled rows are preferred
+ * as keepers so that locked transactions are preserved while mutable
+ * duplicates can be flagged. Relative input order is preserved.
  */
 export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
   const childIds = new Set<number>();
@@ -147,7 +149,17 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
   for (const fp of order) {
     const list = byFingerprint.get(fp)!;
     if (list.length < 2) continue;
-    groups.push({ fingerprint: fp, keeper: list[0]!, duplicates: list.slice(1) });
+    const reconciled: DuplicateEntry[] = [];
+    const nonReconciled: DuplicateEntry[] = [];
+    for (const item of list) {
+      if (item.status === "r") {
+        reconciled.push(item);
+      } else {
+        nonReconciled.push(item);
+      }
+    }
+    const sorted = [...reconciled, ...nonReconciled];
+    groups.push({ fingerprint: fp, keeper: sorted[0]!, duplicates: sorted.slice(1) });
   }
   return groups;
 }
@@ -157,6 +169,10 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
  * Includes plain regular rows, split parents, and transfers. Split children
  * are excluded on the source account because their parent already represents
  * the full bank transaction amount.
+ *
+ * When rename rules are provided, fingerprints are added for both the stored
+ * payee and the canonical renamed payee so subsequent imports match regardless
+ * of when the rename rule was defined.
  */
 export function buildExistingImportFingerprints(
   accountId: number,
@@ -169,7 +185,8 @@ export function buildExistingImportFingerprints(
     memo?: string | null;
     amount: number | string;
   }>,
-  accountNameById?: Map<number, string>
+  accountNameById?: Map<number, string>,
+  renameRules?: RenameRule[]
 ): Set<string> {
   const fingerprints = new Set<string>();
 
@@ -189,6 +206,20 @@ export function buildExistingImportFingerprints(
           memo: t.memo ?? "",
         })
       );
+      if (renameRules && renameRules.length > 0) {
+        const renamed = applyRenameRules(renameRules, t.payee);
+        if (renamed !== t.payee) {
+          fingerprints.add(
+            duplicateFingerprint({
+              accountId,
+              date: t.date,
+              amount: amt,
+              payee: renamed,
+              memo: t.memo ?? "",
+            })
+          );
+        }
+      }
     } else if (t.transferAccountId === accountId) {
       // Transfer where this account is the destination:
       // The incoming amount is opposite in sign to the stored transfer row.
@@ -202,17 +233,46 @@ export function buildExistingImportFingerprints(
           memo: t.memo ?? "",
         })
       );
+      if (renameRules && renameRules.length > 0) {
+        const renamed = applyRenameRules(renameRules, t.payee);
+        if (renamed !== t.payee) {
+          fingerprints.add(
+            duplicateFingerprint({
+              accountId,
+              date: t.date,
+              amount: destAmount,
+              payee: renamed,
+              memo: t.memo ?? "",
+            })
+          );
+        }
+      }
       if (accountNameById && accountNameById.has(t.accountId)) {
         const sourceName = accountNameById.get(t.accountId)!;
+        const transferPayee = `Transfer : ${sourceName}`;
         fingerprints.add(
           duplicateFingerprint({
             accountId,
             date: t.date,
             amount: destAmount,
-            payee: `Transfer : ${sourceName}`,
+            payee: transferPayee,
             memo: t.memo ?? "",
           })
         );
+        if (renameRules && renameRules.length > 0) {
+          const renamed = applyRenameRules(renameRules, transferPayee);
+          if (renamed !== transferPayee) {
+            fingerprints.add(
+              duplicateFingerprint({
+                accountId,
+                date: t.date,
+                amount: destAmount,
+                payee: renamed,
+                memo: t.memo ?? "",
+              })
+            );
+          }
+        }
       }
     }
   }
