@@ -363,13 +363,21 @@ describe("format", () => {
       expect(evalAmount("  100  +  50  ")).toBe(150);
     });
 
-    it("handles European decimal commas when followed by two digits (BUG-14)", () => {
+    it("handles European decimal commas when followed by one or two digits (BUG-13, BUG-14)", () => {
+      expect(evalAmount("1,5")).toBe(1.5);
+      expect(evalAmount("12,5")).toBe(12.5);
+      expect(evalAmount(",5")).toBe(0.5);
       expect(evalAmount("12,50")).toBe(12.5);
       expect(evalAmount(",50")).toBe(0.5);
+      expect(evalAmount("12,5 + 3,5")).toBe(16);
       expect(evalAmount("12,50 + 3,45")).toBeCloseTo(15.95);
+      expect(evalAmount("(12,5 + 2,5) * 2")).toBe(30);
       expect(evalAmount("(12,50 + 2,50) * 2")).toBe(30);
+      expect(evalAmount("-12,5")).toBe(-12.5);
       expect(evalAmount("-12,50")).toBe(-12.5);
+      expect(evalAmount("$12,5")).toBe(12.5);
       expect(evalAmount("$12,50")).toBe(12.5);
+      expect(evalAmount("€12,5")).toBe(12.5);
       expect(evalAmount("€12,50")).toBe(12.5);
       expect(evalAmount("1,250")).toBe(1250);
       expect(evalAmount("1,000")).toBe(1000);

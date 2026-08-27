@@ -210,4 +210,161 @@ describe("BudgetAppShell (BUG-24)", () => {
       expect(within(row).getByRole("button", { name: "$100.00" })).toBeDefined();
     });
   });
+
+  it("BUG-15: optimistic addTransaction adjusts account.balance so register running balances are correct immediately", async () => {
+    let postTransactionResolver: ((res: Response) => void) | null = null;
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/api/budget")) {
+        return new Response(JSON.stringify(initialBudget), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/api/transactions") && init?.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        return new Promise<Response>((resolve) => {
+          postTransactionResolver = resolve;
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any;
+
+    render(<BudgetAppShell initialView="transactions" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading budget")).toBeNull();
+    });
+
+    // Switch to TD Unlimited Chequing
+    fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
+
+    // Open Add Transaction modal
+    const addBtn = screen.getByRole("button", { name: /add a new transaction/i });
+    fireEvent.click(addBtn);
+
+    // Fill Payee
+    const payeeTrigger = screen.getByText("e.g. Whole Foods");
+    fireEvent.click(payeeTrigger);
+    const payeeInput = screen.getByPlaceholderText("e.g. Whole Foods");
+    fireEvent.change(payeeInput, { target: { value: "Optimistic Coffee" } });
+
+    // Fill Amount: -50.00
+    const amountInput = screen.getByPlaceholderText("0.00");
+    fireEvent.change(amountInput, { target: { value: "-50.00" } });
+
+    // Save transaction
+    const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // The new row should appear immediately in the register
+    expect(screen.getAllByText("Optimistic Coffee").length).toBeGreaterThan(0);
+
+    // Verify that the account balance was optimistically adjusted
+    // Initial Chequing balance in seed is -805319 (-$8,053.19) minus $50 = -$8,103.19
+    expect(screen.getAllByText("-$8,103.19").length).toBeGreaterThan(0);
+
+    // Resolve POST response
+    if (postTransactionResolver) {
+      await act(async () => {
+        postTransactionResolver!(
+          new Response(
+            JSON.stringify({
+              id: 8888,
+              accountId: 1,
+              categoryId: null,
+              date: "2026-06-15",
+              payee: "Optimistic Coffee",
+              memo: "",
+              amount: -5000,
+              status: "u",
+              flagColor: null,
+              transferAccountId: null,
+              parentId: null,
+              isIncome: false,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        );
+      });
+    }
+  });
+
+  it("BUG-15: optimistic deleteTransaction adjusts account.balance immediately", async () => {
+    let deleteTransactionResolver: ((res: Response) => void) | null = null;
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/api/budget")) {
+        return new Response(JSON.stringify(initialBudget), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/api/transactions") && init?.method === "DELETE") {
+        return new Promise<Response>((resolve) => {
+          deleteTransactionResolver = resolve;
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any;
+
+    render(<BudgetAppShell initialView="transactions" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading budget")).toBeNull();
+    });
+
+    // Switch to TD Unlimited Chequing
+    fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
+
+    // Click on the first transaction row in the register to open edit modal
+    const tableRows = screen.getAllByRole("row");
+    const firstRow = tableRows[1]!;
+    fireEvent.click(firstRow);
+
+    expect(screen.getByText("Edit Transaction")).toBeDefined();
+
+    // Step 1: Click Delete
+    fireEvent.click(screen.getByRole("button", { name: /^delete/i }));
+    expect(screen.getByText(/^Delete /)).toBeDefined();
+
+    // Step 2: Confirm deletion
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, delete it/i }));
+    });
+
+    // Deleting -17.95 from -8053.19 should optimistically increase balance to -8035.24 (-$8,035.24)
+    expect(screen.getAllByText("-$8,035.24").length).toBeGreaterThan(0);
+
+    // Resolve DELETE response
+    if (deleteTransactionResolver) {
+      await act(async () => {
+        deleteTransactionResolver!(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      });
+    }
+  });
 });
