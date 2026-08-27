@@ -9,6 +9,7 @@ import { importCsvTransactions } from "../src/import-csv.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import { eq, sql } from "drizzle-orm";
 import { TransactionError, createSplitWithChildren, createTransfer } from "../src/queries/transactions.js";
+import { createRenameRule } from "../src/queries/rename-rules.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -453,4 +454,41 @@ describe("importCsvTransactions", () => {
     expect(destImport.skipped).toHaveLength(1);
     expect(destImport.skipped[0]!.reason).toBe("Matches an existing transaction");
   });
+
+  it("skips re-import when a rename rule was added after initial import (BUG-34)", async () => {
+    const accountId = await seedAccount();
+
+    // 1. Initial import with raw payee BCF1 before any rename rules exist
+    const firstImport = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "BCF1", amountCents: -2808 })],
+    });
+    expect(firstImport.count).toBe(1);
+
+    const initialData = await getBudgetData(db);
+    expect(initialData.transactions).toHaveLength(1);
+    expect(initialData.transactions[0]!.payee).toBe("BCF1");
+    expect(initialData.accounts.find((a) => a.id === accountId)?.balance).toBe(String(100000 - 2808));
+
+    // 2. User adds rename rule: BCF1 -> BC Ferries
+    await createRenameRule(db, {
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+
+    // 3. Re-import the same statement row with raw payee BCF1
+    const secondImport = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "BCF1", amountCents: -2808 })],
+    });
+    expect(secondImport.count).toBe(0);
+    expect(secondImport.skipped).toHaveLength(1);
+    expect(secondImport.skipped[0]!.reason).toBe("Matches an existing transaction");
+
+    // 4. Verify no new transaction was created and account balance was not deducted twice
+    const afterData = await getBudgetData(db);
+    expect(afterData.transactions).toHaveLength(1);
+    expect(afterData.accounts.find((a) => a.id === accountId)?.balance).toBe(String(100000 - 2808));
+  });
 });
+
