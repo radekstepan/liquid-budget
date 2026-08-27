@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -840,6 +840,97 @@ describe("reconcile queries", () => {
         .where(eq(schema.accounts.id, acct.id));
       expect(updatedAcct?.lastReconciledAt).toBeNull();
       expect(updatedAcct?.lastReconciledBalance).toBeNull();
+    });
+
+    it("BUG-38: foreign key cascades onDelete: 'set null' for reconciliationId and adjustmentTransactionId", async () => {
+      const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
+      const [cat] = await db
+        .insert(schema.categories)
+        .values({ groupId: group!.id, name: "Reconcile Adjustments" })
+        .returning();
+
+      // Create a transaction and reconcile with adjustment
+      await createTransaction(db, {
+        accountId: acct.id,
+        date: "2026-04-01",
+        payee: "Test Tx",
+        amount: 10000,
+        status: "c",
+      });
+
+      const recResult = await reconcileAccount(db, {
+        accountId: acct.id,
+        statementBalance: 15000,
+        statementDate: "2026-04-10",
+        adjustmentCategoryId: cat!.id,
+      });
+
+      expect(recResult.adjustmentTransactionId).toBeTruthy();
+
+      const [recRow] = await db
+        .select()
+        .from(schema.reconciliations)
+        .where(eq(schema.reconciliations.accountId, acct.id));
+      expect(recRow?.adjustmentTransactionId).toBe(recResult.adjustmentTransactionId);
+
+      // Verify that deleting an adjustment transaction nulls adjustmentTransactionId on reconciliation
+      await db.delete(schema.transactions).where(eq(schema.transactions.id, recResult.adjustmentTransactionId!));
+      const [recAfterTxDelete] = await db
+        .select()
+        .from(schema.reconciliations)
+        .where(eq(schema.reconciliations.id, recRow!.id));
+      expect(recAfterTxDelete?.adjustmentTransactionId).toBeNull();
+
+      // Verify that deleting a reconciliation nulls reconciliationId on associated transactions
+      const [txBefore] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(txBefore?.reconciliationId).toBe(recRow!.id);
+
+      await db.delete(schema.reconciliations).where(eq(schema.reconciliations.id, recRow!.id));
+      const [txAfter] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(txAfter?.reconciliationId).toBeNull();
+    });
+
+    it("BUG-38: unreconcileAccount fails loudly when referenced adjustment transaction is missing", async () => {
+      const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const today = "2026-04-10";
+
+      // 1. Direct insert with foreign keys enabled rejects invalid adjustmentTransactionId
+      expect(() => {
+        db.insert(schema.reconciliations).values({
+          accountId: acct.id,
+          reconciledAt: today,
+          statementDate: today,
+          statementBalance: 50000,
+          adjustmentTransactionId: 999999,
+        }).run();
+      }).toThrow(/FOREIGN KEY constraint failed/);
+
+      // 2. Simulate legacy/corrupted database where foreign keys were bypassed
+      db.run(sql`PRAGMA foreign_keys = OFF`);
+      await db.insert(schema.reconciliations).values({
+        accountId: acct.id,
+        reconciledAt: today,
+        statementDate: today,
+        statementBalance: 50000,
+        adjustmentTransactionId: 999999,
+      });
+      db.run(sql`PRAGMA foreign_keys = ON`);
+
+      await db
+        .update(schema.accounts)
+        .set({ lastReconciledAt: today, lastReconciledBalance: 50000 })
+        .where(eq(schema.accounts.id, acct.id));
+
+      await expect(unreconcileAccount(db, acct.id)).rejects.toThrow(
+        /Adjustment transaction 999999 referenced by reconciliation/
+      );
     });
   });
 });

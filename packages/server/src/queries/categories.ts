@@ -58,8 +58,8 @@ export async function createCategory(db: Database, input: CreateCategoryInput) {
         groupId: input.groupId,
         name: String(input.name ?? "New Category"),
         sort: Number(maxRow?.max ?? -1) + 1,
-        goalTarget: input.goalTarget != null ? assertValidAmount(input.goalTarget) : null,
-        carryover: input.carryover != null ? assertValidAmount(input.carryover) : 0,
+        goalTarget: input.goalTarget != null ? assertValidAmount(input.goalTarget, { allowZero: true }) : null,
+        carryover: input.carryover != null ? assertValidAmount(input.carryover, { allowZero: true }) : 0,
         overspendCarriesOver: input.overspendCarriesOver === true,
       })
       .returning();
@@ -104,10 +104,10 @@ export async function updateCategory(
   const p: Record<string, unknown> = {};
   if (patch.name !== undefined && patch.name != null) p.name = String(patch.name);
   if (patch.goalTarget !== undefined) {
-    p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget);
+    p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget, { allowZero: true });
   }
   if (patch.carryover !== undefined) {
-    p.carryover = patch.carryover == null ? 0 : assertValidAmount(patch.carryover);
+    p.carryover = patch.carryover == null ? 0 : assertValidAmount(patch.carryover, { allowZero: true });
   }
   if (patch.sort !== undefined && patch.sort != null) p.sort = Number(patch.sort);
   if (patch.overspendCarriesOver !== undefined) {

@@ -31,7 +31,7 @@ export type UpdateAccountInput = {
 };
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
-  const balance = input.balance != null ? assertValidAmount(input.balance) : 0;
+  const balance = input.balance != null ? assertValidAmount(input.balance, { allowZero: true }) : 0;
   const kind = String(input.kind ?? "liquid");
   const onBudget = input.onBudget !== undefined ? Boolean(input.onBudget) : kind !== "offbudget";
 

@@ -311,6 +311,11 @@ export async function unreconcileAccount(
             .where(eq(accounts.id, accountId));
           await db.delete(transactions).where(eq(transactions.id, adjTxn.id));
           deletedAdjustmentId = adjTxn.id;
+        } else {
+          throw new TransactionError(
+            `Adjustment transaction ${lastRec.adjustmentTransactionId} referenced by reconciliation ${lastRec.id} was not found`,
+            409
+          );
         }
       }
 

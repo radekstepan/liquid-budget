@@ -333,4 +333,88 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       ).toBe(false);
     });
   });
+
+  describe("BUG-40: Nonzero amount rejection in transaction and recurring schemas", () => {
+    it("rejects amount 0 in TransactionCreateSchema, Patch, and BulkUpdate", () => {
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: 0,
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          amount: 0,
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1],
+          patch: { amount: 0 },
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -5000,
+          subTransactions: [
+            { categoryId: 1, amount: -5000 },
+            { categoryId: 2, amount: 0 },
+          ],
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects amount 0 in RecurringCreateSchema and RecurringPatchSchema", () => {
+      expect(
+        RecurringCreateSchema.safeParse({
+          accountId: 1,
+          frequency: "monthly",
+          nextDate: "2026-06-15",
+          amount: 0,
+        }).success
+      ).toBe(false);
+
+      expect(
+        RecurringPatchSchema.safeParse({
+          id: 1,
+          amount: 0,
+        }).success
+      ).toBe(false);
+    });
+
+    it("allows balance 0 for accounts and amount 0 for assignments and category carryover", () => {
+      expect(
+        AccountCreateSchema.safeParse({
+          name: "New Account",
+          kind: "liquid",
+          groupLabel: "Budget Accounts",
+          balance: 0,
+        }).success
+      ).toBe(true);
+
+      expect(
+        AssignmentUpsertSchema.safeParse({
+          categoryId: 1,
+          month: "2026-06",
+          amount: 0,
+        }).success
+      ).toBe(true);
+
+      expect(
+        CategoryCreateSchema.safeParse({
+          groupId: 1,
+          name: "Groceries",
+          carryover: 0,
+          goalTarget: 0,
+        }).success
+      ).toBe(true);
+    });
+  });
 });
