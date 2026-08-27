@@ -312,7 +312,42 @@ export async function deleteAccount(db: Database, id: number) {
 
     // 3. Clean up recurring transfer counterparties
     await db.delete(recurring).where(eq(recurring.transferAccountId, id));
-    await db.delete(recurringSubTransactions).where(eq(recurringSubTransactions.transferAccountId, id));
+
+    const affectedSubs = await db
+      .select({
+        id: recurringSubTransactions.id,
+        recurringId: recurringSubTransactions.recurringId,
+      })
+      .from(recurringSubTransactions)
+      .where(eq(recurringSubTransactions.transferAccountId, id));
+
+    if (affectedSubs.length > 0) {
+      const affectedRecurringIds = Array.from(new Set(affectedSubs.map((s) => s.recurringId)));
+      await db.delete(recurringSubTransactions).where(eq(recurringSubTransactions.transferAccountId, id));
+
+      for (const rId of affectedRecurringIds) {
+        const remaining = await db
+          .select({
+            id: recurringSubTransactions.id,
+            amount: recurringSubTransactions.amount,
+          })
+          .from(recurringSubTransactions)
+          .where(eq(recurringSubTransactions.recurringId, rId));
+
+        if (remaining.length < 2) {
+          await db.delete(recurringSubTransactions).where(eq(recurringSubTransactions.recurringId, rId));
+          await db.delete(recurring).where(eq(recurring.id, rId));
+        } else {
+          const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
+          await db
+            .update(recurring)
+            .set({ amount: newTotal })
+            .where(eq(recurring.id, rId));
+        }
+      }
+    } else {
+      await db.delete(recurringSubTransactions).where(eq(recurringSubTransactions.transferAccountId, id));
+    }
 
     // 4. Clean up linked categories (e.g. credit card payment categories)
     await db.delete(categories).where(eq(categories.linkedAccountId, id));

@@ -60,7 +60,11 @@ export async function POST(req: Request) {
     }
     try {
       const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
-      return Response.json({ postedCount: posted.length, posted });
+      return Response.json({
+        postedCount: posted.length,
+        posted,
+        failures: (posted as any).failures ?? [],
+      });
     } catch (e) {
       return apiErrorResponse(e);
     }
@@ -113,7 +117,11 @@ export async function POST(req: Request) {
     }
     try {
       const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
-      return Response.json({ postedCount: posted.length, posted });
+      return Response.json({
+        postedCount: posted.length,
+        posted,
+        failures: (posted as any).failures ?? [],
+      });
     } catch (e) {
       return apiErrorResponse(e);
     }

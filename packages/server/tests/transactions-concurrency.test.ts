@@ -398,7 +398,7 @@ describe("SQLite transaction concurrency & serialization", () => {
     expect(txRows[0]?.payee).toBe("Starting Balance");
   });
 
-  it("rolls back the entire batch if any item fails during autoPostDueRecurringTransactions (BUG-04, BUG-53)", async () => {
+  it("isolates failures per item during autoPostDueRecurringTransactions (BUG-01) so valid items post and invalid items are deactivated", async () => {
     const acct = await createAccount(db, { name: "Checking", balance: 50000, onBudget: true });
     const grp = await createCategoryGroup(db, { name: "Bills" });
     const cat = await createCategory(db, { groupId: grp.id, name: "Services" });
@@ -413,8 +413,7 @@ describe("SQLite transaction concurrency & serialization", () => {
       nextDate: "2026-07-01",
     });
 
-    // Item 2: Invalid (will fail at post time because transfer destination is same as source)
-    // We insert directly into schema.recurring bypassing initial createRecurring validation to simulate corrupted data
+    // Item 2: Invalid (corrupted: transfer destination is same as source)
     const [rec2] = await db
       .insert(schema.recurring)
       .values({
@@ -441,28 +440,34 @@ describe("SQLite transaction concurrency & serialization", () => {
       nextDate: "2026-07-01",
     });
 
-    // Attempt auto-posting due items
-    await expect(
-      autoPostDueRecurringTransactions(db, "2026-07-05")
-    ).rejects.toThrow();
+    // Auto-posting due items should succeed without throwing
+    const posted = await autoPostDueRecurringTransactions(db, "2026-07-05");
 
-    // Verify all transactions in the batch were rolled back (only starting balance remains)
+    // Valid items (rec1 and rec3) posted successfully
+    expect(posted).toHaveLength(2);
+    expect((posted as any).failures).toHaveLength(1);
+    expect((posted as any).failures[0]?.id).toBe(rec2!.id);
+
+    // Verify transactions in the account (starting balance + rec1 + rec3 = 3 rows)
     const txRows = await db
       .select()
       .from(schema.transactions)
       .where(eq(schema.transactions.accountId, acct.id));
-    expect(txRows).toHaveLength(1);
-    expect(txRows[0]?.payee).toBe("Starting Balance");
+    expect(txRows).toHaveLength(3);
 
-    // Balance should remain unchanged (50,000)
+    // Account balance reflects valid items: 50000 - 1000 - 3000 = 46000
     const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
-    expect(freshAcct?.balance).toBe(50000);
+    expect(freshAcct?.balance).toBe(46000);
 
-    // Schedules of rec1 and rec3 should NOT be advanced
+    // Schedules of rec1 and rec3 were advanced to 2026-08-01
     const [freshRec1] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec1.id));
-    expect(freshRec1?.nextDate).toBe("2026-07-01");
+    expect(freshRec1?.nextDate).toBe("2026-08-01");
     const [freshRec3] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec3.id));
-    expect(freshRec3?.nextDate).toBe("2026-07-01");
+    expect(freshRec3?.nextDate).toBe("2026-08-01");
+
+    // Corrupted rule rec2 was deactivated
+    const [freshRec2] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec2!.id));
+    expect(freshRec2?.active).toBe(false);
   });
 });
 

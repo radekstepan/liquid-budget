@@ -316,6 +316,50 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
     const allAccountsForMap = await db.select().from(accounts);
     for (const a of allAccountsForMap) accNameMap.set(a.id, a.name);
 
+    // Fallback category for cross-budget-boundary transfer outflows with missing categories (BUG-03)
+    let fallbackTransferCategoryId: number | null = null;
+    async function getOrCreateFallbackTransferCategory(): Promise<number> {
+      if (fallbackTransferCategoryId !== null) return fallbackTransferCategoryId;
+      const [existingGroup] = await db
+        .select()
+        .from(categoryGroups)
+        .where(eq(categoryGroups.name, "Other"))
+        .limit(1);
+      let grpId = existingGroup?.id;
+      if (!grpId) {
+        const [gRow] = await db
+          .insert(categoryGroups)
+          .values({
+            name: "Other",
+            sort: groupSort++,
+            isCreditCardPayments: false,
+          })
+          .returning();
+        grpId = gRow!.id;
+      }
+      const [existingCat] = await db
+        .select()
+        .from(categories)
+        .where(and(eq(categories.groupId, grpId), eq(categories.name, "Uncategorized Transfers")))
+        .limit(1);
+      if (existingCat) {
+        fallbackTransferCategoryId = existingCat.id;
+      } else {
+        const [cRow] = await db
+          .insert(categories)
+          .values({
+            groupId: grpId,
+            name: "Uncategorized Transfers",
+            sort: 9999,
+            carryover: 0,
+            goalTarget: null,
+          })
+          .returning();
+        fallbackTransferCategoryId = cRow!.id;
+      }
+      return fallbackTransferCategoryId;
+    }
+
     // Build subTransactions and transactions lookup
     const subTxById = new Map<string, { parent: any; sub: any }>();
     const txById = new Map<string, any>();
@@ -406,6 +450,21 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               }
             } else if (st.payeeId) {
               subPayee = payeeMap.get(st.payeeId) || "";
+            }
+
+            const childAmt = dollarsToCents(st.amount);
+            if (subTransferAccountId != null) {
+              const destAccEntity = st.targetAccountId || (st.payeeId?.startsWith("Payee/Transfer:") ? st.payeeId.split(":")[1] : "");
+              const destIsOnBudget = destAccEntity ? (accOnBudgetMap.get(destAccEntity) ?? false) : (allAccountsForMap.find((a) => a.id === subTransferAccountId)?.onBudget ?? false);
+              const isCrossBoundary = accIsOnBudget !== destIsOnBudget;
+              const netOnBudgetDelta = (accIsOnBudget ? childAmt : 0) + (destIsOnBudget ? -childAmt : 0);
+              if (isCrossBoundary) {
+                if (netOnBudgetDelta < 0 && subCatId === null) {
+                  subCatId = await getOrCreateFallbackTransferCategory();
+                }
+              } else {
+                subCatId = null;
+              }
             }
 
             const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
@@ -543,7 +602,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               catEntityId === "Category/__ImmediateIncome__" ||
               catEntityId === "Category/__DeferredIncome__";
             const isTransferIncome = isCrossBoundaryTransfer && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
-            const finalTransferCatId = !isCrossBoundaryTransfer ? null : isSpecialIncomeCat ? null : catId;
+            let finalTransferCatId = !isCrossBoundaryTransfer ? null : isSpecialIncomeCat ? null : catId;
+            if (isCrossBoundaryTransfer && netOnBudget < 0 && finalTransferCatId === null) {
+              finalTransferCatId = await getOrCreateFallbackTransferCategory();
+            }
 
             const isTxReconciled = cleared === "Reconciled";
             const txRecId = isTxReconciled ? accountReconciliationIdMap.get(sourceAccEntityId) ?? null : null;
@@ -657,6 +719,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             catId = null;
           }
           const netOnBudgetTx = (srcOnBudget ? (t.amount || 0) : 0) + (destOnBudget ? -(t.amount || 0) : 0);
+          if (isCrossBoundaryTx && netOnBudgetTx < 0 && catId === null) {
+            catId = await getOrCreateFallbackTransferCategory();
+          }
           const isTxIncome =
             (srcOnBudget && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
             (isCrossBoundaryTx && (catId === null || isSpecialIncomeCat) && netOnBudgetTx > 0);
@@ -789,6 +854,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
         }
       }
+      if (transferAccountId === accId) {
+        transferAccountId = null;
+      }
 
       const accIsOnBudget = accOnBudgetMap.get(st.accountId) ?? true;
       let catId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
@@ -800,10 +868,50 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         catId = null;
       }
 
-      // Splits cannot have a top-level category.
-      const hasSubs = Array.isArray(st.subTransactions) && st.subTransactions.length > 0;
+      const rawSubs = (st.subTransactions || []).filter((sub: any) => !sub.isTombstone);
+      const hasSubs = rawSubs.length >= 2;
+
+      let parentAmount = dollarsToCents(st.amount);
       if (hasSubs) {
         catId = null;
+        transferAccountId = null;
+        // Rebalance parent amount to match the sum of sub-transactions to guarantee split balance invariant
+        parentAmount = rawSubs.reduce((sum: number, sub: any) => sum + dollarsToCents(sub.amount), 0);
+      } else if (rawSubs.length === 1) {
+        // A single child is not a valid split; collapse to a regular recurring transaction
+        const single = rawSubs[0]!;
+        parentAmount = dollarsToCents(single.amount);
+        catId = (accIsOnBudget && categoryIdMap.get(single.categoryId)) || null;
+        if (
+          single.categoryId === "Category/__ImmediateIncome__" ||
+          single.categoryId === "Category/__DeferredIncome__" ||
+          single.categoryId === "Category/__Split__"
+        ) {
+          catId = null;
+        }
+        if (single.targetAccountId) {
+          transferAccountId = accountIdMap.get(single.targetAccountId) || null;
+        } else if (single.payeeId && single.payeeId.startsWith("Payee/Transfer:")) {
+          const tid = single.payeeId.split(":")[1];
+          transferAccountId = tid ? accountIdMap.get(tid) || null : null;
+        }
+        if (transferAccountId === accId) {
+          transferAccountId = null;
+        }
+      }
+
+      if (transferAccountId != null) {
+        const destAccEntity = st.targetAccountId || (st.payeeId?.startsWith("Payee/Transfer:") ? st.payeeId.split(":")[1] : "");
+        const destIsOnBudget = destAccEntity ? (accOnBudgetMap.get(destAccEntity) ?? false) : (allAccountsForMap.find((a) => a.id === transferAccountId)?.onBudget ?? false);
+        const isCross = accIsOnBudget !== destIsOnBudget;
+        const netOnBudget = (accIsOnBudget ? parentAmount : 0) + (destIsOnBudget ? -parentAmount : 0);
+        if (isCross) {
+          if (netOnBudget < 0 && catId === null) {
+            catId = await getOrCreateFallbackTransferCategory();
+          }
+        } else {
+          catId = null;
+        }
       }
 
       let rawFreq = (st.frequency || "monthly").toLowerCase().replace(/[\s_-]+/g, "");
@@ -858,7 +966,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           payee,
           memo: st.memo || "",
           flagColor: ynabFlagToColor(st.flag),
-          amount: dollarsToCents(st.amount),
+          amount: parentAmount,
           frequency,
           nextDate: st.date,
           anchorDay,
@@ -869,8 +977,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
       if (hasSubs && insertedR) {
         let sort = 0;
-        for (const sub of st.subTransactions) {
-          if (sub.isTombstone) continue;
+        for (const sub of rawSubs) {
           let subCatId = (accIsOnBudget && categoryIdMap.get(sub.categoryId)) || null;
           if (
             sub.categoryId === "Category/__ImmediateIncome__" ||
@@ -890,11 +997,29 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               subTransferAccountId = foundTarget;
             }
           }
+          if (subTransferAccountId === accId) {
+            subTransferAccountId = null;
+          }
+
+          const childAmt = dollarsToCents(sub.amount);
+          if (subTransferAccountId != null) {
+            const destAccEntity = sub.targetAccountId || (sub.payeeId?.startsWith("Payee/Transfer:") ? sub.payeeId.split(":")[1] : "");
+            const destIsOnBudget = destAccEntity ? (accOnBudgetMap.get(destAccEntity) ?? false) : (allAccountsForMap.find((a) => a.id === subTransferAccountId)?.onBudget ?? false);
+            const isCross = accIsOnBudget !== destIsOnBudget;
+            const netOnBudget = (accIsOnBudget ? childAmt : 0) + (destIsOnBudget ? -childAmt : 0);
+            if (isCross) {
+              if (netOnBudget < 0 && subCatId === null) {
+                subCatId = await getOrCreateFallbackTransferCategory();
+              }
+            } else {
+              subCatId = null;
+            }
+          }
 
           await db.insert(recurringSubTransactions).values({
             recurringId: insertedR.id,
             categoryId: subCatId,
-            amount: dollarsToCents(sub.amount),
+            amount: childAmt,
             memo: sub.memo || "",
             sort: sort++,
             transferAccountId: subTransferAccountId,

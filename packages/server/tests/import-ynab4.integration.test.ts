@@ -29,6 +29,7 @@ import { importYnab4 } from "../src/import-ynab4.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import { postRecurringTransaction, updateRecurring } from "../src/queries/recurring.js";
 import { unreconcileAccount } from "../src/queries/reconcile.js";
+import { verifyBudgetIntegrity } from "../src/queries/diagnostics.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -782,9 +783,9 @@ describe("importYnab4 full import", () => {
     expect(Number(subTax!.amount)).toBe(-30000); // -$300.00
 
     expect(subTransfer).toMatchObject({
-      categoryId: null,
       memo: "401k contribution",
     });
+    expect(subTransfer!.categoryId).not.toBeNull();
     expect(subTransfer!.transferAccountId).not.toBeNull();
     expect(Number(subTransfer!.amount)).toBe(-20000); // -$200.00
 
@@ -1009,5 +1010,133 @@ describe("importYnab4 full import", () => {
     const [clearedAcc] = await db.select().from(schema.accounts);
     expect(clearedAcc?.lastReconciledAt).toBeNull();
     expect(clearedAcc?.lastReconciledBalance).toBeNull();
+  });
+
+  it("BUG-03: imports boundary outflow transfers without category by assigning fallback category, preserving budget integrity", async () => {
+    const backupData = {
+      accounts: [
+        { entityId: "acc_chk", accountName: "Checking", accountType: "Checking", onBudget: true },
+        { entityId: "acc_inv", accountName: "Investments", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [
+        { entityId: "p_start", name: "Starting Balance" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc_main",
+          name: "General",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc_gen", name: "General Exp" }],
+        },
+      ],
+      transactions: [
+        // Checking starting balance $1,000.00
+        {
+          entityId: "t_chk_start",
+          accountId: "acc_chk",
+          date: "2026-07-01",
+          amount: 1000,
+          cleared: "Cleared",
+          payeeId: "p_start",
+          categoryId: "Category/__ImmediateIncome__",
+        },
+        // Cross-boundary transfer from Checking (on-budget) to Investments (off-budget) of -$200.00 with NO category
+        {
+          entityId: "t_transfer_out",
+          accountId: "acc_chk",
+          date: "2026-07-15",
+          amount: -200,
+          cleared: "Cleared",
+          targetAccountId: "acc_inv",
+          transferTransactionId: "t_transfer_in",
+          categoryId: null,
+        },
+        {
+          entityId: "t_transfer_in",
+          accountId: "acc_inv",
+          date: "2026-07-15",
+          amount: 200,
+          cleared: "Cleared",
+          targetAccountId: "acc_chk",
+          transferTransactionId: "t_transfer_out",
+          categoryId: null,
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, backupData);
+
+    const budget = await getBudgetData(db);
+    // Checking: 100000 - 20000 = 80000
+    // Investments: 20000
+    const chk = budget.accounts.find((a) => a.name === "Checking");
+    expect(Number(chk?.balance)).toBe(80000);
+
+    // The boundary outflow transfer should have been assigned a fallback category
+    const transferTx = budget.transactions.find((t) => t.transferAccountId != null);
+    expect(transferTx).toBeDefined();
+    expect(transferTx?.categoryId).not.toBeNull();
+
+    const fallbackCat = budget.categories.find((c) => c.id === transferTx?.categoryId);
+    expect(fallbackCat?.name).toBe("Uncategorized Transfers");
+
+    // Core budget integrity audit must be completely consistent
+    const report = await verifyBudgetIntegrity(db, "2026-07");
+    expect(report.difference).toBe(0);
+  });
+
+  it("BUG-01 / BUG-03: validates and rebalances scheduled split transactions on import", async () => {
+    const backupData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Checking", accountType: "Checking", onBudget: true },
+        { entityId: "acc2", accountName: "OffBudget", accountType: "InvestmentAccount", onBudget: false },
+      ],
+      payees: [
+        { entityId: "p_sched", name: "Scheduled Payee" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc_main",
+          name: "Main",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc_cat1", name: "Cat 1" }],
+        },
+      ],
+      transactions: [],
+      monthlyBudgets: [],
+      scheduledTransactions: [
+        // Scheduled split with parent amount = -100, but subtransactions sum = -60 + -40 = -100
+        // and child 2 transfers to off-budget without category
+        {
+          entityId: "s_split",
+          accountId: "acc1",
+          date: "2026-09-01",
+          amount: -999, // Unbalanced parent amount in YNAB4 backup
+          frequency: "monthly",
+          payeeId: "p_sched",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            { categoryId: "sc_cat1", amount: -60, memo: "Sub 1" },
+            { categoryId: null, targetAccountId: "acc2", amount: -40, memo: "Sub 2" },
+          ],
+        },
+      ],
+    };
+
+    await importYnab4(db, backupData);
+
+    const budget = await getBudgetData(db);
+    expect(budget.recurring).toHaveLength(1);
+    const rec = budget.recurring[0]!;
+
+    // Parent amount rebalanced to sum of children: -6000 + -4000 = -10000 cents
+    expect(Number(rec.amount)).toBe(-10000);
+    expect(rec.subTransactions).toHaveLength(2);
+    // Boundary transfer child assigned fallback category
+    const transferSub = rec.subTransactions.find((s) => s.transferAccountId != null);
+    expect(transferSub).toBeDefined();
+    expect(transferSub?.categoryId).not.toBeNull();
   });
 });
