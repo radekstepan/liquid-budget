@@ -349,6 +349,12 @@ describe("addDaysISO", () => {
     expect(addDaysISO("2026-06-28", 5)).toBe("2026-07-03");
     expect(addDaysISO("2024-02-27", 3)).toBe("2024-03-01");
   });
+
+  it("returns input unchanged for invalid calendar dates (BUG-19)", () => {
+    expect(addDaysISO("2026-02-31", 1)).toBe("2026-02-31");
+    expect(addDaysISO("2026-02-29", 1)).toBe("2026-02-29");
+    expect(addDaysISO("invalid", 5)).toBe("invalid");
+  });
 });
 
 describe("groupRecurringByTimeline", () => {

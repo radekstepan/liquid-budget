@@ -44,8 +44,14 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
 
 import {
   formatZodError,
+  ISODateSchema,
+  RecurringAutoPostActionSchema,
+  RecurringBulkDeleteSchema,
+  RecurringBulkPostActionSchema,
+  RecurringBulkUpdateSchema,
   RecurringCreateSchema,
   RecurringPatchSchema,
+  RecurringPostActionSchema,
 } from "../schemas";
 
 function errorResponse(e: unknown): Response {
@@ -62,8 +68,14 @@ export async function POST(req: Request) {
 
   if (action === "post") {
     const id = Number(searchParams.get("id"));
-    const postDate = searchParams.get("date") || undefined;
-    if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+    const rawDate = searchParams.get("date") || undefined;
+    if (!id || Number.isNaN(id) || id <= 0) return Response.json({ error: "invalid id" }, { status: 400 });
+    let postDate: string | undefined;
+    if (rawDate !== undefined) {
+      const dateRes = ISODateSchema.safeParse(rawDate);
+      if (!dateRes.success) return Response.json({ error: "invalid date" }, { status: 400 });
+      postDate = dateRes.data;
+    }
     try {
       const res = await postRecurringTransaction(db, id, postDate);
       return Response.json(res);
@@ -73,8 +85,15 @@ export async function POST(req: Request) {
   }
 
   if (action === "autopost") {
+    const rawAsOfDate = searchParams.get("asOfDate") || searchParams.get("date") || undefined;
+    let asOfDate: string | undefined;
+    if (rawAsOfDate !== undefined) {
+      const dateRes = ISODateSchema.safeParse(rawAsOfDate);
+      if (!dateRes.success) return Response.json({ error: "invalid date" }, { status: 400 });
+      asOfDate = dateRes.data;
+    }
     try {
-      const posted = await autoPostDueRecurringTransactions(db);
+      const posted = await autoPostDueRecurringTransactions(db, asOfDate);
       return Response.json({ postedCount: posted.length, posted });
     } catch (e) {
       return errorResponse(e);
@@ -85,10 +104,12 @@ export async function POST(req: Request) {
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
 
   if (typeof json === "object" && json !== null && (json as any).action === "post") {
-    const id = Number((json as any).id);
-    if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+    const parsed = RecurringPostActionSchema.safeParse(json);
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
     try {
-      const res = await postRecurringTransaction(db, id, (json as any).date ? String((json as any).date) : undefined);
+      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
       return Response.json(res);
     } catch (e) {
       return errorResponse(e);
@@ -96,16 +117,15 @@ export async function POST(req: Request) {
   }
 
   if (typeof json === "object" && json !== null && (json as any).action === "bulk-post") {
-    const ids = (json as any).ids;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return Response.json({ error: "ids must be a non-empty array" }, { status: 400 });
+    const parsed = RecurringBulkPostActionSchema.safeParse(json);
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
-    const postDate = (json as any).date ? String((json as any).date) : undefined;
     try {
       const results = await withTransaction(db, async () => {
         const list = [];
-        for (const id of ids) {
-          const res = await postRecurringTransaction(db, Number(id), postDate);
+        for (const id of parsed.data.ids) {
+          const res = await postRecurringTransaction(db, id, parsed.data.date);
           list.push(res);
         }
         return list;
@@ -117,8 +137,12 @@ export async function POST(req: Request) {
   }
 
   if (typeof json === "object" && json !== null && (json as any).action === "autopost") {
+    const parsed = RecurringAutoPostActionSchema.safeParse(json);
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
     try {
-      const posted = await autoPostDueRecurringTransactions(db, (json as any).asOfDate ? String((json as any).asOfDate) : undefined);
+      const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
       return Response.json({ postedCount: posted.length, posted });
     } catch (e) {
       return errorResponse(e);
@@ -161,20 +185,21 @@ export async function PATCH(req: Request) {
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
 
   if (typeof json === "object" && json !== null && (json as any).action === "bulk-update") {
-    const ids = (json as any).ids;
-    const patch = (json as any).patch;
-    if (!Array.isArray(ids) || ids.length === 0 || !patch || typeof patch !== "object") {
-      return Response.json({ error: "invalid bulk-update payload" }, { status: 400 });
+    const parseResult = RecurringBulkUpdateSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
+    const { ids, patch } = parseResult.data;
     try {
       const db = getDefaultDb();
       const cleanPatch: Parameters<typeof updateRecurring>[2] = {};
       if (patch.flagColor !== undefined) cleanPatch.flagColor = patch.flagColor;
       if (patch.active !== undefined) cleanPatch.active = patch.active;
       if (patch.categoryId !== undefined) cleanPatch.categoryId = patch.categoryId;
+      if (patch.nextDate !== undefined) cleanPatch.nextDate = patch.nextDate;
 
       for (const id of ids) {
-        await updateRecurring(db, Number(id), cleanPatch);
+        await updateRecurring(db, id, cleanPatch);
       }
       return Response.json({ updatedCount: ids.length });
     } catch (e) {
@@ -234,11 +259,12 @@ export async function DELETE(req: Request) {
 
   try {
     const json = await req.json();
-    if (typeof json === "object" && json !== null && Array.isArray((json as any).ids)) {
-      for (const singleId of (json as any).ids) {
-        await deleteRecurring(db, Number(singleId));
+    const parseResult = RecurringBulkDeleteSchema.safeParse(json);
+    if (parseResult.success) {
+      for (const singleId of parseResult.data.ids) {
+        await deleteRecurring(db, singleId);
       }
-      return Response.json({ ok: true, deletedCount: (json as any).ids.length });
+      return Response.json({ ok: true, deletedCount: parseResult.data.ids.length });
     }
   } catch {}
 

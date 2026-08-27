@@ -6,7 +6,12 @@ import type {
   TransactionFlagColor,
   TransactionFlagState,
 } from "@ynab/logic";
-import { TRANSACTION_DUPLICATE_FLAG, TRANSACTION_FLAG_COLORS } from "@ynab/logic";
+import {
+  isValidISODate,
+  isValidISOMonth,
+  TRANSACTION_DUPLICATE_FLAG,
+  TRANSACTION_FLAG_COLORS,
+} from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { accounts, transactions } from "../schema.js";
@@ -78,6 +83,20 @@ export class TransactionError extends Error {
     super(message);
     this.name = "TransactionError";
   }
+}
+
+export function assertValidISODate(date: unknown, fieldName: string = "date"): string {
+  if (!isValidISODate(date)) {
+    throw new TransactionError(`Invalid calendar date for ${fieldName}: ${date}`, 400);
+  }
+  return date;
+}
+
+export function assertValidISOMonth(month: unknown, fieldName: string = "month"): string {
+  if (!isValidISOMonth(month)) {
+    throw new TransactionError(`Invalid month format for ${fieldName}: ${month}`, 400);
+  }
+  return month;
 }
 
 export function assertValidAmount(amount: unknown): number {
@@ -211,6 +230,10 @@ export function assertSplitsBalanced(
  */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
   const amount = assertValidAmount(input.amount);
+  assertValidISODate(input.date, "date");
+  if (input.incomeMonth) {
+    assertValidISOMonth(input.incomeMonth, "incomeMonth");
+  }
   if (input.status === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
@@ -433,6 +456,7 @@ export async function createSplitWithChildren(
   children: SubTransactionInput[]
 ) {
   const parentAmount = assertValidAmount(parent.amount);
+  assertValidISODate(parent.date, "date");
   assertSplitsBalanced(parentAmount, children);
 
   const parentStatus = parent.status ?? "c";
@@ -603,7 +627,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (patch.categoryId !== undefined) {
     p.categoryId = patch.categoryId ?? null;
   }
-  if (patch.date !== undefined && patch.date != null) p.date = String(patch.date);
+  if (patch.date !== undefined && patch.date != null) p.date = assertValidISODate(patch.date, "date");
   if (patch.payee !== undefined && patch.payee != null) p.payee = String(patch.payee);
   if (patch.memo !== undefined) p.memo = patch.memo == null ? "" : String(patch.memo);
   if (patch.amount !== undefined && patch.amount != null) p.amount = assertValidAmount(patch.amount);
@@ -613,7 +637,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     p.reconciliationId = null;
   }
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
-  if (patch.incomeMonth !== undefined) p.incomeMonth = patch.incomeMonth ?? null;
+  if (patch.incomeMonth !== undefined) {
+    p.incomeMonth = patch.incomeMonth ? assertValidISOMonth(patch.incomeMonth, "incomeMonth") : null;
+  }
   if (patch.isIncome !== undefined) p.isIncome = patch.isIncome;
 
   const isParent = existing.parentId == null && existing.transferAccountId == null;
@@ -834,6 +860,9 @@ export async function updateSplit(
     throw new TransactionError("target row has no children; use a regular update");
   }
 
+  if (parentFields.date !== undefined && parentFields.date != null) {
+    assertValidISODate(parentFields.date, "date");
+  }
   const parentAmount =
     parentFields.amount !== undefined && parentFields.amount != null
       ? assertValidAmount(parentFields.amount)
@@ -1164,6 +1193,12 @@ export async function bulkUpdateTransactions(
   patch: BulkUpdateTransactionPatch
 ) {
   if (!ids || ids.length === 0) return [];
+  if (patch.date !== undefined && patch.date != null) {
+    assertValidISODate(patch.date, "date");
+  }
+  if (patch.incomeMonth !== undefined && patch.incomeMonth != null) {
+    assertValidISOMonth(patch.incomeMonth, "incomeMonth");
+  }
   if (patch.status === "r") {
     throw new TransactionError(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"

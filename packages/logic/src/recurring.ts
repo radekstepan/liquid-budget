@@ -15,7 +15,7 @@
  */
 
 import type { Account, Recurring, RecurringSubTransaction } from "./types.js";
-import { fmt, num, todayISO } from "./format.js";
+import { fmt, isValidISODate, num, todayISO } from "./format.js";
 
 export type RecurringFlavour = "single" | "transfer" | "split";
 
@@ -316,6 +316,7 @@ export function countDueRecurring(
  * Returns an ISO date shifted by `days` days.
  */
 export function addDaysISO(iso: string, days: number): string {
+  if (!isValidISODate(iso)) return iso;
   const d = new Date(iso + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return iso;
   d.setUTCDate(d.getUTCDate() + days);

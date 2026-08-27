@@ -252,4 +252,85 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(RecurringPatchSchema.safeParse({ id: 1, active: false }).success).toBe(true);
     });
   });
+
+  describe("BUG-19: Calendar date and month rejection", () => {
+    it("rejects invalid calendar dates in TransactionCreateSchema, Patch, and BulkUpdate", () => {
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-02-31",
+          amount: -1000,
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          date: "2026-04-31",
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1],
+          patch: { date: "2026-02-29" },
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: 1000,
+          incomeMonth: "2026-13",
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects invalid months in AssignmentUpsertSchema", () => {
+      expect(
+        AssignmentUpsertSchema.safeParse({
+          categoryId: 1,
+          month: "2026-13",
+          amount: 5000,
+        }).success
+      ).toBe(false);
+
+      expect(
+        AssignmentUpsertSchema.safeParse({
+          categoryId: 1,
+          month: "2026-00",
+          amount: 5000,
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects invalid dates in Recurring schemas", () => {
+      expect(
+        RecurringCreateSchema.safeParse({
+          accountId: 1,
+          amount: -5000,
+          frequency: "monthly",
+          nextDate: "2026-02-31",
+        }).success
+      ).toBe(false);
+
+      expect(
+        RecurringPatchSchema.safeParse({
+          id: 1,
+          nextDate: "2026-02-31",
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects invalid dates in ReconcileAccountSchema", () => {
+      expect(
+        ReconcileAccountSchema.safeParse({
+          accountId: 1,
+          statementBalance: 10000,
+          statementDate: "2026-02-31",
+        }).success
+      ).toBe(false);
+    });
+  });
 });

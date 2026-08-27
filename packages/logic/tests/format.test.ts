@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dollarsToCents, evalAmount, fmt, fmtSigned, monthKey, monthLabel, nextDateFor, num, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, isValidISODate, isValidISOMonth, monthKey, monthLabel, nextDateFor, num, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers and formats cents as dollars", () => {
@@ -415,9 +415,68 @@ describe("format", () => {
       expect(adjustDateShortcut("2026-06-15", "T")).toBe(todayISO());
     });
 
-    it("returns null for unsupported keys or invalid dates", () => {
+    it("returns null for unsupported keys or invalid dates (BUG-19)", () => {
       expect(adjustDateShortcut("2026-06-15", "x")).toBeNull();
       expect(adjustDateShortcut("invalid", "+")).toBeNull();
+      expect(adjustDateShortcut("2026-02-31", "+")).toBeNull();
+      expect(adjustDateShortcut("2026-02-29", "+")).toBeNull();
+      expect(adjustDateShortcut("2026-04-31", "m")).toBeNull();
+      expect(adjustDateShortcut("2026-13-01", "y")).toBeNull();
+    });
+  });
+
+  describe("isValidISODate and isValidISOMonth (BUG-19)", () => {
+    it("isValidISODate accepts valid calendar dates including leap years", () => {
+      expect(isValidISODate("2026-06-15")).toBe(true);
+      expect(isValidISODate("2026-01-31")).toBe(true);
+      expect(isValidISODate("2026-02-28")).toBe(true);
+      expect(isValidISODate("2024-02-29")).toBe(true); // leap year
+      expect(isValidISODate("2000-02-29")).toBe(true); // leap century
+      expect(isValidISODate("2026-12-31")).toBe(true);
+    });
+
+    it("isValidISODate rejects invalid calendar dates and malformed strings", () => {
+      expect(isValidISODate("2026-02-31")).toBe(false);
+      expect(isValidISODate("2026-02-29")).toBe(false); // non-leap year
+      expect(isValidISODate("1900-02-29")).toBe(false); // non-leap century
+      expect(isValidISODate("2026-04-31")).toBe(false); // 30-day month
+      expect(isValidISODate("2026-06-31")).toBe(false);
+      expect(isValidISODate("2026-09-31")).toBe(false);
+      expect(isValidISODate("2026-11-31")).toBe(false);
+      expect(isValidISODate("2026-00-01")).toBe(false);
+      expect(isValidISODate("2026-13-01")).toBe(false);
+      expect(isValidISODate("2026-01-00")).toBe(false);
+      expect(isValidISODate("2026-01-32")).toBe(false);
+      expect(isValidISODate("0000-01-01")).toBe(false);
+      expect(isValidISODate("2026/06/15")).toBe(false);
+      expect(isValidISODate("2026-6-15")).toBe(false);
+      expect(isValidISODate("")).toBe(false);
+      expect(isValidISODate(null)).toBe(false);
+      expect(isValidISODate(undefined)).toBe(false);
+      expect(isValidISODate(12345)).toBe(false);
+    });
+
+    it("isValidISOMonth accepts valid month strings", () => {
+      expect(isValidISOMonth("2026-01")).toBe(true);
+      expect(isValidISOMonth("2026-06")).toBe(true);
+      expect(isValidISOMonth("2026-12")).toBe(true);
+    });
+
+    it("isValidISOMonth rejects invalid month strings", () => {
+      expect(isValidISOMonth("2026-00")).toBe(false);
+      expect(isValidISOMonth("2026-13")).toBe(false);
+      expect(isValidISOMonth("0000-01")).toBe(false);
+      expect(isValidISOMonth("2026-6")).toBe(false);
+      expect(isValidISOMonth("June 2026")).toBe(false);
+      expect(isValidISOMonth("2026-06-15")).toBe(false);
+      expect(isValidISOMonth("")).toBe(false);
+      expect(isValidISOMonth(null)).toBe(false);
+    });
+
+    it("nextDateFor returns invalid calendar dates unchanged without normalizing into future months (BUG-19)", () => {
+      expect(nextDateFor("monthly", "2026-02-31", 31)).toBe("2026-02-31");
+      expect(nextDateFor("monthly", "2026-02-29")).toBe("2026-02-29");
+      expect(nextDateFor("daily", "2026-04-31")).toBe("2026-04-31");
     });
   });
 

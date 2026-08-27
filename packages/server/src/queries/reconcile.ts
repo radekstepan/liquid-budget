@@ -2,7 +2,7 @@ import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { accounts, categories, reconciliations, transactions } from "../schema.js";
-import { TransactionError } from "./transactions.js";
+import { assertValidISODate, TransactionError } from "./transactions.js";
 import { todayISO, type ReconcileState } from "@ynab/logic";
 
 /**
@@ -50,6 +50,7 @@ export async function getReconcileState(
   accountId: number,
   statementDate: string = todayISO()
 ): Promise<ReconcileState> {
+  assertValidISODate(statementDate, "statementDate");
   const [acct] = await db.select().from(accounts).where(eq(accounts.id, accountId));
   if (!acct) {
     throw new TransactionError(`Account ${accountId} not found`, 404);
