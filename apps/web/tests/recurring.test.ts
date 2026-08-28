@@ -219,6 +219,16 @@ describe("Recurring API routes (BUG-19, BUG-41, BUG-42)", () => {
       expect(res.status).toBe(400);
     });
 
+    it("DELETE with query id returns 404 for non-existent recurring", async () => {
+      const req = new NextRequest("http://localhost:3000/api/recurring?id=99999", {
+        method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error).toBe("not found");
+    });
+
     it("PATCH on non-existent recurring returns 404", async () => {
       const req = new NextRequest("http://localhost:3000/api/recurring", {
         method: "PATCH",

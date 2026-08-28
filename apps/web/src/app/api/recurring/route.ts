@@ -240,6 +240,7 @@ export async function DELETE(req: Request) {
     }
     try {
       const deleted = await deleteRecurring(db, parsed.data);
+      if (!deleted) return Response.json({ error: "not found" }, { status: 404 });
       return Response.json({ ok: true, deleted });
     } catch (e) {
       return apiErrorResponse(e);

@@ -99,6 +99,63 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     expect(rec.payee).toBe("Target");
   });
 
+  it("BUG-22: does not cascade payee name to split children or transfer rows by raw text match", () => {
+    const p = findOrCreatePayee(db, "Landlord", 10);
+
+    // 1. Regular transaction with matching text (legacy, null payeeId) -> SHOULD update
+    db.run(
+      `INSERT INTO transactions (account_id, category_id, date, payee, memo, amount, status, created_at, is_income) VALUES (1, 10, '2026-06-01', 'Landlord', '', -5000, 'c', '', 0);`
+    );
+
+    // 2. Split parent row with matching text (null payeeId) -> SHOULD update
+    db.run(
+      `INSERT INTO transactions (id, account_id, date, payee, memo, amount, status, created_at, is_income) VALUES (100, 1, '2026-06-01', 'Landlord', '', -10000, 'c', '', 0);`
+    );
+
+    // 3. Split child row with matching text (null payeeId, parent_id = 100) -> should NOT update
+    db.run(
+      `INSERT INTO transactions (id, account_id, parent_id, date, payee, memo, amount, status, created_at, is_income) VALUES (101, 1, 100, '2026-06-01', 'Landlord', '', -5000, 'c', '', 0);`
+    );
+
+    // 4. Transfer row with matching text (null payeeId, transfer_account_id = 1) -> should NOT update
+    db.run(
+      `INSERT INTO transactions (id, account_id, transfer_account_id, date, payee, memo, amount, status, created_at, is_income) VALUES (102, 1, 2, '2026-06-01', 'Landlord', '', -2000, 'c', '', 0);`
+    );
+
+    // 5. Transfer recurring row with matching text (null payeeId, transfer_account_id = 1) -> should NOT update
+    db.run(
+      `INSERT INTO recurring (account_id, transfer_account_id, payee, amount, frequency, next_date, active) VALUES (1, 2, 'Landlord', -2000, 'monthly', '2026-07-01', 1);`
+    );
+
+    // 6. Split child row WITH explicit payee_id -> SHOULD update
+    db.run(
+      `INSERT INTO transactions (id, account_id, parent_id, payee_id, date, payee, memo, amount, status, created_at, is_income) VALUES (103, 1, 100, ${p.id}, '2026-06-01', 'Landlord', '', -5000, 'c', '', 0);`
+    );
+
+    const updated = updatePayee(db, p.id, { name: "Property Management Co" });
+    expect(updated?.name).toBe("Property Management Co");
+
+    const allTx = db.select().from(transactions).all();
+    const regularTx = allTx.find((t) => t.id === 1)!;
+    expect(regularTx.payee).toBe("Property Management Co");
+
+    const splitParent = allTx.find((t) => t.id === 100)!;
+    expect(splitParent.payee).toBe("Property Management Co");
+
+    const unlinkedChild = allTx.find((t) => t.id === 101)!;
+    expect(unlinkedChild.payee).toBe("Landlord"); // Kept unchanged
+
+    const unlinkedTransfer = allTx.find((t) => t.id === 102)!;
+    expect(unlinkedTransfer.payee).toBe("Landlord"); // Kept unchanged
+
+    const linkedChild = allTx.find((t) => t.id === 103)!;
+    expect(linkedChild.payee).toBe("Property Management Co"); // Updated because of explicit payeeId
+
+    const allRec = db.select().from(recurring).all();
+    const unlinkedRecTransfer = allRec[0]!;
+    expect(unlinkedRecTransfer.payee).toBe("Landlord"); // Kept unchanged
+  });
+
   it("deletes a payee", () => {
     const p = findOrCreatePayee(db, "Gas Station");
     expect(getPayees(db)).toHaveLength(1);
