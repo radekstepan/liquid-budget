@@ -1438,4 +1438,124 @@ describe("importYnab4 full import", () => {
     expect(tx1?.reconciliationId).toBe(rec1!.id);
     expect(tx2?.reconciliationId).toBe(rec2!.id);
   });
+
+  it("BUG-01: imports genuine milliunit-encoded YNAB4 data at correct scale (÷10 before dollarsToCents)", async () => {
+    // Stock YNAB4 backups store amounts as integer milliunits (×1000).
+    // A $45.00 grocery is stored as -45000, a $3,000.00 paycheck as 3000000.
+    // After detection and conversion, amounts should be in cents:
+    //   -45000 milliunits → -4500 cents (−$45.00)
+    //   3000000 milliunits → 300000 cents ($3,000.00)
+    const milliunitData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p1", name: "Grocery Store" },
+        { entityId: "p2", name: "Employer" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Everyday",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Groceries" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -45000, // −$45.00 in milliunits
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "sc1",
+        },
+        {
+          entityId: "t2",
+          accountId: "acc1",
+          date: "2026-06-02",
+          amount: 3000000, // +$3,000.00 in milliunits → exceeds 1M threshold
+          cleared: "Cleared",
+          payeeId: "p2",
+          categoryId: "Category/__ImmediateIncome__",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, milliunitData);
+    const { transactions } = await getBudgetData(db);
+
+    expect(transactions).toHaveLength(2);
+
+    const grocery = transactions.find((t) => t.payee === "Grocery Store");
+    expect(grocery).toBeDefined();
+    // -45000 milliunits → -4500 cents
+    expect(Number(grocery!.amount)).toBe(-4500);
+
+    const income = transactions.find((t) => t.payee === "Employer");
+    expect(income).toBeDefined();
+    // 3000000 milliunits → 300000 cents
+    expect(Number(income!.amount)).toBe(300000);
+  });
+
+  it("BUG-01: still imports decimal-dollar data correctly (regression guard for backup.y4backup)", async () => {
+    // Verify that decimal-dollar data (like the repo's own backup.y4backup)
+    // still imports at the correct scale via the existing test baseline.
+    const decimalData = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p1", name: "Store" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Expenses",
+          type: "OUTFLOW",
+          subCategories: [{ entityId: "sc1", name: "Food" }],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -45.00, // −$45.00 in decimal dollars (has fractional part)
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "sc1",
+        },
+        {
+          entityId: "t2",
+          accountId: "acc1",
+          date: "2026-06-02",
+          amount: 3000.00, // +$3,000.00 in decimal dollars
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "Category/__ImmediateIncome__",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, decimalData);
+    const { transactions } = await getBudgetData(db);
+
+    expect(transactions).toHaveLength(2);
+
+    const outflow = transactions.find((t) => Number(t.amount) < 0);
+    expect(outflow).toBeDefined();
+    // −45.00 dollars → −4500 cents
+    expect(Number(outflow!.amount)).toBe(-4500);
+
+    const inflow = transactions.find((t) => Number(t.amount) > 0);
+    expect(inflow).toBeDefined();
+    // 3000.00 dollars → 300000 cents
+    expect(Number(inflow!.amount)).toBe(300000);
+  });
 });
