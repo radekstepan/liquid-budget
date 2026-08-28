@@ -35,6 +35,7 @@ export const categoryGroups = sqliteTable(
     name: text("name").notNull(),
     sort: integer("sort").notNull().default(0),
     isCreditCardPayments: integer("is_credit_card_payments", { mode: "boolean" }).notNull().default(false),
+    isHidden: integer("is_hidden", { mode: "boolean" }).notNull().default(false),
   },
   (t) => ({
     nameUniq: uniqueIndex("category_groups_name_uniq").on(t.name),

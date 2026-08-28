@@ -16,6 +16,7 @@ export type CategoryGroup = {
   name: string;
   sort: number;
   isCreditCardPayments: boolean;
+  isHidden?: boolean;
 };
 
 export type Category = {

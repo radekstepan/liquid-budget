@@ -544,6 +544,18 @@ describe("categories queries", () => {
       expect(reconciledAfter?.categoryId).toBeNull();
       expect(reconciledAfter?.status).toBe("r");
     });
+
+    it("creates and updates category groups with isHidden flag (BUG-30)", async () => {
+      const db = openMigratedDb();
+      const [grp1] = await db.insert(schema.categoryGroups).values({ name: "Visible Group", sort: 0, isHidden: false }).returning();
+      expect(grp1?.isHidden).toBe(false);
+
+      const [grp2] = await db.insert(schema.categoryGroups).values({ name: "Hidden Group", sort: 1, isHidden: true }).returning();
+      expect(grp2?.isHidden).toBe(true);
+
+      const updated = await updateCategoryGroup(db, grp1!.id, { isHidden: true });
+      expect(updated?.isHidden).toBe(true);
+    });
   });
 });
 

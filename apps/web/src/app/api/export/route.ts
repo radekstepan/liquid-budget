@@ -49,6 +49,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (format === "sqlite" || format === "db") {
+      try {
+        db.$client.pragma("wal_checkpoint(TRUNCATE)");
+      } catch (e) {
+        console.warn("[export] wal_checkpoint failed:", e);
+      }
       const buffer = db.$client.serialize();
       return new Response(new Uint8Array(buffer), {
         headers: {
@@ -71,9 +76,9 @@ export async function GET(req: NextRequest) {
       lines.push("");
 
       // Category Groups
-      lines.push(csvLine(["Type", "ID", "Name", "Sort", "CC Payments"]));
+      lines.push(csvLine(["Type", "ID", "Name", "Sort", "CC Payments", "Hidden"]));
       for (const g of data.groups) {
-        lines.push(csvLine(["Group", g.id, g.name, g.sort, g.isCreditCardPayments ? "Y" : "N"]));
+        lines.push(csvLine(["Group", g.id, g.name, g.sort, g.isCreditCardPayments ? "Y" : "N", g.isHidden ? "Y" : "N"]));
       }
 
       lines.push("");

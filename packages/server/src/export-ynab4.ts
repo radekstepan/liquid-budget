@@ -204,7 +204,7 @@ export async function exportYnab4(
 
   const yMasterCategories = allGroups.map((g) => {
     const groupCats = categoriesByGroup.get(g.id) ?? [];
-    const isHidden = g.name.toLowerCase() === "hidden categories";
+    const isHidden = Boolean(g.isHidden || g.name.toLowerCase() === "hidden categories");
     const entityId = isHidden
       ? "MasterCategory/__Hidden__"
       : g.isCreditCardPayments

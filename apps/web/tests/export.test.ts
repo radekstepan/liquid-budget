@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
+import Database from "better-sqlite3";
+import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase, transactions } from "@ynab/server";
 import { GET } from "../src/app/api/export/route";
 import { POST as importPOST } from "../src/app/api/import/route";
 import { POST as importCsvPOST } from "../src/app/api/import/csv/route";
@@ -93,13 +94,32 @@ describe("GET /api/export", () => {
     expect(json.transactions).toBeDefined();
   });
 
-  it("exports SQLite DB binary", async () => {
+  it("exports SQLite DB binary including newest writes (BUG-29)", async () => {
+    const db = getDefaultDb();
+    await db.insert(transactions).values({
+      accountId: 1,
+      categoryId: null,
+      date: "2026-06-25",
+      payee: "Brand New WAL Write",
+      memo: "Checking WAL flush",
+      amount: -12345,
+      status: "c",
+    });
+
     const req = new NextRequest("http://localhost:3000/api/export?format=sqlite");
     const res = await GET(req);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("application/x-sqlite3");
     const arrayBuf = await res.arrayBuffer();
     expect(arrayBuf.byteLength).toBeGreaterThan(0);
+
+    const exportedSqlite = new Database(Buffer.from(arrayBuf));
+    const row = exportedSqlite
+      .prepare("SELECT * FROM transactions WHERE payee = ?")
+      .get("Brand New WAL Write") as { payee: string; amount: number } | undefined;
+    expect(row).toBeDefined();
+    expect(row?.amount).toBe(-12345);
+    exportedSqlite.close();
   });
 });
 

@@ -10,6 +10,7 @@ import {
   todayISO,
   MONTHS_LONG,
   computeNetWorthReport,
+  computeCashFlowRange,
   type NetWorthPoint,
 } from "@ynab/logic";
 import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
@@ -153,19 +154,9 @@ export const ReportsView = memo(function ReportsView({
     [data.transactions, splitParentIds, actualStart, actualEnd]
   );
 
-  const income = useMemo(
-    () =>
-      rangeTxns
-        .filter((t) => t.categoryId == null && t.transferAccountId == null && num(t.amount) > 0)
-        .reduce((s, t) => s + num(t.amount), 0),
-    [rangeTxns]
-  );
-  const expense = useMemo(
-    () =>
-      rangeTxns
-        .filter((t) => (t.transferAccountId == null || t.categoryId != null) && num(t.amount) < 0)
-        .reduce((s, t) => s + num(t.amount), 0),
-    [rangeTxns]
+  const { income, outflow, net } = useMemo(
+    () => computeCashFlowRange(data, actualStart, actualEnd),
+    [data, actualStart, actualEnd]
   );
 
   const spending: SpendingItem[] = useMemo(() => {
@@ -294,15 +285,15 @@ export const ReportsView = memo(function ReportsView({
               />
               <MathCell
                 label="Expenses"
-                value={fmt(expense)}
+                value={fmt(-outflow)}
                 tone="red"
                 className="flex-1"
                 style={{ minWidth: 140 }}
               />
               <MathCell
                 label="Net"
-                value={fmt(income + expense)}
-                tone={income + expense >= 0 ? "green" : "red"}
+                value={fmt(net)}
+                tone={net >= 0 ? "green" : "red"}
                 className="flex-1"
                 style={{ minWidth: 140 }}
               />

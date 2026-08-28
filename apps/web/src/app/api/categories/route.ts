@@ -34,7 +34,10 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
     try {
-      const row = await createCategoryGroup(db, { name: parseResult.data.name });
+      const row = await createCategoryGroup(db, {
+        name: parseResult.data.name,
+        isHidden: parseResult.data.isHidden,
+      });
       return Response.json(row);
     } catch (e) {
       return apiErrorResponse(e);
@@ -78,6 +81,7 @@ export async function PATCH(req: Request) {
     const patch: Parameters<typeof updateCategoryGroup>[2] = {};
     if (body.name !== undefined) patch.name = body.name;
     if (body.sort !== undefined) patch.sort = body.sort;
+    if (body.isHidden !== undefined) patch.isHidden = body.isHidden;
 
     try {
       const row = await updateCategoryGroup(db, body.id, patch);

@@ -36,11 +36,11 @@ const accounts: Account[] = [
 // CATEGORY GROUPS
 // ---------------------------------------------------------------------------
 const groups: CategoryGroup[] = [
-  { id: 1, name: "Housing",               sort: 0, isCreditCardPayments: false },
-  { id: 2, name: "Needs",                 sort: 1, isCreditCardPayments: false },
-  { id: 3, name: "Wants",                 sort: 2, isCreditCardPayments: false },
-  { id: 4, name: "Savings & Investments", sort: 3, isCreditCardPayments: false },
-  { id: 5, name: "Credit Card Payments",  sort: 4, isCreditCardPayments: true  },
+  { id: 1, name: "Housing",               sort: 0, isCreditCardPayments: false, isHidden: false },
+  { id: 2, name: "Needs",                 sort: 1, isCreditCardPayments: false, isHidden: false },
+  { id: 3, name: "Wants",                 sort: 2, isCreditCardPayments: false, isHidden: false },
+  { id: 4, name: "Savings & Investments", sort: 3, isCreditCardPayments: false, isHidden: false },
+  { id: 5, name: "Credit Card Payments",  sort: 4, isCreditCardPayments: true,  isHidden: false },
 ];
 
 // ---------------------------------------------------------------------------

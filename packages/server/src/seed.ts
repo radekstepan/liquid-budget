@@ -95,11 +95,11 @@ export async function seedDatabase(db: Db) {
   const groups = await db
     .insert(categoryGroups)
     .values([
-      { name: "Housing",               sort: 0, isCreditCardPayments: false },
-      { name: "Needs",                 sort: 1, isCreditCardPayments: false },
-      { name: "Wants",                 sort: 2, isCreditCardPayments: false },
-      { name: "Savings & Investments", sort: 3, isCreditCardPayments: false },
-      { name: "Credit Card Payments",  sort: 4, isCreditCardPayments: true  },
+      { name: "Housing",               sort: 0, isCreditCardPayments: false, isHidden: false },
+      { name: "Needs",                 sort: 1, isCreditCardPayments: false, isHidden: false },
+      { name: "Wants",                 sort: 2, isCreditCardPayments: false, isHidden: false },
+      { name: "Savings & Investments", sort: 3, isCreditCardPayments: false, isHidden: false },
+      { name: "Credit Card Payments",  sort: 4, isCreditCardPayments: true,  isHidden: false },
     ])
     .returning();
 

@@ -20,7 +20,7 @@ describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
     const res = await PATCH(req);
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("At least one of name or sort must be provided");
+    expect(json.error).toContain("At least one of name, sort, or isHidden must be provided");
   });
 
   it("rejects group PATCH with empty name (400 Bad Request)", async () => {

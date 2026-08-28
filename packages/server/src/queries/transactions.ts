@@ -19,10 +19,10 @@ import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
 export type CreateTransactionInput = {
   accountId: number;
-  categoryId: number | null;
+  categoryId?: number | null;
   date: string;
-  payee: string;
-  memo: string;
+  payee?: string;
+  memo?: string;
   amount: number;
   status?: ClearedStatus;
   /** YNAB4-style flag color; null/undefined leaves the row unflagged. */
@@ -255,7 +255,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     }
   }
 
-  let payee = input.payee;
+  let payee = input.payee ?? "";
   if (input.transferAccountId != null && !payee.trim()) {
     const destName = await getAccountName(db, input.transferAccountId);
     payee = `Transfer : ${destName ?? "Unknown"}`;
@@ -326,7 +326,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         categoryId,
         date: input.date,
         payee,
-        memo: input.memo,
+        memo: input.memo ?? "",
         amount,
         status: input.status ?? "c",
         flagColor: sanitizeFlagColor(input.flagColor),
