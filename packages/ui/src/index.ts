@@ -18,7 +18,6 @@ export {
 } from "./Modals.js";
 export {
   ReconcileModal,
-  type ReconcileModalState,
   type ReconcileResultPayload,
 } from "./ReconcileModal.js";
 export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";

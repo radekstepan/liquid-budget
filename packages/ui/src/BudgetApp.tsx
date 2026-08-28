@@ -5,7 +5,6 @@ import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, I
 import {
   computeBudget,
   computeCashFlow,
-  computeReconcileState,
   computeTrailingNetWorth,
   computeMonthlyInsights,
   num,
@@ -189,6 +188,7 @@ export type BudgetAppApi = {
   reconcileAccount: (input: {
     accountId: number;
     statementBalance: number;
+    statementDate: string;
     adjustmentCategoryId: number | null;
   }) => Promise<void>;
   unreconcileAccount: (accountId: number) => Promise<void>;
@@ -644,15 +644,11 @@ export function BudgetApp({
   const editingAccount =
     modal.kind === "editAccount" ? data.accounts.find((a) => a.id === modal.accountId) : undefined;
 
-  // Derive the reconcile state for the currently-open account from
-  // the in-memory data — no extra API call needed because the
-  // working balance is cleared + reconciled total bounded by statement date.
-  const reconcileState = useMemo(() => {
+  // Derive the reconcile account for the currently-open modal.
+  const reconcileAccount_ = useMemo(() => {
     if (modal.kind !== "reconcile") return null;
-    const acct = data.accounts.find((a) => a.id === modal.accountId);
-    if (!acct) return null;
-    return computeReconcileState(acct, data.transactions, todayISO());
-  }, [modal, data.accounts, data.transactions]);
+    return data.accounts.find((a) => a.id === modal.accountId) ?? null;
+  }, [modal, data.accounts]);
 
   const dueBadgeCount = useMemo(() => {
     return countDueRecurring(data.recurring, todayISO());
@@ -1084,9 +1080,10 @@ export function BudgetApp({
           }}
         />
       )}
-      {modal.kind === "reconcile" && reconcileState && (
+      {modal.kind === "reconcile" && reconcileAccount_ && (
         <ReconcileModal
-          state={reconcileState}
+          account={reconcileAccount_}
+          transactions={data.transactions}
           categories={data.categories}
           groups={data.groups.filter(
             (g) => g.name !== "__Internal__" && g.name.toLowerCase() !== "__internal__"

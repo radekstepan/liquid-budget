@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Category, CategoryGroup, ReconcileState } from "@ynab/logic";
-import { evalAmount, round2, dollarsToCents } from "@ynab/logic";
+import type {
+  Account,
+  Category,
+  CategoryGroup,
+  Transaction,
+} from "@ynab/logic";
+import { computeReconcileState, evalAmount, dollarsToCents, todayISO } from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -11,8 +16,6 @@ import { AmountPreview } from "./AmountInput.js";
  * Server response from `POST /api/reconcile` with `action: "reconcile"`.
  * Mirrors the type exported from `@ynab/server` (`ReconcileResult`).
  */
-export type ReconcileModalState = ReconcileState;
-
 export type ReconcileResultPayload = {
   reconciledCount: number;
   adjustmentTransactionId: number | null;
@@ -34,7 +37,8 @@ export type ReconcileResultPayload = {
  *   - Footer primary action is disabled until diff === 0.
  */
 export function ReconcileModal({
-  state,
+  account,
+  transactions,
   categories,
   groups,
   onClose,
@@ -42,18 +46,26 @@ export function ReconcileModal({
   onUnreconcile,
   busy,
 }: {
-  state: ReconcileModalState;
+  account: Pick<Account, "id" | "name" | "lastReconciledAt" | "lastReconciledBalance">;
+  transactions: Transaction[];
   categories: Category[];
   groups: CategoryGroup[];
   onClose: () => void;
   onReconcile: (input: {
     accountId: number;
     statementBalance: number;
+    statementDate: string;
     adjustmentCategoryId: number | null;
   }) => Promise<void>;
   onUnreconcile?: (accountId: number) => Promise<void>;
   busy?: boolean;
 }) {
+  const [statementDate, setStatementDate] = useState(todayISO());
+  const state = useMemo(
+    () => computeReconcileState(account, transactions, statementDate),
+    [account, transactions, statementDate]
+  );
+
   const [statementInput, setStatementInput] = useState(
     (state.workingBalance / 100).toFixed(2)
   );
@@ -109,6 +121,7 @@ export function ReconcileModal({
     await onReconcile({
       accountId: state.accountId,
       statementBalance,
+      statementDate,
       adjustmentCategoryId: balanced
         ? null
         : adjustmentCategoryId === ""
@@ -162,6 +175,15 @@ export function ReconcileModal({
           tone="soft"
         />
       </div>
+
+      <Field label="Statement Date">
+        <TextField
+          value={statementDate}
+          onChange={(e) => setStatementDate(e.target.value)}
+          placeholder="YYYY-MM-DD"
+          className="w-full"
+        />
+      </Field>
 
       <Field label="Statement Balance">
         <TextField

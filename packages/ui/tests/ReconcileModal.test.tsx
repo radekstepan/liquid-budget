@@ -1,20 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { ReconcileModal, type ReconcileModalState } from "../src/ReconcileModal.js";
-import type { Category, CategoryGroup } from "@ynab/logic";
+import { ReconcileModal } from "../src/ReconcileModal.js";
+import type { Account, Category, CategoryGroup, Transaction } from "@ynab/logic";
 import { openSearchable } from "./dropdown.js";
 
-const state: ReconcileModalState = {
-  accountId: 7,
-  accountName: "Chequing",
-  workingBalance: 125050,
-  unclearedTotal: -5000,
-  unclearedCount: 2,
-  clearedCount: 3,
-  reconciledCount: 10,
+vi.mock("@ynab/logic", async () => {
+  const actual = await vi.importActual<typeof import("@ynab/logic")>("@ynab/logic");
+  return { ...actual, todayISO: () => "2026-08-28" };
+});
+
+const account: Pick<Account, "id" | "name" | "lastReconciledAt" | "lastReconciledBalance"> = {
+  id: 7,
+  name: "Chequing",
   lastReconciledAt: null,
   lastReconciledBalance: null,
 };
+
+// 3 cleared sum to 85050, 10 reconciled sum to 40000 → workingBalance = 125050
+// 2 uncleared sum to -5000
+const transactions: Transaction[] = [
+  { id: 1, accountId: 7, categoryId: 10, date: "2026-06-01", payee: "C1", memo: "", amount: "50000", status: "c" },
+  { id: 2, accountId: 7, categoryId: 10, date: "2026-06-02", payee: "C2", memo: "", amount: "25000", status: "c" },
+  { id: 3, accountId: 7, categoryId: 10, date: "2026-06-03", payee: "C3", memo: "", amount: "10050", status: "c" },
+  ...Array.from({ length: 10 }, (_, i) => ({
+    id: 10 + i,
+    accountId: 7,
+    categoryId: 10,
+    date: "2026-05-01",
+    payee: `R${i}`,
+    memo: "",
+    amount: "4000",
+    status: "r" as const,
+  })),
+  { id: 20, accountId: 7, categoryId: 10, date: "2026-06-10", payee: "U1", memo: "", amount: "-2500", status: "u" },
+  { id: 21, accountId: 7, categoryId: 10, date: "2026-06-11", payee: "U2", memo: "", amount: "-2500", status: "u" },
+];
 
 const groups: CategoryGroup[] = [
   { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
@@ -33,7 +53,8 @@ function renderModal(overrides: Partial<Parameters<typeof ReconcileModal>[0]> = 
   const onUnreconcile = vi.fn(async () => {});
   const view = render(
     <ReconcileModal
-      state={state}
+      account={account}
+      transactions={transactions}
       categories={categories}
       groups={groups}
       onClose={onClose}
@@ -58,8 +79,13 @@ describe("ReconcileModal", () => {
 
   it("shows 'never' for Last Reconciled value when lastReconciledBalance is null", () => {
     renderModal();
-    // The Last Reconciled value cell renders "—" for a null balance.
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("shows the statement date field defaulting to today", () => {
+    renderModal();
+    const dateInput = screen.getByPlaceholderText("YYYY-MM-DD");
+    expect(dateInput).toHaveValue("2026-08-28");
   });
 
   it("shows the balanced banner and enables Reconcile when statement matches working balance", () => {
@@ -71,6 +97,7 @@ describe("ReconcileModal", () => {
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 125050,
+      statementDate: "2026-08-28",
       adjustmentCategoryId: null,
     });
   });
@@ -105,6 +132,7 @@ describe("ReconcileModal", () => {
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 100000,
+      statementDate: "2026-08-28",
       adjustmentCategoryId: 10,
     });
   });
@@ -161,7 +189,6 @@ describe("ReconcileModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
-    // With no eligible categories the closed field shows the notice as its value.
     expect(screen.getByText("No categories available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /mark for adjustment/i })).toBeDisabled();
   });
@@ -177,14 +204,15 @@ describe("ReconcileModal", () => {
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 125050,
+      statementDate: "2026-08-28",
       adjustmentCategoryId: null,
     });
   });
 
   it("calls onUnreconcile when the undo link is clicked", () => {
     const { onUnreconcile } = renderModal({
-      state: {
-        ...state,
+      account: {
+        ...account,
         lastReconciledAt: "2026-06-01",
         lastReconciledBalance: 120000,
       },
@@ -196,7 +224,7 @@ describe("ReconcileModal", () => {
 
   it("hides the undo notice when onUnreconcile is not provided", () => {
     renderModal({
-      state: { ...state, lastReconciledAt: "2026-06-01", lastReconciledBalance: 1200 },
+      account: { ...account, lastReconciledAt: "2026-06-01", lastReconciledBalance: 1200 },
       onUnreconcile: undefined,
     });
     expect(screen.queryByText(/already reconciled/i)).not.toBeInTheDocument();
@@ -211,5 +239,21 @@ describe("ReconcileModal", () => {
     const { onClose } = renderModal();
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("submits statementDate with a past date when the user changes it", () => {
+    const { onReconcile } = renderModal();
+    fireEvent.change(screen.getByPlaceholderText("YYYY-MM-DD"), {
+      target: { value: "2026-07-31" },
+    });
+    const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
+    expect(reconcile).toBeEnabled();
+    fireEvent.click(reconcile);
+    expect(onReconcile).toHaveBeenCalledWith({
+      accountId: 7,
+      statementBalance: 125050,
+      statementDate: "2026-07-31",
+      adjustmentCategoryId: null,
+    });
   });
 });
