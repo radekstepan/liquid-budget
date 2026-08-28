@@ -8,7 +8,7 @@ import {
   getDefaultDb,
   resetAndSeedDatabase,
 } from "@ynab/server";
-import { DELETE, PATCH } from "../src/app/api/transactions/route";
+import { DELETE, PATCH, POST } from "../src/app/api/transactions/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
@@ -147,6 +147,93 @@ describe("PATCH /api/transactions (BUG-19)", () => {
       // Verify second delete of same id returns 404
       const secondRes = await DELETE(req);
       expect(secondRes.status).toBe(404);
+    });
+  });
+
+  describe("POST /api/transactions (BUG-25)", () => {
+    it("creates transaction when payload includes a 'patch' key instead of misrouting to bulk-update", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+      const req = new NextRequest("http://localhost:3000/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patch: null,
+          accountId: account!.id,
+          date: "2026-08-01",
+          amount: -3500,
+          payee: "Coffee Shop",
+          memo: "Latte",
+        }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.id).toBeDefined();
+      expect(json.amount).toBe(-3500);
+      expect(json.payee).toBe("Coffee Shop");
+      expect(json.memo).toBe("Latte");
+    });
+
+    it("correctly handles bulk-update with action=bulk-update query parameter", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const tx1 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "Store A",
+      });
+      const tx2 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -2000,
+        date: "2026-08-02",
+        payee: "Store B",
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/transactions?action=bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: [tx1!.id, tx2!.id],
+          patch: { memo: "Bulk Note", status: "c" },
+        }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.count).toBe(2);
+    });
+
+    it("correctly handles bulk-update with action in JSON body", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const tx1 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "Store A",
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk-update",
+          ids: [tx1!.id],
+          patch: { flagColor: "green" },
+        }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.count).toBe(1);
     });
   });
 });

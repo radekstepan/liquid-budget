@@ -81,7 +81,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (action === "bulk-update" || (typeof json === "object" && json !== null && "patch" in json)) {
+  if (action === "bulk-update" || (typeof json === "object" && json !== null && (json as any).action === "bulk-update")) {
     const parseResult = TransactionBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
