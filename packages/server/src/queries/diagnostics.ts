@@ -153,7 +153,12 @@ export async function verifyBudgetIntegrity(
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
 
-  let totalAccountBalance = 0;
+  const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
+  let totalAccountBalance = onBudgetAccounts.reduce(
+    (s, a) => s + Number(a.balance ?? 0),
+    0
+  );
+
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
 
@@ -174,8 +179,8 @@ export async function verifyBudgetIntegrity(
     const isIncome = isIncomeTransaction(t, accountMap);
     const effectiveMonth = isIncome ? (t.incomeMonth || t.date.slice(0, 7)) : t.date.slice(0, 7);
 
-    if (effectiveMonth <= month) {
-      totalAccountBalance += netOnBudgetDelta;
+    if (effectiveMonth > month) {
+      totalAccountBalance -= netOnBudgetDelta;
     }
   }
 

@@ -395,5 +395,41 @@ describe("diagnostics queries", () => {
       expect(latestReport.tbb).toBe(500000);
       expect(latestReport.difference).toBe(0);
     });
+
+    it("detects corrupted/drifted on-budget stored account balances (BUG-09)", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true });
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [cat] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+
+      await createTransaction(db, {
+        accountId: checking.id,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Starting Balance",
+        memo: "",
+        amount: 500000,
+      });
+
+      await db.insert(schema.assignments).values({
+        categoryId: cat.id,
+        month: "2026-08",
+        amount: 100000,
+      });
+
+      // Verify integrity before drift
+      const cleanReport = await verifyBudgetIntegrity(db, "2026-08");
+      expect(cleanReport.difference).toBe(0);
+
+      // Directly corrupt the stored balance of the on-budget account
+      await db
+        .update(schema.accounts)
+        .set({ balance: 999999 })
+        .where(eq(schema.accounts.id, checking.id));
+
+      // verifyBudgetIntegrity should now detect the mismatch against stored balances
+      const driftedReport = await verifyBudgetIntegrity(db, "2026-08");
+      expect(driftedReport.totalOnBudgetAccountBalance).toBe(999999);
+      expect(driftedReport.difference).toBe(499999); // 999999 - 100000 - 400000 = 499999
+    });
   });
 });
