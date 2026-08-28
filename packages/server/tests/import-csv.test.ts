@@ -541,5 +541,75 @@ describe("importCsvTransactions", () => {
     expect(afterData.transactions).toHaveLength(1);
     expect(afterData.accounts.find((a) => a.id === accountId)?.balance).toBe(String(100000 - 2808));
   });
+
+  it("BUG-16: links imported rows to payee entities and applies auto-categorization", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [groceries] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+    const [household] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Household", sort: 1, carryover: 0 })
+      .returning();
+    const [income] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Income", sort: 2, carryover: 0 })
+      .returning();
+
+    // Pre-register payees carrying auto-categorization rules
+    await db
+      .insert(schema.payees)
+      .values([
+        { name: "Supermarket", autoCategoryId: groceries!.id, createdAt: "" },
+        { name: "Employer", autoCategoryId: income!.id, createdAt: "" },
+      ]);
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Supermarket", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "Employer", amountCents: 50000 }),
+        // Explicit CSV category must win over the payee's auto-category
+        row({ rowNumber: 4, payee: "Supermarket", amountCents: -2000, category: "Household" }),
+        // First sight of a payee: a payees row is created for it
+        row({ rowNumber: 5, payee: "New Cafe", amountCents: -300 }),
+      ],
+    });
+    expect(out.count).toBe(4);
+
+    // The payees table is populated: 2 pre-registered + 1 created on import
+    const payeeRows = await db.select().from(schema.payees).orderBy(schema.payees.id);
+    expect(payeeRows.map((p) => p.name)).toEqual(["Supermarket", "Employer", "New Cafe"]);
+    const payeeIdByName = new Map(payeeRows.map((p) => [p.name, p.id]));
+
+    const data = await getBudgetData(db);
+    const txByPayee = (p: string) => data.transactions.filter((t) => t.payee === p);
+    expect(txByPayee("Supermarket")).toHaveLength(2);
+    expect(txByPayee("Employer")).toHaveLength(1);
+    expect(txByPayee("New Cafe")).toHaveLength(1);
+
+    // payeeId is set on every inserted transaction
+    for (const t of data.transactions) {
+      expect(t.payeeId).toBe(payeeIdByName.get(t.payee));
+    }
+
+    // autoCategoryId is applied when the row carries no category
+    const autoCategorized = txByPayee("Supermarket").find((t) => t.amount === "-1000")!;
+    expect(autoCategorized.categoryId).toBe(groceries!.id);
+
+    // An explicit CSV category takes precedence over autoCategoryId
+    const explicit = txByPayee("Supermarket").find((t) => t.amount === "-2000")!;
+    expect(explicit.categoryId).toBe(household!.id);
+
+    // The income row is auto-categorized instead of falling into uncategorized income
+    const salary = txByPayee("Employer")[0]!;
+    expect(salary.categoryId).toBe(income!.id);
+    expect(salary.isIncome).toBe(false);
+  });
 });
 

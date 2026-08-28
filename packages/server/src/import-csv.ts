@@ -5,6 +5,7 @@ import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, categories, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
+import { findOrCreatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
 
 export type ImportCsvInput = {
@@ -137,14 +138,24 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       const categoryId = account.onBudget && row.category
         ? (categoryByName.get(row.category.trim().toLowerCase()) ?? null)
         : null;
-      const isIncome = categoryId == null && amount > 0 && !!account.onBudget && account.kind !== "credit";
+      // Link the row to a payee entity (creating it on first sight, BUG-16) and
+      // fall back to the payee's auto-category when the statement row carries no
+      // resolvable category. Off-budget accounts stay uncategorized, matching the
+      // explicit-category resolution above.
+      const payeeRow = findOrCreatePayee(db, row.payee ?? "");
+      const effectiveCategoryId =
+        categoryId === null && account.onBudget && payeeRow.autoCategoryId != null
+          ? payeeRow.autoCategoryId
+          : categoryId;
+      const isIncome = effectiveCategoryId == null && amount > 0 && !!account.onBudget && account.kind !== "credit";
       const [inserted] = await db
         .insert(transactions)
         .values({
           accountId: input.accountId,
-          categoryId,
+          categoryId: effectiveCategoryId,
           date: row.date!,
           payee: row.payee ?? "",
+          payeeId: payeeRow.id,
           memo: row.memo ?? "",
           amount,
           status: "c",
