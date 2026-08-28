@@ -12,6 +12,7 @@ import {
   invalidateBudgetIndex,
   getMonthsWithData,
   isIncomeTransaction,
+  normalizeBudgetData,
 } from "../src/budget-engine.js";
 import { makeSeedBudgetData, DEMO_MONTH } from "../src/seed-fixture.js";
 import type { BudgetData, Category, CategoryGroup } from "../src/types.js";
@@ -1287,6 +1288,142 @@ describe("computeBudget", () => {
         const fastCcGroup = fastJune.groups.find((g) => g.group.isCreditCardPayments)!;
         expect(fastCcGroup.rows.find((r) => r.category.id === 2)!.available).toBe(10000);
         expect(fastCcGroup.rows.find((r) => r.category.id === 3)!.available).toBe(0);
+      });
+
+      it("BUG-15: duplicate payment links where first is in non-CC group preserves CC-group link and clears non-CC link", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+            { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 1, name: "Misplaced Visa", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            { id: 3, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const normalized = normalizeBudgetData(data);
+        const cat2 = normalized.categories.find((c) => c.id === 2)!;
+        const cat3 = normalized.categories.find((c) => c.id === 3)!;
+        expect(cat2.linkedAccountId).toBeNull();
+        expect(cat3.linkedAccountId).toBe(2);
+        // No duplicate category was synthesized because cat3 is a valid CC payment category
+        expect(normalized.categories.filter((c) => c.linkedAccountId === 2).length).toBe(1);
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments)!;
+        const visaPayRow = ccGroup.rows.find((r) => r.category.id === 3)!;
+        expect(visaPayRow.ccBuffer).toBe(10000);
+        expect(visaPayRow.available).toBe(10000);
+
+        // Budget integrity invariant: Cash (50000) = Envelopes (0 + 10000) + TBB (40000)
+        const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopes + june.tbb).toBe(50000);
+
+        const idx = buildBudgetIndex(data);
+        const fastJune = computeBudget({ ...data, budgetIndex: idx }, "2025-06");
+        expect(fastJune.tbb).toBe(june.tbb);
+        const fastCcGroup = fastJune.groups.find((g) => g.group.isCreditCardPayments)!;
+        expect(fastCcGroup.rows.find((r) => r.category.id === 3)!.available).toBe(10000);
+      });
+
+      it("BUG-15: duplicate payment links where both are in non-CC groups clears both and synthesizes CC payment category", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 1, name: "Misplaced Visa 1", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            { id: 3, groupId: 1, name: "Misplaced Visa 2", sort: 2, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const normalized = normalizeBudgetData(data);
+        const cat2 = normalized.categories.find((c) => c.id === 2)!;
+        const cat3 = normalized.categories.find((c) => c.id === 3)!;
+        expect(cat2.linkedAccountId).toBeNull();
+        expect(cat3.linkedAccountId).toBeNull();
+
+        const synthCat = normalized.categories.find((c) => c.linkedAccountId === 2)!;
+        expect(synthCat).toBeDefined();
+        expect(synthCat.id).toBeGreaterThan(3);
+        const synthCcGroup = normalized.groups.find((g) => g.id === synthCat.groupId)!;
+        expect(synthCcGroup.isCreditCardPayments).toBe(true);
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments)!;
+        const visaPayRow = ccGroup.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(visaPayRow.ccBuffer).toBe(10000);
+        expect(visaPayRow.available).toBe(10000);
+
+        const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopes + june.tbb).toBe(50000);
+      });
+
+      it("BUG-15: single misplaced link in non-CC group clears link and synthesizes CC payment category", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 1, name: "Misplaced Visa", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          ],
+          assignments: [
+            { id: 1, categoryId: 1, month: "2025-06", amount: "10000" },
+          ],
+          transactions: [
+            { id: 1, accountId: 1, categoryId: null, date: "2025-06-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+            { id: 2, accountId: 2, categoryId: 1, date: "2025-06-15", payee: "Supermarket", memo: "", amount: "-10000", status: "c" },
+          ],
+          recurring: [],
+        };
+
+        const normalized = normalizeBudgetData(data);
+        const cat2 = normalized.categories.find((c) => c.id === 2)!;
+        expect(cat2.linkedAccountId).toBeNull();
+
+        const synthCat = normalized.categories.find((c) => c.linkedAccountId === 2)!;
+        expect(synthCat).toBeDefined();
+
+        const june = computeBudget(data, "2025-06");
+        const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments)!;
+        const visaPayRow = ccGroup.rows.find((r) => r.category.linkedAccountId === 2)!;
+        expect(visaPayRow.ccBuffer).toBe(10000);
+        expect(visaPayRow.available).toBe(10000);
+
+        const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
+        expect(totalEnvelopes + june.tbb).toBe(50000);
       });
 
       it("off-budget credit card account does not synthesize CC payment category", () => {
