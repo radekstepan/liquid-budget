@@ -47,6 +47,8 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let inQuotes = false;
+  let currentLine = 1;
+  let quoteStartLine = 1;
   const s = text.replace(/^\uFEFF/, "");
   let i = 0;
   while (i < s.length) {
@@ -62,12 +64,26 @@ export function parseCsv(text: string): string[][] {
         i += 1;
         continue;
       }
+      if (ch === "\n") {
+        currentLine += 1;
+      } else if (ch === "\r") {
+        if (s[i + 1] === "\n") {
+          currentLine += 1;
+          cell += ch;
+          cell += s[i + 1]!;
+          i += 2;
+          continue;
+        } else {
+          currentLine += 1;
+        }
+      }
       cell += ch;
       i += 1;
       continue;
     }
     if (ch === '"') {
       inQuotes = true;
+      quoteStartLine = currentLine;
       i += 1;
       continue;
     }
@@ -83,12 +99,16 @@ export function parseCsv(text: string): string[][] {
       row = [];
       cell = "";
       if (ch === "\r" && s[i + 1] === "\n") i += 1;
+      currentLine += 1;
       i += 1;
       continue;
     }
     cell += ch;
     i += 1;
     continue;
+  }
+  if (inQuotes) {
+    throw new Error(`Unclosed quote in CSV on line ${quoteStartLine}`);
   }
   if (cell !== "" || row.length > 0) {
     row.push(cell);
@@ -101,11 +121,67 @@ function normHeader(h: string): string {
   return h.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function findHeaderRow(rows: string[][]): number {
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i]!.some((c) => c.trim() !== "")) return i;
+function analyzeHeader(rawHeader: string[]) {
+  const header = rawHeader.map((h) => normHeader(h));
+  let dateIdx = -1;
+  let payeeCandidate = -1;
+  let memoCandidate = -1;
+  let descCandidate = -1;
+  let categoryIdx = -1;
+  let outflowIdx = -1;
+  let inflowIdx = -1;
+  let amountIdx = -1;
+  let typeIdx = -1;
+
+  header.forEach((h, i) => {
+    if (h === "type") {
+      typeIdx = i;
+      return;
+    }
+    if (h.includes("type") || h.includes("method")) return;
+    if (dateIdx < 0 && h.includes("date")) dateIdx = i;
+    else if (payeeCandidate < 0 && (h.includes("payee") || h.includes("merchant") || h.includes("vendor"))) payeeCandidate = i;
+    else if (memoCandidate < 0 && (h.includes("memo") || h.includes("note"))) memoCandidate = i;
+    else if (descCandidate < 0 && (h.includes("description") || h.includes("details") || h.includes("narrative"))) descCandidate = i;
+    else if (categoryIdx < 0 && h.includes("categor")) categoryIdx = i;
+    else if (amountIdx < 0 && (h === "amount" || h === "value")) amountIdx = i;
+    else if (outflowIdx < 0 && /outflow|debit|withdrawal|expense|spent/.test(h)) outflowIdx = i;
+    else if (inflowIdx < 0 && /inflow|credit|deposit|income|received/.test(h)) inflowIdx = i;
+    else if (amountIdx < 0 && (h.includes("amount") || h.includes("value"))) amountIdx = i;
+    else if (outflowIdx < 0 && /payment/.test(h)) outflowIdx = i;
+  });
+
+  let payeeIdx = -1;
+  let memoIdx = -1;
+  if (payeeCandidate >= 0) {
+    payeeIdx = payeeCandidate;
+    if (memoCandidate >= 0) {
+      memoIdx = memoCandidate;
+    } else if (descCandidate >= 0) {
+      memoIdx = descCandidate;
+    }
+  } else if (descCandidate >= 0) {
+    payeeIdx = descCandidate;
+    if (memoCandidate >= 0) {
+      memoIdx = memoCandidate;
+    }
+  } else if (memoCandidate >= 0) {
+    payeeIdx = memoCandidate;
   }
-  return -1;
+
+  const isValid = dateIdx >= 0 && payeeIdx >= 0 && (outflowIdx >= 0 || inflowIdx >= 0 || amountIdx >= 0);
+
+  return {
+    dateIdx,
+    payeeIdx,
+    memoIdx,
+    categoryIdx,
+    outflowIdx,
+    inflowIdx,
+    amountIdx,
+    typeIdx,
+    isValid,
+  };
 }
 
 function toISO(y: string, mo: string, d: string): string | null {
@@ -125,13 +201,15 @@ function toISO(y: string, mo: string, d: string): string | null {
 export function detectDateFormat(
   rows: string[][],
   dateIdx: number,
-  headerIdx: number = 0
+  headerIdx: number = 0,
+  isMultiSection: boolean = false
 ): DateFormatConvention {
   let dmyVotes = 0;
   let mdyVotes = 0;
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const cells = rows[i];
     if (!cells || cells.every((c) => c.trim() === "")) continue;
+    if (isMultiSection && cells[0]?.trim().toLowerCase() !== "transaction") continue;
     const raw = (cells[dateIdx] ?? "").trim();
     if (!raw) continue;
 
@@ -341,50 +419,44 @@ export function swapPayeeMemo(rows: CsvImportRow[], swap?: boolean): CsvImportRo
 }
 
 export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImportResult {
-  const rows = parseCsv(text);
-  const headerIdx = findHeaderRow(rows);
-  if (rows.length === 0 || headerIdx < 0) {
+  let rows: string[][];
+  try {
+    rows = parseCsv(text);
+  } catch (err: any) {
+    return { headerError: err?.message || "Invalid CSV", rows: [] };
+  }
+
+  let headerIdx = -1;
+  let headerAnalysis: ReturnType<typeof analyzeHeader> | null = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i]!.some((c) => c.trim() !== "")) {
+      const analysis = analyzeHeader(rows[i]!);
+      if (analysis.isValid) {
+        headerIdx = i;
+        headerAnalysis = analysis;
+        break;
+      }
+    }
+  }
+
+  if (headerIdx < 0) {
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i]!.some((c) => c.trim() !== "")) {
+        headerIdx = i;
+        headerAnalysis = analyzeHeader(rows[i]!);
+        break;
+      }
+    }
+  }
+
+  if (rows.length === 0 || headerIdx < 0 || !headerAnalysis) {
     return { headerError: "The file is empty", rows: [] };
   }
-  const header = rows[headerIdx]!.map((h) => normHeader(h));
-  let dateIdx = -1;
-  let payeeCandidate = -1;
-  let memoCandidate = -1;
-  let descCandidate = -1;
-  let categoryIdx = -1;
-  let outflowIdx = -1;
-  let inflowIdx = -1;
-  let amountIdx = -1;
-  header.forEach((h, i) => {
-    if (h.includes("type") || h.includes("method")) return;
-    if (dateIdx < 0 && h.includes("date")) dateIdx = i;
-    else if (payeeCandidate < 0 && (h.includes("payee") || h.includes("merchant") || h.includes("vendor"))) payeeCandidate = i;
-    else if (memoCandidate < 0 && (h.includes("memo") || h.includes("note"))) memoCandidate = i;
-    else if (descCandidate < 0 && (h.includes("description") || h.includes("details") || h.includes("narrative"))) descCandidate = i;
-    else if (categoryIdx < 0 && h.includes("categor")) categoryIdx = i;
-    else if (amountIdx < 0 && (h === "amount" || h === "value")) amountIdx = i;
-    else if (outflowIdx < 0 && /outflow|debit|withdrawal|expense|spent/.test(h)) outflowIdx = i;
-    else if (inflowIdx < 0 && /inflow|credit|deposit|income|received/.test(h)) inflowIdx = i;
-    else if (amountIdx < 0 && (h.includes("amount") || h.includes("value"))) amountIdx = i;
-    else if (outflowIdx < 0 && /payment/.test(h)) outflowIdx = i;
-  });
-  let payeeIdx = -1;
-  let memoIdx = -1;
-  if (payeeCandidate >= 0) {
-    payeeIdx = payeeCandidate;
-    if (memoCandidate >= 0) {
-      memoIdx = memoCandidate;
-    } else if (descCandidate >= 0) {
-      memoIdx = descCandidate;
-    }
-  } else if (descCandidate >= 0) {
-    payeeIdx = descCandidate;
-    if (memoCandidate >= 0) {
-      memoIdx = memoCandidate;
-    }
-  } else if (memoCandidate >= 0) {
-    payeeIdx = memoCandidate;
-  }
+
+  const { dateIdx, payeeIdx, memoIdx, categoryIdx, outflowIdx, inflowIdx, amountIdx, typeIdx } = headerAnalysis;
+  const isMultiSection = typeIdx === 0;
+
   let headerError: string | null = null;
   if (dateIdx < 0) headerError = "Could not find a Date column";
   else if (payeeIdx < 0) headerError = "Could not find a Payee column";
@@ -395,13 +467,14 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
     opts?.dateFormat && opts.dateFormat !== "auto"
       ? opts.dateFormat
       : dateIdx >= 0
-        ? detectDateFormat(rows, dateIdx, headerIdx)
+        ? detectDateFormat(rows, dateIdx, headerIdx, isMultiSection)
         : "dmy";
 
   const parsedRows: CsvImportRow[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const cells = rows[i]!;
     if (cells.every((c) => c.trim() === "")) continue;
+    if (isMultiSection && cells[0]?.trim().toLowerCase() !== "transaction") continue;
     const raw = (idx: number) => (idx >= 0 ? (cells[idx] ?? "").trim() : "");
     const payee = raw(payeeIdx);
     const memo = raw(memoIdx);
