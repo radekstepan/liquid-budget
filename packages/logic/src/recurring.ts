@@ -59,6 +59,33 @@ const VALID_RECURRING_FREQUENCY_SET = new Set([
   "everyotheryear",
 ]);
 
+const MONTH_BASED_FREQUENCIES = new Set([
+  "twiceamonth",
+  "semimonthly",
+  "monthly",
+  "everyothermonth",
+  "bimonthly",
+  "every3months",
+  "quarterly",
+  "every4months",
+  "twiceayear",
+  "semiannually",
+  "yearly",
+  "annually",
+  "every2years",
+  "everyotheryear",
+]);
+
+/**
+ * Returns true if the given frequency string is anchored to a day-of-month
+ * and prone to end-of-month clamping drift if anchorDay is lost.
+ */
+export function isMonthBasedFrequency(frequency: unknown): boolean {
+  if (typeof frequency !== "string" || !frequency.trim()) return false;
+  const norm = frequency.toLowerCase().replace(/[\s_-]+/g, "");
+  return MONTH_BASED_FREQUENCIES.has(norm);
+}
+
 /**
  * Returns true if the given frequency string corresponds to a valid recurring frequency
  * or accepted alias.

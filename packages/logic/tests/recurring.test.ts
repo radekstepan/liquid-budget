@@ -6,6 +6,7 @@ import {
   frequencyMonthlyMultiplier,
   getRecurringChildren,
   groupRecurringByTimeline,
+  isMonthBasedFrequency,
   isValidRecurringFrequency,
   netMonthlyAmount,
   RECURRING_FREQUENCIES,
@@ -375,5 +376,36 @@ describe("groupRecurringByTimeline", () => {
     expect(grouped.thisWeek.map((x) => x.id)).toEqual([3, 4]);
     expect(grouped.later.map((x) => x.id)).toEqual([5]);
     expect(grouped.paused.map((x) => x.id)).toEqual([6]);
+  });
+});
+
+describe("isMonthBasedFrequency (BUG-07)", () => {
+  it("returns true for all month-anchored frequencies", () => {
+    expect(isMonthBasedFrequency("monthly")).toBe(true);
+    expect(isMonthBasedFrequency("twiceamonth")).toBe(true);
+    expect(isMonthBasedFrequency("semimonthly")).toBe(true);
+    expect(isMonthBasedFrequency("everyothermonth")).toBe(true);
+    expect(isMonthBasedFrequency("bimonthly")).toBe(true);
+    expect(isMonthBasedFrequency("every3months")).toBe(true);
+    expect(isMonthBasedFrequency("quarterly")).toBe(true);
+    expect(isMonthBasedFrequency("every4months")).toBe(true);
+    expect(isMonthBasedFrequency("twiceayear")).toBe(true);
+    expect(isMonthBasedFrequency("semiannually")).toBe(true);
+    expect(isMonthBasedFrequency("yearly")).toBe(true);
+    expect(isMonthBasedFrequency("annually")).toBe(true);
+    expect(isMonthBasedFrequency("every2years")).toBe(true);
+    expect(isMonthBasedFrequency("everyotheryear")).toBe(true);
+  });
+
+  it("returns false for interval-in-days frequencies and one-offs", () => {
+    expect(isMonthBasedFrequency("daily")).toBe(false);
+    expect(isMonthBasedFrequency("weekly")).toBe(false);
+    expect(isMonthBasedFrequency("biweekly")).toBe(false);
+    expect(isMonthBasedFrequency("everyotherweek")).toBe(false);
+    expect(isMonthBasedFrequency("every4weeks")).toBe(false);
+    expect(isMonthBasedFrequency("never")).toBe(false);
+    expect(isMonthBasedFrequency("once")).toBe(false);
+    expect(isMonthBasedFrequency("")).toBe(false);
+    expect(isMonthBasedFrequency(null)).toBe(false);
   });
 });
