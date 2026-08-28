@@ -176,6 +176,7 @@ export type SerializedBudgetIndex = {
   spendByAccountMonth: Record<string, Record<string | number, number>>;
   incomeByMonth: Record<string, number>;
   carryoverByMonth: Record<string, Record<string | number, number>>;
+  endingBalanceByMonth?: Record<string, Record<string | number, number>>;
   overspentByMonth: Record<string, number>;
   surplusByMonth: Record<string, number>;
 };

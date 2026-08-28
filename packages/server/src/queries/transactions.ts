@@ -7,10 +7,12 @@ import type {
   TransactionFlagState,
 } from "@ynab/logic";
 import {
+  classifyBoundaryTransfer,
   isValidISODate,
   isValidISOMonth,
   TRANSACTION_DUPLICATE_FLAG,
   TRANSACTION_FLAG_COLORS,
+  TransactionError,
 } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
@@ -76,16 +78,7 @@ export type SubTransactionInput = {
   payee?: string;
 };
 
-/**
- * Thrown by the transactions queries to signal a validation failure
- * that should surface as a 4xx HTTP response (rather than a 5xx).
- */
-export class TransactionError extends Error {
-  constructor(message: string, public readonly status = 400) {
-    super(message);
-    this.name = "TransactionError";
-  }
-}
+export { TransactionError };
 
 export function assertValidISODate(date: unknown, fieldName: string = "date"): string {
   if (!isValidISODate(date)) {
@@ -276,34 +269,16 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       incomeMonth = null;
     } else if (isTransfer) {
       const destOnBudget = await isAccountOnBudget(db, input.transferAccountId!);
-      const isBoundaryCrossing = onBudget !== destOnBudget;
-      const netOnBudgetDelta =
-        (onBudget ? amount : 0) + (destOnBudget ? -amount : 0);
-
-      if (isBoundaryCrossing) {
-        if (netOnBudgetDelta > 0) {
-          if (input.categoryId != null) {
-            categoryId = input.categoryId;
-            isIncome = false;
-            incomeMonth = null;
-          } else {
-            categoryId = null;
-            isIncome = true;
-            incomeMonth = input.incomeMonth ?? null;
-          }
-        } else {
-          if (input.categoryId == null) {
-            throw new TransactionError("Boundary transfer outflow requires a category", 400);
-          }
-          categoryId = input.categoryId;
-          isIncome = false;
-          incomeMonth = null;
-        }
-      } else {
-        categoryId = null;
-        isIncome = false;
-        incomeMonth = null;
-      }
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget: onBudget,
+        destOnBudget,
+        amount,
+        categoryId: input.categoryId,
+        incomeMonth: input.incomeMonth,
+      });
+      categoryId = classification.categoryId;
+      isIncome = classification.isIncome;
+      incomeMonth = classification.incomeMonth;
     } else if (!onBudget) {
       categoryId = null;
       isIncome = false;
@@ -384,40 +359,16 @@ export async function createTransfer(
   return withTransaction(db, async () => {
     const srcOnBudget = await isAccountOnBudget(db, baseInput.accountId);
     const destOnBudget = await isAccountOnBudget(db, destAccountId);
-    const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-    const netOnBudgetDelta = (srcOnBudget ? amount : 0) + (destOnBudget ? -amount : 0);
-
-    let categoryId: number | null = null;
-    let isIncome = false;
-    let incomeMonth: string | null = null;
-
-    if (isBoundaryCrossing) {
-      if (netOnBudgetDelta > 0) {
-        // Inflow into budget from off-budget
-        if (baseInput.categoryId != null) {
-          categoryId = baseInput.categoryId;
-          isIncome = false;
-          incomeMonth = null;
-        } else {
-          categoryId = null;
-          isIncome = true;
-          incomeMonth = baseInput.incomeMonth ?? null;
-        }
-      } else {
-        // Outflow from budget to off-budget
-        if (baseInput.categoryId == null) {
-          throw new TransactionError("Boundary transfer outflow requires a category", 400);
-        }
-        categoryId = baseInput.categoryId;
-        isIncome = false;
-        incomeMonth = null;
-      }
-    } else {
-      // Internal transfer between same budget boundary
-      categoryId = null;
-      isIncome = false;
-      incomeMonth = null;
-    }
+    const classification = classifyBoundaryTransfer({
+      srcOnBudget,
+      destOnBudget,
+      amount,
+      categoryId: baseInput.categoryId,
+      incomeMonth: baseInput.incomeMonth,
+    });
+    const categoryId = classification.categoryId;
+    const isIncome = classification.isIncome;
+    const incomeMonth = classification.incomeMonth;
 
     const [row] = await db
       .insert(transactions)
@@ -510,25 +461,15 @@ export async function createSplitWithChildren(
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
         const destOnBudget = await isAccountOnBudget(db, transferAccountId);
-        const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-        const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
-
-        if (isBoundaryCrossing) {
-          if (netOnBudgetDelta > 0) {
-            if (categoryId == null) {
-              isIncome = true;
-            } else {
-              isIncome = false;
-            }
-          } else {
-            if (categoryId == null) {
-              throw new TransactionError("Boundary transfer outflow requires a category", 400);
-            }
-            isIncome = false;
-          }
-        } else {
-          categoryId = null;
-        }
+        const classification = classifyBoundaryTransfer({
+          srcOnBudget,
+          destOnBudget,
+          amount: childAmount,
+          categoryId,
+          incomeMonth: null,
+        });
+        categoryId = classification.categoryId;
+        isIncome = classification.isIncome;
       } else {
         if (!srcOnBudget) {
           categoryId = null;
@@ -712,37 +653,18 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         : null;
 
     if (existing.transferAccountId != null) {
-      const isBoundaryCrossing = destOnBudget !== null && srcOnBudget !== destOnBudget;
-      const netOnBudgetDelta =
-        (srcOnBudget ? newAmount : 0) + (destOnBudget ? -newAmount : 0);
-
-      if (isBoundaryCrossing) {
-        const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
-        if (netOnBudgetDelta > 0) {
-          if (finalCatId != null) {
-            p.categoryId = finalCatId;
-            p.isIncome = false;
-            p.incomeMonth = null;
-          } else {
-            p.categoryId = null;
-            p.isIncome = true;
-            if (!("incomeMonth" in p)) {
-              p.incomeMonth = existing.incomeMonth ?? null;
-            }
-          }
-        } else {
-          if (finalCatId == null) {
-            throw new TransactionError("Boundary transfer outflow requires a category", 400);
-          }
-          p.categoryId = finalCatId;
-          p.isIncome = false;
-          p.incomeMonth = null;
-        }
-      } else {
-        p.categoryId = null;
-        p.isIncome = false;
-        p.incomeMonth = null;
-      }
+      const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : existing.categoryId;
+      const incMonth = "incomeMonth" in p ? (p.incomeMonth as string | null) : (existing.incomeMonth ?? null);
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget,
+        destOnBudget: destOnBudget ?? true,
+        amount: newAmount,
+        categoryId: finalCatId,
+        incomeMonth: incMonth,
+      });
+      p.categoryId = classification.categoryId;
+      p.isIncome = classification.isIncome;
+      p.incomeMonth = classification.incomeMonth;
     } else if (isSplitParent) {
       p.categoryId = null;
       p.isIncome = false;
@@ -946,25 +868,15 @@ export async function updateSplit(
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
         const destOnBudget = await isAccountOnBudget(db, transferAccountId);
-        const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-        const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
-
-        if (isBoundaryCrossing) {
-          if (netOnBudgetDelta > 0) {
-            if (categoryId == null) {
-              isIncome = true;
-            } else {
-              isIncome = false;
-            }
-          } else {
-            if (categoryId == null) {
-              throw new TransactionError("Boundary transfer outflow requires a category", 400);
-            }
-            isIncome = false;
-          }
-        } else {
-          categoryId = null;
-        }
+        const classification = classifyBoundaryTransfer({
+          srcOnBudget,
+          destOnBudget,
+          amount: childAmount,
+          categoryId,
+          incomeMonth: null,
+        });
+        categoryId = classification.categoryId;
+        isIncome = classification.isIncome;
       } else {
         if (c.payee !== undefined && c.payee !== null && c.payee !== "") {
           payee = String(c.payee);
@@ -1367,34 +1279,18 @@ export async function bulkUpdateTransactions(
           : null;
 
       if (existing.transferAccountId != null) {
-        const isBoundaryCrossing = destOnBudget !== null && srcOnBudget !== destOnBudget;
-        const netOnBudgetDelta =
-          (srcOnBudget ? newAmount : 0) + (destOnBudget ? -newAmount : 0);
-
-        if (isBoundaryCrossing) {
-          const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
-          if (netOnBudgetDelta > 0) {
-            if (finalCatId != null) {
-              setFields.categoryId = finalCatId;
-              setFields.isIncome = false;
-              setFields.incomeMonth = null;
-            } else {
-              setFields.categoryId = null;
-              setFields.isIncome = true;
-            }
-          } else {
-            if (finalCatId == null) {
-              throw new TransactionError("Boundary transfer outflow requires a category", 400);
-            }
-            setFields.categoryId = finalCatId;
-            setFields.isIncome = false;
-            setFields.incomeMonth = null;
-          }
-        } else {
-          setFields.categoryId = null;
-          setFields.isIncome = false;
-          setFields.incomeMonth = null;
-        }
+        const finalCatId = "categoryId" in setFields ? (setFields.categoryId as number | null) : existing.categoryId;
+        const incMonth = "incomeMonth" in setFields ? (setFields.incomeMonth as string | null) : null;
+        const classification = classifyBoundaryTransfer({
+          srcOnBudget,
+          destOnBudget: destOnBudget ?? true,
+          amount: newAmount,
+          categoryId: finalCatId,
+          incomeMonth: incMonth,
+        });
+        setFields.categoryId = classification.categoryId;
+        setFields.isIncome = classification.isIncome;
+        setFields.incomeMonth = classification.incomeMonth;
       } else if (isSplitParent) {
         setFields.categoryId = null;
         setFields.isIncome = false;

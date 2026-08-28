@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dollarsToCents, evalAmount, fmt, fmtSigned, isValidISODate, isValidISOMonth, monthKey, monthLabel, nextDateFor, num, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, isValidISODate, isValidISOMonth, monthKey, monthLabel, nextDateFor, num, numCents, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers and formats cents as dollars", () => {
@@ -76,6 +76,50 @@ describe("format", () => {
     expect(() => num("1e21")).toThrow(RangeError);
     expect(() => num(Number.MAX_SAFE_INTEGER + 100)).toThrow(RangeError);
     expect(() => num(1e21)).toThrow(RangeError);
+  });
+
+  describe("numCents (strict)", () => {
+    it("parses valid integer amounts and currency strings", () => {
+      expect(numCents(500)).toBe(500);
+      expect(numCents(-500)).toBe(-500);
+      expect(numCents(0)).toBe(0);
+      expect(numCents("500")).toBe(500);
+      expect(numCents("-500")).toBe(-500);
+      expect(numCents("$1,234")).toBe(1234);
+      expect(numCents("-$500")).toBe(-500);
+      expect(numCents("(750)")).toBe(-750);
+      expect(numCents("+ $1,000")).toBe(1000);
+      expect(numCents("100.00")).toBe(100);
+      expect(numCents(null)).toBe(0);
+      expect(numCents(undefined)).toBe(0);
+    });
+
+    it("rejects non-integer float numbers and fractional decimal strings", () => {
+      expect(() => numCents(12.34)).toThrow(TypeError);
+      expect(() => numCents(100.5)).toThrow(TypeError);
+      expect(() => numCents("12.34")).toThrow(TypeError);
+      expect(() => numCents("100.5")).toThrow(TypeError);
+      expect(() => numCents("-12.34")).toThrow(TypeError);
+    });
+
+    it("rejects NaN, unparseable strings, and infinite numbers", () => {
+      expect(() => numCents("abc")).toThrow(TypeError);
+      expect(() => numCents("12a")).toThrow(TypeError);
+      expect(() => numCents(NaN)).toThrow(TypeError);
+      expect(() => numCents(Infinity)).toThrow(TypeError);
+      expect(() => numCents(-Infinity)).toThrow(TypeError);
+    });
+
+    it("enforces allowZero option when requested", () => {
+      expect(() => numCents(0, { allowZero: false })).toThrow(RangeError);
+      expect(() => numCents("0", { allowZero: false })).toThrow(RangeError);
+      expect(() => numCents(null, { allowZero: false })).toThrow(RangeError);
+    });
+
+    it("throws RangeError on integer overflow", () => {
+      expect(() => numCents("9007199254740992")).toThrow(RangeError);
+      expect(() => numCents(Number.MAX_SAFE_INTEGER + 100)).toThrow(RangeError);
+    });
   });
 
   it("dollarsToCents converts dollar amounts to integer cents with symmetric float-safe rounding (BUG-27)", () => {

@@ -52,6 +52,7 @@ import type {
   Transaction,
 } from "./types.js";
 import { num } from "./format.js";
+import { classifyBoundaryTransfer } from "./transfers.js";
 
 // ---------------------------------------------------------------------------
 // Income classification helper
@@ -77,15 +78,14 @@ export function isIncomeTransaction(
           : accountMap.find((a) => a.id === t.transferAccountId);
       const onB = accB ? accB.onBudget : true;
 
-      // Internal transfer between same budget boundary: never income
-      if (onA === onB) return false;
-
-      // Net change to on-budget balances from this transfer:
-      const netOnBudgetDelta = (onA ? num(t.amount) : 0) + (onB ? -num(t.amount) : 0);
-      if (netOnBudgetDelta <= 0) return false;
-
-      // Inbound boundary transfer with categoryId == null is always income to TBB
-      return true;
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget: onA,
+        destOnBudget: onB,
+        amount: num(t.amount),
+        categoryId: t.categoryId,
+        incomeMonth: t.incomeMonth,
+      });
+      return classification.isIncome;
     }
 
     // Regular transaction
@@ -359,7 +359,15 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
   );
 
   const endingBalanceByMonth = new Map<string, Map<number, number>>();
-  if (data) {
+  if (idx.endingBalanceByMonth) {
+    for (const [m, catMap] of Object.entries(idx.endingBalanceByMonth)) {
+      const inner = new Map<number, number>();
+      for (const [catId, val] of Object.entries(catMap)) {
+        inner.set(Number(catId), val);
+      }
+      endingBalanceByMonth.set(m, inner);
+    }
+  } else if (data) {
     const normData = normalizeBudgetData(data);
     const ccGroupIds = new Set(
       normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
@@ -461,8 +469,15 @@ function buildRawIndexData(
     if (t.transferAccountId != null) {
       const accB = accountMap.get(t.transferAccountId);
       const onB = accB ? accB.onBudget : true;
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget: onA,
+        destOnBudget: onB,
+        amount: amt,
+        categoryId: t.categoryId,
+        incomeMonth: t.incomeMonth,
+      });
       netOnBudgetDelta = (onA ? amt : 0) + (onB ? -amt : 0);
-      isInternalTransfer = onA && onB;
+      isInternalTransfer = !classification.isBoundaryCrossing;
     } else {
       netOnBudgetDelta = onA ? amt : 0;
     }
@@ -742,6 +757,10 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
   for (const [m, map] of index.carryoverByMonth) {
     serializedCarryover[m] = Object.fromEntries(map);
   }
+  const serializedEnding: Record<string, Record<string | number, number>> = {};
+  for (const [m, map] of index.endingBalanceByMonth) {
+    serializedEnding[m] = Object.fromEntries(map);
+  }
 
   const result: SerializedBudgetIndex = {
     version: BUDGET_INDEX_VERSION,
@@ -751,6 +770,7 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     spendByAccountMonth: serializedSpend,
     incomeByMonth: Object.fromEntries(index.incomeByMonth),
     carryoverByMonth: serializedCarryover,
+    endingBalanceByMonth: serializedEnding,
     overspentByMonth: Object.fromEntries(index.overspentByMonth),
     surplusByMonth: Object.fromEntries(index.surplusByMonth),
   };

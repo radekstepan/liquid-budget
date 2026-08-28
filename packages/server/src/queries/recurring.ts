@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import {
+  classifyBoundaryTransfer,
   isMonthBasedFrequency,
   isValidISODate,
   isValidRecurringFrequency,
@@ -201,21 +202,14 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       categoryId = null;
     } else if (norm.isTransfer && norm.effectiveTransferAccountId != null) {
       const destOnBudget = await isAccountOnBudget(db, norm.effectiveTransferAccountId);
-      const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-      const netOnBudgetDelta = (srcOnBudget ? validatedAmount : 0) + (destOnBudget ? -validatedAmount : 0);
-
-      if (isBoundaryCrossing) {
-        if (netOnBudgetDelta < 0) {
-          if (norm.effectiveCategoryId == null) {
-            throw new RecurringError("Boundary transfer outflow requires a category", 422);
-          }
-          categoryId = norm.effectiveCategoryId;
-        } else {
-          categoryId = norm.effectiveCategoryId ?? null;
-        }
-      } else {
-        categoryId = null;
-      }
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget,
+        destOnBudget,
+        amount: validatedAmount,
+        categoryId: norm.effectiveCategoryId,
+        errorFactory: (msg) => new RecurringError(msg, 422),
+      });
+      categoryId = classification.categoryId;
     } else if (!srcOnBudget) {
       categoryId = null;
     } else {
@@ -253,21 +247,14 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
 
         if (transferAccountId) {
           const destOnBudget = await isAccountOnBudget(db, transferAccountId);
-          const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-          const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
-
-          if (isBoundaryCrossing) {
-            if (netOnBudgetDelta < 0) {
-              if (c.categoryId == null) {
-                throw new RecurringError("Boundary transfer outflow requires a category", 422);
-              }
-              categoryId = Number(c.categoryId);
-            } else {
-              categoryId = c.categoryId ? Number(c.categoryId) : null;
-            }
-          } else {
-            categoryId = null;
-          }
+          const classification = classifyBoundaryTransfer({
+            srcOnBudget,
+            destOnBudget,
+            amount: childAmount,
+            categoryId: c.categoryId ? Number(c.categoryId) : null,
+            errorFactory: (msg) => new RecurringError(msg, 422),
+          });
+          categoryId = classification.categoryId;
         } else if (!srcOnBudget) {
           categoryId = null;
         } else {
@@ -388,26 +375,19 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       p.categoryId = null;
     } else if (isTransfer) {
       const destOnBudget = await isAccountOnBudget(db, effectiveTransferAccountId!);
-      const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-      const netOnBudgetDelta = (srcOnBudget ? effectiveAmount : 0) + (destOnBudget ? -effectiveAmount : 0);
-
       const candidateCatId =
         patch.categoryId !== undefined && norm.effectiveCategoryId !== undefined
           ? norm.effectiveCategoryId
           : existing.categoryId;
 
-      if (isBoundaryCrossing) {
-        if (netOnBudgetDelta < 0) {
-          if (candidateCatId == null) {
-            throw new RecurringError("Boundary transfer outflow requires a category", 422);
-          }
-          p.categoryId = candidateCatId;
-        } else {
-          p.categoryId = candidateCatId ?? null;
-        }
-      } else {
-        p.categoryId = null;
-      }
+      const classification = classifyBoundaryTransfer({
+        srcOnBudget,
+        destOnBudget,
+        amount: effectiveAmount,
+        categoryId: candidateCatId,
+        errorFactory: (msg) => new RecurringError(msg, 422),
+      });
+      p.categoryId = classification.categoryId;
     } else if (!srcOnBudget) {
       p.categoryId = null;
     } else if (patch.categoryId !== undefined && norm.effectiveCategoryId !== undefined) {
@@ -431,21 +411,14 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
 
           if (transferAccountId) {
             const destOnBudget = await isAccountOnBudget(db, transferAccountId);
-            const isBoundaryCrossing = srcOnBudget !== destOnBudget;
-            const netOnBudgetDelta = (srcOnBudget ? childAmount : 0) + (destOnBudget ? -childAmount : 0);
-
-            if (isBoundaryCrossing) {
-              if (netOnBudgetDelta < 0) {
-                if (c.categoryId == null) {
-                  throw new RecurringError("Boundary transfer outflow requires a category", 422);
-                }
-                categoryId = Number(c.categoryId);
-              } else {
-                categoryId = c.categoryId ? Number(c.categoryId) : null;
-              }
-            } else {
-              categoryId = null;
-            }
+            const classification = classifyBoundaryTransfer({
+              srcOnBudget,
+              destOnBudget,
+              amount: childAmount,
+              categoryId: c.categoryId ? Number(c.categoryId) : null,
+              errorFactory: (msg) => new RecurringError(msg, 422),
+            });
+            categoryId = classification.categoryId;
           } else if (!srcOnBudget) {
             categoryId = null;
           } else {

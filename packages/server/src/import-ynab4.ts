@@ -1,6 +1,15 @@
 import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
-import { dollarsToCents, nextMonthKey, todayISO, TRANSACTION_DUPLICATE_FLAG, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
+import {
+  classifyBoundaryTransfer,
+  dollarsToCents,
+  nextMonthKey,
+  todayISO,
+  TRANSACTION_DUPLICATE_FLAG,
+  type ImportSkippedEntry,
+  type ImportSummary,
+  type TransactionFlagColor,
+} from "@ynab/logic";
 import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
@@ -606,30 +615,37 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             }
 
             const childAmt = dollarsToCents(st.amount);
+            let isChildIncome = false;
+            let childIncomeMonth: string | null = null;
+
             if (subTransferAccountId != null) {
               const destAccEntity = st.targetAccountId || (st.payeeId?.startsWith("Payee/Transfer:") ? st.payeeId.split(":")[1] : "");
               const destIsOnBudget = destAccEntity ? (accOnBudgetMap.get(destAccEntity) ?? false) : (allAccountsForMap.find((a) => a.id === subTransferAccountId)?.onBudget ?? false);
               const isCrossBoundary = accIsOnBudget !== destIsOnBudget;
               const netOnBudgetDelta = (accIsOnBudget ? childAmt : 0) + (destIsOnBudget ? -childAmt : 0);
-              if (isCrossBoundary) {
-                if (netOnBudgetDelta < 0 && subCatId === null) {
-                  subCatId = await getOrCreateFallbackTransferCategory();
-                }
-              } else {
-                subCatId = null;
+              if (isCrossBoundary && netOnBudgetDelta < 0 && subCatId === null) {
+                subCatId = await getOrCreateFallbackTransferCategory();
               }
+              const classification = classifyBoundaryTransfer({
+                srcOnBudget: accIsOnBudget,
+                destOnBudget: destIsOnBudget,
+                amount: childAmt,
+                categoryId: subCatId,
+              });
+              subCatId = classification.categoryId;
+              isChildIncome = classification.isIncome;
+            } else {
+              const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
+              isChildIncome =
+                accIsOnBudget &&
+                (st.categoryId === "Category/__ImmediateIncome__" ||
+                  isChildDeferred ||
+                  (subCatId === null && subTransferAccountId === null)) &&
+                (st.amount || 0) > 0;
+              childIncomeMonth = isChildIncome
+                ? (st.incomeMonth || (isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
+                : null;
             }
-
-            const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
-            const isChildIncome =
-              accIsOnBudget &&
-              (st.categoryId === "Category/__ImmediateIncome__" ||
-                isChildDeferred ||
-                (subCatId === null && subTransferAccountId === null)) &&
-              (st.amount || 0) > 0;
-            const childIncomeMonth = isChildIncome
-              ? (st.incomeMonth || (isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
-              : null;
 
             const isChildReconciled = isParentReconciled || st.cleared === "Reconciled" || Boolean(st.reconciliationId);
             const childRecId = st.reconciliationId
@@ -775,16 +791,24 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             const sourceIsOnBudget = accOnBudgetMap.get(sourceAccEntityId) ?? true;
             const destIsOnBudget = accOnBudgetMap.get(destAccEntityId) ?? true;
             const isCrossBoundaryTransfer = sourceIsOnBudget !== destIsOnBudget;
-            const netOnBudget = (sourceIsOnBudget ? rawAmount : 0) + (destIsOnBudget ? -rawAmount : 0);
+            const rawCents = dollarsToCents(rawAmount);
+            const netOnBudget = (sourceIsOnBudget ? rawCents : 0) + (destIsOnBudget ? -rawCents : 0);
             const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
             const isSpecialIncomeCat =
               catEntityId === "Category/__ImmediateIncome__" ||
               catEntityId === "Category/__DeferredIncome__";
-            const isTransferIncome = isCrossBoundaryTransfer && (catId === null || isSpecialIncomeCat) && netOnBudget > 0;
-            let finalTransferCatId = !isCrossBoundaryTransfer ? null : isSpecialIncomeCat ? null : catId;
-            if (isCrossBoundaryTransfer && netOnBudget < 0 && finalTransferCatId === null) {
-              finalTransferCatId = await getOrCreateFallbackTransferCategory();
+            let effectiveCatId = isSpecialIncomeCat ? null : catId;
+            if (isCrossBoundaryTransfer && netOnBudget < 0 && effectiveCatId === null) {
+              effectiveCatId = await getOrCreateFallbackTransferCategory();
             }
+            const classification = classifyBoundaryTransfer({
+              srcOnBudget: sourceIsOnBudget,
+              destOnBudget: destIsOnBudget,
+              amount: rawCents,
+              categoryId: effectiveCatId,
+            });
+            const finalTransferCatId = classification.categoryId;
+            const isTransferIncome = classification.isIncome;
 
             const isTxReconciled = cleared === "Reconciled" || Boolean(t.reconciliationId) || Boolean(partner?.reconciliationId);
             const recEntityId = t.reconciliationId || partner?.reconciliationId;

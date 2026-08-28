@@ -88,6 +88,97 @@ export function num(s: string | number | null | undefined): number {
   return finalVal === 0 ? 0 : finalVal;
 }
 
+/**
+ * Strict parser for integer cents values.
+ * Throws TypeError or RangeError on non-integer, unparseable, or overflow input.
+ */
+export function numCents(
+  s: string | number | null | undefined,
+  options?: { allowZero?: boolean }
+): number {
+  const allowZero = options?.allowZero ?? true;
+  if (s == null) {
+    if (!allowZero) throw new RangeError("Amount cannot be zero");
+    return 0;
+  }
+
+  if (typeof s === "number") {
+    if (Number.isNaN(s) || !Number.isFinite(s)) {
+      throw new TypeError(`Invalid integer cents value: ${s}`);
+    }
+    if (!Number.isSafeInteger(s)) {
+      if (Math.abs(s) > Number.MAX_SAFE_INTEGER) {
+        throw new RangeError(`Amount ${s} exceeds safe integer range`);
+      }
+      throw new TypeError(`Amount must be an integer cents value: ${s}`);
+    }
+    if (!allowZero && s === 0) {
+      throw new RangeError("Amount cannot be zero");
+    }
+    return s;
+  }
+
+  let str = String(s).trim();
+  if (!str) {
+    if (!allowZero) throw new RangeError("Amount cannot be zero");
+    return 0;
+  }
+
+  let sign = 1;
+  if (str.startsWith("(") && str.endsWith(")")) {
+    sign = -1;
+    str = str.slice(1, -1).trim();
+  } else if (str.startsWith("-")) {
+    sign = -1;
+    str = str.slice(1).trim();
+  } else if (str.startsWith("+")) {
+    sign = 1;
+    str = str.slice(1).trim();
+  }
+
+  // Strip currency symbols, commas, spaces, underscores
+  str = str.replace(/[$€£¥,_ \t]/g, "");
+
+  // Handle minus sign after currency symbol e.g. "$-500"
+  if (str.startsWith("-")) {
+    sign = -1 * sign;
+    str = str.slice(1).trim();
+  } else if (str.startsWith("+")) {
+    str = str.slice(1).trim();
+  }
+
+  if (!str) {
+    throw new TypeError(`Invalid integer cents value: ${s}`);
+  }
+
+  if (str.includes(".")) {
+    const parts = str.split(".");
+    if (parts.length !== 2 || !/^\d*$/.test(parts[0]!) || !/^\d*$/.test(parts[1]!)) {
+      throw new TypeError(`Invalid integer cents value: ${s}`);
+    }
+    // If decimal part contains non-zero digits, reject as lossy float cents
+    if (parts[1] && !/^0+$/.test(parts[1])) {
+      throw new TypeError(`Invalid integer cents value (contains decimal): ${s}`);
+    }
+    str = parts[0] || "0";
+  }
+
+  if (!/^\d+$/.test(str)) {
+    throw new TypeError(`Invalid integer cents value: ${s}`);
+  }
+
+  const rawNum = Number(str);
+  if (!Number.isSafeInteger(rawNum)) {
+    throw new RangeError(`Amount ${s} exceeds safe integer range`);
+  }
+
+  const finalVal = sign * rawNum;
+  if (!allowZero && finalVal === 0) {
+    throw new RangeError("Amount cannot be zero");
+  }
+  return finalVal === 0 ? 0 : finalVal;
+}
+
 export function dollarsToCents(d: number | string | null | undefined): number {
   if (d == null) return 0;
   const n = typeof d === "number" ? d : Number(d);
