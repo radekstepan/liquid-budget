@@ -150,6 +150,13 @@ export function CsvImportModal({
           {error}
         </Notice>
       )}
+      {parsed?.dateAmbiguous && dateFormat === "auto" && (
+        <Notice tone="warn" className="mb-3" title="Ambiguous date format">
+          Every date in this file could be read as either DD/MM/YYYY or MM/DD/YYYY, so auto-detect
+          defaulted to {parsed.detectedDateFormat?.toUpperCase()}. Pick a format below if that
+          looks wrong.
+        </Notice>
+      )}
 
       <Field label="Account">
         <Select
