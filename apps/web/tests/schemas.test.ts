@@ -417,4 +417,80 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       ).toBe(true);
     });
   });
+
+  describe("BUG-26: Reconciled status 'r' rejection in transaction schemas", () => {
+    it("rejects status 'r' in TransactionCreateSchema, TransactionPatchSchema, and TransactionBulkUpdateSchema", () => {
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -1000,
+          status: "r",
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          status: "r",
+        }).success
+      ).toBe(false);
+
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1],
+          patch: { status: "r" },
+        }).success
+      ).toBe(false);
+    });
+
+    it("accepts status 'u' and 'c' in TransactionCreateSchema, TransactionPatchSchema, and TransactionBulkUpdateSchema", () => {
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -1000,
+          status: "u",
+        }).success
+      ).toBe(true);
+
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -1000,
+          status: "c",
+        }).success
+      ).toBe(true);
+
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          status: "u",
+        }).success
+      ).toBe(true);
+
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          status: "c",
+        }).success
+      ).toBe(true);
+
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          action: "bulk-update",
+          ids: [1],
+          patch: { status: "u" },
+        }).success
+      ).toBe(true);
+
+      expect(
+        TransactionBulkUpdateSchema.safeParse({
+          ids: [1],
+          patch: { status: "c" },
+        }).success
+      ).toBe(true);
+    });
+  });
 });

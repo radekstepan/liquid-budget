@@ -166,8 +166,8 @@ describe("computeMonthlyInsights", () => {
     expect(insights[1]?.pctChange).toBe(20);
   });
 
-  it("includes zero-spend months in the three-month baseline average (BUG-36)", () => {
-    const data: BudgetData = {
+  it("divides baseline average by number of prior months with actual data (BUG-27)", () => {
+    const data1PriorMonth: BudgetData = {
       accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
       groups: [{ id: 1, name: "Daily", sort: 1, isCreditCardPayments: false }],
       categories: [
@@ -178,16 +178,44 @@ describe("computeMonthlyInsights", () => {
       transactions: [
         // Spend 30000 cents ($300) in one prior month (May) and zero in March and April
         { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
-        // Current month spend is $300 in June -> 3-mo baseline is 30000 / 3 = 10000, % change is +200%
+        // Current month spend is $300 in June -> baseline is 30000 / 1 = 30000, % change is 0% (not deflated to 10000)
         { id: 2, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
       ],
     };
 
-    const insights = computeMonthlyInsights(data, "2026-06");
-    expect(insights).toHaveLength(1);
-    expect(insights[0]?.categoryName).toBe("Category A");
-    expect(insights[0]?.avgAmount).toBe(10000); // 30000 / 3 = 10000
-    expect(insights[0]?.pctChange).toBe(200); // (30000 - 10000) / 10000 = +200%
+    const insights1 = computeMonthlyInsights(data1PriorMonth, "2026-06");
+    expect(insights1).toHaveLength(1);
+    expect(insights1[0]?.categoryName).toBe("Category A");
+    expect(insights1[0]?.avgAmount).toBe(30000); // 30000 / 1 = 30000
+    expect(insights1[0]?.pctChange).toBe(0); // (30000 - 30000) / 30000 = 0%
+
+    // 2 prior months with data
+    const data2PriorMonths: BudgetData = {
+      ...data1PriorMonth,
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-10", payee: "Shop", memo: "", amount: "-40000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-20000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
+      ],
+    };
+
+    const insights2 = computeMonthlyInsights(data2PriorMonths, "2026-06");
+    expect(insights2).toHaveLength(1);
+    expect(insights2[0]?.categoryName).toBe("Category A");
+    expect(insights2[0]?.avgAmount).toBe(30000); // (40000 + 20000) / 2 = 30000
+    expect(insights2[0]?.pctChange).toBe(0);
+
+    // 0 prior months with data -> clean insight
+    const data0PriorMonths: BudgetData = {
+      ...data1PriorMonth,
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
+      ],
+    };
+
+    const insights0 = computeMonthlyInsights(data0PriorMonths, "2026-06");
+    expect(insights0).toHaveLength(1);
+    expect(insights0[0]?.type).toBe("clean");
   });
 
   it("factors in refunds and returns to reduce net category spend (UNI-35 / BUG-28)", () => {

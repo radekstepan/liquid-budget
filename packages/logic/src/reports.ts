@@ -358,7 +358,7 @@ export function computeMonthlyInsights(
   for (const [catId, currentSpend] of currentSpendByCat.entries()) {
     const mMap = priorSpendByCatMonth.get(catId);
     if (mMap && mMap.size > 0) {
-      const divisor = priorMonths.size;
+      const divisor = mMap.size;
       const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
       const avg3mo = Math.round(totalPriorSpend / divisor);
       if (avg3mo > 0) {
