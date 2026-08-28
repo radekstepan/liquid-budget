@@ -1372,7 +1372,7 @@ describe("computeBudget", () => {
 
         const synthCat = normalized.categories.find((c) => c.linkedAccountId === 2)!;
         expect(synthCat).toBeDefined();
-        expect(synthCat.id).toBeGreaterThan(3);
+        expect(synthCat.id).toBeLessThan(0);
         const synthCcGroup = normalized.groups.find((g) => g.id === synthCat.groupId)!;
         expect(synthCcGroup.isCreditCardPayments).toBe(true);
 
@@ -1415,6 +1415,7 @@ describe("computeBudget", () => {
 
         const synthCat = normalized.categories.find((c) => c.linkedAccountId === 2)!;
         expect(synthCat).toBeDefined();
+        expect(synthCat.id).toBeLessThan(0);
 
         const june = computeBudget(data, "2025-06");
         const ccGroup = june.groups.find((g) => g.group.isCreditCardPayments)!;
@@ -1424,6 +1425,44 @@ describe("computeBudget", () => {
 
         const totalEnvelopes = june.groups.reduce((s, g) => s + g.available, 0);
         expect(totalEnvelopes + june.tbb).toBe(50000);
+      });
+
+      it("BUG-31: synthesized categories use negative IDs and do not collide with existing or future positive DB IDs", () => {
+        const data: BudgetData = {
+          accounts: [
+            { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+            { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+            { id: 3, name: "MasterCard", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 2 },
+          ],
+          groups: [
+            { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          ],
+          categories: [
+            { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+            { id: 2, groupId: 1, name: "Dining Out", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+          ],
+          assignments: [],
+          transactions: [],
+          recurring: [],
+        };
+
+        const normalized = normalizeBudgetData(data);
+        const synthCats = normalized.categories.filter((c) => c.linkedAccountId != null);
+        expect(synthCats).toHaveLength(2);
+        expect(synthCats[0]!.id).toBe(-1);
+        expect(synthCats[1]!.id).toBe(-2);
+
+        // If data already had negative IDs from a previous pass, new IDs decrement further
+        const normalizedAgain = normalizeBudgetData({
+          ...normalized,
+          accounts: [
+            ...normalized.accounts,
+            { id: 4, name: "Amex", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 3 },
+          ],
+        });
+        const amexCat = normalizedAgain.categories.find((c) => c.linkedAccountId === 4)!;
+        expect(amexCat).toBeDefined();
+        expect(amexCat.id).toBe(-3);
       });
 
       it("off-budget credit card account does not synthesize CC payment category", () => {
