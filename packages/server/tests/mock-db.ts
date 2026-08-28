@@ -3,7 +3,7 @@ import { vi } from "vitest";
 import type { Database } from "../../src/client.js";
 
 export type CallLog = {
-  op: "select" | "insert" | "update" | "delete" | "execute" | "run";
+  op: "select" | "insert" | "update" | "delete" | "execute" | "run" | "all";
   table?: string;
   values?: unknown;
   where?: unknown;
@@ -186,6 +186,18 @@ export function createMockDb(): MockDb {
       const text = extractSqlText(sqlAst);
       calls.push({ op: "execute", sql: text });
       return { rows: [{ count: "0" }] };
+    }),
+    all: vi.fn(async (sqlAst: unknown) => {
+      const text = extractSqlText(sqlAst);
+      calls.push({ op: "all", sql: text });
+      const counterKey = `all:*#${(perCallCounters.get("all:*") ?? 0) + 1}`;
+      perCallCounters.set("all:*", (perCallCounters.get("all:*") ?? 0) + 1);
+      if (responses.has(counterKey)) {
+        const v = responses.get(counterKey);
+        responses.delete(counterKey);
+        return v;
+      }
+      return responses.get("all:*") ?? [];
     }),
     run: vi.fn((sqlAst: unknown) => {
       // drizzle-orm's `db.run(sql)` (BaseSQLiteDatabase.run) lowers

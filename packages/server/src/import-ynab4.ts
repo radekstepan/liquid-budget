@@ -6,6 +6,7 @@ import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
+import { recomputeAccountBalances } from "./queries/diagnostics.js";
 
 export interface Ynab4Settings {
   currencySymbol?: string;
@@ -1293,42 +1294,5 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
   });
 }
 
-/**
- * Recompute every account's `balance` from the current set of
- * transactions. Exported for testability.
- *
- * Outflows: non-parent rows posted to this account as the source.
- * Inflows: non-parent rows where this account is the transfer destination
- *   (the source row is stored against the source's `accountId` with negative amount;
- *   the destination's balance is `-sourceAmount`).
- */
-export async function recomputeAccountBalances(db: Db): Promise<void> {
-  const allAccs = await db.select().from(accounts);
-  for (const a of allAccs) {
-    const outRes = await db
-      .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.accountId, a.id),
-          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-        )
-      );
+export { recomputeAccountBalances } from "./queries/diagnostics.js";
 
-    const inRes = await db
-      .select({ sum: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.transferAccountId, a.id),
-          isNotNull(transactions.transferAccountId),
-          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
-        )
-      );
-
-    const outgoing = Number(outRes[0]?.sum || 0);
-    const incomingFromTransfers = Number(inRes[0]?.sum || 0);
-    const sum = outgoing - incomingFromTransfers;
-    await db.update(accounts).set({ balance: sum }).where(eq(accounts.id, a.id));
-  }
-}

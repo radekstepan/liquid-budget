@@ -201,10 +201,15 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
   const groups = [...data.groups];
   let ccGroup = groups.find((g) => g.isCreditCardPayments);
   if (!ccGroup) {
-    const maxGroupId = groups.reduce((max, g) => Math.max(max, g.id), 0);
+    let nextSynthGroupId = -1;
+    for (const g of groups) {
+      if (g.id <= nextSynthGroupId) {
+        nextSynthGroupId = g.id - 1;
+      }
+    }
     const maxGroupSort = groups.reduce((max, g) => Math.max(max, g.sort), -1);
     ccGroup = {
-      id: maxGroupId + 1,
+      id: nextSynthGroupId,
       name: "Credit Card Payments",
       sort: maxGroupSort + 1,
       isCreditCardPayments: true,
@@ -225,16 +230,20 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     return c;
   });
 
-  let maxCatId = categories.reduce((max, c) => Math.max(max, c.id), 0);
+  let nextSynthCatId = -1;
+  for (const c of categories) {
+    if (c.id <= nextSynthCatId) {
+      nextSynthCatId = c.id - 1;
+    }
+  }
   let maxCatSort = categories
     .filter((c) => c.groupId === ccGroup!.id)
     .reduce((max, c) => Math.max(max, c.sort), -1);
 
   for (const acc of missingAccounts) {
-    maxCatId++;
     maxCatSort++;
     categories.push({
-      id: maxCatId,
+      id: nextSynthCatId--,
       groupId: ccGroup.id,
       name: acc.name,
       sort: maxCatSort,

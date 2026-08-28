@@ -8,7 +8,6 @@ import {
   TransactionError,
   updateSplit,
   updateTransaction,
-  type ClearedStatus,
   type SubTransactionInput,
 } from "@ynab/server";
 
@@ -43,13 +42,6 @@ function parseSubTransactions(raw: unknown): SubTxn[] {
       memo: typeof o.memo === "string" ? o.memo : undefined,
     };
   });
-}
-
-function parseStatus(raw: unknown, fallback: ClearedStatus = "c"): ClearedStatus {
-  if (raw === "u" || raw === "c" || raw === "r") return raw;
-  if (raw === false) return "u";
-  if (raw === true) return fallback;
-  return fallback;
 }
 
 import { apiErrorResponse } from "../errors";
