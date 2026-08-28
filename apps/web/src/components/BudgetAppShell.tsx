@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
-import { num } from "@ynab/logic";
+import { invalidateBudgetIndex, num } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -52,7 +52,16 @@ export function BudgetAppShell({
   initialMonth?: string;
   initialAccount?: number;
 }) {
-  const [data, setData] = useState<BudgetData | null>(null);
+  const [data, _setData] = useState<BudgetData | null>(null);
+  const setData = useCallback((value: React.SetStateAction<BudgetData | null>) => {
+    _setData((prev) => {
+      if (prev) {
+        invalidateBudgetIndex(prev);
+      }
+      const next = typeof value === "function" ? (value as (p: BudgetData | null) => BudgetData | null)(prev) : value;
+      return next;
+    });
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [syncingCount, setSyncingCount] = useState(0);

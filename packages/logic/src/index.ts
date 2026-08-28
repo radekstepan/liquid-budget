@@ -4,6 +4,7 @@ export * from "./split.js";
 export * from "./recurring.js";
 export * from "./csv-import.js";
 export * from "./reconcile.js";
+export * from "./transfers.js";
 // Full YNAB4 engine
 export {
   computeBudget,
