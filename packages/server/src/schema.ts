@@ -53,7 +53,7 @@ export const categories = sqliteTable(
     carryover: integer("carryover").notNull().default(0),
     goalTarget: integer("goal_target"),
     linkedAccountId: integer("linked_account_id").references(() => accounts.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
     overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
   },
