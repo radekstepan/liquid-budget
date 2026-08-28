@@ -505,8 +505,8 @@ describe("categories queries", () => {
 
       // Cleared transaction was moved to catNew
       expect(clearedAfter?.categoryId).toBe(catNew!.id);
-      // Reconciled transaction was NOT re-categorized to catNew; it was set to null when catOld was deleted
-      expect(reconciledAfter?.categoryId).toBeNull();
+      // BUG-05: Reconciled transaction is also re-pointed (category is metadata, not locked)
+      expect(reconciledAfter?.categoryId).toBe(catNew!.id);
       expect(reconciledAfter?.status).toBe("r");
     });
 
@@ -541,7 +541,8 @@ describe("categories queries", () => {
       const [reconciledAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, reconciledTx!.id));
 
       expect(clearedAfter?.categoryId).toBe(catNew!.id);
-      expect(reconciledAfter?.categoryId).toBeNull();
+      // BUG-05: Reconciled transaction is also re-pointed
+      expect(reconciledAfter?.categoryId).toBe(catNew!.id);
       expect(reconciledAfter?.status).toBe("r");
     });
 
@@ -555,6 +556,49 @@ describe("categories queries", () => {
 
       const updated = await updateCategoryGroup(db, grp1!.id, { isHidden: true });
       expect(updated?.isHidden).toBe(true);
+    });
+
+    it("BUG-05: deleteCategory with replacement re-points reconciled transactions and preserves budget history", async () => {
+      const db = openMigratedDb();
+      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [catOld] = await db.insert(schema.categories).values({ name: "Groceries", groupId: group!.id, sort: 0 }).returning();
+      const [catNew] = await db.insert(schema.categories).values({ name: "Food", groupId: group!.id, sort: 1 }).returning();
+
+      // Create a reconciled transaction in June assigned to catOld
+      const [reconciledTx] = await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -5000,
+        date: "2026-06-15",
+        status: "r",
+      }).returning();
+
+      // Capture budget state BEFORE deletion
+      const { getBudgetData } = await import("../src/queries/budget.js");
+      const { computeBudget } = await import("@ynab/logic");
+      const beforeData = await getBudgetData(db);
+      const beforeResult = computeBudget(beforeData, "2026-06");
+
+      // Delete catOld with replacement catNew
+      await deleteCategory(db, catOld!.id, { moveToCategoryId: catNew!.id });
+
+      // Assert reconciled transaction was re-pointed, not nullified
+      const [txAfter] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, reconciledTx!.id));
+      expect(txAfter?.categoryId).toBe(catNew!.id);
+      expect(txAfter?.status).toBe("r");
+
+      // Assert budget history for June is unchanged (numerical values preserved)
+      const afterData = await getBudgetData(db);
+      const afterResult = computeBudget(afterData, "2026-06");
+      expect(afterResult.tbb).toBe(beforeResult.tbb);
+      expect(afterResult.totalIncome).toBe(beforeResult.totalIncome);
+      expect(afterResult.totalAssigned).toBe(beforeResult.totalAssigned);
+      expect(afterResult.overspentPrevious).toBe(beforeResult.overspentPrevious);
+      // Budget integrity invariant: totalOnBudgetAccountBalance - sum(categoryAvailable) - TBB === 0
+      const afterTotalAvail = afterResult.groups.reduce((s, g) => s + g.available, 0);
+      const beforeTotalAvail = beforeResult.groups.reduce((s, g) => s + g.available, 0);
+      expect(afterTotalAvail).toBe(beforeTotalAvail);
     });
   });
 });
