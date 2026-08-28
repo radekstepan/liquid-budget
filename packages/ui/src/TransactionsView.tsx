@@ -402,7 +402,16 @@ export const TransactionsView = memo(function TransactionsView({
     let inflow = 0;
     let outflow = 0;
     let count = 0;
+    const parentsWithVisibleChildren = new Set<number>();
     for (const r of filtered) {
+      if (r.parentId != null) {
+        parentsWithVisibleChildren.add(r.parentId);
+      }
+    }
+    for (const r of filtered) {
+      if (splitParentIds.has(r.id) && parentsWithVisibleChildren.has(r.id)) {
+        continue;
+      }
       count++;
       const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
       const effAmt = isIncoming ? -r.amount : r.amount;
@@ -410,7 +419,7 @@ export const TransactionsView = memo(function TransactionsView({
       else outflow += -effAmt;
     }
     return { inflow, outflow, net: inflow - outflow, count };
-  }, [filtered, accountFilter]);
+  }, [filtered, accountFilter, splitParentIds]);
 
   const filterAccount = accountFilter != null ? accountById.get(accountFilter) : null;
   const hasFlagColumn = useMemo(

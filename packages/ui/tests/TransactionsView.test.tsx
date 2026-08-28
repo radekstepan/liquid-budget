@@ -531,6 +531,108 @@ describe("TransactionsView", () => {
       // Summary bar should show 1 selected
       expect(screen.getByText("1 selected")).toBeInTheDocument();
     });
+
+    it("BUG-23: computes footer totals correctly without double-counting split parents when child transfer legs are present", () => {
+      const data = makeSeedBudgetData();
+      // Add a split on Account 1 where child 1 is an incoming transfer into Account 2
+      // and child 2 is a category expense on Account 1
+      const splitParent = {
+        id: 8001,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Multi-leg Split",
+        memo: "",
+        amount: "-10000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      };
+      const splitChildTransfer = {
+        id: 8002,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Multi-leg Split",
+        memo: "Transfer part",
+        amount: "-4000",
+        status: "c" as const,
+        transferAccountId: 2,
+        parentId: 8001,
+      };
+      const splitChildExpense = {
+        id: 8003,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-08-01",
+        payee: "Multi-leg Split",
+        memo: "Expense part",
+        amount: "-6000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: 8001,
+      };
+
+      // Set only this split transaction in data to test exact totals
+      data.transactions = [splitParent, splitChildTransfer, splitChildExpense];
+
+      // 1. In Account 1 view: split parent is visible (outflow $100.00), child legs are not individually listed
+      const { unmount: unmount1 } = render(
+        <TransactionsView
+          data={data}
+          accountFilter={1}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+      expect(screen.getByText("1 transactions")).toBeInTheDocument();
+      expect(screen.getByText("Outflow −$100.00")).toBeInTheDocument();
+      expect(screen.getByText("Net -$100.00")).toBeInTheDocument();
+      unmount1();
+
+      // 2. In Account 2 view: incoming transfer child is visible (inflow $40.00), parent is not listed
+      const { unmount: unmount2 } = render(
+        <TransactionsView
+          data={data}
+          accountFilter={2}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+      expect(screen.getByText("1 transactions")).toBeInTheDocument();
+      expect(screen.getByText("Inflow $40.00")).toBeInTheDocument();
+      expect(screen.getByText("Net $40.00")).toBeInTheDocument();
+      unmount2();
+
+      // 3. Edge case: parent also matches filter via transferAccountId or leg, so both parent and inbound child are in filtered
+      const edgeParent = {
+        ...splitParent,
+        transferAccountId: 2, // Parent also matches account 2 filter
+      };
+      data.transactions = [edgeParent, splitChildTransfer, splitChildExpense];
+
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={2}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+      // Because child transfer is visible, edgeParent must NOT be double-counted in totals
+      expect(screen.getByText("1 transactions")).toBeInTheDocument();
+      expect(screen.getByText("Inflow $40.00")).toBeInTheDocument();
+      expect(screen.getByText("Net $40.00")).toBeInTheDocument();
+    });
   });
 });
 

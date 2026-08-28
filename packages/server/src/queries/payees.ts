@@ -1,4 +1,4 @@
-import { eq, asc, or } from "drizzle-orm";
+import { eq, asc, or, and, isNull } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { payees, transactions, recurring } from "../schema.js";
 
@@ -91,8 +91,18 @@ export function updatePayee(
       const newName = patch.name.trim();
       const oldName = current.name;
 
+      // Best-effort cascade: Rows linked by payeeId are always updated.
+      // Text fallback is restricted to regular, non-transfer, non-split-child rows
+      // (BUG-22) so that transfer legs and split sub-transactions are never rewritten by accident.
       const txCondition = oldName
-        ? or(eq(transactions.payeeId, id), eq(transactions.payee, oldName))
+        ? or(
+            eq(transactions.payeeId, id),
+            and(
+              eq(transactions.payee, oldName),
+              isNull(transactions.parentId),
+              isNull(transactions.transferAccountId)
+            )
+          )
         : eq(transactions.payeeId, id);
 
       tx.update(transactions)
@@ -101,7 +111,13 @@ export function updatePayee(
         .run();
 
       const recCondition = oldName
-        ? or(eq(recurring.payeeId, id), eq(recurring.payee, oldName))
+        ? or(
+            eq(recurring.payeeId, id),
+            and(
+              eq(recurring.payee, oldName),
+              isNull(recurring.transferAccountId)
+            )
+          )
         : eq(recurring.payeeId, id);
 
       tx.update(recurring)

@@ -236,7 +236,8 @@ export async function DELETE(req: Request) {
   const id = Number(searchParams.get("id"));
   if (!id) return Response.json({ error: "invalid" }, { status: 400 });
   try {
-    await deleteTransaction(getDefaultDb(), id);
+    const deleted = await deleteTransaction(getDefaultDb(), id);
+    if (!deleted) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json({ ok: true });
   } catch (e) {
     return apiErrorResponse(e);

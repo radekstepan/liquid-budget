@@ -8,7 +8,7 @@ import {
   getDefaultDb,
   resetAndSeedDatabase,
 } from "@ynab/server";
-import { PATCH } from "../src/app/api/transactions/route";
+import { DELETE, PATCH } from "../src/app/api/transactions/route";
 
 vi.stubEnv("DATABASE_URL", ":memory:");
 
@@ -105,5 +105,48 @@ describe("PATCH /api/transactions (BUG-19)", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.categoryId).toBeNull();
+  });
+
+  describe("DELETE /api/transactions (BUG-24)", () => {
+    it("returns 404 for nonexistent id", async () => {
+      const req = new NextRequest("http://localhost:3000/api/transactions?id=999999", {
+        method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error).toBe("not found");
+    });
+
+    it("returns 400 for invalid id", async () => {
+      const req = new NextRequest("http://localhost:3000/api/transactions?id=invalid", {
+        method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 200 and deletes the transaction for valid id", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const txn = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -2500,
+        date: "2026-08-01",
+        payee: "Bakery",
+      });
+
+      const req = new NextRequest(`http://localhost:3000/api/transactions?id=${txn!.id}`, {
+        method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+
+      // Verify second delete of same id returns 404
+      const secondRes = await DELETE(req);
+      expect(secondRes.status).toBe(404);
+    });
   });
 });
