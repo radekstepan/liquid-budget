@@ -12,7 +12,7 @@ import {
 import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 
-type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number };
+type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number | null };
 
 type SortKey =
   | "date"
@@ -382,7 +382,8 @@ export const TransactionsView = memo(function TransactionsView({
           break;
         }
         case "balance":
-          cmp = a.runningBalance - b.runningBalance;
+          // Rows without a walk entry ("—") sort as 0.
+          cmp = (a.runningBalance ?? 0) - (b.runningBalance ?? 0);
           break;
       }
       if (cmp === 0) {
@@ -879,12 +880,17 @@ export const TransactionsView = memo(function TransactionsView({
                       </td>
                       <td
                         className="num y-num"
-                        style={{
-                          color: t.runningBalance < 0 ? "var(--y-red)" : "var(--y-ink)",
-                          fontWeight: t.runningBalance < 0 ? 700 : 400,
-                        }}
+                        style={
+                          t.runningBalance == null
+                            ? { color: "var(--y-ink-faint)" }
+                            : {
+                                color:
+                                  t.runningBalance < 0 ? "var(--y-red)" : "var(--y-ink)",
+                                fontWeight: t.runningBalance < 0 ? 700 : 400,
+                              }
+                        }
                       >
-                        {money(t.runningBalance)}
+                        {t.runningBalance == null ? "—" : money(t.runningBalance)}
                       </td>
                     </tr>
                   );

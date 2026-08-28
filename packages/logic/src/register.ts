@@ -26,10 +26,16 @@
  *      applied with the *opposite* sign — the source's outflow is the
  *      destination's inflow, mirroring the server's
  *      `applyBalance(accountId, -amount)` in `createTransfer`.
- *   4. Split parent rows mirror the running balance of the
- *      chronologically-newest child in their cluster (the *first* child
- *      in the date-descending sort) so the cluster reads as a single
- *      balance line — the "balance after this cluster".
+ *   4. Split parent rows mirror the running balance of the first child
+ *      in their cluster *that has a walk entry* (the chronologically-
+ *      newest participating child) so the cluster reads as a single
+ *      balance line — the "balance after this cluster". If no child
+ *      participated, the parent gets `null` too.
+ *
+ * Rows that do not participate in a walk (e.g. in an anchored
+ * single-account view, a row on another account with no transfer link
+ * to the anchor) get `null` rather than the account's live balance — a
+ * historical column must never silently show a current figure.
  *
  * The function is pure: same inputs always produce same outputs, no
  * database, no React.
@@ -44,10 +50,11 @@ export type RegisterRow = Omit<Transaction, "amount"> & {
    * Balance of the relevant account (the anchor, or the row's own
    * `accountId` when no anchor) *after* this row is applied. For
    * split-parent rows this is copied from the chronologically-newest
-   * child of the same parent so the cluster reads as a single balance
-   * line.
+   * participating child of the same parent so the cluster reads as a
+   * single balance line. `null` when the row did not participate in a
+   * walk (e.g. anchored to another account with no transfer link).
    */
-  runningBalance: number;
+  runningBalance: number | null;
 };
 
 /** Row with `amount` parsed to a number — used internally during the walk. */
@@ -141,32 +148,45 @@ export function computeRunningBalances(
     }
   }
 
-  // Mirror split parents to the post-cluster value of their first
-  // (date-descending) child — the chronologically-newest child, which
-  // carries the "balance after the entire cluster" reading.
-  const firstChildByParent = new Map<number, number>();
+  // Mirror split parents to the post-cluster value of the first child
+  // in their cluster *that has a walk entry* — the chronologically-newest
+  // participating child, which carries the "balance after the entire
+  // cluster" reading. Children on other accounts (no walk entry) are
+  // skipped; if no child participated, the parent stays unmapped and
+  // assembles as `null` rather than a live balance.
+  const childrenByParent = new Map<number, number[]>();
   for (let i = 0; i < len; i++) {
     const r = rows[i]!;
-    if (r.parentId != null && !firstChildByParent.has(r.parentId)) {
-      // First occurrence in `rows` is the first in the date-desc
-      // sort (sort is stable; same-date ties keep input order).
-      firstChildByParent.set(r.parentId, r.id);
+    if (r.parentId != null) {
+      let list = childrenByParent.get(r.parentId);
+      if (!list) {
+        list = [];
+        childrenByParent.set(r.parentId, list);
+      }
+      // Order of occurrence in `rows` is date-desc order (sort is
+      // stable; same-date ties keep input order).
+      list.push(r.id);
     }
   }
-  for (const [parentId, childId] of firstChildByParent) {
-    const childBal = runningBalanceById.get(childId);
-    if (childBal != null) runningBalanceById.set(parentId, childBal);
+  for (const [parentId, childIds] of childrenByParent) {
+    for (const childId of childIds) {
+      const childBal = runningBalanceById.get(childId);
+      if (childBal != null) {
+        runningBalanceById.set(parentId, childBal);
+        break;
+      }
+    }
   }
 
-  // Assemble output, falling back to the row's own account balance for
-  // any row that didn't participate in a walk (e.g. a row on account X
-  // passed in alongside an anchor on account Y, with no transfer link).
+  // Assemble output. Rows that didn't participate in a walk (e.g. a row
+  // on account X passed in alongside an anchor on account Y, with no
+  // transfer link) get `null` — never the account's live balance, which
+  // would masquerade as a historical figure.
   const result: RegisterRow[] = new Array(len);
   for (let i = 0; i < len; i++) {
     const r = rows[i]!;
     const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
-    const runningBalance =
-      runningBalanceById.get(r.id) ?? accountBalances.get(r.accountId) ?? 0;
+    const runningBalance = runningBalanceById.get(r.id) ?? null;
     result[i] = { ...r, amount: amt, runningBalance };
   }
   return result;
