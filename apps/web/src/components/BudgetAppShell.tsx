@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -218,10 +218,11 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
+
         const newTx: Transaction = {
           id: tempId,
           accountId: t.accountId,
-          categoryId: t.categoryId,
+          categoryId: t.subTransactions?.length ? null : t.categoryId,
           date: t.date,
           payee: t.payee,
           memo: t.memo ?? "",
@@ -233,12 +234,54 @@ export function BudgetAppShell({
         };
 
         const deltas = new Map<number, number>();
+        let newTransactions: Transaction[] = [newTx];
+
         if (t.subTransactions && t.subTransactions.length > 0) {
+          const srcAccount = prev.accounts.find((a) => a.id === t.accountId);
+          const srcOnBudget = srcAccount?.onBudget ?? true;
+          let childIdx = 1;
           for (const st of t.subTransactions) {
             deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + st.amount);
             if (st.transferAccountId != null) {
               deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
             }
+
+            let childCategoryId = st.categoryId ?? null;
+            let isIncome = false;
+
+            if (st.transferAccountId != null) {
+              const destAccount = prev.accounts.find((a) => a.id === st.transferAccountId);
+              const destOnBudget = destAccount?.onBudget ?? true;
+              const classification = classifyBoundaryTransfer({
+                srcOnBudget,
+                destOnBudget,
+                amount: st.amount,
+                categoryId: childCategoryId,
+              });
+              childCategoryId = classification.categoryId;
+              isIncome = classification.isIncome;
+            } else if (!srcOnBudget) {
+              childCategoryId = null;
+              isIncome = false;
+            } else {
+              isIncome = childCategoryId == null && st.amount > 0;
+            }
+
+            newTransactions.push({
+              id: tempId - childIdx,
+              accountId: t.accountId,
+              categoryId: childCategoryId,
+              date: t.date,
+              payee: st.transferAccountId != null ? `Transfer : ${prev.accounts.find((a) => a.id === st.transferAccountId)?.name ?? "Unknown"}` : t.payee,
+              memo: st.memo ?? "",
+              amount: st.amount.toFixed(2),
+              status: t.status,
+              flagColor: t.flagColor ?? null,
+              transferAccountId: st.transferAccountId ?? null,
+              parentId: tempId,
+              isIncome,
+            });
+            childIdx++;
           }
         } else {
           deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + t.amount);
@@ -247,7 +290,7 @@ export function BudgetAppShell({
           }
         }
         const accounts = applyAccountDeltas(prev.accounts, deltas);
-        return { ...prev, accounts, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
+        return { ...prev, accounts, transactions: [...newTransactions, ...prev.transactions], budgetIndex: undefined };
       });
       return withSync(async () => {
         await runMutation(
@@ -264,6 +307,26 @@ export function BudgetAppShell({
                   transactions: prev.transactions.map((tx) =>
                     tx.id === tempId ? { ...tx, id: (res as Transaction).id } : tx
                   ),
+                };
+              });
+            } else if (res && "parent" in res && "children" in res) {
+              const splitRes = res as { parent: Transaction; children: Transaction[] };
+              setData((prev) => {
+                if (!prev) return prev;
+                const childTempIds = new Map<number, number>();
+                let ci = 1;
+                for (const child of splitRes.children) {
+                  childTempIds.set(tempId - ci, child.id);
+                  ci++;
+                }
+                return {
+                  ...prev,
+                  transactions: prev.transactions.map((tx) => {
+                    if (tx.id === tempId) return { ...tx, id: splitRes.parent.id };
+                    const realChildId = childTempIds.get(tx.id);
+                    if (realChildId != null) return { ...tx, id: realChildId };
+                    return tx;
+                  }),
                 };
               });
             }
@@ -328,6 +391,23 @@ export function BudgetAppShell({
 
         const accounts = applyAccountDeltas(prev.accounts, deltas);
 
+        // Re-classify categoryId for transfer rows to mirror server-side classifyBoundaryTransfer
+        let transferCategoryId: number | null | undefined = t.categoryId;
+        let transferIsIncome: boolean | undefined;
+        if (target?.transferAccountId != null && "categoryId" in t) {
+          const srcAccount = prev.accounts.find((a) => a.id === (t.accountId ?? target.accountId));
+          const destAccount = prev.accounts.find((a) => a.id === target.transferAccountId);
+          const newAmount = t.amount ?? num(target.amount);
+          const classification = classifyBoundaryTransfer({
+            srcOnBudget: srcAccount?.onBudget ?? true,
+            destOnBudget: destAccount?.onBudget ?? true,
+            amount: newAmount,
+            categoryId: t.categoryId,
+          });
+          transferCategoryId = classification.categoryId;
+          transferIsIncome = classification.isIncome;
+        }
+
         const transactions = prev.transactions.map((x) => {
           const isTarget = x.id === id;
           const isSplitMember =
@@ -346,13 +426,14 @@ export function BudgetAppShell({
           return {
             ...x,
             ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
-            ...(t.categoryId !== undefined ? { categoryId: t.categoryId } : {}),
+            ...(t.categoryId !== undefined ? { categoryId: transferCategoryId } : {}),
             ...(t.date !== undefined ? { date: t.date } : {}),
             ...(t.payee !== undefined ? { payee: t.payee } : {}),
             ...(t.memo !== undefined ? { memo: t.memo } : {}),
             ...(t.amount !== undefined ? { amount: t.amount.toFixed(2) } : {}),
             ...(t.status !== undefined ? { status: t.status } : {}),
             ...(t.flagColor !== undefined ? { flagColor: t.flagColor ?? null } : {}),
+            ...(transferIsIncome !== undefined ? { isIncome: transferIsIncome } : {}),
           };
         });
         return { ...prev, accounts, transactions, budgetIndex: undefined };
