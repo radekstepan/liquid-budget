@@ -189,8 +189,31 @@ export async function verifyBudgetIntegrity(
     0
   );
 
+  // Unfunded CC spending creates debt on the card without moving cash into
+  // the CC Payment category.  In the spending month the negative non-CC
+  // category available offsets the card debt in the invariant.  In subsequent
+  // months the negative is clamped to zero (no cash carryover), leaving the
+  // card debt unmatched.  We compute the portion of CC debt that is not
+  // covered by either the CC Payment category available or negative non-CC
+  // category balances, and add it to the account side so the invariant holds:
+  //
+  //   unmatchedCCDebt = max(0, totalCCDebt - totalCCPaymentAvailable - nonCCNegativeSum)
+  //   diff = totalAccountBalance + unmatchedCCDebt - totalCategoryAvailable - TBB
+  const ccAccounts = onBudgetAccounts.filter((a) => a.kind === "credit");
+  const totalCCDebt = ccAccounts.reduce(
+    (s, a) => s + Math.max(0, -Number(a.balance ?? 0)),
+    0
+  );
+  const totalCCPaymentAvailable = result.groups
+    .filter((g) => g.group.isCreditCardPayments)
+    .reduce((s, g) => s + g.available, 0);
+  const nonCCNegativeSum = result.groups
+    .filter((g) => !g.group.isCreditCardPayments)
+    .reduce((s, g) => s + Math.max(0, -g.available), 0);
+  const unmatchedCCDebt = Math.max(0, totalCCDebt - totalCCPaymentAvailable - nonCCNegativeSum);
+
   const difference = Math.round(
-    totalAccountBalance - totalCategoryAvailable - result.tbb
+    totalAccountBalance + unmatchedCCDebt - totalCategoryAvailable - result.tbb
   );
 
   return {

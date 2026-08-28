@@ -431,5 +431,41 @@ describe("diagnostics queries", () => {
       expect(driftedReport.totalOnBudgetAccountBalance).toBe(999999);
       expect(driftedReport.difference).toBe(499999); // 999999 - 100000 - 400000 = 499999
     });
+
+    it("BUG-07: does not false-positive on unfunded credit-card spending across months", async () => {
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
+      const amex = await createAccount(db, { name: "Amex", kind: "credit", onBudget: true, balance: 0 });
+
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Everyday", sort: 0 }).returning();
+      const [ccGroup] = await db.insert(schema.categoryGroups).values({ name: "Credit Card Payments", sort: 1, isCreditCardPayments: true }).returning();
+      const [groceries] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+      const [amexPay] = await db.insert(schema.categories).values({ groupId: ccGroup.id, name: "Amex Payment", sort: 0, linkedAccountId: amex.id }).returning();
+
+      // $100 charged on Amex with $0 budgeted in 2026-06
+      await db.insert(schema.assignments).values([
+        { categoryId: groceries.id, month: "2026-06", amount: 0 },
+        { categoryId: amexPay.id, month: "2026-06", amount: 0 },
+      ]);
+      await createTransaction(db, {
+        accountId: amex.id,
+        categoryId: groceries.id,
+        date: "2026-06-15",
+        payee: "Supermarket",
+        memo: "",
+        amount: -10000,
+      });
+
+      // Month 1: verify integrity in spending month
+      const juneReport = await verifyBudgetIntegrity(db, "2026-06");
+      expect(juneReport.difference).toBe(0);
+
+      // Month 2: verify integrity in subsequent month (negative clamped)
+      const julyReport = await verifyBudgetIntegrity(db, "2026-07");
+      expect(julyReport.difference).toBe(0);
+
+      // Month 3: still clean
+      const augReport = await verifyBudgetIntegrity(db, "2026-08");
+      expect(augReport.difference).toBe(0);
+    });
   });
 });
