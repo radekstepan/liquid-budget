@@ -17,7 +17,11 @@ export function SpendingReport({
   total: number;
   initialView?: "bars" | "donut";
 }) {
-  const [viewMode, setViewMode] = useLocalStorage<"bars" | "donut">("ynab:reports:spendingViewMode", initialView);
+  const [viewMode, setViewMode] = useLocalStorage<"bars" | "donut">(
+    "ynab:reports:spendingViewMode",
+    initialView,
+    (v): v is "bars" | "donut" => v === "bars" || v === "donut"
+  );
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
   const { ref: donutRef, size: donutSize } = useElementSize<HTMLDivElement>();
 

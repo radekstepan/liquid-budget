@@ -549,7 +549,11 @@ export function SpendingTrendsReport({
   const { ref: chartContainerRef, size } = useElementSize<HTMLDivElement>();
 
   // Scale mode (linear vs logarithmic)
-  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">("ynab:reports:trendsScaleMode", "linear");
+  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">(
+    "ynab:reports:trendsScaleMode",
+    "linear",
+    (v): v is "linear" | "log" => v === "linear" || v === "log"
+  );
 
   // Drilldown hierarchy state
   const [drillGroupId, setDrillGroupId] = useState<number | null>(null);
@@ -583,7 +587,12 @@ export function SpendingTrendsReport({
     return new Set(data.categories.filter((c) => !ccGroupIds.has(c.groupId)).map((c) => c.id));
   }, [data.categories, data.groups]);
 
-  const [persistedIds, setPersistedIds] = useLocalStorage<number[] | null>("ynab:reports:trendsActiveCategories", null);
+  const [persistedIds, setPersistedIds] = useLocalStorage<number[] | null>(
+    "ynab:reports:trendsActiveCategories",
+    null,
+    (v): v is number[] | null =>
+      v === null || (Array.isArray(v) && v.every((x) => typeof x === "number" && Number.isFinite(x)))
+  );
   const [activeCategoryIds, setActiveCategoryIds] = useState<Set<number>>(() => {
     if (persistedIds != null) return new Set(persistedIds);
     return allCategoryIds;

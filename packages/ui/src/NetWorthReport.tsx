@@ -300,7 +300,11 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
   const gid = useId();
   const { ref, size } = useElementSize<HTMLDivElement>();
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
-  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">("ynab:reports:scaleMode", "linear");
+  const [scaleMode, setScaleMode] = useLocalStorage<"linear" | "log">(
+    "ynab:reports:scaleMode",
+    "linear",
+    (v): v is "linear" | "log" => v === "linear" || v === "log"
+  );
 
   const chart = useMemo(() => {
     if (size.width === 0 || size.height === 0 || points.length === 0) return null;

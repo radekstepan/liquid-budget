@@ -469,5 +469,67 @@ describe("ReportsView", () => {
     expect(screen.getByText("Retirement")).toBeInTheDocument();
     expect(screen.getAllByText("$500.00").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("BUG-45: updates automatic date range when older transactions are imported if untouched", () => {
+    const initialData = makeData(); // transactions from 2026-04 to 2026-06 (Income = $9000, 3 x 3000)
+    const { rerender } = render(<ReportsView data={initialData} month="2026-06" />);
+
+    // Default range is 2026-04 to 2026-06 -> Income is $9,000.00
+    expect(screen.getByText("$9,000.00")).toBeInTheDocument();
+
+    // Now older transaction from 2025-01 ($5000 income) is imported
+    const updatedData: BudgetData = {
+      ...initialData,
+      transactions: [
+        txn("2025-01", 1, "Old Payroll", 5000),
+        ...initialData.transactions,
+      ],
+    };
+
+    rerender(<ReportsView data={updatedData} month="2026-06" />);
+
+    // Income should now automatically include the 2025-01 transaction ($9000 + $5000 = $14000)
+    expect(screen.getByText("$14,000.00")).toBeInTheDocument();
+  });
+
+  it("BUG-45: retains user customized date range when data updates", () => {
+    const initialData = makeData();
+    const { rerender } = render(<ReportsView data={initialData} month="2026-06" />);
+
+    // Manually customize the From month using Select
+    pickFromOpenDropdownByValue(/from month/i, "4");
+
+    // Income for May + June is $6000
+    expect(screen.getByText("$6,000.00")).toBeInTheDocument();
+
+    // Now older transaction from 2025-01 is imported
+    const updatedData: BudgetData = {
+      ...initialData,
+      transactions: [
+        txn("2025-01", 1, "Old Payroll", 5000),
+        ...initialData.transactions,
+      ],
+    };
+
+    rerender(<ReportsView data={updatedData} month="2026-06" />);
+
+    // Customized range remains May to June -> still $6000
+    expect(screen.getByText("$6,000.00")).toBeInTheDocument();
+
+    // Now resetKey changes (user clicks Reports in sidebar)
+    rerender(<ReportsView data={updatedData} month="2026-06" resetKey={1} />);
+
+    // Reset should revert to automatic full range ($14000)
+    expect(screen.getByText("$14,000.00")).toBeInTheDocument();
+  });
+
+  it("BUG-44: recovers from invalid subTab in localStorage", () => {
+    window.localStorage.setItem("ynab:reports:subTab", JSON.stringify("invalid-tab"));
+    renderView();
+    // Falls back to Overview
+    expect(screen.getByText("Top Payees")).toBeInTheDocument();
+    expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
+  });
 });
+
 
