@@ -289,7 +289,7 @@ describe("computeBudget", () => {
     expect(august.tbb).toBe(-70000);
   });
 
-  it("overspentPrevious is 0 when the previous data-bearing month is not the immediate previous calendar month", () => {
+  it("overspentPrevious reports the previous data-bearing month's overspend across gap months", () => {
     // June: assign 0, spend 200000 -> overspent 200000
     // July: no assignments, no transactions (empty)
     // August: no assignments, no transactions (empty)
@@ -312,20 +312,20 @@ describe("computeBudget", () => {
     const june = computeBudget(data, "2025-06");
     expect(june.overspentPrevious).toBe(0);
 
-    // July: June is the immediate preceding calendar month -> returns 200000
+    // July: June is the immediate preceding data month -> returns 200000
     const july = computeBudget(data, "2025-07");
     expect(july.overspentPrevious).toBe(200000);
 
-    // August: June is NOT the immediate preceding calendar month (July is, and July had no overspend) -> returns 0
+    // August: June is still the most recent prior data month -> returns 200000
     const august = computeBudget(data, "2025-08");
-    expect(august.overspentPrevious).toBe(0);
+    expect(august.overspentPrevious).toBe(200000);
 
-    // Cache hit path for August: still returns 0
+    // Cache hit path for August: still returns 200000
     const augustCached = computeBudget(data, "2025-08");
-    expect(augustCached.overspentPrevious).toBe(0);
+    expect(augustCached.overspentPrevious).toBe(200000);
   });
 
-  it("overspentPrevious correctly handles year boundaries", () => {
+  it("overspentPrevious correctly handles year boundaries across gap months", () => {
     // Overspend in 2025-11 only
     const dataNov: BudgetData = {
       ...emptyData(),
@@ -340,10 +340,10 @@ describe("computeBudget", () => {
       ],
     };
 
-    // 2025-12 has immediate previous month (2025-11) with overspend
+    // 2025-12 has most recent prior data month (2025-11) with overspend
     expect(computeBudget(dataNov, "2025-12").overspentPrevious).toBe(10000);
-    // 2026-01 previous calendar month is 2025-12 (which had no data/overspend) -> 0
-    expect(computeBudget(dataNov, "2026-01").overspentPrevious).toBe(0);
+    // 2026-01 still has most recent prior data month (2025-11) with overspend
+    expect(computeBudget(dataNov, "2026-01").overspentPrevious).toBe(10000);
 
     // Overspend in 2025-12
     const dataDec: BudgetData = {
@@ -359,7 +359,7 @@ describe("computeBudget", () => {
       ],
     };
 
-    // 2026-01 previous calendar month is 2025-12 -> 15000
+    // 2026-01 previous data month is 2025-12 -> 15000
     expect(computeBudget(dataDec, "2026-01").overspentPrevious).toBe(15000);
   });
 

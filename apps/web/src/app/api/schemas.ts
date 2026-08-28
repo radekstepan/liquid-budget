@@ -12,10 +12,12 @@ export const ISOMonthSchema = z.string().refine(isValidISOMonth, {
 export const TransactionFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple"]);
 
 export const SubTransactionSchema = z.object({
+  id: z.number().int().positive().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
   transferAccountId: z.number().int().positive().nullable().optional(),
   amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
   memo: z.string().max(1000).optional(),
+  payee: z.string().max(255).optional(),
 });
 
 export const TransactionCreateSchema = z.object({

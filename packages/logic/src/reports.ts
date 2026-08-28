@@ -65,8 +65,9 @@ export function computeNetWorthReport(
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
   const months = getMonthsBetween(actualStart, actualEnd);
 
-  // 1. Identify split parents and earliest transaction month per account
+  // 1. Identify split parents and valid account IDs
   const splitParentIds = new Set<number>();
+  const validAccountIds = new Set<number>(data.accounts.map((a) => a.id));
   const earliestMonthByAccount = new Map<number, string>();
   for (const t of data.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
@@ -86,32 +87,45 @@ export function computeNetWorthReport(
     const amt = num(t.amount);
     const mk = t.date.slice(0, 7);
 
-    // Track earliest activity month for source account
-    const curEarliestSrc = earliestMonthByAccount.get(t.accountId);
-    if (!curEarliestSrc || mk < curEarliestSrc) {
-      earliestMonthByAccount.set(t.accountId, mk);
-    }
-
     // Source account delta
-    totalDeltas.set(t.accountId, (totalDeltas.get(t.accountId) ?? 0) + amt);
-    let srcMonthMap = deltasByMonth.get(mk);
-    if (!srcMonthMap) {
-      srcMonthMap = new Map<number, number>();
-      deltasByMonth.set(mk, srcMonthMap);
+    if (!validAccountIds.has(t.accountId)) {
+      console.warn(`[computeNetWorthReport] Transaction ${t.id} references unknown or deleted accountId ${t.accountId}`);
+    } else {
+      // Track earliest activity month for source account
+      const curEarliestSrc = earliestMonthByAccount.get(t.accountId);
+      if (!curEarliestSrc || mk < curEarliestSrc) {
+        earliestMonthByAccount.set(t.accountId, mk);
+      }
+
+      totalDeltas.set(t.accountId, (totalDeltas.get(t.accountId) ?? 0) + amt);
+      let srcMonthMap = deltasByMonth.get(mk);
+      if (!srcMonthMap) {
+        srcMonthMap = new Map<number, number>();
+        deltasByMonth.set(mk, srcMonthMap);
+      }
+      srcMonthMap.set(t.accountId, (srcMonthMap.get(t.accountId) ?? 0) + amt);
     }
-    srcMonthMap.set(t.accountId, (srcMonthMap.get(t.accountId) ?? 0) + amt);
 
     // Transfer destination account delta
     if (t.transferAccountId != null) {
-      const curEarliestDest = earliestMonthByAccount.get(t.transferAccountId);
-      if (!curEarliestDest || mk < curEarliestDest) {
-        earliestMonthByAccount.set(t.transferAccountId, mk);
+      if (!validAccountIds.has(t.transferAccountId)) {
+        console.warn(`[computeNetWorthReport] Transaction ${t.id} references unknown or deleted transferAccountId ${t.transferAccountId}`);
+      } else {
+        const curEarliestDest = earliestMonthByAccount.get(t.transferAccountId);
+        if (!curEarliestDest || mk < curEarliestDest) {
+          earliestMonthByAccount.set(t.transferAccountId, mk);
+        }
+        totalDeltas.set(t.transferAccountId, (totalDeltas.get(t.transferAccountId) ?? 0) - amt);
+        let srcMonthMap = deltasByMonth.get(mk);
+        if (!srcMonthMap) {
+          srcMonthMap = new Map<number, number>();
+          deltasByMonth.set(mk, srcMonthMap);
+        }
+        srcMonthMap.set(
+          t.transferAccountId,
+          (srcMonthMap.get(t.transferAccountId) ?? 0) - amt
+        );
       }
-      totalDeltas.set(t.transferAccountId, (totalDeltas.get(t.transferAccountId) ?? 0) - amt);
-      srcMonthMap.set(
-        t.transferAccountId,
-        (srcMonthMap.get(t.transferAccountId) ?? 0) - amt
-      );
     }
   }
 
@@ -131,6 +145,7 @@ export function computeNetWorthReport(
     const mMap = deltasByMonth.get(pm);
     if (mMap) {
       for (const [accId, d] of mMap.entries()) {
+        if (!validAccountIds.has(accId)) continue;
         runningBalances.set(accId, (runningBalances.get(accId) ?? 0) + d);
       }
     }
@@ -142,15 +157,17 @@ export function computeNetWorthReport(
     const mMap = deltasByMonth.get(m);
     if (mMap) {
       for (const [accId, d] of mMap.entries()) {
+        if (!validAccountIds.has(accId)) continue;
         runningBalances.set(accId, (runningBalances.get(accId) ?? 0) + d);
       }
     }
 
     let assets = 0;
     let debts = 0;
-    for (const [accId, bal] of runningBalances.entries()) {
+    for (const a of data.accounts) {
+      const bal = runningBalances.get(a.id) ?? 0;
       // Clamp to 0 if the account has transactions but they only begin in a future month
-      const earliest = earliestMonthByAccount.get(accId);
+      const earliest = earliestMonthByAccount.get(a.id);
       if (earliest && m < earliest) {
         continue;
       }

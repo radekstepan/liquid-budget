@@ -937,18 +937,8 @@ export function getMonthsWithData(data: BudgetData): string[] {
 // Helpers (internal)
 // ---------------------------------------------------------------------------
 
-function getPreviousCalendarMonth(month: string): string {
-  const parts = month.split("-");
-  const year = parseInt(parts[0] ?? "0", 10);
-  const m = parseInt(parts[1] ?? "1", 10);
-  if (m === 1) {
-    return `${year - 1}-12`;
-  }
-  return `${year}-${String(m - 1).padStart(2, "0")}`;
-}
-
 /**
- * Retrieve carryover balance map and previous month's cash overspent amount.
+ * Retrieve carryover balance map and previous data month's cash overspent amount.
  */
 function buildCarryoverMap(
   data: BudgetData,
@@ -956,13 +946,11 @@ function buildCarryoverMap(
   orderedMonths: string[],
   targetMonth: string
 ): { carryoverMap: Map<number, number>; overspentPrevious: number } {
-  const prevCalendarMonth = getPreviousCalendarMonth(targetMonth);
   const priorMonths = orderedMonths.filter((m) => m < targetMonth);
   const mostRecentPrior = priorMonths.length > 0 ? priorMonths[priorMonths.length - 1] : null;
-  const overspentPrevious =
-    mostRecentPrior === prevCalendarMonth
-      ? (index.overspentByMonth.get(mostRecentPrior) ?? 0)
-      : 0;
+  const overspentPrevious = mostRecentPrior
+    ? (index.overspentByMonth.get(mostRecentPrior) ?? 0)
+    : 0;
 
   const carryoverMap =
     index.carryoverByMonth.get(targetMonth) ??

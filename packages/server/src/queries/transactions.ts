@@ -65,6 +65,7 @@ export type UpdateTransactionInput = {
 };
 
 export type SubTransactionInput = {
+  id?: number | null;
   /**
    * Category or transfer account for the sub-transaction.
    */
@@ -72,6 +73,7 @@ export type SubTransactionInput = {
   transferAccountId?: number | null;
   amount: number;
   memo?: string;
+  payee?: string;
 };
 
 /**
@@ -174,7 +176,7 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; status: ClearedStatus }[]> {
+): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; payee: string; status: ClearedStatus }[]> {
   return db
     .select({
       id: transactions.id,
@@ -183,6 +185,7 @@ async function getChildren(
       transferAccountId: transactions.transferAccountId,
       categoryId: transactions.categoryId,
       memo: transactions.memo,
+      payee: transactions.payee,
       status: transactions.status,
     })
     .from(transactions)
@@ -498,7 +501,7 @@ export async function createSplitWithChildren(
     const childRows = [];
     for (const c of children) {
       const childAmount = assertValidAmount(c.amount);
-      let payee = parent.payee;
+      let payee = c.payee !== undefined && c.payee !== null && c.payee !== "" ? String(c.payee) : parent.payee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
       let categoryId = c.categoryId ? Number(c.categoryId) : null;
       let isIncome = false;
@@ -929,7 +932,10 @@ export async function updateSplit(
 
     const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
     const newChildren = [];
-    for (const c of children) {
+    const usedOldIndices = new Set<number>();
+
+    for (let i = 0; i < children.length; i++) {
+      const c = children[i]!;
       const childAmount = assertValidAmount(c.amount);
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
@@ -960,6 +966,41 @@ export async function updateSplit(
           categoryId = null;
         }
       } else {
+        if (c.payee !== undefined && c.payee !== null && c.payee !== "") {
+          payee = String(c.payee);
+        } else {
+          // Attempt to match with an existing child to preserve custom payee
+          let matchedOldChild: (typeof oldChildren)[0] | undefined;
+          if (c.id != null) {
+            const foundIdx = oldChildren.findIndex((oc, idx) => !usedOldIndices.has(idx) && oc.id === c.id);
+            if (foundIdx !== -1) {
+              usedOldIndices.add(foundIdx);
+              matchedOldChild = oldChildren[foundIdx];
+            }
+          }
+          if (!matchedOldChild && !usedOldIndices.has(i) && oldChildren[i] && Number(oldChildren[i]!.amount) === childAmount && (oldChildren[i]!.memo || "") === (c.memo || "")) {
+            usedOldIndices.add(i);
+            matchedOldChild = oldChildren[i];
+          }
+          if (!matchedOldChild) {
+            const foundIdx = oldChildren.findIndex((oc, idx) => !usedOldIndices.has(idx) && Number(oc.amount) === childAmount && (oc.memo || "") === (c.memo || ""));
+            if (foundIdx !== -1) {
+              usedOldIndices.add(foundIdx);
+              matchedOldChild = oldChildren[foundIdx];
+            }
+          }
+          if (!matchedOldChild && !usedOldIndices.has(i) && oldChildren[i]) {
+            usedOldIndices.add(i);
+            matchedOldChild = oldChildren[i];
+          }
+
+          if (matchedOldChild && matchedOldChild.transferAccountId == null && matchedOldChild.payee && matchedOldChild.payee !== parent.payee) {
+            payee = matchedOldChild.payee;
+          } else {
+            payee = newPayee;
+          }
+        }
+
         if (!srcOnBudget) {
           categoryId = null;
           isIncome = false;
