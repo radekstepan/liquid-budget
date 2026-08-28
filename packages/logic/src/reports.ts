@@ -338,7 +338,9 @@ export function computeMonthlyInsights(
   _budgetResult?: unknown
 ): SpendingInsight[] {
   const insights: SpendingInsight[] = [];
+  const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const catMap = new Map(data.categories.map((c) => [c.id, c.name]));
+  const catMetaMap = new Map(data.categories.map((c) => [c.id, c]));
   const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
   const splitParentIds = new Set<number>();
   for (const t of data.transactions) {
@@ -358,6 +360,9 @@ export function computeMonthlyInsights(
     if (splitParentIds.has(t.id)) continue;
     if (t.categoryId == null) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
+
+    const metaCat = catMetaMap.get(t.categoryId);
+    if (metaCat && groupMap.get(metaCat.groupId)?.isCreditCardPayments) continue;
 
     const netOutflow = -num(t.amount);
     const mk = t.date.slice(0, 7);
@@ -381,7 +386,7 @@ export function computeMonthlyInsights(
   for (const [catId, currentSpend] of currentSpendByCat.entries()) {
     const mMap = priorSpendByCatMonth.get(catId);
     if (mMap && mMap.size > 0) {
-      const divisor = mMap.size;
+      const divisor = 3;
       const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
       const avg3mo = Math.round(totalPriorSpend / divisor);
       if (avg3mo > 0) {
