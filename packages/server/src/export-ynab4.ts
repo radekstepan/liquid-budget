@@ -17,6 +17,16 @@ function flagToName(flag: string | null | undefined): string | null {
   return FLAG_NAMES[flag.toLowerCase()] ?? null;
 }
 
+function escapeXml(str: string | null | undefined): string {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function statusToCleared(status: string | null | undefined): string {
   switch (status) {
     case "r":
@@ -306,6 +316,7 @@ export async function exportYnab4(
             date: t.date,
             amount: -(ch.amount / 100),
             cleared: statusToCleared(t.status),
+            flag: flagToName(ch.flagColor),
             memo: ch.memo || "",
             payeeId: `Payee/Transfer:acc-${t.accountId}`,
             transferTransactionId: `st-${ch.id}`,
@@ -332,6 +343,7 @@ export async function exportYnab4(
           targetAccountId: subTargetAccId,
           payeeId: subTransferPayeeId || childPayeeId,
           transferTransactionId: subTransferTxId,
+          flag: flagToName(ch.flagColor),
           entityType: "subTransaction",
           entityVersion: `st-v-${ch.id}`,
           incomeMonth: ch.incomeMonth || null,
@@ -513,12 +525,12 @@ export async function exportYnab4(
 
   const settingsXml = `<?xml version="1.0" encoding="utf-8"?>
 <com.ynab.dataAccess.settings.MachineBudgetSettingsVO>
-  <currencySymbol>${currencySymbol}</currencySymbol>
-  <currencyISOSymbol>${currencyISOSymbol}</currencyISOSymbol>
-  <decimalSeparator>${decimalSeparator}</decimalSeparator>
-  <groupSeparator>${groupSeparator}</groupSeparator>
-  <dateFormat>${dateFormat}</dateFormat>
-  <budgetName>${budgetName}</budgetName>
+  <currencySymbol>${escapeXml(currencySymbol)}</currencySymbol>
+  <currencyISOSymbol>${escapeXml(currencyISOSymbol)}</currencyISOSymbol>
+  <decimalSeparator>${escapeXml(decimalSeparator)}</decimalSeparator>
+  <groupSeparator>${escapeXml(groupSeparator)}</groupSeparator>
+  <dateFormat>${escapeXml(dateFormat)}</dateFormat>
+  <budgetName>${escapeXml(budgetName)}</budgetName>
 </com.ynab.dataAccess.settings.MachineBudgetSettingsVO>
 `;
 

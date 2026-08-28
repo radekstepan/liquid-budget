@@ -27,11 +27,11 @@ async function main() {
 
   console.log(`Reading backup file from ${backupPath}...`);
   const fileBuffer = fs.readFileSync(backupPath);
-  const { ynabData } = extractYnab4DataFromZip(fileBuffer);
+  const { ynabData, settingsXml } = extractYnab4DataFromZip(fileBuffer);
   const db = getDefaultDb();
 
   console.log("Starting YNAB4 import...");
-  const summary = await importYnab4(db, ynabData);
+  const summary = await importYnab4(db, ynabData, settingsXml);
   console.log("Import complete:", summary);
 }
 

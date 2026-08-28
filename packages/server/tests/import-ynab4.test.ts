@@ -480,6 +480,17 @@ describe("parseYnab4SettingsXml (UNI-26 / BUG-30)", () => {
     expect(parseYnab4SettingsXml(undefined)).toEqual({});
     expect(parseYnab4SettingsXml("")).toEqual({});
   });
+
+  it("unescapes XML entities in settings values (BUG-49)", () => {
+    const xml = `
+      <budgetSettings>
+        <budgetName>A &amp; B &lt; C &gt; &quot;D&quot; &apos;E&apos;</budgetName>
+        <currencySymbol>&amp;pound;</currencySymbol>
+      </budgetSettings>
+    `;
+    const settings = parseYnab4SettingsXml(xml);
+    expect(settings.budgetName).toBe(`A & B < C > "D" 'E'`);
+  });
 });
 
 /**
