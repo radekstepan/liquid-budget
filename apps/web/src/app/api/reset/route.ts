@@ -11,6 +11,16 @@ export const dynamic = "force-dynamic";
  * curl -X POST http://localhost:3000/api/reset
  */
 export async function POST() {
+  const isProd = process.env.NODE_ENV === "production";
+  const isResetEnabled = process.env.RESET_ENABLED === "true";
+
+  if (isProd && !isResetEnabled) {
+    return Response.json(
+      { ok: false, message: "Reset is disabled in production unless RESET_ENABLED=true." },
+      { status: 403 }
+    );
+  }
+
   try {
     const db = getDefaultDb();
     await resetAndSeedDatabase(db);

@@ -72,4 +72,47 @@ describe("POST /api/reset (BUG-03)", () => {
     expect(allAccounts).toHaveLength(19);
     expect(allAccounts.some((a) => a.name === "Important User Account")).toBe(true);
   });
+
+  it("BUG-16: rejects reset with 403 in production environment when RESET_ENABLED is not set", async () => {
+    const db = getDefaultDb();
+    await db.insert(accounts).values({
+      name: "Live Production User Account",
+      kind: "liquid",
+      groupLabel: "Budget Accounts",
+      balance: 999900,
+      onBudget: true,
+      sort: 99,
+    });
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RESET_ENABLED", "false");
+
+    const res = await POST();
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.message).toContain("disabled in production");
+
+    // Live account was NOT wiped
+    const allAccounts = await db.select().from(accounts);
+    expect(allAccounts.some((a) => a.name === "Live Production User Account")).toBe(true);
+
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATABASE_URL", ":memory:");
+  });
+
+  it("BUG-16: allows reset in production environment when RESET_ENABLED='true'", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RESET_ENABLED", "true");
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.message).toBe("Database reset and re-seeded.");
+
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATABASE_URL", ":memory:");
+  });
 });
+

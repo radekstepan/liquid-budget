@@ -1,7 +1,7 @@
 import AdmZip from "adm-zip";
 import { asc } from "drizzle-orm";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 
 const FLAG_NAMES: Record<string, string> = {
   red: "Red",
@@ -103,6 +103,7 @@ export async function exportYnab4(
     allTransactions,
     allRecurring,
     allRecurringSubs,
+    allReconciliations,
   ] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort), asc(accounts.id)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort), asc(categoryGroups.id)),
@@ -111,6 +112,7 @@ export async function exportYnab4(
     db.select().from(transactions).orderBy(asc(transactions.date), asc(transactions.id)),
     db.select().from(recurring).orderBy(asc(recurring.nextDate), asc(recurring.id)),
     db.select().from(recurringSubTransactions).orderBy(asc(recurringSubTransactions.sort), asc(recurringSubTransactions.id)),
+    db.select().from(reconciliations).orderBy(asc(reconciliations.id)),
   ]);
 
   const categoryMap = new Map<number, typeof allCategories[number]>();
@@ -193,8 +195,6 @@ export async function exportYnab4(
   };
 
   // 4. Master Categories & Subcategories
-  // Filter out internal Credit Card Payments group
-  const nonInternalGroups = allGroups.filter((g) => !g.isCreditCardPayments);
   const categoriesByGroup = new Map<number, (typeof allCategories[number])[]>();
   for (const c of allCategories) {
     const list = categoriesByGroup.get(c.groupId) ?? [];
@@ -202,24 +202,31 @@ export async function exportYnab4(
     categoriesByGroup.set(c.groupId, list);
   }
 
-  const yMasterCategories = nonInternalGroups.map((g) => {
+  const yMasterCategories = allGroups.map((g) => {
     const groupCats = categoriesByGroup.get(g.id) ?? [];
     const isHidden = g.name.toLowerCase() === "hidden categories";
+    const entityId = isHidden
+      ? "MasterCategory/__Hidden__"
+      : g.isCreditCardPayments
+      ? "MasterCategory/CreditCardPayments"
+      : `mc-${g.id}`;
     return {
-      entityId: isHidden ? "MasterCategory/__Hidden__" : `mc-${g.id}`,
+      entityId,
       name: g.name,
       type: "OUTFLOW",
       sortableIndex: (g.sort ?? 0) * 1000,
+      isCreditCardPayments: Boolean(g.isCreditCardPayments),
       entityType: "masterCategory",
       entityVersion: `mc-v-${g.id}`,
       subCategories: groupCats.map((c) => ({
         entityId: `sc-${c.id}`,
-        masterCategoryId: isHidden ? "MasterCategory/__Hidden__" : `mc-${g.id}`,
+        masterCategoryId: entityId,
         name: c.name,
         sortableIndex: (c.sort ?? 0) * 1000,
         type: "OUTFLOW",
         overspendingHandling: c.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
-        cachedBalance: 0,
+        cachedBalance: (c.carryover ?? 0) / 100,
+        accountId: c.linkedAccountId ? `acc-${c.linkedAccountId}` : undefined,
         entityType: "subCategory",
         entityVersion: `sc-v-${c.id}`,
       })),
@@ -232,6 +239,7 @@ export async function exportYnab4(
     name: "Income",
     type: "INFLOW",
     sortableIndex: 999999,
+    isCreditCardPayments: false,
     entityType: "masterCategory",
     entityVersion: "mc-income",
     subCategories: [],
@@ -302,11 +310,17 @@ export async function exportYnab4(
         let subTransferTxId: string | undefined = undefined;
         let subCatId: string | null = null;
 
+        if (ch.categoryId != null) {
+          subCatId = `sc-${ch.categoryId}`;
+        } else if (ch.isIncome) {
+          const isChildDeferred = ch.incomeMonth && t.date ? ch.incomeMonth > t.date.slice(0, 7) : false;
+          subCatId = isChildDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
+        }
+
         if (ch.transferAccountId != null) {
           subTargetAccId = `acc-${ch.transferAccountId}`;
           subTransferPayeeId = `Payee/Transfer:acc-${ch.transferAccountId}`;
           subTransferTxId = `tx-split-transfer-${ch.id}-dest`;
-          subCatId = null;
 
           // Generate counterpart on destination account
           yTransactions.push({
@@ -321,15 +335,12 @@ export async function exportYnab4(
             payeeId: `Payee/Transfer:acc-${t.accountId}`,
             transferTransactionId: `st-${ch.id}`,
             categoryId: null,
+            reconciliationId: ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null),
+            reconciledAt: ch.reconciledAt || t.reconciledAt || null,
             accepted: true,
             entityType: "transaction",
             entityVersion: `tx-v-${ch.id}-dest`,
           });
-        } else if (ch.isIncome) {
-          const isChildDeferred = ch.incomeMonth && t.date ? ch.incomeMonth > t.date.slice(0, 7) : false;
-          subCatId = isChildDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
-        } else if (ch.categoryId != null) {
-          subCatId = `sc-${ch.categoryId}`;
         }
 
         const childPayeeId = ch.payee ? getOrCreatePayeeId(ch.payee) : undefined;
@@ -341,9 +352,11 @@ export async function exportYnab4(
           memo: ch.memo || "",
           categoryId: subCatId,
           targetAccountId: subTargetAccId,
-          payeeId: subTransferPayeeId || childPayeeId,
+          payeeId: subTransferPayeeId || childPayeeId || payeeId,
           transferTransactionId: subTransferTxId,
           flag: flagToName(ch.flagColor),
+          reconciliationId: ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null),
+          reconciledAt: ch.reconciledAt || t.reconciledAt || null,
           entityType: "subTransaction",
           entityVersion: `st-v-${ch.id}`,
           incomeMonth: ch.incomeMonth || null,
@@ -361,6 +374,8 @@ export async function exportYnab4(
         payeeId,
         categoryId: parentCatId,
         subTransactions,
+        reconciliationId: t.reconciliationId ? `rec-${t.reconciliationId}` : null,
+        reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}`,
@@ -368,6 +383,22 @@ export async function exportYnab4(
       });
     } else if (t.transferAccountId != null) {
       // Transfer Pair
+      const sourceAcc = allAccounts.find((a) => a.id === t.accountId);
+      const destAcc = allAccounts.find((a) => a.id === t.transferAccountId);
+
+      let transferCatId: string | null = null;
+      if (t.categoryId != null) {
+        transferCatId = `sc-${t.categoryId}`;
+      } else if (t.isIncome) {
+        const isTxDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
+        transferCatId = isTxDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
+      }
+
+      // For cross-boundary transfers, assign the category to the on-budget leg
+      const srcCatId = sourceAcc?.onBudget ? transferCatId : (!destAcc?.onBudget ? transferCatId : null);
+      const destCatId = destAcc?.onBudget && !sourceAcc?.onBudget ? transferCatId : null;
+      const recId = t.reconciliationId ? `rec-${t.reconciliationId}` : null;
+
       // Source transaction
       yTransactions.push({
         entityId: `tx-${t.id}-src`,
@@ -380,10 +411,13 @@ export async function exportYnab4(
         memo: t.memo || "",
         payeeId: `Payee/Transfer:acc-${t.transferAccountId}`,
         transferTransactionId: `tx-${t.id}-dest`,
-        categoryId: null,
+        categoryId: srcCatId,
+        reconciliationId: recId,
+        reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}-src`,
+        incomeMonth: t.incomeMonth || null,
       });
 
       // Destination counterpart transaction
@@ -398,10 +432,13 @@ export async function exportYnab4(
         memo: t.memo || "",
         payeeId: `Payee/Transfer:acc-${t.accountId}`,
         transferTransactionId: `tx-${t.id}-src`,
-        categoryId: null,
+        categoryId: destCatId,
+        reconciliationId: recId,
+        reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}-dest`,
+        incomeMonth: t.incomeMonth || null,
       });
     } else {
       // Standard regular transaction
@@ -425,6 +462,8 @@ export async function exportYnab4(
         memo: t.memo || "",
         payeeId,
         categoryId: catId,
+        reconciliationId: t.reconciliationId ? `rec-${t.reconciliationId}` : null,
+        reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}`,
@@ -506,6 +545,17 @@ export async function exportYnab4(
     };
   });
 
+  const yReconciliations = allReconciliations.map((r) => ({
+    entityId: `rec-${r.id}`,
+    accountId: `acc-${r.accountId}`,
+    reconciledAt: r.reconciledAt,
+    statementDate: r.statementDate,
+    statementBalance: r.statementBalance / 100,
+    adjustmentTransactionId: r.adjustmentTransactionId ? `tx-${r.adjustmentTransactionId}` : null,
+    entityType: "reconciliation",
+    entityVersion: `rec-v-${r.id}`,
+  }));
+
   const ynabData = {
     budgetMetaData,
     accounts: yAccounts,
@@ -514,6 +564,7 @@ export async function exportYnab4(
     monthlyBudgets: yMonthlyBudgets,
     transactions: yTransactions,
     scheduledTransactions: yScheduledTransactions,
+    reconciliations: yReconciliations,
   };
 
   const budgetName = options?.budgetName ?? "Budget";
