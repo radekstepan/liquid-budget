@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import path from "path";
 import { fileURLToPath } from "url";
 import { exportYnab4, exportYnab4Zip } from "../src/export-ynab4.js";
@@ -204,6 +204,109 @@ describe("exportYnab4 & exportYnab4Zip", () => {
       active: true,
     });
 
+    // BUG-17: CC Payment category assignment & carryover
+    const [ccCat] = await db1.select().from(schema.categories).where(isNotNull(schema.categories.linkedAccountId)).limit(1);
+    if (ccCat) {
+      await db1.update(schema.categories).set({ carryover: 50000 }).where(eq(schema.categories.id, ccCat.id));
+      await db1.insert(schema.assignments).values({
+        categoryId: ccCat.id,
+        month: "2026-05",
+        amount: 25000,
+      });
+    }
+
+    // BUG-17: Cross-boundary transfer with category
+    const [accOffBudget] = await db1.insert(schema.accounts).values({
+      name: "Investment Portfolio",
+      kind: "offbudget",
+      groupLabel: "Tracking Accounts",
+      onBudget: false,
+      balance: 500000,
+    }).returning();
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      transferAccountId: accOffBudget!.id,
+      date: "2026-05-18",
+      payee: `Transfer : ${accOffBudget!.name}`,
+      memo: "Contribution to investments",
+      amount: -10000,
+      status: "c",
+    });
+
+    // BUG-17: Multiple reconciliation rounds and transaction links
+    const [rec1] = await db1.insert(schema.reconciliations).values({
+      accountId: accChecking!.id,
+      reconciledAt: "2026-04-30",
+      statementDate: "2026-04-30",
+      statementBalance: 100000,
+    }).returning();
+
+    const [rec2] = await db1.insert(schema.reconciliations).values({
+      accountId: accChecking!.id,
+      reconciledAt: "2026-05-31",
+      statementDate: "2026-05-31",
+      statementBalance: 150000,
+    }).returning();
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      date: "2026-04-25",
+      payee: "April Reconciled Vendor",
+      memo: "Round 1 tx",
+      amount: -2500,
+      status: "r",
+      reconciliationId: rec1!.id,
+      reconciledAt: "2026-04-30",
+    });
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      date: "2026-05-25",
+      payee: "May Reconciled Vendor",
+      memo: "Round 2 tx",
+      amount: -3500,
+      status: "r",
+      reconciliationId: rec2!.id,
+      reconciledAt: "2026-05-31",
+    });
+
+    // BUG-17: Split child with distinct child payees
+    const [multiPayeeSplitParent] = await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: null,
+      date: "2026-05-28",
+      payee: "Department Store Parent",
+      memo: "Shopping mall spree",
+      amount: -10000,
+      status: "c",
+    }).returning();
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      date: "2026-05-28",
+      payee: "Electronics Boutique",
+      memo: "Headphones",
+      amount: -4000,
+      status: "c",
+      parentId: multiPayeeSplitParent!.id,
+    });
+
+    await db1.insert(schema.transactions).values({
+      accountId: accChecking!.id,
+      categoryId: cat!.id,
+      date: "2026-05-28",
+      payee: "Clothing Outlet",
+      memo: "Shirt",
+      amount: -6000,
+      status: "c",
+      parentId: multiPayeeSplitParent!.id,
+    });
+
     await recomputeAccountBalances(db1);
 
     const initialData1 = await getBudgetData(db1);
@@ -239,6 +342,46 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     const a2Assignment = data2.assignments.find((a) => a.categoryId === roundTripCat!.id && a.month === "2026-05");
     expect(a2Assignment).toBeDefined();
     expect(Number(a2Assignment!.amount)).toBe(15000);
+
+    // BUG-17: CC Payment category assignment & carryover preserved
+    if (ccCat) {
+      const roundTripCcCat = data2.categories.find((c) => c.linkedAccountId != null);
+      expect(roundTripCcCat).toBeDefined();
+      expect(Number(roundTripCcCat!.carryover)).toBe(50000);
+      const ccAssignment2 = data2.assignments.find((a) => a.categoryId === roundTripCcCat!.id && a.month === "2026-05");
+      expect(ccAssignment2).toBeDefined();
+      expect(Number(ccAssignment2!.amount)).toBe(25000);
+    }
+
+    // BUG-17: Cross-boundary transfer category preserved
+    const boundaryTransfer2 = data2.transactions.find((t) => t.memo === "Contribution to investments");
+    expect(boundaryTransfer2).toBeDefined();
+    expect(boundaryTransfer2!.categoryId).toBe(roundTripCat!.id);
+
+    // BUG-17: Reconciliations roundtrip and transaction links preserved
+    const db2Reconciliations = await db2.select().from(schema.reconciliations);
+    expect(db2Reconciliations.length).toBeGreaterThanOrEqual(2);
+    const round1Tx = data2.transactions.find((t) => t.memo === "Round 1 tx");
+    const round2Tx = data2.transactions.find((t) => t.memo === "Round 2 tx");
+    expect(round1Tx).toBeDefined();
+    expect(round1Tx!.status).toBe("r");
+    expect(round1Tx!.reconciliationId).toBeDefined();
+    expect(round2Tx).toBeDefined();
+    expect(round2Tx!.status).toBe("r");
+    expect(round2Tx!.reconciliationId).toBeDefined();
+    expect(round1Tx!.reconciliationId).not.toBe(round2Tx!.reconciliationId);
+
+    // BUG-17: Split child payees preserved
+    const mallParent = data2.transactions.find((t) => t.memo === "Shopping mall spree");
+    expect(mallParent).toBeDefined();
+    const mallChildren = data2.transactions.filter((t) => t.parentId === mallParent!.id);
+    expect(mallChildren).toHaveLength(2);
+    const elecChild = mallChildren.find((c) => c.memo === "Headphones");
+    const clothChild = mallChildren.find((c) => c.memo === "Shirt");
+    expect(elecChild).toBeDefined();
+    expect(elecChild!.payee).toBe("Electronics Boutique");
+    expect(clothChild).toBeDefined();
+    expect(clothChild!.payee).toBe("Clothing Outlet");
 
     // 4. Split transaction parent & children
     const rParent = data2.transactions.find((t) => t.memo === "Split parent memo");

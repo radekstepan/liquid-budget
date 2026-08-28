@@ -23,6 +23,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { isNotNull } from "drizzle-orm";
 import path from "path";
 import { fileURLToPath } from "url";
 import { importYnab4 } from "../src/import-ynab4.js";
@@ -1257,5 +1258,184 @@ describe("importYnab4 full import", () => {
       expect(t.reconciledAt).toBeNull();
       expect(t.reconciliationId).toBeNull();
     }
+  });
+
+  it("does not seed credit card payment carryover from arbitrary uncategorized purchases (BUG-18)", async () => {
+    const db = openMigratedDb();
+    const backupData = {
+      accounts: [
+        { entityId: "acc_cc", accountName: "Mastercard", accountType: "CreditCard", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p_apple", name: "Apple Store" },
+        { entityId: "p_coffee", name: "Starbucks" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc_general",
+          name: "General",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc_coffee", name: "Coffee" },
+          ],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "tx_apple",
+          accountId: "acc_cc",
+          date: "2024-01-01",
+          amount: -500, // $500 uncategorized laptop purchase
+          cleared: "Cleared",
+          payeeId: "p_apple",
+          categoryId: null,
+        },
+        {
+          entityId: "tx_coffee",
+          accountId: "acc_cc",
+          date: "2024-01-02",
+          amount: -5,
+          cleared: "Cleared",
+          payeeId: "p_coffee",
+          categoryId: "sc_coffee",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, backupData);
+
+    const ccCat = await db.select().from(schema.categories).where(isNotNull(schema.categories.linkedAccountId));
+    expect(ccCat).toHaveLength(1);
+    // Carryover must NOT latch onto the $500 Apple Store purchase
+    expect(ccCat[0]!.carryover).toBe(0);
+  });
+
+  it("seeds credit card payment carryover from multi-language starting payees and opening debt (BUG-18)", async () => {
+    const db = openMigratedDb();
+    const backupData = {
+      accounts: [
+        { entityId: "acc_french_card", accountName: "Carte Bleue", accountType: "CreditCard", onBudget: true },
+        { entityId: "acc_german_card", accountName: "Kreditkarte", accountType: "CreditCard", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p_solde", name: "Solde initial" },
+        { entityId: "p_anfang", name: "Anfangssaldo" },
+      ],
+      masterCategories: [],
+      transactions: [
+        {
+          entityId: "tx_french_start",
+          accountId: "acc_french_card",
+          date: "2024-01-01",
+          amount: -350, // 350 EUR starting debt
+          cleared: "Cleared",
+          payeeId: "p_solde",
+          categoryId: null,
+        },
+        {
+          entityId: "tx_german_start",
+          accountId: "acc_german_card",
+          date: "2024-01-01",
+          amount: -420, // 420 EUR starting debt
+          cleared: "Cleared",
+          payeeId: "p_anfang",
+          categoryId: null,
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, backupData);
+
+    const ccCats = await db.select().from(schema.categories).where(isNotNull(schema.categories.linkedAccountId));
+    expect(ccCats).toHaveLength(2);
+
+    const frenchCat = ccCats.find((c) => c.name === "Carte Bleue");
+    const germanCat = ccCats.find((c) => c.name === "Kreditkarte");
+
+    expect(frenchCat).toBeDefined();
+    expect(frenchCat!.carryover).toBe(35000); // 350.00 -> 35000 cents
+
+    expect(germanCat).toBeDefined();
+    expect(germanCat!.carryover).toBe(42000); // 420.00 -> 42000 cents
+  });
+
+  it("imports multiple explicit reconciliation rounds and links transactions (BUG-17)", async () => {
+    const db = openMigratedDb();
+    const backupData = {
+      accounts: [
+        { entityId: "acc_multi_rec", accountName: "Checking", accountType: "Checking", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p_rec1", name: "Store A" },
+        { entityId: "p_rec2", name: "Store B" },
+      ],
+      masterCategories: [],
+      reconciliations: [
+        {
+          entityId: "rec_round_1",
+          accountId: "acc_multi_rec",
+          reconciledAt: "2026-03-31",
+          statementDate: "2026-03-31",
+          statementBalance: 1000,
+        },
+        {
+          entityId: "rec_round_2",
+          accountId: "acc_multi_rec",
+          reconciledAt: "2026-04-30",
+          statementDate: "2026-04-30",
+          statementBalance: 1200,
+        },
+      ],
+      transactions: [
+        {
+          entityId: "tx_r1",
+          accountId: "acc_multi_rec",
+          date: "2026-03-15",
+          amount: -50,
+          cleared: "Reconciled",
+          reconciliationId: "rec_round_1",
+          reconciledAt: "2026-03-31",
+          payeeId: "p_rec1",
+          categoryId: null,
+        },
+        {
+          entityId: "tx_r2",
+          accountId: "acc_multi_rec",
+          date: "2026-04-15",
+          amount: -75,
+          cleared: "Reconciled",
+          reconciliationId: "rec_round_2",
+          reconciledAt: "2026-04-30",
+          payeeId: "p_rec2",
+          categoryId: null,
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+
+    await importYnab4(db, backupData);
+
+    const recs = await db.select().from(schema.reconciliations);
+    expect(recs).toHaveLength(2);
+
+    const rec1 = recs.find((r) => r.statementDate === "2026-03-31");
+    const rec2 = recs.find((r) => r.statementDate === "2026-04-30");
+    expect(rec1).toBeDefined();
+    expect(rec2).toBeDefined();
+    expect(rec1!.statementBalance).toBe(100000);
+    expect(rec2!.statementBalance).toBe(120000);
+
+    const txs = await db.select().from(schema.transactions);
+    expect(txs).toHaveLength(2);
+
+    const tx1 = txs.find((t) => t.payee === "Store A");
+    const tx2 = txs.find((t) => t.payee === "Store B");
+    expect(tx1?.reconciliationId).toBe(rec1!.id);
+    expect(tx2?.reconciliationId).toBe(rec2!.id);
   });
 });
