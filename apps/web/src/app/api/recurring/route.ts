@@ -4,44 +4,11 @@ import {
   deleteRecurring,
   getDefaultDb,
   postRecurringTransaction,
-  RecurringError,
   updateRecurring,
   withTransaction,
 } from "@ynab/server";
-
-export const dynamic = "force-dynamic";
-
-type SubTxn = {
-  categoryId?: number | null;
-  transferAccountId?: number | null;
-  amount: number;
-  memo?: string;
-};
-
-function parseSubTransactions(raw: unknown): SubTxn[] {
-  if (!Array.isArray(raw)) {
-    throw new RecurringError("subTransactions must be an array");
-  }
-  return raw.map((c, i) => {
-    if (!c || typeof c !== "object") {
-      throw new RecurringError(`subTransactions[${i}] is not an object`);
-    }
-    const o = c as Record<string, unknown>;
-    const categoryId = o.categoryId ? Number(o.categoryId) : null;
-    const transferAccountId = o.transferAccountId ? Number(o.transferAccountId) : null;
-    const amount = Number(o.amount);
-    if ((!categoryId && !transferAccountId && amount <= 0) || Number.isNaN(amount)) {
-      throw new RecurringError(`subTransactions[${i}] missing categoryId/transferAccountId or amount`);
-    }
-    return {
-      categoryId,
-      transferAccountId,
-      amount,
-      memo: typeof o.memo === "string" ? o.memo : undefined,
-    };
-  });
-}
-
+import { z } from "zod";
+import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
   ISODateSchema,
@@ -54,12 +21,7 @@ import {
   RecurringPostActionSchema,
 } from "../schemas";
 
-function errorResponse(e: unknown): Response {
-  if (e instanceof RecurringError) {
-    return Response.json({ error: e.message }, { status: e.status });
-  }
-  return Response.json({ error: String(e) }, { status: 500 });
-}
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -67,41 +29,49 @@ export async function POST(req: Request) {
   const db = getDefaultDb();
 
   if (action === "post") {
-    const id = Number(searchParams.get("id"));
-    const rawDate = searchParams.get("date") || undefined;
-    if (!id || Number.isNaN(id) || id <= 0) return Response.json({ error: "invalid id" }, { status: 400 });
-    let postDate: string | undefined;
-    if (rawDate !== undefined) {
-      const dateRes = ISODateSchema.safeParse(rawDate);
-      if (!dateRes.success) return Response.json({ error: "invalid date" }, { status: 400 });
-      postDate = dateRes.data;
+    const PostQuerySchema = z.object({
+      id: z.coerce.number().int().positive(),
+      date: ISODateSchema.optional(),
+    });
+    const parsed = PostQuerySchema.safeParse({
+      id: searchParams.get("id"),
+      date: searchParams.get("date") || undefined,
+    });
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const res = await postRecurringTransaction(db, id, postDate);
+      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
       return Response.json(res);
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
   if (action === "autopost") {
-    const rawAsOfDate = searchParams.get("asOfDate") || searchParams.get("date") || undefined;
-    let asOfDate: string | undefined;
-    if (rawAsOfDate !== undefined) {
-      const dateRes = ISODateSchema.safeParse(rawAsOfDate);
-      if (!dateRes.success) return Response.json({ error: "invalid date" }, { status: 400 });
-      asOfDate = dateRes.data;
+    const AutoPostQuerySchema = z.object({
+      asOfDate: ISODateSchema.optional(),
+    });
+    const parsed = AutoPostQuerySchema.safeParse({
+      asOfDate: searchParams.get("asOfDate") || searchParams.get("date") || undefined,
+    });
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const posted = await autoPostDueRecurringTransactions(db, asOfDate);
+      const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
       return Response.json({ postedCount: posted.length, posted });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
 
   if (typeof json === "object" && json !== null && (json as any).action === "post") {
     const parsed = RecurringPostActionSchema.safeParse(json);
@@ -112,7 +82,7 @@ export async function POST(req: Request) {
       const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
       return Response.json(res);
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -132,7 +102,7 @@ export async function POST(req: Request) {
       });
       return Response.json({ postedCount: results.length, results });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -145,7 +115,7 @@ export async function POST(req: Request) {
       const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
       return Response.json({ postedCount: posted.length, posted });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -156,7 +126,7 @@ export async function POST(req: Request) {
   const body = parseResult.data;
 
   try {
-    const row = await createRecurring(getDefaultDb(), {
+    const row = await createRecurring(db, {
       accountId: body.accountId,
       categoryId: body.categoryId ?? null,
       payee: body.payee,
@@ -176,13 +146,17 @@ export async function POST(req: Request) {
     });
     return Response.json(row);
   } catch (e) {
-    return errorResponse(e);
+    return apiErrorResponse(e);
   }
 }
 
 export async function PATCH(req: Request) {
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
 
   if (typeof json === "object" && json !== null && (json as any).action === "bulk-update") {
     const parseResult = RecurringBulkUpdateSchema.safeParse(json);
@@ -198,12 +172,14 @@ export async function PATCH(req: Request) {
       if (patch.categoryId !== undefined) cleanPatch.categoryId = patch.categoryId;
       if (patch.nextDate !== undefined) cleanPatch.nextDate = patch.nextDate;
 
+      let updatedCount = 0;
       for (const id of ids) {
-        await updateRecurring(db, id, cleanPatch);
+        const row = await updateRecurring(db, id, cleanPatch);
+        if (row) updatedCount++;
       }
-      return Response.json({ updatedCount: ids.length });
+      return Response.json({ updatedCount });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -236,37 +212,50 @@ export async function PATCH(req: Request) {
     }
 
     const row = await updateRecurring(getDefaultDb(), body.id, patch);
-    if (!row) return Response.json({ error: "not found" }, { status: 404 });
+    if (!row) return Response.json({ error: "Recurring transaction not found" }, { status: 404 });
     return Response.json(row);
   } catch (e) {
-    return errorResponse(e);
+    return apiErrorResponse(e);
   }
 }
 
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
-  const id = Number(searchParams.get("id"));
   const db = getDefaultDb();
 
-  if (id) {
+  if (searchParams.has("id")) {
+    const parsed = z.coerce.number().int().positive().safeParse(searchParams.get("id"));
+    if (!parsed.success) {
+      return Response.json({ error: "invalid id" }, { status: 400 });
+    }
     try {
-      await deleteRecurring(db, id);
-      return Response.json({ ok: true });
+      const deleted = await deleteRecurring(db, parsed.data);
+      return Response.json({ ok: true, deleted });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
+  let json: unknown;
   try {
-    const json = await req.json();
-    const parseResult = RecurringBulkDeleteSchema.safeParse(json);
-    if (parseResult.success) {
-      for (const singleId of parseResult.data.ids) {
-        await deleteRecurring(db, singleId);
-      }
-      return Response.json({ ok: true, deletedCount: parseResult.data.ids.length });
-    }
-  } catch {}
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid id or ids" }, { status: 400 });
+  }
 
-  return Response.json({ error: "invalid id or ids" }, { status: 400 });
+  const parseResult = RecurringBulkDeleteSchema.safeParse(json);
+  if (!parseResult.success) {
+    return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+  }
+
+  try {
+    let deletedCount = 0;
+    for (const singleId of parseResult.data.ids) {
+      const deleted = await deleteRecurring(db, singleId);
+      if (deleted) deletedCount++;
+    }
+    return Response.json({ ok: true, deletedCount });
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
 }

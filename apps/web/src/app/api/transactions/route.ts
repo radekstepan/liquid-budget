@@ -52,6 +52,7 @@ function parseStatus(raw: unknown, fallback: ClearedStatus = "c"): ClearedStatus
   return fallback;
 }
 
+import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
   TransactionBulkDeleteSchema,
@@ -59,13 +60,6 @@ import {
   TransactionCreateSchema,
   TransactionPatchSchema,
 } from "../schemas";
-
-function errorResponse(e: unknown): Response {
-  if (e instanceof TransactionError) {
-    return Response.json({ error: e.message }, { status: e.status });
-  }
-  return Response.json({ error: String(e) }, { status: 500 });
-}
 
 export async function POST(req: Request) {
   let json: unknown;
@@ -83,7 +77,7 @@ export async function POST(req: Request) {
       const deleted = await bulkDeleteTransactions(db, parseResult.data.ids);
       return Response.json({ ok: true, count: deleted.length, deleted });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -96,7 +90,7 @@ export async function POST(req: Request) {
       const updated = await bulkUpdateTransactions(db, parseResult.data.ids, parseResult.data.patch);
       return Response.json({ ok: true, count: updated.length, updated });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -128,7 +122,7 @@ export async function POST(req: Request) {
       );
       return Response.json(result);
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -147,7 +141,7 @@ export async function POST(req: Request) {
     });
     return Response.json(row);
   } catch (e) {
-    return errorResponse(e);
+    return apiErrorResponse(e);
   }
 }
 
@@ -165,7 +159,7 @@ export async function PATCH(req: Request) {
       const updated = await bulkUpdateTransactions(db, parseResult.data.ids, parseResult.data.patch);
       return Response.json({ ok: true, count: updated.length, updated });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -198,7 +192,7 @@ export async function PATCH(req: Request) {
       );
       return Response.json(result);
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -218,7 +212,7 @@ export async function PATCH(req: Request) {
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);
   } catch (e) {
-    return errorResponse(e);
+    return apiErrorResponse(e);
   }
 }
 
@@ -231,7 +225,7 @@ export async function DELETE(req: Request) {
       const deleted = await bulkDeleteTransactions(getDefaultDb(), ids);
       return Response.json({ ok: true, count: deleted.length, deleted });
     } catch (e) {
-      return errorResponse(e);
+      return apiErrorResponse(e);
     }
   }
 
@@ -241,6 +235,6 @@ export async function DELETE(req: Request) {
     await deleteTransaction(getDefaultDb(), id);
     return Response.json({ ok: true });
   } catch (e) {
-    return errorResponse(e);
+    return apiErrorResponse(e);
   }
 }

@@ -135,9 +135,7 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
   const isTransfer =
     input.transferAccountId !== undefined && input.transferAccountId != null;
   const isSplit =
-    input.subTransactions !== undefined &&
-    Array.isArray(input.subTransactions) &&
-    input.subTransactions.length > 0;
+    input.subTransactions !== undefined && input.subTransactions !== null;
 
   if (isTransfer && isSplit) {
     throw new RecurringError("recurring cannot be both a transfer and a split");
@@ -455,9 +453,10 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
   });
 }
 
-export async function deleteRecurring(db: Database, id: number) {
+export async function deleteRecurring(db: Database, id: number): Promise<boolean> {
   return withTransaction(db, async () => {
-    await db.delete(recurring).where(and(eq(recurring.id, id)));
+    const deleted = await db.delete(recurring).where(and(eq(recurring.id, id))).returning({ id: recurring.id });
+    return Boolean(deleted && deleted.length > 0);
   });
 }
 

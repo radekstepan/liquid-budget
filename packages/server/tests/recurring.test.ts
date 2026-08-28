@@ -263,6 +263,21 @@ describe("recurring queries", () => {
           subTransactions: [{ categoryId: 5, amount: -20000 }],
         })
       ).rejects.toBeInstanceOf(RecurringError);
+
+      await expect(
+        createRecurring(mock.db, {
+          accountId: 1,
+          categoryId: null,
+          payee: "Costco",
+          amount: -20000,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          subTransactions: [],
+        })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "split must have at least two sub-transactions",
+      });
     });
 
     it("rejects an unbalanced split", async () => {
@@ -666,16 +681,14 @@ describe("recurring queries", () => {
       });
     });
 
-    it("removes all sub-transactions when the key is present with []", async () => {
+    it("BUG-41: rejects updating recurring with empty sub-transactions array []", async () => {
       mock.respondWith("select:recurring", [existingRow]);
-      mock.respondWith("update:recurring", [{ id: 1 }]);
-      mock.respondWith("delete:recurring_sub_transactions", []);
-      mock.respondWith("select:recurring", [existingRow]);
-      await updateRecurring(mock.db, 1, { subTransactions: [] });
-      const subInserts = mock.calls.filter(
-        (c) => c.op === "insert" && c.table === "recurring_sub_transactions"
-      );
-      expect(subInserts).toHaveLength(0);
+      await expect(
+        updateRecurring(mock.db, 1, { subTransactions: [] })
+      ).rejects.toMatchObject({
+        name: "RecurringError",
+        message: "split must have at least two sub-transactions",
+      });
     });
 
     it("setting transferAccountId deletes existing children and nulls categoryId", async () => {
@@ -790,10 +803,18 @@ describe("recurring queries", () => {
   });
 
   describe("deleteRecurring", () => {
-    it("issues a delete on the recurring table", async () => {
-      await deleteRecurring(mock.db, 5);
+    it("issues a delete on the recurring table and returns true when deleted", async () => {
+      mock.respondWith("delete:recurring", [{ id: 5 }]);
+      const res = await deleteRecurring(mock.db, 5);
+      expect(res).toBe(true);
       const deleteCall = mock.calls.find((c) => c.op === "delete");
       expect(deleteCall?.table).toBe("recurring");
+    });
+
+    it("returns false when recurring row does not exist", async () => {
+      mock.respondWith("delete:recurring", []);
+      const res = await deleteRecurring(mock.db, 999);
+      expect(res).toBe(false);
     });
   });
 

@@ -1,18 +1,14 @@
 import {
-  CategoryError,
   createCategory,
   createCategoryGroup,
   deleteCategory,
   deleteCategoryGroup,
   getDefaultDb,
-  renameCategoryGroup,
   updateCategory,
   updateCategoryGroup,
-  updateCategoryGroupSort,
 } from "@ynab/server";
-
-export const dynamic = "force-dynamic";
-
+import { z } from "zod";
+import { apiErrorResponse } from "../errors";
 import {
   CategoryCreateSchema,
   CategoryGroupCreateSchema,
@@ -21,9 +17,15 @@ import {
   formatZodError,
 } from "../schemas";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
   const db = getDefaultDb();
 
   if (typeof json === "object" && json !== null && "type" in json && (json as any).type === "group") {
@@ -31,8 +33,12 @@ export async function POST(req: Request) {
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
-    const row = await createCategoryGroup(db, { name: parseResult.data.name });
-    return Response.json(row);
+    try {
+      const row = await createCategoryGroup(db, { name: parseResult.data.name });
+      return Response.json(row);
+    } catch (e) {
+      return apiErrorResponse(e);
+    }
   }
 
   const parseResult = CategoryCreateSchema.safeParse(json);
@@ -40,19 +46,27 @@ export async function POST(req: Request) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
   }
   const body = parseResult.data;
-  const row = await createCategory(db, {
-    groupId: body.groupId,
-    name: body.name,
-    goalTarget: body.goalTarget,
-    carryover: body.carryover,
-    overspendCarriesOver: body.overspendCarriesOver,
-  });
-  return Response.json(row);
+  try {
+    const row = await createCategory(db, {
+      groupId: body.groupId,
+      name: body.name,
+      goalTarget: body.goalTarget,
+      carryover: body.carryover,
+      overspendCarriesOver: body.overspendCarriesOver,
+    });
+    return Response.json(row);
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
 }
 
 export async function PATCH(req: Request) {
   let json: unknown;
-  try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
   const db = getDefaultDb();
 
   if (typeof json === "object" && json !== null && "type" in json && (json as any).type === "group") {
@@ -65,8 +79,15 @@ export async function PATCH(req: Request) {
     if (body.name !== undefined) patch.name = body.name;
     if (body.sort !== undefined) patch.sort = body.sort;
 
-    const row = await updateCategoryGroup(db, body.id, patch);
-    return Response.json(row);
+    try {
+      const row = await updateCategoryGroup(db, body.id, patch);
+      if (!row) {
+        return Response.json({ error: "Category group not found" }, { status: 404 });
+      }
+      return Response.json(row);
+    } catch (e) {
+      return apiErrorResponse(e);
+    }
   }
 
   const parseResult = CategoryPatchSchema.safeParse(json);
@@ -81,18 +102,35 @@ export async function PATCH(req: Request) {
   if (body.sort !== undefined) patch.sort = body.sort;
   if (body.overspendCarriesOver !== undefined) patch.overspendCarriesOver = body.overspendCarriesOver;
 
-  const row = await updateCategory(db, body.id, patch);
-  return Response.json(row);
+  try {
+    const row = await updateCategory(db, body.id, patch);
+    if (!row) {
+      return Response.json({ error: "Category not found" }, { status: 404 });
+    }
+    return Response.json(row);
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
 }
 
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
-  const id = Number(searchParams.get("id"));
+  const parsedId = z.coerce.number().int().positive().safeParse(searchParams.get("id"));
+  if (!parsedId.success) {
+    return Response.json({ error: "invalid id" }, { status: 400 });
+  }
+  const id = parsedId.data;
   const type = searchParams.get("type");
-  const moveToCategoryId = searchParams.get("moveToCategoryId")
-    ? Number(searchParams.get("moveToCategoryId"))
-    : undefined;
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
+
+  let moveToCategoryId: number | undefined;
+  if (searchParams.has("moveToCategoryId")) {
+    const parsedMoveTo = z.coerce.number().int().positive().safeParse(searchParams.get("moveToCategoryId"));
+    if (!parsedMoveTo.success) {
+      return Response.json({ error: "invalid moveToCategoryId" }, { status: 400 });
+    }
+    moveToCategoryId = parsedMoveTo.data;
+  }
+
   const db = getDefaultDb();
 
   try {
@@ -102,10 +140,7 @@ export async function DELETE(req: Request) {
       await deleteCategory(db, id, { moveToCategoryId });
     }
     return Response.json({ ok: true });
-  } catch (e: any) {
-    if (e instanceof CategoryError) {
-      return Response.json({ error: e.message }, { status: e.status });
-    }
-    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
+  } catch (e) {
+    return apiErrorResponse(e);
   }
 }
