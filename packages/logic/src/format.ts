@@ -531,13 +531,14 @@ export function nextDateFor(
       const d1 = anchorDay <= 15 ? anchorDay : anchorDay - 15;
       const d2 = anchorDay <= 15 ? anchorDay + 15 : anchorDay;
       const currentDay = d.getUTCDate();
-      const isFirstHalf = currentDay <= 15 || (currentDay === 16 && d1 === 16);
+      const lastDay = new Date(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      const clampedD2 = Math.min(d2, lastDay);
+      const isFirstHalf = currentDay < clampedD2;
 
       if (isFirstHalf) {
-        const lastDay = new Date(
-          Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
-        ).getUTCDate();
-        d.setUTCDate(Math.min(d2, lastDay));
+        d.setUTCDate(clampedD2);
       } else {
         d.setUTCDate(1);
         d.setUTCMonth(d.getUTCMonth() + 1);
