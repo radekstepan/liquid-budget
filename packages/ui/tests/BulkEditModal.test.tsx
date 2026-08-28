@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BulkEditTransactionsModal } from "../src/BulkEditModal.js";
-import type { Account, Category, CategoryGroup, Transaction } from "@ynab/logic";
+import { todayISO, nextMonthKey, type Account, type Category, type CategoryGroup, type Transaction } from "@ynab/logic";
 import {
   openSearchlistByPlaceholder,
   pickFromOpenDropdownByValue,
@@ -232,5 +232,44 @@ describe("BulkEditTransactionsModal", () => {
     // Review Changes button remains disabled because all transactions are reconciled
     const reviewBtn = screen.getByRole("button", { name: /review changes \(1\)/i });
     expect(reviewBtn).toBeDisabled();
+  });
+
+  it("BUG-14: supports setting deferred income category with custom deferred month", async () => {
+    const onSave = vi.fn();
+    render(
+      <BulkEditTransactionsModal
+        transactionIds={[10, 20]}
+        transactions={sampleTransactions}
+        accounts={sampleAccounts}
+        categories={sampleCategories}
+        groups={sampleGroups}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+
+    // Enable Category
+    fireEvent.click(screen.getByRole("checkbox", { name: /^category$/i }));
+    pickFromOpenDropdownByValue(/Income: Available this month/i, "__deferred__");
+
+    // Fill custom deferred month
+    const monthInput = screen.getByDisplayValue(nextMonthKey(todayISO().slice(0, 7)));
+    fireEvent.change(monthInput, { target: { value: "2026-12" } });
+
+    // Review & Confirm
+    const reviewBtn = screen.getByRole("button", { name: /review changes \(1\)/i });
+    fireEvent.click(reviewBtn);
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm & update 2 transactions/i }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        {
+          categoryId: null,
+          incomeMonth: "2026-12",
+        },
+        [10, 20]
+      );
+    });
   });
 });

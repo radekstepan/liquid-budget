@@ -124,7 +124,7 @@ export function evalAmount(
   const raw = typeof s === "number" ? String(s) : s;
   const stripped = raw
     .replace(/[$€£¥_]/g, "")
-    .replace(/,(\d{2})(?!\d)/g, ".$1")
+    .replace(/,(\d{1,2})(?!\d)/g, ".$1")
     .replace(/,/g, "");
   if (stripped.replace(/\s+/g, "") === "") return null;
   if (!_VALID.test(stripped)) return null;

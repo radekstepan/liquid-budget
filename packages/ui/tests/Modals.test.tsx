@@ -394,6 +394,75 @@ describe("TransactionModal", () => {
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 99, payee: "IGA" });
   });
 
+  it("BUG-14: preserves initial.incomeMonth when editing memo of deferred income transaction", () => {
+    const onSave = vi.fn();
+    const initial: Transaction = {
+      id: 101,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-06-10",
+      payee: "Bonus",
+      memo: "Old memo",
+      amount: "50000",
+      cleared: true,
+      incomeMonth: "2026-09", // Deferred 3 months out
+    };
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    // Edit only the memo
+    fireEvent.change(screen.getByDisplayValue("Old memo"), {
+      target: { value: "Updated memo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      id: 101,
+      memo: "Updated memo",
+      incomeMonth: "2026-09", // Preserved, not reset to 2026-07
+    });
+  });
+
+  it("BUG-14: allows changing the deferred month via month picker", () => {
+    const onSave = vi.fn();
+    const initial: Transaction = {
+      id: 102,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-06-10",
+      payee: "Bonus",
+      memo: "",
+      amount: "50000",
+      cleared: true,
+      incomeMonth: "2026-07",
+    };
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    const monthInput = screen.getByDisplayValue("2026-07");
+    fireEvent.change(monthInput, { target: { value: "2026-10" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      id: 102,
+      incomeMonth: "2026-10",
+    });
+  });
+
   describe("deletion flow", () => {
     it("does not render a delete button in add mode", () => {
       render(

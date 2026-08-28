@@ -122,11 +122,24 @@ export function TransactionModal({
   }, [accounts, accountId]);
   const isOffBudget = selectedAccount ? !selectedAccount.onBudget : false;
 
-  const isInitialDeferred = initial?.categoryId == null && !!initial?.incomeMonth && initial.incomeMonth > (initial.date ? initial.date.slice(0, 7) : "");
+  const isInitialDeferred =
+    initial?.categoryId == null &&
+    !!initial?.incomeMonth &&
+    initial.incomeMonth > (initial.date ? initial.date.slice(0, 7) : "");
   const [categoryId, setCategoryId] = useState<number | "" | "__deferred__">(
     initial?.categoryId ?? (isInitialDeferred ? "__deferred__" : "")
   );
   const [date, setDate] = useState(initial?.date ?? defaultDate ?? todayISO());
+  const [incomeMonth, setIncomeMonth] = useState<string>(
+    initial?.incomeMonth ??
+      nextMonthKey(
+        initial?.date
+          ? initial.date.slice(0, 7)
+          : defaultDate
+          ? defaultDate.slice(0, 7)
+          : todayISO().slice(0, 7)
+      )
+  );
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
   const [amount, setAmount] = useState(
@@ -254,7 +267,7 @@ export function TransactionModal({
         } else {
           const isDeferred = categoryId === "__deferred__";
           finalCatId = categoryId === "" || isDeferred ? null : Number(categoryId);
-          incMonth = isDeferred ? nextMonthKey(date.slice(0, 7)) : null;
+          incMonth = isDeferred ? (incomeMonth || nextMonthKey(date.slice(0, 7))) : null;
         }
       }
       onSave({
@@ -312,7 +325,7 @@ export function TransactionModal({
     if (!payee.trim()) return;
     const isDeferred = !isOffBudget && categoryId === "__deferred__";
     const finalCatId = isOffBudget || categoryId === "" || isDeferred ? null : Number(categoryId);
-    const incMonth = isDeferred ? nextMonthKey(date.slice(0, 7)) : null;
+    const incMonth = isDeferred ? (incomeMonth || nextMonthKey(date.slice(0, 7))) : null;
 
     onSave({
       id: initial?.id,
@@ -542,6 +555,17 @@ export function TransactionModal({
             )}
           </div>
 
+          {mode === "single" && !isOffBudget && categoryId === "__deferred__" && (
+            <Field label="Deferred to month">
+              <TextField
+                type="month"
+                value={incomeMonth}
+                onChange={(e) => setIncomeMonth(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+          )}
+
           {mode === "transfer" && isTransferBoundary && (
             <Field label={isBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
               <Select
@@ -576,6 +600,17 @@ export function TransactionModal({
                   ))
                 )}
               </Select>
+            </Field>
+          )}
+
+          {mode === "transfer" && isTransferBoundary && !isBoundaryOutflow && categoryId === "__deferred__" && (
+            <Field label="Deferred to month">
+              <TextField
+                type="month"
+                value={incomeMonth}
+                onChange={(e) => setIncomeMonth(e.target.value)}
+                className={inputClass}
+              />
             </Field>
           )}
 

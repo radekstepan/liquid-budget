@@ -3,7 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
+import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
+import { num } from "@ynab/logic";
+
+function applyAccountDeltas(
+  accounts: Account[],
+  deltas: Map<number, number>
+): Account[] {
+  if (deltas.size === 0) return accounts;
+  return accounts.map((acc) => {
+    const delta = deltas.get(acc.id);
+    if (!delta) return acc;
+    const current = num(acc.balance);
+    return { ...acc, balance: String(current + Math.round(delta)) };
+  });
+}
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -208,7 +222,23 @@ export function BudgetAppShell({
           transferAccountId: t.transferAccountId ?? null,
           parentId: null,
         };
-        return { ...prev, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
+
+        const deltas = new Map<number, number>();
+        if (t.subTransactions && t.subTransactions.length > 0) {
+          for (const st of t.subTransactions) {
+            deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + st.amount);
+            if (st.transferAccountId != null) {
+              deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
+            }
+          }
+        } else {
+          deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + t.amount);
+          if (t.transferAccountId != null) {
+            deltas.set(t.transferAccountId, (deltas.get(t.transferAccountId) ?? 0) - t.amount);
+          }
+        }
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
+        return { ...prev, accounts, transactions: [newTx, ...prev.transactions], budgetIndex: undefined };
       });
       return withSync(async () => {
         await runMutation(
@@ -249,6 +279,46 @@ export function BudgetAppShell({
         const splitParentId =
           target?.parentId ?? (prev.transactions.some((x) => x.parentId === id) ? id : null);
 
+        const isSplitParent = prev.transactions.some((x) => x.parentId === id);
+        const deltas = new Map<number, number>();
+
+        if (target) {
+          if (t.subTransactions !== undefined) {
+            const oldChildren = prev.transactions.filter((x) => x.parentId === id);
+            for (const c of oldChildren) {
+              deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
+              if (c.transferAccountId != null) {
+                deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
+              }
+            }
+            for (const st of t.subTransactions) {
+              deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) + st.amount);
+              if (st.transferAccountId != null) {
+                deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
+              }
+            }
+          } else if (!isSplitParent) {
+            const oldAccountId = target.accountId;
+            const oldAmount = num(target.amount);
+            const newAccountId = t.accountId ?? target.accountId;
+            const newAmount = t.amount !== undefined ? t.amount : oldAmount;
+
+            if (target.transferAccountId != null) {
+              deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
+              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + oldAmount);
+              deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
+              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) - newAmount);
+            } else {
+              if (newAccountId !== oldAccountId || newAmount !== oldAmount) {
+                deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
+                deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
+              }
+            }
+          }
+        }
+
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
+
         const transactions = prev.transactions.map((x) => {
           const isTarget = x.id === id;
           const isSplitMember =
@@ -276,7 +346,7 @@ export function BudgetAppShell({
             ...(t.flagColor !== undefined ? { flagColor: t.flagColor ?? null } : {}),
           };
         });
-        return { ...prev, transactions, budgetIndex: undefined };
+        return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       const isStatusOrFlagOnly =
         (t.status !== undefined || t.flagColor !== undefined) &&
@@ -311,10 +381,48 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
+        const target = prev.transactions.find((x) => x.id === id);
+        const deltas = new Map<number, number>();
+
+        if (target) {
+          if (target.parentId != null) {
+            deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
+            if (target.transferAccountId != null) {
+              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + num(target.amount));
+            }
+            const remaining = prev.transactions.filter(
+              (x) => x.parentId === target.parentId && x.id !== id
+            );
+            if (remaining.length === 1) {
+              const lastChild = remaining[0]!;
+              deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
+              if (lastChild.transferAccountId != null) {
+                deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
+              }
+            }
+          } else if (target.transferAccountId != null) {
+            deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
+            deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + num(target.amount));
+          } else {
+            const children = prev.transactions.filter((x) => x.parentId === id);
+            if (children.length > 0) {
+              for (const c of children) {
+                deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
+                if (c.transferAccountId != null) {
+                  deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
+                }
+              }
+            } else {
+              deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
+            }
+          }
+        }
+
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
         const transactions = prev.transactions.filter(
           (x) => x.id !== id && x.parentId !== id
         );
-        return { ...prev, transactions, budgetIndex: undefined };
+        return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       return withSync(() =>
         runMutation(
@@ -337,10 +445,49 @@ export function BudgetAppShell({
         if (!prev) return prev;
         snapshot = prev;
         const idSet = new Set(ids);
+        const deltas = new Map<number, number>();
+
+        for (const tx of prev.transactions) {
+          if (!idSet.has(tx.id)) continue;
+          if (tx.parentId != null) {
+            if (idSet.has(tx.parentId)) continue;
+            deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
+            if (tx.transferAccountId != null) {
+              deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
+            }
+            const remaining = prev.transactions.filter(
+              (x) => x.parentId === tx.parentId && !idSet.has(x.id)
+            );
+            if (remaining.length === 1) {
+              const lastChild = remaining[0]!;
+              deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
+              if (lastChild.transferAccountId != null) {
+                deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
+              }
+            }
+          } else {
+            const children = prev.transactions.filter((x) => x.parentId === tx.id);
+            if (children.length > 0) {
+              for (const c of children) {
+                deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
+                if (c.transferAccountId != null) {
+                  deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
+                }
+              }
+            } else {
+              deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
+              if (tx.transferAccountId != null) {
+                deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
+              }
+            }
+          }
+        }
+
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
         const transactions = prev.transactions.filter(
           (x) => !idSet.has(x.id) && (x.parentId == null || !idSet.has(x.parentId))
         );
-        return { ...prev, transactions, budgetIndex: undefined };
+        return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       return withSync(() =>
         runMutation(
@@ -377,6 +524,32 @@ export function BudgetAppShell({
           }
         }
 
+        const deltas = new Map<number, number>();
+        if (patch.accountId != null || patch.amount != null) {
+          for (const tx of prev.transactions) {
+            if (!idSet.has(tx.id)) continue;
+            const isSplitParent = prev.transactions.some((c) => c.parentId === tx.id);
+            const oldAccountId = tx.accountId;
+            const oldAmount = num(tx.amount);
+            const newAccountId = patch.accountId != null ? patch.accountId : oldAccountId;
+            const newAmount = patch.amount != null ? patch.amount : oldAmount;
+
+            if (tx.transferAccountId != null) {
+              deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
+              deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + oldAmount);
+              deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
+              deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) - newAmount);
+            } else if (!isSplitParent) {
+              if (newAccountId !== oldAccountId || newAmount !== oldAmount) {
+                deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
+                deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
+              }
+            }
+          }
+        }
+
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
+
         const transactions = prev.transactions.map((x) => {
           if (!idSet.has(x.id)) {
             const isSplitMember =
@@ -404,7 +577,7 @@ export function BudgetAppShell({
             ...(patch.incomeMonth !== undefined ? { incomeMonth: patch.incomeMonth } : {}),
           };
         });
-        return { ...prev, transactions, budgetIndex: undefined };
+        return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       const isStatusOnly =
         patch.categoryId === undefined &&

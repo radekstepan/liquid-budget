@@ -75,6 +75,9 @@ export function BulkEditTransactionsModal({
   const [date, setDate] = useState(todayISO());
   const [payee, setPayee] = useState("");
   const [categoryId, setCategoryId] = useState<number | "" | "__deferred__">("");
+  const [deferredMonth, setDeferredMonth] = useState<string>(() =>
+    nextMonthKey(todayISO().slice(0, 7))
+  );
   const [memo, setMemo] = useState("");
   const [accountId, setAccountId] = useState<number>(
     availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
@@ -134,10 +137,10 @@ export function BulkEditTransactionsModal({
 
   const categoryLabel = useMemo(() => {
     if (categoryId === "") return "Income: Available this month";
-    if (categoryId === "__deferred__") return "Income: Available next month";
+    if (categoryId === "__deferred__") return `Income: Available ${deferredMonth || "next month"}`;
     const found = categories.find((c) => c.id === Number(categoryId));
     return found ? found.name : `Category #${categoryId}`;
-  }, [categoryId, categories]);
+  }, [categoryId, categories, deferredMonth]);
 
   const accountLabel = useMemo(() => {
     const found = accounts.find((a) => a.id === Number(accountId));
@@ -155,7 +158,7 @@ export function BulkEditTransactionsModal({
         const isDeferred = categoryId === "__deferred__";
         patch.categoryId = categoryId === "" || isDeferred ? null : Number(categoryId);
         if (isDeferred) {
-          patch.incomeMonth = nextMonthKey(editDate ? date.slice(0, 7) : todayISO().slice(0, 7));
+          patch.incomeMonth = deferredMonth || nextMonthKey(editDate ? date.slice(0, 7) : todayISO().slice(0, 7));
         } else {
           patch.incomeMonth = null;
         }
@@ -509,6 +512,19 @@ export function BulkEditTransactionsModal({
                 onClick={() => setEditCategory(true)}
               >
                 (Keep existing categories)
+              </div>
+            )}
+            {editCategory && categoryId === "__deferred__" && (
+              <div className="pt-2">
+                <label className="text-[11px] text-[var(--y-ink-soft)] block mb-1">
+                  Deferred to month
+                </label>
+                <TextField
+                  type="month"
+                  value={deferredMonth}
+                  onChange={(e) => setDeferredMonth(e.target.value)}
+                  className={inputClass}
+                />
               </div>
             )}
           </div>
