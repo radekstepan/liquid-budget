@@ -455,6 +455,92 @@ describe("importYnab4 full import", () => {
     expect(Number(visaPaymentCat.carryover)).toBe(75000); // 75000 cents ($750.00)
   });
 
+  it("initializes credit card payment category carryover when starting balance payee is renamed or localized (BUG-06)", async () => {
+    const dataWithRenamedStartingBalance = {
+      ...ynabData,
+      transactions: [
+        ...ynabData.transactions,
+        {
+          entityId: "t_cc_start_renamed",
+          accountId: "acc2",
+          amount: -620, // -$620.00 starting debt on Visa
+          date: "2026-05-15",
+          payeeId: "p_start_renamed",
+          cleared: "Cleared",
+        },
+      ],
+      payees: [
+        ...ynabData.payees,
+        { entityId: "p_start_renamed", name: "Solde initial / Ancien compte" },
+      ],
+    };
+
+    await importYnab4(db, dataWithRenamedStartingBalance);
+    const { categories } = await getBudgetData(db);
+    const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
+    expect(visaPaymentCat).toBeTruthy();
+    expect(Number(visaPaymentCat.carryover)).toBe(62000); // 62000 cents ($620.00)
+  });
+
+  it("deterministically picks the earliest starting transaction when multiple uncategorized transactions exist (BUG-06)", async () => {
+    const dataWithMultipleUncategorized = {
+      ...ynabData,
+      transactions: [
+        ...ynabData.transactions,
+        {
+          entityId: "t_cc_later",
+          accountId: "acc2",
+          amount: -300,
+          date: "2026-05-20",
+          payeeId: "p_custom",
+          cleared: "Cleared",
+        },
+        {
+          entityId: "t_cc_earlier",
+          accountId: "acc2",
+          amount: -800,
+          date: "2026-05-10",
+          payeeId: "p_custom",
+          cleared: "Cleared",
+        },
+      ],
+      payees: [
+        ...ynabData.payees,
+        { entityId: "p_custom", name: "Old debt balance" },
+      ],
+    };
+
+    await importYnab4(db, dataWithMultipleUncategorized);
+    const { categories } = await getBudgetData(db);
+    const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
+    expect(visaPaymentCat).toBeTruthy();
+    expect(Number(visaPaymentCat.carryover)).toBe(80000); // 80000 cents from earliest 2026-05-10
+  });
+
+  it("does not seed carryover when credit card has only categorized transactions (BUG-06)", async () => {
+    const dataWithOnlyCategorized = {
+      ...ynabData,
+      transactions: [
+        ...ynabData.transactions,
+        {
+          entityId: "t_cc_purchase",
+          accountId: "acc2",
+          amount: -50,
+          date: "2026-05-01",
+          payeeId: "p1",
+          categoryId: "sc1",
+          cleared: "Cleared",
+        },
+      ],
+    };
+
+    await importYnab4(db, dataWithOnlyCategorized);
+    const { categories } = await getBudgetData(db);
+    const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
+    expect(visaPaymentCat).toBeTruthy();
+    expect(Number(visaPaymentCat.carryover)).toBe(0);
+  });
+
   it("imports plain identical transactions within the backup and flags unreconciled duplicates", async () => {
     const dupData = {
       accounts: [{ entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true }],

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import AdmZip from "adm-zip";
 import { dollarsToCents, nextMonthKey, todayISO, TRANSACTION_DUPLICATE_FLAG, type ImportSkippedEntry, type ImportSummary, type TransactionFlagColor } from "@ynab/logic";
 import { duplicateFingerprint } from "@ynab/logic";
@@ -722,16 +722,41 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     // 6b. Initialize Credit Card Payment category carryover from card starting balance if present
     for (const acc of creditAccounts) {
-      const [startingTx] = await db
+      // Find starting balance transaction: prefer explicit starting/opening balance payee match,
+      // fallback to the account's oldest uncategorized transaction if payee was renamed or localized.
+      let [startingTx] = await db
         .select()
         .from(transactions)
         .where(
           and(
             eq(transactions.accountId, acc.id),
-            sql`lower(${transactions.payee}) like '%starting balance%'`
+            isNull(transactions.parentId),
+            isNull(transactions.transferAccountId),
+            or(
+              sql`lower(${transactions.payee}) like '%starting balance%'`,
+              sql`lower(${transactions.payee}) like '%opening balance%'`,
+              sql`lower(${transactions.payee}) like '%initial balance%'`
+            )
           )
         )
+        .orderBy(asc(transactions.date), asc(transactions.id))
         .limit(1);
+
+      if (!startingTx) {
+        [startingTx] = await db
+          .select()
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.accountId, acc.id),
+              isNull(transactions.parentId),
+              isNull(transactions.transferAccountId),
+              isNull(transactions.categoryId)
+            )
+          )
+          .orderBy(asc(transactions.date), asc(transactions.id))
+          .limit(1);
+      }
 
       if (startingTx && Number(startingTx.amount) < 0) {
         await db
