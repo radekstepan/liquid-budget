@@ -560,34 +560,64 @@ export async function postRecurringTransaction(
   });
 }
 
+export type AutoPostFailure = {
+  id: number;
+  payee: string;
+  error: string;
+};
+
 /**
  * Automatically materialize all active recurring transactions whose nextDate <= asOfDate.
+ * Each due rule is isolated so that a single corrupted or un-postable rule
+ * does not block or roll back valid due rules. Failing rules are recorded in
+ * failures and marked inactive (active = false).
  */
 export async function autoPostDueRecurringTransactions(
   db: Database,
   asOfDate: string = todayISO()
 ) {
   const validatedAsOfDate = assertValidISODate(asOfDate, "asOfDate");
-  return withTransaction(db, async () => {
-    const due = await db
-      .select()
-      .from(recurring)
-      .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${validatedAsOfDate}`));
+  const due = await db
+    .select()
+    .from(recurring)
+    .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${validatedAsOfDate}`));
 
-    const posted = [];
-    for (const r of due) {
-      let currentNextDate = r.nextDate;
-      while (currentNextDate <= validatedAsOfDate) {
+  const posted: any[] = [];
+  const failures: AutoPostFailure[] = [];
+
+  for (const r of due) {
+    let currentNextDate = r.nextDate;
+    while (currentNextDate <= validatedAsOfDate) {
+      try {
         const res = await postRecurringTransaction(db, r.id, currentNextDate);
         posted.push(res.transaction);
         if (!res.active || res.nextDate <= currentNextDate) break;
         currentNextDate = res.nextDate;
+      } catch (err: any) {
+        failures.push({
+          id: r.id,
+          payee: r.payee,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Deactivate the broken recurring rule so it doesn't repeatedly fail on every cycle
+        try {
+          await db
+            .update(recurring)
+            .set({ active: false })
+            .where(eq(recurring.id, r.id));
+        } catch {
+          // Ignore secondary update errors
+        }
+        break;
       }
     }
-    return posted;
-  });
+  }
+
+  (posted as any).failures = failures;
+  return posted;
 }
 
 export const createRecurringTransaction = createRecurring;
 export const updateRecurringTransaction = updateRecurring;
+
 

@@ -23,6 +23,7 @@ import {
   createSplitWithChildren,
   createTransaction,
 } from "../src/queries/transactions.js";
+import { createRecurring } from "../src/queries/recurring.js";
 import { verifyBalanceIntegrity } from "../src/queries/diagnostics.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
 
@@ -966,6 +967,90 @@ describe("accounts queries", () => {
 
       await deleteAccount(db, acct.id);
       expect(await getAccount(db, acct.id)).toBeUndefined();
+    });
+
+    it("BUG-02: deletes entire recurring split rule when 2-child split has 1 transfer child targeting deleted account", async () => {
+      const acctA = await createAccount(db, { name: "Checking" });
+      const acctB = await createAccount(db, { name: "Loan" });
+      const group = await createCategoryGroup(db, "Bills");
+      const cat = await createCategory(db, { name: "Interest", groupId: group.id });
+
+      const splitRec = await createRecurring(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        payee: "Loan Payment",
+        amount: -10000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        subTransactions: [
+          { categoryId: null, transferAccountId: acctB.id, amount: -6000 },
+          { categoryId: cat.id, amount: -4000 },
+        ],
+      });
+
+      expect(splitRec).toBeDefined();
+
+      // Delete Account B (Loan)
+      await deleteAccount(db, acctB.id);
+
+      // Account B is deleted
+      expect(await getAccount(db, acctB.id)).toBeUndefined();
+
+      // The entire recurring rule should be deleted (no 1-child corrupted split remains)
+      const recurringRows = await db
+        .select()
+        .from(schema.recurring)
+        .where(eq(schema.recurring.id, splitRec!.id));
+      expect(recurringRows).toHaveLength(0);
+
+      const subRows = await db
+        .select()
+        .from(schema.recurringSubTransactions)
+        .where(eq(schema.recurringSubTransactions.recurringId, splitRec!.id));
+      expect(subRows).toHaveLength(0);
+    });
+
+    it("BUG-02: rebalances recurring split rule when 3-child split has 1 transfer child targeting deleted account", async () => {
+      const acctA = await createAccount(db, { name: "Checking" });
+      const acctB = await createAccount(db, { name: "Savings" });
+      const group = await createCategoryGroup(db, "Living");
+      const cat1 = await createCategory(db, { name: "Groceries", groupId: group.id });
+      const cat2 = await createCategory(db, { name: "Household", groupId: group.id });
+
+      const splitRec = await createRecurring(db, {
+        accountId: acctA.id,
+        categoryId: null,
+        payee: "Paycheck Allocation",
+        amount: 300000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        subTransactions: [
+          { categoryId: cat1.id, amount: 150000 },
+          { categoryId: cat2.id, amount: 100000 },
+          { categoryId: null, transferAccountId: acctB.id, amount: 50000 },
+        ],
+      });
+
+      expect(splitRec).toBeDefined();
+
+      // Delete Account B
+      await deleteAccount(db, acctB.id);
+
+      // Parent recurring rule is preserved and its amount is rebalanced to sum of remaining children: 150000 + 100000 = 250000
+      const [updatedRec] = await db
+        .select()
+        .from(schema.recurring)
+        .where(eq(schema.recurring.id, splitRec!.id));
+      expect(updatedRec).toBeDefined();
+      expect(updatedRec?.amount).toBe(250000);
+
+      // Remaining sub-transactions count is 2
+      const remainingSubs = await db
+        .select()
+        .from(schema.recurringSubTransactions)
+        .where(eq(schema.recurringSubTransactions.recurringId, splitRec!.id));
+      expect(remainingSubs).toHaveLength(2);
+      expect(remainingSubs.map((s) => s.amount)).toEqual(expect.arrayContaining([150000, 100000]));
     });
   });
 

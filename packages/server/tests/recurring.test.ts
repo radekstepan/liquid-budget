@@ -1316,6 +1316,64 @@ describe("recurring queries", () => {
         memo: "Monthly rent",
       });
     });
+
+    it("BUG-01: autoPostDueRecurringTransactions isolates per-item error when a rule fails, deactivates it, and collects failure", async () => {
+      const validRow = {
+        id: 90,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Valid Gym",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        active: true,
+        transferAccountId: null,
+      };
+      const invalidRow = {
+        id: 91,
+        accountId: 1,
+        categoryId: null,
+        payee: "Corrupt Split",
+        amount: -10000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        active: true,
+        transferAccountId: null,
+      };
+
+      // 1. Initial query selects both due rows
+      mock.respondWithNth("select:recurring", 1, [validRow, invalidRow]);
+
+      // 2. Processing validRow
+      mock.respondWithNth("select:recurring", 2, [validRow]);
+      mock.respondWithNth("select:recurring_sub_transactions", 1, []);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 901, date: "2026-06-01", amount: -5000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...validRow, nextDate: "2026-07-01" }]);
+
+      // 3. Processing invalidRow: only 1 child -> throws RecurringError("split must have at least two sub-transactions")
+      mock.respondWithNth("select:recurring", 3, [invalidRow]);
+      mock.respondWithNth("select:recurring_sub_transactions", 2, [
+        { id: 1, recurringId: 91, categoryId: 2, amount: -10000, memo: "", sort: 0, transferAccountId: null },
+      ]);
+      mock.respondWith("update:recurring", [{ ...invalidRow, active: false }]);
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      expect(posted).toHaveLength(1);
+      expect((posted as any).failures).toHaveLength(1);
+      expect((posted as any).failures[0]).toMatchObject({
+        id: 91,
+        payee: "Corrupt Split",
+        error: "split must have at least two sub-transactions",
+      });
+
+      // Verify deactivation update was called for invalid rule
+      const deactivationCall = mock.calls.find(
+        (c) => c.op === "update" && c.table === "recurring" && c.set && c.set.active === false
+      );
+      expect(deactivationCall).toBeDefined();
+    });
   });
 });
 

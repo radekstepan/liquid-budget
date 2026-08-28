@@ -9,10 +9,16 @@ export async function GET() {
   if (!seeded) {
     await seedDatabase(db);
   }
-  const autoPosted = await autoPostDueRecurringTransactions(db);
+  let autoPostedCount = 0;
+  try {
+    const autoPosted = await autoPostDueRecurringTransactions(db);
+    autoPostedCount = autoPosted.length;
+  } catch (err) {
+    console.error("autoPostDueRecurringTransactions failed in GET /api/budget:", err);
+  }
   const data = await getBudgetData(db);
   return Response.json({
     ...data,
-    autoPostedRecurringCount: autoPosted.length,
+    autoPostedRecurringCount: autoPostedCount,
   });
 }
