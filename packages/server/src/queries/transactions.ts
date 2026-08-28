@@ -590,71 +590,72 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   }
   if (patch.isIncome !== undefined) p.isIncome = patch.isIncome;
 
-  const isParent = existing.parentId == null && existing.transferAccountId == null;
-  // Always query child count for cleanliness; the count is used to decide
-  // whether this row is a split parent. Costs one extra cheap query for
-  // non-parent rows but keeps the logic linear.
-  const hasChildren = (await childCount(db, id)) > 0;
-  const isSplitParent = isParent && hasChildren;
-
-  if (isSplitParent) {
-    const children = await getChildren(db, id);
-    if (children.some((c) => c.status === "r")) {
-      throw new TransactionError(
-        "Transaction is reconciled and locked. Unreconcile before editing.",
-        422
-      );
-    }
-    if ("amount" in p) {
-      throw new TransactionError("cannot change amount of a split parent; edit children");
-    }
-    if ("accountId" in p) {
-      throw new TransactionError("cannot change account of a split parent");
-    }
-  }
-
-  if (existing.parentId != null) {
-    if ("accountId" in p) {
-      throw new TransactionError("cannot change account of a split child");
-    }
-    if ("amount" in p) {
-      throw new TransactionError("cannot change amount of a split child; edit the split");
-    }
-  }
-
   let shouldLearnRenameRule = false;
   let oldPayee = "";
   let newPayee = "";
 
   const row = await withTransaction(db, async () => {
-    const newAccountId = (p.accountId as number | undefined) ?? existing.accountId;
-    const newAmount = (p.amount as number | undefined) ?? Number(existing.amount);
+    // Re-read inside the transaction for an authoritative snapshot
+    const [current] = await db.select().from(transactions).where(eq(transactions.id, id));
+    if (!current) return null;
 
-    if (existing.transferAccountId != null) {
-      await applyBalance(db, existing.accountId, -Number(existing.amount));
-      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+    const isParent = current.parentId == null && current.transferAccountId == null;
+    const hasChildren = (await childCount(db, id)) > 0;
+    const isSplitParent = isParent && hasChildren;
+
+    if (isSplitParent) {
+      const children = await getChildren(db, id);
+      if (children.some((c) => c.status === "r")) {
+        throw new TransactionError(
+          "Transaction is reconciled and locked. Unreconcile before editing.",
+          422
+        );
+      }
+      if ("amount" in p) {
+        throw new TransactionError("cannot change amount of a split parent; edit children");
+      }
+      if ("accountId" in p) {
+        throw new TransactionError("cannot change account of a split parent");
+      }
+    }
+
+    if (current.parentId != null) {
+      if ("accountId" in p) {
+        throw new TransactionError("cannot change account of a split child");
+      }
+      if ("amount" in p) {
+        throw new TransactionError("cannot change amount of a split child; edit the split");
+      }
+    }
+
+    const newAccountId = (p.accountId as number | undefined) ?? current.accountId;
+    const newAmount = (p.amount as number | undefined) ?? Number(current.amount);
+
+    if (current.transferAccountId != null) {
+      await applyBalance(db, current.accountId, -Number(current.amount));
+      await applyBalance(db, current.transferAccountId, Number(current.amount));
       await applyBalance(db, newAccountId, newAmount);
-      await applyBalance(db, existing.transferAccountId, -newAmount);
+      await applyBalance(db, current.transferAccountId, -newAmount);
     } else if (!isSplitParent) {
-      if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
-        await applyBalance(db, existing.accountId, -Number(existing.amount));
-        if (newAccountId !== existing.accountId) {
+      if (newAccountId !== current.accountId || newAmount !== Number(current.amount)) {
+        await applyBalance(db, current.accountId, -Number(current.amount));
+        if (newAccountId !== current.accountId) {
           await applyBalance(db, newAccountId, newAmount);
         } else {
-          await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
+          await applyBalance(db, newAccountId, newAmount - Number(current.amount));
         }
       }
     }
 
     const srcOnBudget = await isAccountOnBudget(db, newAccountId);
     const destOnBudget =
-      existing.transferAccountId != null
-        ? await isAccountOnBudget(db, existing.transferAccountId)
+      current.transferAccountId != null
+        ? await isAccountOnBudget(db, current.transferAccountId)
         : null;
 
-    if (existing.transferAccountId != null) {
-      const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : existing.categoryId;
-      const incMonth = "incomeMonth" in p ? (p.incomeMonth as string | null) : (existing.incomeMonth ?? null);
+    if (current.transferAccountId != null) {
+      const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : current.categoryId;
+      const incMonth = "incomeMonth" in p ? (p.incomeMonth as string | null) : (current.incomeMonth ?? null);
       const classification = classifyBoundaryTransfer({
         srcOnBudget,
         destOnBudget: destOnBudget ?? true,
@@ -674,9 +675,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.incomeMonth = null;
       p.isIncome = false;
     } else {
-      const finalCatId = "categoryId" in p ? p.categoryId : existing.categoryId;
+      const finalCatId = "categoryId" in p ? p.categoryId : current.categoryId;
       const isEligibleForIncome =
-        existing.parentId == null &&
+        current.parentId == null &&
         finalCatId == null;
 
       const isIncome = isEligibleForIncome
@@ -699,11 +700,11 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
 
     // If this row is a child of a split and date changed, propagate date to parent and siblings
-    if (existing.parentId != null && "date" in p && p.date != null) {
+    if (current.parentId != null && "date" in p && p.date != null) {
       await db
         .update(transactions)
         .set({ date: String(p.date) })
-        .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
+        .where(or(eq(transactions.id, current.parentId), eq(transactions.parentId, current.parentId)));
     }
 
     // If this row is a split parent and status changed, propagate status to children
@@ -715,11 +716,11 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     }
 
     // If this row is a child of a split and status changed, propagate status to parent and siblings
-    if (existing.parentId != null && "status" in p && p.status != null) {
+    if (current.parentId != null && "status" in p && p.status != null) {
       await db
         .update(transactions)
         .set({ status: p.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
-        .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
+        .where(or(eq(transactions.id, current.parentId), eq(transactions.parentId, current.parentId)));
     }
 
     // Learn an automatic rename rule from a deliberate payee rename on a
@@ -776,51 +777,52 @@ export async function updateSplit(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"
     );
   }
-  const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
-  if (!parent) {
-    throw new TransactionError("split parent not found", 404);
-  }
-  if (parent.status === "r") {
-    throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
-  }
-  if (parent.parentId != null || parent.transferAccountId != null) {
-    throw new TransactionError("target row is not a split parent");
-  }
-  if ("flagColor" in parentFields && parentFields.flagColor !== undefined && parent.flagColor === TRANSACTION_DUPLICATE_FLAG) {
-    throw new TransactionError(
-      "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
-      422
-    );
-  }
-  if ((await childCount(db, parentId)) === 0) {
-    throw new TransactionError("target row has no children; use a regular update");
-  }
-
-  if (parentFields.date !== undefined && parentFields.date != null) {
-    assertValidISODate(parentFields.date, "date");
-  }
-  const parentAmount =
-    parentFields.amount !== undefined && parentFields.amount != null
-      ? assertValidAmount(parentFields.amount)
-      : assertValidAmount(parent.amount);
-  assertSplitsBalanced(parentAmount, children);
-
-  for (const c of children) {
-    if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
-      throw new TransactionError("transfer account must differ from source account");
-    }
-  }
-
-  const oldChildren = await getChildren(db, parentId);
-  if (oldChildren.some((c) => c.status === "r")) {
-    throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
-  }
 
   let shouldLearnRenameRule = false;
   let learnedOldPayee = "";
   let learnedNewPayee = "";
 
   const res = await withTransaction(db, async () => {
+    const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
+    if (!parent) {
+      throw new TransactionError("split parent not found", 404);
+    }
+    if (parent.status === "r") {
+      throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
+    }
+    if (parent.parentId != null || parent.transferAccountId != null) {
+      throw new TransactionError("target row is not a split parent");
+    }
+    if ("flagColor" in parentFields && parentFields.flagColor !== undefined && parent.flagColor === TRANSACTION_DUPLICATE_FLAG) {
+      throw new TransactionError(
+        "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
+        422
+      );
+    }
+    if ((await childCount(db, parentId)) === 0) {
+      throw new TransactionError("target row has no children; use a regular update");
+    }
+
+    if (parentFields.date !== undefined && parentFields.date != null) {
+      assertValidISODate(parentFields.date, "date");
+    }
+    const parentAmount =
+      parentFields.amount !== undefined && parentFields.amount != null
+        ? assertValidAmount(parentFields.amount)
+        : assertValidAmount(parent.amount);
+    assertSplitsBalanced(parentAmount, children);
+
+    for (const c of children) {
+      if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
+        throw new TransactionError("transfer account must differ from source account");
+      }
+    }
+
+    const oldChildren = await getChildren(db, parentId);
+    if (oldChildren.some((c) => c.status === "r")) {
+      throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
+    }
+
     for (const c of oldChildren) {
       await applyBalance(db, c.accountId, -Number(c.amount));
       if (c.transferAccountId != null) {
@@ -999,16 +1001,19 @@ export async function deleteTransaction(db: Database, id: number) {
   }
 
   return withTransaction(db, async () => {
-    if (existing.parentId != null) {
-      await applyBalance(db, existing.accountId, -Number(existing.amount));
-      if (existing.transferAccountId != null) {
-        await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+    const [current] = await db.select().from(transactions).where(eq(transactions.id, id));
+    if (!current) return null;
+
+    if (current.parentId != null) {
+      await applyBalance(db, current.accountId, -Number(current.amount));
+      if (current.transferAccountId != null) {
+        await applyBalance(db, current.transferAccountId, Number(current.amount));
       }
       await db.delete(transactions).where(eq(transactions.id, id));
 
       // Check remaining children of the split parent.
       // If only 1 child remains, a 1-child split is invalid so delete parent and the remaining child.
-      const remaining = await getChildren(db, existing.parentId);
+      const remaining = await getChildren(db, current.parentId);
       if (remaining.length === 1) {
         const lastChild = remaining[0]!;
         if (lastChild.status === "r") {
@@ -1022,19 +1027,19 @@ export async function deleteTransaction(db: Database, id: number) {
           await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
         }
         await db.delete(transactions).where(eq(transactions.id, lastChild.id));
-        await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        await db.delete(transactions).where(eq(transactions.id, current.parentId));
       } else if (remaining.length === 0) {
-        await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+        await db.delete(transactions).where(eq(transactions.id, current.parentId));
       } else {
         const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
         await db
           .update(transactions)
           .set({ amount: newTotal })
-          .where(eq(transactions.id, existing.parentId));
+          .where(eq(transactions.id, current.parentId));
       }
-    } else if (existing.transferAccountId != null) {
-      await applyBalance(db, existing.accountId, -Number(existing.amount));
-      await applyBalance(db, existing.transferAccountId, Number(existing.amount));
+    } else if (current.transferAccountId != null) {
+      await applyBalance(db, current.accountId, -Number(current.amount));
+      await applyBalance(db, current.transferAccountId, Number(current.amount));
       await db.delete(transactions).where(eq(transactions.id, id));
     } else {
       const children = await getChildren(db, id);
@@ -1052,7 +1057,7 @@ export async function deleteTransaction(db: Database, id: number) {
           }
         }
       } else {
-        await applyBalance(db, existing.accountId, -Number(existing.amount));
+        await applyBalance(db, current.accountId, -Number(current.amount));
       }
       await db.delete(transactions).where(eq(transactions.id, id));
     }

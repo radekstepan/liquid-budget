@@ -836,9 +836,9 @@ describe("transactions queries", () => {
     });
 
     it("updates a row without affecting balance when amount/account is unchanged", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, payee: "New" }]);
       mock.respondWith("insert:rename_rules", [
@@ -852,28 +852,28 @@ describe("transactions queries", () => {
       // commit (select rename_rules -> BEGIN -> insert rule -> COMMIT ->
       // select again).
       expect(ops).toEqual([
-        "select", "select", "run", "select", "update", "run",
+        "select", "run", "select", "select", "select", "update", "run",
         "select", "run", "insert", "run", "select",
       ]);
     });
 
     it("applies a balance correction when the amount changes", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, amount: -2000 }]);
       mock.respondWith("update:accounts", [{}, {}]);
 
       await updateTransaction(mock.db, 1, { amount: -2000 });
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "select", "run", "update", "update", "select", "update", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "update", "update", "select", "update", "run"]);
     });
 
     it("updates a transfer: reverses both balances then applies both", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, transferAccountId: 2, amount: -10000, payee: "X", categoryId: null, date: "2026-07-01", parentId: null },
-      ]);
+      const rowData = { id: 1, accountId: 1, transferAccountId: 2, amount: -10000, payee: "X", categoryId: null, date: "2026-07-01", parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, amount: -20000 }]);
       mock.respondWith("update:accounts", [{}, {}, {}, {}]);
@@ -881,8 +881,7 @@ describe("transactions queries", () => {
       await updateTransaction(mock.db, 1, { amount: -20000 });
       const ops = mock.calls.map((c) => c.op);
       expect(ops).toEqual([
-        "select", "select",
-        "run",
+        "select", "run", "select", "select",
         "update", "update", "update", "update",
         "select", "select",
         "update",
@@ -891,9 +890,9 @@ describe("transactions queries", () => {
     });
 
     it("rejects amount changes on a split parent", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -10000, payee: "X", categoryId: null, date: "2026-07-01", transferAccountId: null, parentId: null },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -10000, payee: "X", categoryId: null, date: "2026-07-01", transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", [{ id: 2 }]);
 
       await expect(updateTransaction(mock.db, 1, { amount: -20000 })).rejects.toThrow(
@@ -902,9 +901,10 @@ describe("transactions queries", () => {
     });
 
     it("rejects account changes on a split child", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 2, parentId: 1, accountId: 1, amount: -3000, payee: "X", categoryId: 10, date: "2026-07-01", transferAccountId: null },
-      ]);
+      const rowData = { id: 2, parentId: 1, accountId: 1, amount: -3000, payee: "X", categoryId: 10, date: "2026-07-01", transferAccountId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // parent query
+      mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
       mock.respondWith("select:transactions", []);
 
       await expect(updateTransaction(mock.db, 2, { accountId: 2 })).rejects.toThrow(
@@ -913,9 +913,9 @@ describe("transactions queries", () => {
     });
 
     it("persists a flagColor on update", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, flagColor: "blue" }]);
 
@@ -927,9 +927,9 @@ describe("transactions queries", () => {
     });
 
     it("clears a flagColor with an explicit null", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, flagColor: null }]);
 
@@ -940,9 +940,9 @@ describe("transactions queries", () => {
     });
 
     it("sanitizes the internal duplicate marker to null on update (not user-writable)", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -1000, payee: "Old", date: "2026-07-01", categoryId: 2, transferAccountId: null, parentId: null, status: "c" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]);
       mock.respondWith("select:transactions", []);
       mock.respondWith("update:transactions", [{ id: 1, flagColor: null }]);
 
@@ -979,10 +979,10 @@ describe("transactions queries", () => {
     });
 
     it("forces categoryId to null and isIncome to false when updating transaction on off-budget account", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 2, amount: 5000, payee: "Brokerage", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c" },
-      ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      const rowData = { id: 1, accountId: 2, amount: 5000, payee: "Brokerage", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWithNth("select:transactions", 3, []); // childCount = 0
       mock.respondWith("select:accounts", [{ id: 2, onBudget: false }]);
       mock.respondWith("update:transactions", [{ id: 1, categoryId: null, isIncome: false }]);
 
@@ -993,10 +993,10 @@ describe("transactions queries", () => {
     });
 
     it("BUG 1.5: forces isIncome to false and incomeMonth to null when updating transaction with categoryId on on-budget account", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: 5000, payee: "Store", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c", isIncome: true, incomeMonth: "2026-08" },
-      ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      const rowData = { id: 1, accountId: 1, amount: 5000, payee: "Store", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "c", isIncome: true, incomeMonth: "2026-08" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWithNth("select:transactions", 3, []); // childCount = 0
       mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
       mock.respondWith("update:transactions", [{ id: 1, categoryId: 7, isIncome: false }]);
 
@@ -1007,10 +1007,10 @@ describe("transactions queries", () => {
     });
 
     it("BUG-19: preserves categoryId on expense when updating single field (e.g. status) with undefined fields", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -5000, payee: "Groceries", date: "2026-07-01", categoryId: 4, transferAccountId: null, parentId: null, status: "u", isIncome: false, incomeMonth: null },
-      ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      const rowData = { id: 1, accountId: 1, amount: -5000, payee: "Groceries", date: "2026-07-01", categoryId: 4, transferAccountId: null, parentId: null, status: "u", isIncome: false, incomeMonth: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWithNth("select:transactions", 3, []); // childCount = 0
       mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
       mock.respondWith("update:transactions", [{ id: 1, status: "c", categoryId: 4 }]);
 
@@ -1032,10 +1032,10 @@ describe("transactions queries", () => {
     });
 
     it("BUG-19: preserves incomeMonth on income transaction when updating single field (e.g. status) with undefined fields", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: 5000, payee: "Employer", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "u", isIncome: true, incomeMonth: "2026-08" },
-      ]);
-      mock.respondWithNth("select:transactions", 2, []); // childCount = 0
+      const rowData = { id: 1, accountId: 1, amount: 5000, payee: "Employer", date: "2026-07-01", categoryId: null, transferAccountId: null, parentId: null, status: "u", isIncome: true, incomeMonth: "2026-08" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWithNth("select:transactions", 3, []); // childCount = 0
       mock.respondWith("select:accounts", [{ id: 1, onBudget: true }]);
       mock.respondWith("update:transactions", [{ id: 1, status: "c", incomeMonth: "2026-08" }]);
 
@@ -1345,19 +1345,23 @@ describe("transactions queries", () => {
     });
 
     it("deletes and reverses the balance (regular row)", async () => {
-      mock.respondWithNth("select:transactions", 1, [{ id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null }]);
-      mock.respondWith("select:transactions", []);
+      const rowData = { id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWith("select:transactions", []); // getChildren
       mock.respondWith("update:accounts", [{}]);
       mock.respondWith("delete:transactions", [{}]);
 
       const result = await deleteTransaction(mock.db, 1);
       expect(result).toMatchObject({ id: 1 });
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "select", "update", "delete", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "update", "delete", "run"]);
     });
 
     it("deleting a split parent reverses each child's balance before cascade", async () => {
-      mock.respondWithNth("select:transactions", 1, [{ id: 1, accountId: 1, amount: -10000, categoryId: null, transferAccountId: null, parentId: null }]);
+      const rowData = { id: 1, accountId: 1, amount: -10000, categoryId: null, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 2, accountId: 1, amount: -6000, transferAccountId: null },
         { id: 3, accountId: 1, amount: -4000, transferAccountId: null },
@@ -1367,25 +1371,28 @@ describe("transactions queries", () => {
 
       await deleteTransaction(mock.db, 1);
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "select", "update", "update", "delete", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "update", "update", "delete", "run"]);
     });
 
     it("deleting a transfer reverses both source and destination balances", async () => {
-      mock.respondWith("select:transactions", [
+      mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 1, transferAccountId: 2, amount: -10000, parentId: null },
       ]);
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 1, accountId: 1, transferAccountId: 2, amount: -10000, parentId: null },
+      ]); // re-read
       mock.respondWith("update:accounts", [{}, {}]);
       mock.respondWith("delete:transactions", [{}]);
 
       await deleteTransaction(mock.db, 1);
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "update", "update", "delete", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "update", "update", "delete", "run"]);
     });
 
     it("deleting a split parent with transfer sub-transactions reverses source balance and destination transfer balance", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -10000, categoryId: null, transferAccountId: null, parentId: null },
-      ]);
+      const rowData = { id: 1, accountId: 1, amount: -10000, categoryId: null, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 2, accountId: 1, amount: -6000, transferAccountId: null },
         { id: 3, accountId: 1, amount: -4000, transferAccountId: 2 },
@@ -1395,15 +1402,16 @@ describe("transactions queries", () => {
 
       await deleteTransaction(mock.db, 1);
       const ops = mock.calls.map((c) => c.op);
-      expect(ops).toEqual(["select", "run", "select", "update", "update", "update", "delete", "run"]);
+      expect(ops).toEqual(["select", "run", "select", "select", "update", "update", "update", "delete", "run"]);
       const updates = mock.calls.filter((c) => c.op === "update" && c.table === "accounts");
       expect(updates).toHaveLength(3);
     });
 
     it("deleting a split child directly when > 2 children exist reverses child balance and re-totals parent amount", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
-      ]);
+      const rowData = { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
         { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
@@ -1421,9 +1429,10 @@ describe("transactions queries", () => {
     });
 
     it("deleting a split child transfer when > 2 children exist reverses both source and destination balances and re-totals parent", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: 2, categoryId: null },
-      ]);
+      const rowData = { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: 2, categoryId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null },
         { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
@@ -1442,9 +1451,10 @@ describe("transactions queries", () => {
     });
 
     it("deleting a split child when only 1 child remains cleans up remaining child and parent", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 },
-      ]);
+      const rowData = { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null },
       ]);
@@ -1457,9 +1467,10 @@ describe("transactions queries", () => {
     });
 
     it("rejects deleting a split child when the remaining sibling is reconciled with 422 error", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" },
-      ]);
+      const rowData = { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
       mock.respondWith("select:transactions", [
         { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r" },
       ]);
@@ -1472,10 +1483,10 @@ describe("transactions queries", () => {
     });
 
     it("rolls back transaction and rethrows when an error occurs during deletion", async () => {
-      mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null },
-      ]);
-      mock.respondWith("select:transactions", []);
+      const rowData = { id: 1, accountId: 1, amount: -5000, categoryId: 2, transferAccountId: null, parentId: null };
+      mock.respondWithNth("select:transactions", 1, [rowData]);
+      mock.respondWithNth("select:transactions", 2, [rowData]); // re-read
+      mock.respondWith("select:transactions", []); // getChildren
       mock.db.update = vi.fn().mockImplementation(() => {
         throw new Error("DB write failed");
       }) as unknown as typeof mock.db.update;
