@@ -469,5 +469,63 @@ describe("SQLite transaction concurrency & serialization", () => {
     const [freshRec2] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec2!.id));
     expect(freshRec2?.active).toBe(false);
   });
+
+  it("BUG-04: concurrent autoPostDueRecurringTransactions on same due rule keeps active=true and posts only once", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 100000, onBudget: true });
+    const grp = await createCategoryGroup(db, { name: "Bills" });
+    const cat = await createCategory(db, { groupId: grp.id, name: "Rent" });
+
+    const rec = await createRecurringTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat.id,
+      payee: "Monthly Rent",
+      amount: -50000,
+      frequency: "monthly",
+      nextDate: "2026-08-01",
+    });
+
+    // Fire two concurrent auto-post calls simulating two browser tabs
+    const results = await Promise.allSettled([
+      autoPostDueRecurringTransactions(db, "2026-08-15"),
+      autoPostDueRecurringTransactions(db, "2026-08-15"),
+    ]);
+
+    // Both calls should succeed (no unhandled rejection)
+    expect(results).toHaveLength(2);
+    for (const r of results) {
+      expect(r.status).toBe("fulfilled");
+    }
+
+    // Exactly one transaction was posted (not two)
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    // Starting balance + one rent transaction = 2 rows
+    expect(txRows).toHaveLength(2);
+
+    // Rule is still active
+    const [freshRec] = await db.select().from(schema.recurring).where(eq(schema.recurring.id, rec.id));
+    expect(freshRec?.active).toBe(true);
+
+    // Rule's nextDate was advanced
+    expect(freshRec?.nextDate).toBe("2026-09-01");
+
+    // Combined posted count is exactly 1
+    const totalPosted = results.reduce(
+      (sum, r) => sum + (r.status === "fulfilled" ? (r.value as any[]).length : 0),
+      0
+    );
+    expect(totalPosted).toBe(1);
+
+    // At most one failure recorded (the loser's 409)
+    const totalFailures = results.reduce(
+      (sum, r) =>
+        sum +
+        (r.status === "fulfilled" ? ((r.value as any).failures || []).length : 0),
+      0
+    );
+    expect(totalFailures).toBeLessThanOrEqual(1);
+  });
 });
 

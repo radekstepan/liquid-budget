@@ -1446,6 +1446,82 @@ describe("recurring queries", () => {
       });
     });
 
+    it("BUG-04: autoPostDueRecurringTransactions does NOT deactivate rule on 409 schedule mismatch", async () => {
+      const row = {
+        id: 105,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Rent",
+        amount: -100000,
+        frequency: "monthly",
+        nextDate: "2026-08-01",
+        active: true,
+        transferAccountId: null,
+      };
+
+      // 1. Initial query finds the due rule
+      mock.respondWithNth("select:recurring", 1, [row]);
+
+      // 2. postRecurringTransaction reads the rule
+      mock.respondWithNth("select:recurring", 2, [row]);
+      mock.respondWithNth("select:recurring_sub_transactions", 1, []);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 999, date: "2026-08-01", amount: -100000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      // 3. Optimistic update returns empty (another runner already advanced nextDate) => 409
+      mock.respondWith("update:recurring", []);
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
+      expect(posted).toHaveLength(0);
+      expect((posted as any).failures).toHaveLength(1);
+      expect((posted as any).failures[0]).toMatchObject({
+        id: 105,
+        payee: "Rent",
+      });
+
+      // Verify NO deactivation update was issued (no update with active=false)
+      const deactivationCall = mock.calls.find(
+        (c) => c.op === "update" && c.table === "recurring" && c.set && c.set.active === false
+      );
+      expect(deactivationCall).toBeUndefined();
+    });
+
+    it("BUG-04: autoPostDueRecurringTransactions in-process idempotency guard skips duplicate (ruleId, nextDate)", async () => {
+      const row = {
+        id: 106,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Duplicate Guard",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-08-01",
+        active: true,
+        transferAccountId: null,
+      };
+
+      // The initial select returns the rule TWICE (simulating concurrent due-list overlap)
+      mock.respondWithNth("select:recurring", 1, [row, row]);
+
+      // Only one postRecurringTransaction call should happen; the second duplicate row
+      // is skipped by the in-process guard.
+      mock.respondWithNth("select:recurring", 2, [row]);
+      mock.respondWithNth("select:recurring_sub_transactions", 1, []);
+      mock.respondWithNth("select:accounts", 1, [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 1000, date: "2026-08-01", amount: -5000 }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...row, nextDate: "2026-09-01" }]);
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
+      expect(posted).toHaveLength(1);
+
+      // Verify only one postRecurringTransaction was attempted
+      const recurringSelects = mock.calls.filter(
+        (c) => c.op === "select" && c.table === "recurring"
+      );
+      // 1 initial select + 1 within postRecurringTransaction = 2 total
+      expect(recurringSelects).toHaveLength(2);
+    });
+
     it("BUG-09: autoPostDueRecurringTransactions caps catch-up occurrences per rule and collects capped metadata", async () => {
       const dailyRow = {
         id: 104,

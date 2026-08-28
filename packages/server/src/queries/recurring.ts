@@ -587,11 +587,19 @@ export async function autoPostDueRecurringTransactions(
   const failures: AutoPostFailure[] = [];
   const capped: AutoPostCapped[] = [];
   const maxPerRule = options?.maxOccurrencesPerRule !== undefined ? options.maxOccurrencesPerRule : 5;
+  // In-process idempotency guard: prevents re-attempting the same (ruleId, nextDate)
+  // within a single call, which can happen when concurrent callers race and
+  // the loser receives a 409 and should re-read rather than retry.
+  const attemptedKeys = new Set<string>();
 
   for (const r of due) {
     let currentNextDate = r.nextDate;
     let occurrencesForThisRule = 0;
     while (currentNextDate <= validatedAsOfDate) {
+      const key = `${r.id}:${currentNextDate}`;
+      if (attemptedKeys.has(key)) break;
+      attemptedKeys.add(key);
+
       if (maxPerRule > 0 && occurrencesForThisRule >= maxPerRule) {
         capped.push({
           id: r.id,
@@ -607,19 +615,24 @@ export async function autoPostDueRecurringTransactions(
         if (!res.active || res.nextDate <= currentNextDate) break;
         currentNextDate = res.nextDate;
       } catch (err: any) {
+        const isConcurrency409 = err instanceof RecurringError && err.status === 409;
         failures.push({
           id: r.id,
           payee: r.payee,
           error: err instanceof Error ? err.message : String(err),
         });
-        // Deactivate the broken recurring rule so it doesn't repeatedly fail on every cycle
-        try {
-          await db
-            .update(recurring)
-            .set({ active: false })
-            .where(eq(recurring.id, r.id));
-        } catch {
-          // Ignore secondary update errors
+        // 409 = schedule mismatch / already posted (concurrent runner won).
+        // Do NOT deactivate — the rule is healthy, just beat by another process.
+        if (!isConcurrency409) {
+          // Deactivate the broken recurring rule so it doesn't repeatedly fail on every cycle
+          try {
+            await db
+              .update(recurring)
+              .set({ active: false })
+              .where(eq(recurring.id, r.id));
+          } catch {
+            // Ignore secondary update errors
+          }
         }
         break;
       }
