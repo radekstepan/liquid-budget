@@ -149,11 +149,11 @@ export function BudgetAppShell({
         );
         const assignments = existing
           ? prev.assignments.map((a) =>
-              a.id === existing.id ? { ...a, amount: amount.toFixed(2) } : a
+              a.id === existing.id ? { ...a, amount: String(Math.round(amount)) } : a
             )
           : [
               ...prev.assignments,
-              { id: -Date.now(), categoryId, month, amount: amount.toFixed(2) },
+              { id: -Date.now(), categoryId, month, amount: String(Math.round(amount)) },
             ];
         return { ...prev, assignments, budgetIndex: undefined };
       });
