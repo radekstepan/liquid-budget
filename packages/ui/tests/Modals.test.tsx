@@ -831,6 +831,39 @@ describe("TransactionModal", () => {
         payee: "Transfer : Brokerage",
       });
     });
+
+    it("disables destination account select and mode toggle when editing an existing transfer (BUG-04)", () => {
+      const initial: Transaction = {
+        id: 101,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Transfer : Credit",
+        memo: "",
+        amount: "-5000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+
+      // Destination select must be disabled to prevent silently ignored destination edits
+      const transferToBtn = screen.getByRole("button", { name: /transfer to/i });
+      expect(transferToBtn).toBeDisabled();
+
+      // Mode toggle must disable Single and Split buttons
+      expect(screen.getByRole("button", { name: /^single$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^split$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^transfer$/i })).toBeEnabled();
+    });
   });
 
   describe("split mode", () => {

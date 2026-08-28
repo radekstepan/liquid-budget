@@ -432,7 +432,7 @@ export function TransactionModal({
                 active={mode === m}
                 onClick={() => switchingMode(m)}
                 className="flex-1 capitalize"
-                disabled={!!isInitialSplit && m === "single"}
+                disabled={(!!isInitialSplit && m === "single") || (!!isInitialTransfer && m !== "transfer")}
               >
                 {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
               </Button>
@@ -502,6 +502,7 @@ export function TransactionModal({
                   onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
                   className="w-full"
                   searchable
+                  disabled={isInitialTransfer}
                 >
                   <option value="" disabled>Select account…</option>
                   {otherAccounts.map((a) => (

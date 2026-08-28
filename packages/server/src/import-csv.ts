@@ -138,7 +138,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       const categoryId = account.onBudget && row.category
         ? (categoryByName.get(row.category.trim().toLowerCase()) ?? null)
         : null;
-      const isIncome = categoryId == null && amount > 0 && !!account.onBudget;
+      const isIncome = categoryId == null && amount > 0 && !!account.onBudget && account.kind !== "credit";
       const [inserted] = await db
         .insert(transactions)
         .values({

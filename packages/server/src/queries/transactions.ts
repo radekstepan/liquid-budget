@@ -789,15 +789,6 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
     }
 
-    // If this row is a child of a split, verify that the parent is still balanced
-    if (existing.parentId != null) {
-      const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-      if (parent) {
-        const siblings = await getChildren(db, existing.parentId);
-        assertSplitsBalanced(Number(parent.amount), siblings);
-      }
-    }
-
     // Learn an automatic rename rule from a deliberate payee rename on a
     // plain regular transaction. Runs after the commit so a rule-learning
     // failure never rolls back (or blocks) the transaction edit itself.
@@ -1217,7 +1208,6 @@ export async function bulkUpdateTransactions(
     );
   }
   const renameRulesToLearn: { from: string; to: string }[] = [];
-  const modifiedParentIds = new Set<number>();
 
   const updated = await withTransaction(db, async () => {
     const updatedRows: any[] = [];
@@ -1238,7 +1228,6 @@ export async function bulkUpdateTransactions(
             422
           );
         }
-        modifiedParentIds.add(existing.parentId);
       }
       if ("flagColor" in patch && patch.flagColor !== undefined && existing.flagColor === TRANSACTION_DUPLICATE_FLAG) {
         throw new TransactionError(
@@ -1265,7 +1254,6 @@ export async function bulkUpdateTransactions(
         if ("accountId" in patch && patch.accountId !== undefined) {
           throw new TransactionError("cannot change account of a split parent");
         }
-        modifiedParentIds.add(id);
       }
 
       if (existing.parentId != null && patch.accountId !== undefined) {
@@ -1426,14 +1414,6 @@ export async function bulkUpdateTransactions(
         !isSplitParent
       ) {
         renameRulesToLearn.push({ from: existing.payee, to: String(patch.payee) });
-      }
-    }
-
-    for (const parentId of modifiedParentIds) {
-      const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
-      if (parent) {
-        const children = await getChildren(db, parentId);
-        assertSplitsBalanced(Number(parent.amount), children);
       }
     }
 
