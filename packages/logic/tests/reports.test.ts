@@ -156,6 +156,36 @@ describe("computeNetWorthReport", () => {
     expect(pts[1]?.net).toBe(94000);
   });
 
+  it("BUG-21: does not create phantom accounts for transactions referencing deleted or unknown account IDs", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "100000", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Starting", memo: "", amount: "100000", status: "c" },
+        // Transaction referencing deleted account 999
+        { id: 2, accountId: 999, categoryId: null, date: "2026-02-01", payee: "Orphaned", memo: "", amount: "50000", status: "c" },
+        // Transfer to deleted account 888
+        { id: 3, accountId: 1, transferAccountId: 888, categoryId: null, date: "2026-03-01", payee: "Transfer : Deleted", memo: "", amount: "-10000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    const pts = computeNetWorthReport(data, "2026-01", "2026-03");
+    expect(pts).toHaveLength(3);
+
+    // 2026-01: Chequing = 110000 (100000 balance + 10000 delta from 2026-03)
+    // Account 999 is ignored completely.
+    expect(pts[0]).toEqual({ month: "2026-01", assets: 110000, debts: 0, net: 110000 });
+    // 2026-02: Chequing = 110000, no phantom account 999
+    expect(pts[1]).toEqual({ month: "2026-02", assets: 110000, debts: 0, net: 110000 });
+    // 2026-03: Chequing = 100000, no phantom account 888
+    expect(pts[2]).toEqual({ month: "2026-03", assets: 100000, debts: 0, net: 100000 });
+  });
+
   it("clamps account balances to 0 for months prior to their opening activity (UNI-36 / F-17)", () => {
     const data: BudgetData = {
       accounts: [

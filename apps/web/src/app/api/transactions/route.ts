@@ -114,10 +114,12 @@ export async function POST(req: Request) {
           flagColor: body.flagColor ?? null,
         },
         body.subTransactions.map((c) => ({
+          id: c.id,
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
           amount: c.amount,
           memo: c.memo,
+          payee: c.payee,
         }))
       );
       return Response.json(result);
@@ -184,10 +186,12 @@ export async function PATCH(req: Request) {
         body.id,
         parentFields,
         body.subTransactions.map((c) => ({
+          id: c.id,
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
           amount: c.amount,
           memo: c.memo,
+          payee: c.payee,
         }))
       );
       return Response.json(result);

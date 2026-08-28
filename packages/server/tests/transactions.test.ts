@@ -728,6 +728,35 @@ describe("transactions queries", () => {
       ]);
     });
 
+    it("BUG-20: creates split with custom per-child payee when specified", async () => {
+      mock.respondWithNth("insert:transactions", 1, [
+        { id: 1, accountId: 7, categoryId: null, date: "2026-07-01", payee: "Costco", memo: "", amount: -10000, status: "c", parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 2 }]);
+      mock.respondWithNth("insert:transactions", 3, [{ id: 3 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await createSplitWithChildren(
+        mock.db,
+        {
+          accountId: 7,
+          date: "2026-07-01",
+          payee: "Costco",
+          memo: "",
+          amount: -10000,
+        },
+        [
+          { categoryId: 11, amount: -6000, payee: "Costco Pharmacy" },
+          { categoryId: 12, amount: -4000 },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ parentId: null, payee: "Costco" });
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, categoryId: 11, payee: "Costco Pharmacy" });
+      expect(inserts[2]?.values).toMatchObject({ parentId: 1, categoryId: 12, payee: "Costco" });
+    });
+
     it("rounds parent and child float amounts on insert", async () => {
       mock.respondWithNth("insert:transactions", 1, [
         { id: 1, accountId: 7, categoryId: null, date: "2026-07-01", payee: "Costco", memo: "", amount: -10000, status: "c", parentId: null, transferAccountId: null },
@@ -1095,6 +1124,72 @@ describe("transactions queries", () => {
       const inserts = mock.calls.filter((c) => c.op === "insert");
       expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -7000, memo: "new memo" });
       expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -3000, memo: "new memo" });
+    });
+
+    it("BUG-20: preserves custom child payee and updates non-custom payee when parent payee changes", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 2, accountId: 5, amount: -6000, payee: "Amazon Seller A", memo: "Item A", status: "c", transferAccountId: null, categoryId: 1 },
+        { id: 3, accountId: 5, amount: -4000, payee: "Amazon", memo: "Item B", status: "c", transferAccountId: null, categoryId: 2 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 10 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 11 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("select:rename_rules", []);
+      mock.respondWith("insert:rename_rules", [{ id: 1, rule: "Amazon", replacement: "Amazon.com" }]);
+
+      await updateSplit(
+        mock.db,
+        1,
+        { payee: "Amazon.com" },
+        [
+          { categoryId: 1, amount: -6000, memo: "Item A" },
+          { categoryId: 2, amount: -4000, memo: "Item B" },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      // Child 1 preserves its custom payee "Amazon Seller A"
+      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -6000, payee: "Amazon Seller A" });
+      // Child 2 had parent's old payee "Amazon", so it gets updated to "Amazon.com"
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon.com" });
+    });
+
+    it("BUG-20: updates child payee when explicitly specified in updateSplit subTransactions", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 2, accountId: 5, amount: -6000, payee: "Amazon Seller A", memo: "Item A", status: "c", transferAccountId: null, categoryId: 1 },
+        { id: 3, accountId: 5, amount: -4000, payee: "Amazon", memo: "Item B", status: "c", transferAccountId: null, categoryId: 2 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 10 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 11 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      await updateSplit(
+        mock.db,
+        1,
+        {},
+        [
+          { categoryId: 1, amount: -6000, memo: "Item A", payee: "New Seller A" },
+          { categoryId: 2, amount: -4000, memo: "Item B" },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -6000, payee: "New Seller A" });
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon" });
     });
 
     it("rejects a target row that has no children", async () => {
