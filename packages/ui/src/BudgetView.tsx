@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useMemo, Fragment } from "react";
-import type { GroupRow, CatRow, BudgetResult } from "@ynab/logic";
+import type { GroupRow, CatRow, BudgetResult, CategoryGroup } from "@ynab/logic";
 import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents } from "@ynab/logic";
 import {
   Icon,
@@ -34,12 +34,17 @@ function isEmptyRow(r: CatRow): boolean {
   return r.assigned === 0 && r.outflow === 0 && r.available === 0;
 }
 
-export function isInternalGroup(name: string): boolean {
+export function isInternalGroup(group: CategoryGroup | string): boolean {
+  const name = typeof group === "string" ? group : group.name;
   return name === "__Internal__" || name.toLowerCase() === "__internal__";
 }
 
-export function isHiddenGroup(name: string): boolean {
-  return name === "Hidden Categories" || name.toLowerCase() === "hidden categories";
+export function isHiddenGroup(group: CategoryGroup | string): boolean {
+  if (typeof group === "object" && group !== null) {
+    if (group.isHidden !== undefined) return Boolean(group.isHidden);
+    return group.name === "Hidden Categories" || group.name?.toLowerCase() === "hidden categories";
+  }
+  return group === "Hidden Categories" || group.toLowerCase() === "hidden categories";
 }
 
 const COL_A = "w-[120px]";
@@ -119,7 +124,7 @@ export const BudgetView = memo(function BudgetView({
     const srcId = dragGroupId.current;
     if (srcId == null || srcId === targetId || !onReorderGroup) return;
     const structureGroups = budget.groups.filter(
-      (g) => !g.group.isCreditCardPayments && !isInternalGroup(g.group.name) && !isHiddenGroup(g.group.name)
+      (g) => !g.group.isCreditCardPayments && !isInternalGroup(g.group) && !isHiddenGroup(g.group)
     );
     const srcIdx = structureGroups.findIndex((g) => g.group.id === srcId);
     const tgtIdx = structureGroups.findIndex((g) => g.group.id === targetId);
@@ -135,14 +140,14 @@ export const BudgetView = memo(function BudgetView({
     setGroupOverId(null);
   };
 
-  const visibleGroups = budget.groups.filter((g) => !isInternalGroup(g.group.name));
+  const visibleGroups = budget.groups.filter((g) => !isInternalGroup(g.group));
   const structureGroups = visibleGroups.filter(
-    (g) => !g.group.isCreditCardPayments && !isHiddenGroup(g.group.name)
+    (g) => !g.group.isCreditCardPayments && !isHiddenGroup(g.group)
   );
   const creditGroup = visibleGroups.find(
-    (g) => g.group.isCreditCardPayments && !isHiddenGroup(g.group.name)
+    (g) => g.group.isCreditCardPayments && !isHiddenGroup(g.group)
   );
-  const hiddenGroup = visibleGroups.find((g) => isHiddenGroup(g.group.name));
+  const hiddenGroup = visibleGroups.find((g) => isHiddenGroup(g.group));
 
   const quickFill =
     lastMonthAssignments ||
@@ -433,7 +438,7 @@ function GroupBlock({
   const [catOverId, setCatOverId] = useState<number | null>(null);
 
   const gRow = group;
-  const isSpecialGroup = group.group.isCreditCardPayments || isHiddenGroup(group.group.name);
+  const isSpecialGroup = group.group.isCreditCardPayments || isHiddenGroup(group.group);
 
   return (
     <>

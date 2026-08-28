@@ -119,6 +119,7 @@ export const AccountPatchSchema = z
 export const CategoryGroupCreateSchema = z.object({
   type: z.literal("group"),
   name: z.string().min(1).max(255),
+  isHidden: z.boolean().optional().default(false),
 });
 
 export const CategoryCreateSchema = z.object({
@@ -136,9 +137,10 @@ export const CategoryGroupPatchSchema = z
     type: z.literal("group"),
     name: z.string().min(1).max(255).optional(),
     sort: z.number().int().optional(),
+    isHidden: z.boolean().optional(),
   })
-  .refine((data) => data.name !== undefined || data.sort !== undefined, {
-    message: "At least one of name or sort must be provided",
+  .refine((data) => data.name !== undefined || data.sort !== undefined || data.isHidden !== undefined, {
+    message: "At least one of name, sort, or isHidden must be provided",
   });
 
 export const CategoryPatchSchema = z.object({

@@ -11,7 +11,10 @@ export class CategoryError extends Error {
   }
 }
 
-export type CreateCategoryGroupInput = { name: string };
+export type CreateCategoryGroupInput = {
+  name: string;
+  isHidden?: boolean;
+};
 export type CreateCategoryInput = {
   groupId: number;
   name: string;
@@ -35,7 +38,11 @@ export async function createCategoryGroup(db: Database, input: CreateCategoryGro
       .from(categoryGroups);
     const [row] = await db
       .insert(categoryGroups)
-      .values({ name: String(input.name ?? "New Group"), sort: Number(maxRow?.max ?? -1) + 1 })
+      .values({
+        name: String(input.name ?? "New Group"),
+        sort: Number(maxRow?.max ?? -1) + 1,
+        isHidden: Boolean(input.isHidden),
+      })
       .returning();
     return row;
   });
@@ -73,11 +80,13 @@ export async function updateCategoryGroup(
   patch: {
     name?: string;
     sort?: number;
+    isHidden?: boolean;
   }
 ) {
   const p: Record<string, unknown> = {};
   if (patch.name !== undefined) p.name = String(patch.name);
   if (patch.sort !== undefined) p.sort = Number(patch.sort);
+  if (patch.isHidden !== undefined) p.isHidden = Boolean(patch.isHidden);
   if (Object.keys(p).length === 0) {
     const [row] = await db.select().from(categoryGroups).where(eq(categoryGroups.id, id));
     return row;

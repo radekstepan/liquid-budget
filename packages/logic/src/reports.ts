@@ -197,10 +197,24 @@ export type CashFlowSummary = {
   savingsRate: number;
 };
 
+export type CashFlowRangeSummary = {
+  income: number;
+  outflow: number;
+  net: number;
+  savingsRate: number;
+};
+
 /**
- * Compute monthly cash flow (Income vs Outflow, Net, and Savings Rate %).
+ * Compute monthly cash flow across a contiguous month range (inclusive)
+ * applying budget-boundary logic.
  */
-export function computeCashFlow(data: BudgetData, month: string): CashFlowSummary {
+export function computeCashFlowRange(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): CashFlowRangeSummary {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
   const splitParentIds = new Set<number>();
   for (const t of data.transactions) {
     if (t.parentId != null) splitParentIds.add(t.parentId);
@@ -212,7 +226,8 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
 
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
-    if (t.date.slice(0, 7) !== month) continue;
+    const mk = t.date.slice(0, 7);
+    if (mk < actualStart || mk > actualEnd) continue;
 
     const amt = num(t.amount);
     const accA = accountMap.get(t.accountId);
@@ -245,7 +260,15 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
         ? 100
         : 0;
 
-  return { month, income, outflow, net, savingsRate };
+  return { income, outflow, net, savingsRate };
+}
+
+/**
+ * Compute monthly cash flow (Income vs Outflow, Net, and Savings Rate %).
+ */
+export function computeCashFlow(data: BudgetData, month: string): CashFlowSummary {
+  const flow = computeCashFlowRange(data, month, month);
+  return { month, ...flow };
 }
 
 export type TrailingNetWorthSummary = {

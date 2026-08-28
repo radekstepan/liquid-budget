@@ -144,6 +144,37 @@ describe("ReportsView", () => {
     expect(screen.getByText("$8,200.00")).toBeInTheDocument();
   });
 
+  it("excludes off-budget account activity from Overview income and expense totals (BUG-28)", () => {
+    const dataWithOffbudget: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+        { id: 2, name: "Brokerage", kind: "offbudget", groupLabel: "Tracking", balance: "0", onBudget: false, sort: 1 },
+      ],
+      groups: [],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Payroll", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "Groceries", memo: "", amount: "-5000", status: "c" },
+        // Off-budget dividend: +$1,000.00
+        { id: 3, accountId: 2, categoryId: null, date: "2026-06-10", payee: "Dividend", memo: "", amount: "100000", status: "c", isIncome: true },
+        // Off-budget fee: -$200.00
+        { id: 4, accountId: 2, categoryId: null, date: "2026-06-15", payee: "Advisor Fee", memo: "", amount: "-20000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    renderView({ data: dataWithOffbudget });
+    // Income must be $3,000.00, not $4,000.00
+    expect(screen.getByText("$3,000.00")).toBeInTheDocument();
+    // Expense must be -$50.00, not -$250.00
+    expect(screen.getByText("-$50.00")).toBeInTheDocument();
+    // Net must be $2,950.00, not $3,750.00
+    expect(screen.getByText("$2,950.00")).toBeInTheDocument();
+  });
+
   it("re-totals when the From month is narrowed", () => {
     renderView();
     pickFromOpenDropdownByValue(/from month/i, "5");

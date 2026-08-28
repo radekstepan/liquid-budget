@@ -661,5 +661,44 @@ describe("BudgetView", () => {
       renderView({ budget: budgetWithRedArrow, budgets: [budgetWithRedArrow] });
       expect(screen.getByLabelText("Red arrow: carry over")).toBeInTheDocument();
     });
+
+    it("renders user-created group named 'Hidden Categories' with isHidden: false in visible budget grid (BUG-30)", () => {
+      const budgetWithCustomHiddenName = makeBudget({
+        groups: [
+          {
+            group: { id: 1, name: "Hidden Categories", sort: 0, isCreditCardPayments: false, isHidden: false },
+            assigned: 10000,
+            outflow: 0,
+            available: 10000,
+            rows: [
+              {
+                category: {
+                  id: 10,
+                  groupId: 1,
+                  name: "Mystery Fund",
+                  sort: 0,
+                  carryover: "0",
+                  goalTarget: null,
+                  linkedAccountId: null,
+                },
+                carryoverIn: 0,
+                assigned: 10000,
+                outflow: 0,
+                ccBuffer: 0,
+                available: 10000,
+                fundedPct: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderView({ budget: budgetWithCustomHiddenName, budgets: [budgetWithCustomHiddenName] });
+      // Group header should be in document and category visible in normal budget grid
+      expect(screen.getByText("Hidden Categories")).toBeInTheDocument();
+      expect(screen.getByText("Mystery Fund")).toBeInTheDocument();
+      // Should not render as the collapsed special hidden group section at bottom
+      expect(screen.queryByText(/unhide/i)).not.toBeInTheDocument();
+    });
   });
 });

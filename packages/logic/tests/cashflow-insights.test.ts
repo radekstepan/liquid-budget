@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeCashFlow,
+  computeCashFlowRange,
   computeTrailingNetWorth,
   computeMonthlyInsights,
   getOffsetMonth,
@@ -115,6 +116,33 @@ describe("computeCashFlow", () => {
     expect(flow.outflow).toBe(100000);
     expect(flow.net).toBe(400000);
     expect(flow.savingsRate).toBe(80);
+  });
+
+  it("computes cash flow across a multi-month range and excludes off-budget account activity", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 },
+        { id: 2, name: "Investments", kind: "offbudget", groupLabel: "Tracking", balance: "1000000", onBudget: false, sort: 2 },
+      ],
+      groups: [],
+      categories: [{ id: 10, groupId: 1, name: "Groceries", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-04-01", payee: "Employer", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-100000", status: "c" },
+        { id: 3, accountId: 1, categoryId: null, date: "2026-05-01", payee: "Employer", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 4, accountId: 2, categoryId: null, date: "2026-05-10", payee: "Offbudget Outflow", memo: "", amount: "-50000", status: "c" },
+        { id: 5, accountId: 2, categoryId: null, date: "2026-05-15", payee: "Dividend", memo: "", amount: "100000", status: "c", isIncome: true },
+        { id: 6, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Employer", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 7, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "Supermarket", memo: "", amount: "-50000", status: "c" },
+      ],
+    };
+
+    const rangeFlow = computeCashFlowRange(data, "2026-04", "2026-06");
+    expect(rangeFlow.income).toBe(900000); // 300k + 300k + 300k, excluding dividend
+    expect(rangeFlow.outflow).toBe(150000); // 100k + 50k, excluding offbudget fee
+    expect(rangeFlow.net).toBe(750000);
   });
 });
 

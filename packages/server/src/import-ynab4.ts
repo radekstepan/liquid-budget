@@ -319,19 +319,24 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           mc.entityId !== "MasterCategory/CreditCardPayments"
       )
       .sort((a: any, b: any) => {
-        const aHidden = a.name === "Hidden Categories" || a.name?.toLowerCase() === "hidden categories";
-        const bHidden = b.name === "Hidden Categories" || b.name?.toLowerCase() === "hidden categories";
+        const aHidden = a.entityId === "MasterCategory/__Hidden__" || a.name === "Hidden Categories" || a.name?.toLowerCase() === "hidden categories";
+        const bHidden = b.entityId === "MasterCategory/__Hidden__" || b.name === "Hidden Categories" || b.name?.toLowerCase() === "hidden categories";
         if (aHidden !== bHidden) return aHidden ? 1 : -1;
         return (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0);
       });
 
     for (const mc of nonTombstoneMC) {
+      const isHidden =
+        mc.entityId === "MasterCategory/__Hidden__" ||
+        mc.name === "Hidden Categories" ||
+        mc.name?.toLowerCase() === "hidden categories";
       const [gRow] = await db
         .insert(categoryGroups)
         .values({
           name: mc.name,
           sort: groupSort++,
           isCreditCardPayments: false,
+          isHidden,
         })
         .returning();
 
