@@ -739,6 +739,12 @@ describe("parseAmount (BUG-20)", () => {
     expect(parseAmount("1 234,56")).toBe(1234.56);
   });
 
+  it("parses single dot-thousands group like European 1.500 as 1500 not 1.5 (BUG-10)", () => {
+    expect(parseAmount("1.500")).toBe(1500);
+    expect(parseAmount("1,500")).toBe(1500);
+    expect(parseAmount("1.500,50")).toBe(1500.5);
+  });
+
   it("rejects malformed numbers and unsupported suffixes (BUG-20)", () => {
     expect(parseAmount("12abc")).toBeNull();
     expect(parseAmount("123.45 USD")).toBeNull();

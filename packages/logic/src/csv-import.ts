@@ -364,7 +364,7 @@ export function parseAmount(input: string): number | null {
     num = Number(s);
   } else if (/^\d{1,3}(,\d{3})+$/.test(s)) {
     num = Number(s.replace(/,/g, ""));
-  } else if (/^\d{1,3}(\.\d{3}){2,}$/.test(s)) {
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
     num = Number(s.replace(/\./g, ""));
   } else if (/^\d{1,3}( \d{3})+$/.test(s)) {
     num = Number(s.replace(/ /g, ""));
