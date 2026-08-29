@@ -69,7 +69,6 @@ export function BudgetAppShell({
   const reloadSeqRef = useRef(0);
   const latestCompletedReloadSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
-  const mutationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const addToast = useCallback((message: string, tone: ToastItem["tone"] = "info") => {
     const t = createToast(message, tone);

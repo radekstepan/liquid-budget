@@ -23,7 +23,8 @@
     "db:import": "npx tsx apps/web/scripts/do-import.ts",
     "db:generate": "yarn workspace @ynab/web db:generate",
     "db:migrate": "yarn workspace @ynab/server db:migrate",
-    "coverage": "turbo run coverage"
+    "coverage": "turbo run coverage",
+    "check:artifacts": "node scripts/check-artifacts.mjs"
   },
   "devDependencies": {
     "turbo": "2.5.0",

@@ -5,7 +5,6 @@ import {
   getDefaultDb,
   postRecurringTransaction,
   updateRecurring,
-  withTransaction,
 } from "@ynab/server";
 import { z } from "zod";
 import { apiErrorResponse } from "../errors";
@@ -96,16 +95,26 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
+    // Bulk semantics (BUG-18.5): every bulk operation on this route uses
+    // per-item isolation — each post commits or fails in its own
+    // transaction (postRecurringTransaction wraps itself), so a single
+    // invalid item never rolls back the others. Failures are reported
+    // per id in `failures`, mirroring the autopost response shape.
     try {
-      const results = await withTransaction(db, async () => {
-        const list = [];
-        for (const id of parsed.data.ids) {
+      const results: unknown[] = [];
+      const failures: { id: number; error: string }[] = [];
+      for (const id of parsed.data.ids) {
+        try {
           const res = await postRecurringTransaction(db, id, parsed.data.date, true);
-          list.push(res);
+          results.push(res);
+        } catch (itemErr) {
+          failures.push({
+            id,
+            error: itemErr instanceof Error ? itemErr.message : String(itemErr),
+          });
         }
-        return list;
-      });
-      return Response.json({ postedCount: results.length, results });
+      }
+      return Response.json({ postedCount: results.length, results, failures });
     } catch (e) {
       return apiErrorResponse(e);
     }
@@ -176,6 +185,8 @@ export async function PATCH(req: Request) {
     const { ids, patch } = parseResult.data;
     try {
       const db = getDefaultDb();
+      // Per-item isolation (BUG-18.5): each update commits independently,
+      // so one invalid id cannot roll back the rest of the batch.
       const cleanPatch: Parameters<typeof updateRecurring>[2] = {};
       if (patch.flagColor !== undefined) cleanPatch.flagColor = patch.flagColor;
       if (patch.active !== undefined) cleanPatch.active = patch.active;
@@ -260,6 +271,9 @@ export async function DELETE(req: Request) {
   }
 
   try {
+    // Per-item isolation (BUG-18.5): each delete commits in its own
+    // transaction (deleteRecurring wraps itself), matching bulk-post and
+    // bulk-update. A mid-batch failure leaves earlier deletions committed.
     let deletedCount = 0;
     for (const singleId of parseResult.data.ids) {
       const deleted = await deleteRecurring(db, singleId);

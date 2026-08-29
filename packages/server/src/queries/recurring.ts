@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import {
+  assertSplitsBalanced,
   classifyBoundaryTransfer,
   isMonthBasedFrequency,
   isValidISODate,
@@ -95,35 +96,16 @@ export class RecurringError extends Error {
 }
 
 /**
- * Validate a set of recurring sub-transactions. Mirrors the
- * transaction-side `assertSplitsBalanced`.
- *
- * Children use their *signed* amounts so mixed-sign splits (e.g. a
- * Paycheck with a negative tax deduction) are supported. The signed
- * sum must equal the signed parent amount to the cent.
+ * Validate a set of recurring sub-transactions. The rules are
+ * single-sourced in `@ynab/logic`'s `assertSplitsBalanced` (BUG-18.3);
+ * this wrapper only converts the thrown error into a `RecurringError`
+ * so API routes surface it as a 4xx response.
  */
-function assertSplitsBalanced(
+function assertSplitsBalancedOr4xx(
   parentAmount: number,
   children: TxnSubTransactionInput[]
 ): void {
-  const validParent = assertValidAmount(parentAmount);
-  if (children.length < 2) {
-    throw new RecurringError("split must have at least two sub-transactions");
-  }
-  let sum = 0;
-  for (let i = 0; i < children.length; i++) {
-    const c = children[i]!;
-    const childAmount = assertValidAmount(c.amount);
-    sum += childAmount;
-    if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
-      throw new RecurringError(`sub-transaction ${i + 1} must have a category or transfer account`);
-    }
-  }
-  if (sum !== validParent) {
-    throw new RecurringError(
-      `split children do not sum to parent: ${sum} vs ${validParent}`
-    );
-  }
+  assertSplitsBalanced(parentAmount, children, (message) => new RecurringError(message, 400));
 }
 
 function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
@@ -186,7 +168,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
   const validatedFrequency = assertValidFrequency(input.frequency);
   const validatedNextDate = assertValidISODate(input.nextDate, "nextDate");
   if (norm.isSplit) {
-    assertSplitsBalanced(validatedAmount, norm.subTransactions!);
+    assertSplitsBalancedOr4xx(validatedAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
       if (c.transferAccountId != null && Number(c.transferAccountId) === Number(input.accountId)) {
         throw new RecurringError("transfer account must differ from source account");
@@ -305,7 +287,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       patch.amount !== undefined && patch.amount != null
         ? assertValidAmount(patch.amount)
         : assertValidAmount(existing.amount);
-    assertSplitsBalanced(parentAmount, norm.subTransactions!);
+    assertSplitsBalancedOr4xx(parentAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
       if (c.transferAccountId != null && Number(c.transferAccountId) === Number(effectiveAccountId)) {
         throw new RecurringError("transfer account must differ from source account");
@@ -328,7 +310,7 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       .from(recurringSubTransactions)
       .where(eq(recurringSubTransactions.recurringId, id));
     if (existingChildren.length > 0) {
-      assertSplitsBalanced(assertValidAmount(patch.amount), existingChildren);
+      assertSplitsBalancedOr4xx(assertValidAmount(patch.amount), existingChildren);
     }
   }
 

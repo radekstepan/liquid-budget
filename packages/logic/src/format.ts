@@ -483,8 +483,10 @@ export function isValidISOMonth(str: unknown): str is string {
  * Advance an ISO date (YYYY-MM-DD) by one step of the given frequency.
  * Supported frequencies: "daily", "weekly", "biweekly", "twiceamonth",
  * "every4weeks", "monthly", "everyothermonth", "every3months", "every4months",
- * "twiceayear", "yearly", "every2years".
- * Anything else falls back to monthly.
+ * "twiceayear", "yearly", "every2years". Unknown frequencies fall back to
+ * monthly. One-off frequencies ("never", "once") are returned unchanged —
+ * they have no next occurrence (BUG-18.4); callers that advance one-off
+ * schedules should deactivate the rule instead of relying on this function.
  *
  * Monthly and yearly advances clamp the day to the last valid day of the
  * target month — e.g. Jan 31 + 1 month → Feb 28, mirroring how YNAB handles
@@ -608,6 +610,11 @@ export function nextDateFor(
       d.setUTCDate(Math.min(anchorDay, lastDay));
       break;
     }
+    case "never":
+    case "once":
+      // One-off frequencies have no next occurrence — return the input
+      // unchanged instead of silently advancing monthly (BUG-18.4).
+      return iso;
     case "monthly":
     default: {
       d.setUTCDate(1);

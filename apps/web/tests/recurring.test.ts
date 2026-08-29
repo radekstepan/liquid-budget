@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
   createAccount,
@@ -6,7 +7,9 @@ import {
   createCategoryGroup,
   createRecurring,
   getDefaultDb,
+  recurring,
   resetAndSeedDatabase,
+  transactions,
 } from "@ynab/server";
 import { DELETE, PATCH, POST } from "../src/app/api/recurring/route";
 
@@ -237,6 +240,88 @@ describe("Recurring API routes (BUG-19, BUG-41, BUG-42)", () => {
       });
       const res = await PATCH(req);
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("BUG-18.5: bulk operations use per-item isolation", () => {
+    it("bulk-post commits the valid ids even when a middle id fails", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const rec1 = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        amount: -1000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        payee: "First",
+      });
+      const rec2 = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        amount: -2000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        payee: "Third",
+      });
+
+      // The 2nd id in the batch does not exist → its post fails; the 1st
+      // and 3rd must still be committed.
+      const req = new NextRequest("http://localhost:3000/api/recurring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk-post", ids: [rec1!.id, 999999, rec2!.id] }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.postedCount).toBe(2);
+      expect(json.failures).toEqual([
+        { id: 999999, error: "Recurring transaction not found" },
+      ]);
+
+      // Both valid posts were committed: schedules advanced and transaction
+      // rows exist on the fresh account.
+      const [r1] = await db.select().from(recurring).where(eq(recurring.id, rec1!.id));
+      const [r2] = await db.select().from(recurring).where(eq(recurring.id, rec2!.id));
+      expect(r1?.nextDate).toBe("2026-10-01");
+      expect(r2?.nextDate).toBe("2026-10-01");
+      const posted = await db.select().from(transactions).where(eq(transactions.accountId, account!.id));
+      expect(posted).toHaveLength(2);
+    });
+
+    it("bulk-delete deletes the valid ids even when a middle id is missing", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const rec1 = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        amount: -1000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        payee: "First",
+      });
+      const rec2 = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        amount: -2000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        payee: "Third",
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/recurring", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [rec1!.id, 999999, rec2!.id] }),
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.deletedCount).toBe(2);
+
+      const remaining = await db.select().from(recurring).where(eq(recurring.accountId, account!.id));
+      expect(remaining).toHaveLength(0);
     });
   });
 });

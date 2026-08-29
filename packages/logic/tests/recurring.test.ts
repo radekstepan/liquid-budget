@@ -11,8 +11,8 @@ import {
   netMonthlyAmount,
   RECURRING_FREQUENCIES,
   recurringFlavour,
-  validateRecurringSubTransactions,
 } from "../src/recurring.js";
+import { assertSplitsBalanced } from "../src/split.js";
 import type { Recurring, RecurringSubTransaction } from "../src/types.js";
 
 const base = (overrides: Partial<Recurring> = {}): Recurring => ({
@@ -181,74 +181,74 @@ describe("netMonthlyAmount", () => {
   });
 });
 
-describe("validateRecurringSubTransactions", () => {
-  it("returns null for a balanced split", () => {
-    expect(
-      validateRecurringSubTransactions(20000, [
+describe("assertSplitsBalanced for recurring sub-transactions (BUG-18.3)", () => {
+  it("accepts a balanced split of recurring sub-transactions", () => {
+    expect(() =>
+      assertSplitsBalanced(20000, [
         { categoryId: 1, amount: 12000 },
         { categoryId: 2, amount: 8000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
   it("rejects fewer than 2 children", () => {
-    expect(
-      validateRecurringSubTransactions(20000, [{ categoryId: 1, amount: 20000 }])
-    ).toMatch(/at least two/i);
+    expect(() =>
+      assertSplitsBalanced(20000, [{ categoryId: 1, amount: 20000 }])
+    ).toThrow(/at least two/);
   });
 
   it("rejects a negative child with no category and no transfer", () => {
-    expect(
-      validateRecurringSubTransactions(-20000, [
+    expect(() =>
+      assertSplitsBalanced(-20000, [
         { categoryId: 0, amount: -10000 },
         { categoryId: 2, amount: -10000 },
       ])
-    ).toMatch(/missing a category/i);
+    ).toThrow(/must have a category or transfer account/);
   });
 
   it("accepts a mixed-sign paycheck split with an income leg (null category)", () => {
-    expect(
-      validateRecurringSubTransactions(400000, [
+    expect(() =>
+      assertSplitsBalanced(400000, [
         { categoryId: null, amount: 500000 },
         { categoryId: 2, amount: -100000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
   it("rejects unbalanced children", () => {
-    expect(
-      validateRecurringSubTransactions(20000, [
+    expect(() =>
+      assertSplitsBalanced(20000, [
         { categoryId: 1, amount: 12000 },
         { categoryId: 2, amount: 7000 },
       ])
-    ).toMatch(/sum to/);
+    ).toThrow(/do not sum to parent/);
   });
 
   it("accepts a mixed-sign split (Paycheck + tax deduction)", () => {
-    expect(
-      validateRecurringSubTransactions(400000, [
+    expect(() =>
+      assertSplitsBalanced(400000, [
         { categoryId: 1, amount: 500000 },
         { categoryId: 2, amount: -100000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
   it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
-    expect(
-      validateRecurringSubTransactions(400000, [
+    expect(() =>
+      assertSplitsBalanced(400000, [
         { categoryId: 1, amount: 500000 },
         { categoryId: 2, amount: -100001 },
       ])
-    ).toMatch(/sum to/);
+    ).toThrow(/do not sum to parent/);
   });
 
   it("accepts a sub-transaction with both a category and a transfer account (boundary transfer leg)", () => {
-    expect(
-      validateRecurringSubTransactions(-5000, [
+    expect(() =>
+      assertSplitsBalanced(-5000, [
         { categoryId: 1, amount: -3000 },
         { categoryId: 2, transferAccountId: 3, amount: -2000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 });
 

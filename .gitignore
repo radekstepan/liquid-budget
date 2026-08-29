@@ -32,14 +32,21 @@ coverage/
 # turbo
 .turbo/
 
-budget.db*
-apps/web/budget.db*
-budget.test.db*
 .e2e/
 apps/web/.e2e/
-
-*.y4backup
 backup_extracted
+
+# Databases / personal financial data — NEVER commit these.
+# For a persistent DB outside the repo tree set the DATABASE_URL env var
+# (see packages/server/src/client.ts). Verify tracking with:
+#   yarn check:artifacts
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.y4backup
 
 # playwright
 playwright-report/
