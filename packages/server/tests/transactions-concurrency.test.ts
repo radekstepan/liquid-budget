@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
+import type { CsvImportRow } from "@ynab/logic";
 import {
   autoPostDueRecurringTransactions,
   createAccount,
@@ -16,6 +17,7 @@ import {
   createSplitWithChildren,
   createTransaction,
   createTransfer,
+  importCsvTransactions,
   postRecurringTransaction,
   upsertAssignment,
   withTransaction,
@@ -526,6 +528,57 @@ describe("SQLite transaction concurrency & serialization", () => {
       0
     );
     expect(totalFailures).toBeLessThanOrEqual(1);
+  });
+
+  it("prevents duplicate ledger rows on concurrent importCsvTransactions for the same CSV (BUG-08)", async () => {
+    const acct = await createAccount(db, { name: "Checking", balance: 0, onBudget: true });
+
+    const csvRow = (over: Partial<CsvImportRow>): CsvImportRow => ({
+      rowNumber: 2,
+      date: "2026-08-13",
+      payee: "Store",
+      memo: "",
+      category: "",
+      amountCents: -2808,
+      error: null,
+      ...over,
+    });
+
+    const rows = [
+      csvRow({ rowNumber: 2, payee: "Store", amountCents: -2808 }),
+      csvRow({ rowNumber: 3, payee: "Employer", amountCents: 50000 }),
+      csvRow({ rowNumber: 4, payee: "Restaurant", amountCents: -1500 }),
+    ];
+
+    // Fire two concurrent importCsvTransactions calls for the same account and same rows
+    const [res1, res2] = await Promise.allSettled([
+      importCsvTransactions(db, { accountId: acct.id, rows }),
+      importCsvTransactions(db, { accountId: acct.id, rows }),
+    ]);
+
+    // Both should succeed (no unhandled rejection)
+    expect(res1.status).toBe("fulfilled");
+    expect(res2.status).toBe("fulfilled");
+
+    // Verify exactly the expected number of transactions was created (not doubled)
+    const txRows = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, acct.id));
+    // createAccount with balance=0 does not insert a starting balance row, so 3 imported rows
+    expect(txRows).toHaveLength(3);
+
+    // The second import should have skipped all rows as duplicates
+    const result2 = (res2 as PromiseFulfilledResult<{ count: number; skipped: { reason: string }[] }>).value;
+    expect(result2.count).toBe(0);
+    expect(result2.skipped.length).toBe(3);
+    for (const entry of result2.skipped) {
+      expect(entry.reason).toBe("Matches an existing transaction");
+    }
+
+    // Account balance should reflect exactly one import (starting from 0)
+    const [freshAcct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct.id));
+    expect(freshAcct?.balance).toBe(-2808 + 50000 - 1500);
   });
 });
 

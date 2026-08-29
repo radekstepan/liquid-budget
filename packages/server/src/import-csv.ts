@@ -18,56 +18,55 @@ export type ImportCsvResult = {
 };
 
 export async function importCsvTransactions(db: Db, input: ImportCsvInput): Promise<ImportCsvResult> {
-  const [account] = await db.select().from(accounts).where(eq(accounts.id, input.accountId));
-  if (!account) {
-    throw new TransactionError("Account not found", 404);
-  }
-  const allAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts);
-  const accountNameById = new Map(allAccounts.map((a) => [a.id, a.name]));
-
-  const categoryRows = await db
-    .select({ id: categories.id, name: categories.name })
-    .from(categories);
-  const categoryByName = new Map<string, number>();
-  for (const c of categoryRows) {
-    const key = c.name.trim().toLowerCase();
-    if (!categoryByName.has(key)) categoryByName.set(key, c.id);
-  }
-  // Automatic payee rename rules are applied to every incoming row before
-  // duplicate detection and insertion, so re-importing a bank statement
-  // produces clean, consistent payee names.
-  const renameRules = getRenameRules(db);
-
-  // Build a fingerprint set from existing transactions in this account so
-  // re-importing a statement never doubles rows. Top-level plain transactions,
-  // split parents, and transfers are included.
-  const existingTx = await db
-    .select({
-      id: transactions.id,
-      accountId: transactions.accountId,
-      date: transactions.date,
-      payee: transactions.payee,
-      memo: transactions.memo,
-      amount: transactions.amount,
-      parentId: transactions.parentId,
-      transferAccountId: transactions.transferAccountId,
-    })
-    .from(transactions)
-    .where(
-      or(
-        eq(transactions.accountId, input.accountId),
-        eq(transactions.transferAccountId, input.accountId)
-      )
-    );
-
-  const existingFingerprints = buildExistingImportFingerprints(
-    input.accountId,
-    existingTx,
-    accountNameById,
-    renameRules
-  );
-
   return withTransaction(db, async () => {
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, input.accountId));
+    if (!account) {
+      throw new TransactionError("Account not found", 404);
+    }
+    const allAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts);
+    const accountNameById = new Map(allAccounts.map((a) => [a.id, a.name]));
+
+    const categoryRows = await db
+      .select({ id: categories.id, name: categories.name })
+      .from(categories);
+    const categoryByName = new Map<string, number>();
+    for (const c of categoryRows) {
+      const key = c.name.trim().toLowerCase();
+      if (!categoryByName.has(key)) categoryByName.set(key, c.id);
+    }
+    // Automatic payee rename rules are applied to every incoming row before
+    // duplicate detection and insertion, so re-importing a bank statement
+    // produces clean, consistent payee names.
+    const renameRules = getRenameRules(db);
+
+    // Build a fingerprint set from existing transactions in this account so
+    // re-importing a statement never doubles rows. Top-level plain transactions,
+    // split parents, and transfers are included.
+    const existingTx = await db
+      .select({
+        id: transactions.id,
+        accountId: transactions.accountId,
+        date: transactions.date,
+        payee: transactions.payee,
+        memo: transactions.memo,
+        amount: transactions.amount,
+        parentId: transactions.parentId,
+        transferAccountId: transactions.transferAccountId,
+      })
+      .from(transactions)
+      .where(
+        or(
+          eq(transactions.accountId, input.accountId),
+          eq(transactions.transferAccountId, input.accountId)
+        )
+      );
+
+    const existingFingerprints = buildExistingImportFingerprints(
+      input.accountId,
+      existingTx,
+      accountNameById,
+      renameRules
+    );
     const created: number[] = [];
     const skipped: ImportSkippedEntry[] = [];
     for (const rawRow of input.rows) {
