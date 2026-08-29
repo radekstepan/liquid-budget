@@ -12,6 +12,13 @@ export type CsvImportRow = {
 
 export type DateFormatConvention = "dmy" | "mdy";
 
+export type DateFormatDetection = {
+  convention: DateFormatConvention;
+  dmyVotes: number;
+  mdyVotes: number;
+  ambiguous: boolean;
+};
+
 export type CsvImportOptions = {
   swap?: boolean;
   dateFormat?: "auto" | "dmy" | "mdy";
@@ -21,6 +28,7 @@ export type CsvImportResult = {
   headerError: string | null;
   rows: CsvImportRow[];
   detectedDateFormat?: DateFormatConvention;
+  dateAmbiguous?: boolean;
 };
 
 const MONTH_MAP = new Map<string, number>();
@@ -184,6 +192,13 @@ function analyzeHeader(rawHeader: string[]) {
   };
 }
 
+const YEAR_PIVOT = 70;
+
+function expandYear(y: number): number {
+  if (y >= 100) return y;
+  return y < YEAR_PIVOT ? y + 2000 : y + 1900;
+}
+
 function toISO(y: string, mo: string, d: string): string | null {
   const Y = Number(y);
   const M = Number(mo);
@@ -198,14 +213,15 @@ function toISO(y: string, mo: string, d: string): string | null {
   return `${Y}-${pad(M)}-${pad(D)}`;
 }
 
-export function detectDateFormat(
+export function detectDateFormatDetailed(
   rows: string[][],
   dateIdx: number,
   headerIdx: number = 0,
   isMultiSection: boolean = false
-): DateFormatConvention {
+): DateFormatDetection {
   let dmyVotes = 0;
   let mdyVotes = 0;
+  let numericCandidates = 0;
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const cells = rows[i];
     if (!cells || cells.every((c) => c.trim() === "")) continue;
@@ -215,6 +231,7 @@ export function detectDateFormat(
 
     const mNum = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(raw);
     if (mNum) {
+      numericCandidates++;
       const dmyValid = parseDate(raw, "dmy") != null;
       const mdyValid = parseDate(raw, "mdy") != null;
       if (dmyValid && !mdyValid) dmyVotes++;
@@ -232,7 +249,21 @@ export function detectDateFormat(
       continue;
     }
   }
-  return mdyVotes > dmyVotes ? "mdy" : "dmy";
+  return {
+    convention: mdyVotes > dmyVotes ? "mdy" : "dmy",
+    dmyVotes,
+    mdyVotes,
+    ambiguous: numericCandidates > 0 && dmyVotes === mdyVotes,
+  };
+}
+
+export function detectDateFormat(
+  rows: string[][],
+  dateIdx: number,
+  headerIdx: number = 0,
+  isMultiSection: boolean = false
+): DateFormatConvention {
+  return detectDateFormatDetailed(rows, dateIdx, headerIdx, isMultiSection).convention;
 }
 
 export function parseDate(input: string, convention: DateFormatConvention = "dmy"): string | null {
@@ -248,8 +279,7 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
   if (m) {
     const n1 = Number(m[1]);
     const n2 = Number(m[2]);
-    let y = Number(m[3]);
-    if (y < 100) y += 2000;
+    const y = expandYear(Number(m[3]));
     const d = convention === "mdy" ? n2 : n1;
     const mo = convention === "mdy" ? n1 : n2;
     return toISO(String(y), String(mo), String(d));
@@ -267,8 +297,7 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
   if (m) {
     const mo = parseMonthName(m[1]!);
     if (mo != null) {
-      let y = Number(m[3]);
-      if (y < 100) y += 2000;
+      const y = expandYear(Number(m[3]));
       return toISO(String(y), String(mo), m[2]!);
     }
   }
@@ -278,8 +307,7 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
   if (m) {
     const mo = parseMonthName(m[2]!);
     if (mo != null) {
-      let y = Number(m[3]);
-      if (y < 100) y += 2000;
+      const y = expandYear(Number(m[3]));
       return toISO(String(y), String(mo), m[1]!);
     }
   }
@@ -463,12 +491,15 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   else if (outflowIdx < 0 && inflowIdx < 0 && amountIdx < 0)
     headerError = "Could not find an Outflow, Inflow, or Amount column";
 
-  const convention: DateFormatConvention =
-    opts?.dateFormat && opts.dateFormat !== "auto"
-      ? opts.dateFormat
-      : dateIdx >= 0
-        ? detectDateFormat(rows, dateIdx, headerIdx, isMultiSection)
-        : "dmy";
+  let convention: DateFormatConvention = "dmy";
+  let dateAmbiguous = false;
+  if (opts?.dateFormat && opts.dateFormat !== "auto") {
+    convention = opts.dateFormat;
+  } else if (dateIdx >= 0) {
+    const detection = detectDateFormatDetailed(rows, dateIdx, headerIdx, isMultiSection);
+    convention = detection.convention;
+    dateAmbiguous = detection.ambiguous;
+  }
 
   const parsedRows: CsvImportRow[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -534,5 +565,6 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
     headerError,
     rows: opts?.swap ? swapPayeeMemo(parsedRows, true) : parsedRows,
     detectedDateFormat: convention,
+    dateAmbiguous,
   };
 }

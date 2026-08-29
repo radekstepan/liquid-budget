@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectDateFormat,
+  detectDateFormatDetailed,
   parseAmount,
   parseCsv,
   parseCsvImport,
@@ -346,6 +347,28 @@ describe("parseCsvImport", () => {
     expect(mdyResult.rows[1]!.date).toBe("2026-04-06"); // April 6th
   });
 
+  it("surfaces dateAmbiguous when auto-detection had no disambiguating dates (BUG-15)", () => {
+    const ambiguousCsv = [
+      "Date,Payee,Amount",
+      "01/02/2026,Store A,-10.00",
+      "05/06/2026,Store B,-20.00",
+    ].join("\n");
+    const auto = parseCsvImport(ambiguousCsv);
+    expect(auto.detectedDateFormat).toBe("dmy");
+    expect(auto.dateAmbiguous).toBe(true);
+
+    const forced = parseCsvImport(ambiguousCsv, { dateFormat: "mdy" });
+    expect(forced.detectedDateFormat).toBe("mdy");
+    expect(forced.dateAmbiguous).toBe(false);
+
+    const clearCsv = [
+      "Date,Payee,Amount",
+      "13/08/2026,Store A,-10.00",
+      "01/02/2026,Store B,-20.00",
+    ].join("\n");
+    expect(parseCsvImport(clearCsv).dateAmbiguous).toBe(false);
+  });
+
   it("marks rows violating the chosen file convention as invalid date", () => {
     // If file is detected as DD/MM because of 14/08/2026, then 08/14/2026 (month 14) is invalid
     const csv = [
@@ -580,6 +603,57 @@ describe("detectDateFormat", () => {
   });
 });
 
+describe("detectDateFormatDetailed (BUG-15)", () => {
+  it("flags ambiguity when every numeric date is day/month ambiguous (all values <= 12)", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["01/02/2026", "Store", "-10.00"],
+      ["05/06/2026", "Store", "-20.00"],
+      ["11/12/2026", "Store", "-30.00"],
+    ];
+    const detail = detectDateFormatDetailed(rows, 0, 0);
+    expect(detail.convention).toBe("dmy");
+    expect(detail.dmyVotes).toBe(0);
+    expect(detail.mdyVotes).toBe(0);
+    expect(detail.ambiguous).toBe(true);
+  });
+
+  it("does not flag ambiguity when numeric dates disambiguate the convention", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["13/08/2026", "Store", "-10.00"],
+      ["01/02/2026", "Store", "-20.00"],
+    ];
+    const detail = detectDateFormatDetailed(rows, 0, 0);
+    expect(detail.convention).toBe("dmy");
+    expect(detail.ambiguous).toBe(false);
+  });
+
+  it("does not flag ambiguity when there are no numeric date candidates", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["2026-08-01", "Store", "-10.00"],
+      ["15-Aug-2026", "Store", "-20.00"],
+    ];
+    const detail = detectDateFormatDetailed(rows, 0, 0);
+    expect(detail.convention).toBe("dmy");
+    expect(detail.ambiguous).toBe(false);
+  });
+
+  it("flags ambiguity on a tied vote", () => {
+    const rows = [
+      ["Date", "Payee", "Amount"],
+      ["13/08/2026", "Store", "-10.00"],
+      ["05/13/2026", "Store", "-20.00"],
+    ];
+    const detail = detectDateFormatDetailed(rows, 0, 0);
+    expect(detail.dmyVotes).toBe(1);
+    expect(detail.mdyVotes).toBe(1);
+    expect(detail.convention).toBe("dmy");
+    expect(detail.ambiguous).toBe(true);
+  });
+});
+
 describe("parseDate", () => {
   it("parses dates with explicit convention", () => {
     expect(parseDate("08/05/2026", "mdy")).toBe("2026-08-05");
@@ -591,6 +665,15 @@ describe("parseDate", () => {
   it("parses 2-digit years", () => {
     expect(parseDate("08/05/26", "mdy")).toBe("2026-08-05");
     expect(parseDate("05/08/26", "dmy")).toBe("2026-08-05");
+  });
+
+  it("applies a two-digit year pivot: <70 to 2000s, otherwise 1900s (BUG-15)", () => {
+    expect(parseDate("31/12/99", "dmy")).toBe("1999-12-31");
+    expect(parseDate("02/01/50", "dmy")).toBe("2050-01-02");
+    expect(parseDate("12/31/68", "mdy")).toBe("2068-12-31");
+    expect(parseDate("01/12/70", "dmy")).toBe("1970-12-01");
+    expect(parseDate("15-Aug-26")).toBe("2026-08-15");
+    expect(parseDate("Aug 15, 99")).toBe("1999-08-15");
   });
 
   it("parses ISO dates regardless of convention", () => {
