@@ -166,10 +166,9 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
  * as well as recurring transfer rules and linked categories.
  */
 export async function deleteAccount(db: Database, id: number) {
-  const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
-  if (!account) return null;
-
   return withTransaction(db, async () => {
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
+    if (!account) return null;
     // Check if the account contains any reconciled transactions
     const [reconciled] = await db
       .select({ id: transactions.id })
