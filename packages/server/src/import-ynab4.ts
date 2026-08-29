@@ -17,6 +17,70 @@ import { accounts, assignments, categoryGroups, categories, reconciliations, rec
 import { resetDatabase } from "./seed.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
 
+/**
+ * Detect whether YNAB4 amounts are stored as milliunits (integer × 1000) or
+ * decimal dollars (float). Stock YNAB4 backups encode amounts as milliunits
+ * (e.g. -45000 for −$45.00), but this repo's backup.y4backup has been
+ * converted to decimal dollars (e.g. -45.00). We detect the scale by
+ * checking whether any amount has a non-zero fractional part (→ dollars) and
+ * comparing the max magnitude against a threshold (→ milliunits).
+ */
+function detectMilliunitScale(ynabData: any): boolean {
+  const amounts: number[] = [];
+
+  const collect = (v: unknown) => {
+    if (v == null) return;
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n) && n !== 0) amounts.push(n);
+  };
+
+  for (const t of ynabData.transactions || []) {
+    if (t.isTombstone) continue;
+    collect(t.amount);
+    for (const st of t.subTransactions || []) {
+      if (st.isTombstone) continue;
+      collect(st.amount);
+    }
+  }
+  for (const mb of ynabData.monthlyBudgets || []) {
+    if (mb.isTombstone) continue;
+    for (const msb of mb.monthlySubCategoryBudgets || []) {
+      if (msb.isTombstone) continue;
+      collect(msb.budgeted);
+    }
+  }
+  for (const st of ynabData.scheduledTransactions || []) {
+    if (st.isTombstone) continue;
+    collect(st.amount);
+    for (const sub of st.subTransactions || []) {
+      if (sub.isTombstone) continue;
+      collect(sub.amount);
+    }
+  }
+  for (const r of ynabData.reconciliations || []) {
+    if (r.isTombstone) continue;
+    collect(r.statementBalance);
+  }
+  for (const acc of ynabData.accounts || []) {
+    if (acc.isTombstone) continue;
+    collect(acc.lastReconciledBalance);
+  }
+
+  if (amounts.length === 0) return false;
+
+  // If any amount has a fractional part → decimal dollars
+  for (const a of amounts) {
+    if (a % 1 !== 0) return false;
+  }
+
+  // All amounts are integers. If the max magnitude exceeds 10^6 it's
+  // almost certainly milliunits (in decimal dollars that would be $10K+,
+  // which exceeds the typical personal-budget range). This heuristic
+  // is recommended by the BUG-01 report.
+  const maxAbs = Math.max(...amounts.map((a) => Math.abs(a)));
+  return maxAbs > 1_000_000;
+}
+
 export interface Ynab4Settings {
   currencySymbol?: string;
   currencyISOSymbol?: string;
@@ -113,6 +177,14 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
 
 export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: string | Ynab4Settings) {
   return withTransaction(db, async () => {
+    // Detect amount scale: stock YNAB4 backups use milliunits (×1000),
+    // but decimal-dollar conversions also exist. See BUG-01.
+    const isMilliunit = detectMilliunitScale(ynabData);
+    const convertAmount = (v: unknown): number =>
+      isMilliunit
+        ? Math.round(Number(v ?? 0) / 10)
+        : dollarsToCents(v as string | number | null | undefined);
+
     // 1. Wipe current data
     await resetDatabase(db, true);
 
@@ -173,11 +245,11 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           recDate = acc.lastReconciledDate || latestRec.statementDate || latestRec.reconciledAt || todayISO();
           recBalance =
             acc.lastReconciledBalance != null
-              ? dollarsToCents(Number(acc.lastReconciledBalance))
-              : dollarsToCents(latestRec.statementBalance);
+              ? convertAmount(Number(acc.lastReconciledBalance))
+              : convertAmount(latestRec.statementBalance);
         } else if (acc.lastReconciledDate != null) {
           recDate = acc.lastReconciledDate;
-          recBalance = acc.lastReconciledBalance != null ? dollarsToCents(Number(acc.lastReconciledBalance)) : null;
+          recBalance = acc.lastReconciledBalance != null ? convertAmount(Number(acc.lastReconciledBalance)) : null;
         }
       } else {
         // Check if account has reconciled transactions or lastReconciledDate
@@ -196,13 +268,13 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               if (isTopLevelReconciled) {
                 hasReconciledRows = true;
                 if (t.date) reconciledTxDates.push(t.date);
-                reconciledSumCents += dollarsToCents(t.amount || 0);
+                reconciledSumCents += convertAmount(t.amount || 0);
               } else {
                 for (const st of t.subTransactions) {
                   if (!st.isTombstone && st.cleared === "Reconciled") {
                     hasReconciledRows = true;
                     if (t.date) reconciledTxDates.push(t.date);
-                    reconciledSumCents += dollarsToCents(st.amount || 0);
+                    reconciledSumCents += convertAmount(st.amount || 0);
                   }
                 }
               }
@@ -210,7 +282,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               if (isTopLevelReconciled) {
                 hasReconciledRows = true;
                 if (t.date) reconciledTxDates.push(t.date);
-                reconciledSumCents += dollarsToCents(t.amount || 0);
+                reconciledSumCents += convertAmount(t.amount || 0);
               }
             }
           } else {
@@ -220,7 +292,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             if (isTopTransferTarget && isTopLevelReconciled && !hasSubs) {
               hasReconciledRows = true;
               if (t.date) reconciledTxDates.push(t.date);
-              reconciledSumCents += -dollarsToCents(t.amount || 0);
+              reconciledSumCents += -convertAmount(t.amount || 0);
             } else if (hasSubs) {
               for (const st of t.subTransactions) {
                 if (st.isTombstone) continue;
@@ -230,7 +302,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
                 if (isSubTransferTarget && (isTopLevelReconciled || st.cleared === "Reconciled")) {
                   hasReconciledRows = true;
                   if (t.date) reconciledTxDates.push(t.date);
-                  reconciledSumCents += -dollarsToCents(st.amount || 0);
+                  reconciledSumCents += -convertAmount(st.amount || 0);
                 }
               }
             }
@@ -248,7 +320,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           recDate = latestDate || todayISO();
 
           if (acc.lastReconciledBalance != null) {
-            recBalance = dollarsToCents(Number(acc.lastReconciledBalance));
+            recBalance = convertAmount(Number(acc.lastReconciledBalance));
           } else {
             recBalance = reconciledSumCents;
           }
@@ -277,7 +349,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         for (const r of accRecs) {
           const rDate = r.reconciledAt || r.statementDate || recDate || todayISO();
           const sDate = r.statementDate || r.reconciledAt || recDate || todayISO();
-          const sBal = dollarsToCents(r.statementBalance);
+          const sBal = convertAmount(r.statementBalance);
           const [rec] = await db
             .insert(reconciliations)
             .values({
@@ -410,9 +482,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         matchingSc?.entityVersion?.overspendingHandling === "OverspendCarriedForward" ||
         false;
       const initialCarryover = matchingSc?.cachedBalance
-        ? dollarsToCents(Number(matchingSc.cachedBalance))
+        ? convertAmount(Number(matchingSc.cachedBalance))
         : matchingSc?.carryover
-        ? dollarsToCents(Number(matchingSc.carryover))
+        ? convertAmount(Number(matchingSc.carryover))
         : 0;
 
       const [cRow] = await db
@@ -444,7 +516,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         if (msb.budgeted !== 0 && msb.budgeted != null) {
           const catId = categoryIdMap.get(msb.categoryId);
           if (catId) {
-            const amt = dollarsToCents(msb.budgeted);
+            const amt = convertAmount(msb.budgeted);
             await db
               .insert(assignments)
               .values({
@@ -571,7 +643,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             date: t.date,
             payee,
             memo: t.memo || "",
-            amount: dollarsToCents(t.amount),
+            amount: convertAmount(t.amount),
             status: effectiveParentStatus,
             flagColor: ynabFlagToColor(t.flag),
             transferAccountId: null,
@@ -614,7 +686,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               subPayee = payee;
             }
 
-            const childAmt = dollarsToCents(st.amount);
+            const childAmt = convertAmount(st.amount);
             let isChildIncome = false;
             let childIncomeMonth: string | null = null;
 
@@ -672,7 +744,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee: subPayee,
               memo: st.memo || "",
-              amount: dollarsToCents(st.amount),
+              amount: convertAmount(st.amount),
               status: effectiveChildStatus,
               flagColor: ynabFlagToColor(st.flag),
               transferAccountId: subTransferAccountId,
@@ -710,7 +782,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             date: t.date,
             payee: payeeMap.get(t.payeeId) || "",
             memo: t.memo || "",
-            amount: dollarsToCents(t.amount),
+            amount: convertAmount(t.amount),
             reason: "Duplicate counterpart of a split transfer",
           });
           continue;
@@ -723,7 +795,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee: payeeMap.get(t.payeeId) || "",
               memo: t.memo || "",
-              amount: dollarsToCents(t.amount),
+              amount: convertAmount(t.amount),
               reason: "Duplicate transfer counterpart",
             });
             continue;
@@ -791,7 +863,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             const sourceIsOnBudget = accOnBudgetMap.get(sourceAccEntityId) ?? true;
             const destIsOnBudget = accOnBudgetMap.get(destAccEntityId) ?? true;
             const isCrossBoundaryTransfer = sourceIsOnBudget !== destIsOnBudget;
-            const rawCents = dollarsToCents(rawAmount);
+            const rawCents = convertAmount(rawAmount);
             const netOnBudget = (sourceIsOnBudget ? rawCents : 0) + (destIsOnBudget ? -rawCents : 0);
             const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
             const isSpecialIncomeCat =
@@ -829,7 +901,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee,
               memo,
-              amount: dollarsToCents(rawAmount),
+              amount: convertAmount(rawAmount),
               status:
                 isTxReconciled
                   ? txRecId != null ? "r" : "c"
@@ -891,7 +963,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee,
               memo,
-              amount: dollarsToCents(t.amount),
+              amount: convertAmount(t.amount),
               status:
                 isTxReconciled
                   ? txRecId != null ? "r" : "c"
@@ -961,7 +1033,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee,
               memo: t.memo || "",
-              amount: dollarsToCents(t.amount),
+              amount: convertAmount(t.amount),
             });
             if (plainFingerprints.has(fp)) {
               if (t.cleared !== "Reconciled" && flagColor === null) {
@@ -990,7 +1062,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             date: t.date,
             payee,
             memo: t.memo || "",
-            amount: dollarsToCents(t.amount),
+            amount: convertAmount(t.amount),
             status:
               isTxReconciled
                 ? txRecId != null ? "r" : "c"
@@ -1142,16 +1214,16 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const rawSubs = (st.subTransactions || []).filter((sub: any) => !sub.isTombstone);
       const hasSubs = rawSubs.length >= 2;
 
-      let parentAmount = dollarsToCents(st.amount);
+      let parentAmount = convertAmount(st.amount);
       if (hasSubs) {
         catId = null;
         transferAccountId = null;
         // Rebalance parent amount to match the sum of sub-transactions to guarantee split balance invariant
-        parentAmount = rawSubs.reduce((sum: number, sub: any) => sum + dollarsToCents(sub.amount), 0);
+        parentAmount = rawSubs.reduce((sum: number, sub: any) => sum + convertAmount(sub.amount), 0);
       } else if (rawSubs.length === 1) {
         // A single child is not a valid split; collapse to a regular recurring transaction
         const single = rawSubs[0]!;
-        parentAmount = dollarsToCents(single.amount);
+        parentAmount = convertAmount(single.amount);
         catId = (accIsOnBudget && categoryIdMap.get(single.categoryId)) || null;
         if (
           single.categoryId === "Category/__ImmediateIncome__" ||
@@ -1274,7 +1346,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             subTransferAccountId = null;
           }
 
-          const childAmt = dollarsToCents(sub.amount);
+          const childAmt = convertAmount(sub.amount);
           if (subTransferAccountId != null) {
             const destAccEntity = sub.targetAccountId || (sub.payeeId?.startsWith("Payee/Transfer:") ? sub.payeeId.split(":")[1] : "");
             const destIsOnBudget = destAccEntity ? (accOnBudgetMap.get(destAccEntity) ?? false) : (allAccountsForMap.find((a) => a.id === subTransferAccountId)?.onBudget ?? false);
