@@ -150,6 +150,62 @@ describe("format", () => {
 
   it("dollarsToCents throws RangeError on overflow", () => {
     expect(() => dollarsToCents(1e16)).toThrow(RangeError);
+    expect(() => dollarsToCents(1e21)).toThrow(RangeError);
+    expect(() => dollarsToCents(-1e21)).toThrow(RangeError);
+    expect(() => dollarsToCents(90071992547409.92)).toThrow(RangeError);
+    expect(() => dollarsToCents("90071992547409.92")).toThrow(RangeError);
+  });
+
+  it("dollarsToCents handles fractional-cent edge cases exactly (BUG-04)", () => {
+    expect(dollarsToCents(0.295)).toBe(30);
+    expect(dollarsToCents(-0.295)).toBe(-30);
+    expect(dollarsToCents(2.675)).toBe(268);
+    expect(dollarsToCents(8.545)).toBe(855);
+    expect(dollarsToCents(1.15)).toBe(115);
+    expect(dollarsToCents(0.57)).toBe(57);
+    expect(dollarsToCents(1234567.89)).toBe(123456789);
+    expect(dollarsToCents("1234567.89")).toBe(123456789);
+    expect(dollarsToCents(0.005)).toBe(1);
+    expect(dollarsToCents(0.004999999999999999)).toBe(0);
+  });
+
+  it("dollarsToCents maps sub-micro amounts to unsigned zero (BUG-04)", () => {
+    expect(dollarsToCents(1e-7)).toBe(0);
+    expect(dollarsToCents(-1e-7)).toBe(0);
+    expect(dollarsToCents("1e-7")).toBe(0);
+    expect(Object.is(dollarsToCents(-1e-7), -0)).toBe(false);
+  });
+
+  it("dollarsToCents matches exact decimal rounding on randomized inputs (BUG-04)", () => {
+    // Independent reference: exact rational arithmetic via BigInt, rounding
+    // half away from zero as floor(x + 1/2) on the decimal digit string.
+    const exactCents = (n: number): number => {
+      if (n === 0 || !Number.isFinite(n)) return 0;
+      const sign = n < 0 ? -1 : 1;
+      const absStr = String(Math.abs(n));
+      if (absStr.includes("e")) return 0; // |n| < 1e-6 in generated range
+      const [intStr, fracStr = ""] = absStr.split(".");
+      const numerator = BigInt(intStr + fracStr);
+      const denominator = BigInt(10) ** BigInt(fracStr.length);
+      return sign * Number((BigInt(2) * numerator * BigInt(100) + denominator) / (BigInt(2) * denominator));
+    };
+
+    for (let i = 0; i < 5000; i++) {
+      const mode = i % 3;
+      let x: number;
+      if (mode === 0) x = Math.floor(Math.random() * 9e12) / 100;
+      else if (mode === 1) x = (Math.floor(Math.random() * 9e12) + 0.5) / 100;
+      else x = (Math.random() - 0.5) * 2e10;
+      if (i % 2) x = -x;
+
+      expect(dollarsToCents(x)).toBe(exactCents(x));
+      expect(dollarsToCents(String(x))).toBe(exactCents(x));
+
+      // Well-behaved inputs (cents-exact repr): naive float rounding agrees.
+      if ((String(Math.abs(x)).split(".")[1] ?? "").length <= 2) {
+        expect(dollarsToCents(x)).toBe(Math.round(x * 100));
+      }
+    }
   });
 
   it("monthKey zero-pads single-digit months", () => {
