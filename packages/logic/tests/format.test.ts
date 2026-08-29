@@ -386,6 +386,41 @@ describe("format", () => {
       expect(d31).toBe("2026-04-30");
     });
 
+    it("keeps the 1st/16th cadence for anchorDay = 16 (BUG-06)", () => {
+      // anchor 16: pair is 1st and 16th. The 16th belongs to the "second half"
+      // even though d1 (1) < d2 (16), so it must advance to next month's 1st.
+      expect(nextDateFor("twiceamonth", "2026-01-16", 16)).toBe("2026-02-01");
+      expect(nextDateFor("twiceamonth", "2026-02-01", 16)).toBe("2026-02-16");
+      expect(nextDateFor("twiceamonth", "2026-02-16", 16)).toBe("2026-03-01");
+      expect(nextDateFor("twiceamonth", "2026-04-30", 16)).toBe("2026-05-01");
+      expect(nextDateFor("semimonthly", "2026-12-16", 16)).toBe("2027-01-01");
+    });
+
+    it("keeps semimonthly intervals within 12-18 days for every anchor day over 24 months (BUG-06)", () => {
+      const diffDays = (a: string, b: string) =>
+        Math.round(
+          (Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) /
+            86400000
+        );
+      const violations: string[] = [];
+      for (let anchor = 1; anchor <= 31; anchor++) {
+        // Seed from the anchor day itself; hand-set off-schedule dates may
+        // legitimately jump further than one cadence step to the next target.
+        let d = `2026-01-${String(Math.min(anchor, 28)).padStart(2, "0")}`;
+        d = nextDateFor("twiceamonth", d, anchor);
+        // 48 advances ≈ 24 months of twice-a-month occurrences
+        for (let i = 0; i < 48; i++) {
+          const prev = d;
+          d = nextDateFor("twiceamonth", d, anchor);
+          const gap = diffDays(prev, d);
+          if (gap < 12 || gap > 18) {
+            violations.push(`anchor=${anchor} gap=${gap}d ${prev} -> ${d}`);
+          }
+        }
+      }
+      expect(violations).toEqual([]);
+    });
+
     it("prevents quarterly and multi-month schedule drift (BUG-06)", () => {
       // Quarterly starting 2025-11-30 (anchor 30):
       let d = "2025-11-30";
