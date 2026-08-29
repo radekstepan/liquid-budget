@@ -7,6 +7,7 @@ import type {
   TransactionFlagState,
 } from "@ynab/logic";
 import {
+  assertSplitsBalanced,
   classifyBoundaryTransfer,
   isValidISODate,
   isValidISOMonth,
@@ -187,35 +188,15 @@ async function getChildren(
 
 /**
  * Validate that a set of sub-transactions constitutes a balanced split.
- * Throws TransactionError if not. Rules:
- *   - at least 2 children
- *   - every child has a category or transfer account
- *   - the *signed* sum of child amounts matches the *signed* parent amount
- *     to the cent. Mixed signs are allowed (e.g. a Paycheck with a negative
- *     tax deduction) so the children retain their original sign.
+ * The rules are single-sourced in `@ynab/logic`'s `assertSplitsBalanced`
+ * (BUG-18.3); this wrapper only converts the thrown error into a
+ * `TransactionError` so API routes surface it as a 4xx response.
  */
-export function assertSplitsBalanced(
+function assertSplitsBalancedOr4xx(
   parentAmount: number,
   children: SubTransactionInput[]
 ): void {
-  const validParent = assertValidAmount(parentAmount);
-  if (children.length < 2) {
-    throw new TransactionError("split must have at least two sub-transactions");
-  }
-  let sum = 0;
-  for (let i = 0; i < children.length; i++) {
-    const c = children[i]!;
-    const childAmount = assertValidAmount(c.amount);
-    if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
-      throw new TransactionError(`sub-transaction ${i + 1} must have a category or transfer account`);
-    }
-    sum += childAmount;
-  }
-  if (sum !== validParent) {
-    throw new TransactionError(
-      `split children do not sum to parent: ${sum} vs ${validParent}`
-    );
-  }
+  assertSplitsBalanced(parentAmount, children, (message) => new TransactionError(message, 400));
 }
 
 /**
@@ -285,9 +266,11 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       incomeMonth = null;
     } else {
       categoryId = input.categoryId ?? null;
-      const isEligibleForIncome =
-        categoryId == null &&
-        input.parentId == null;
+      // Uncategorized positive inflow = income, regardless of split
+      // nesting — this matches `createSplitWithChildren`'s child
+      // semantics (BUG-18.2). Split children honour an explicit
+      // `isIncome` override just like top-level rows do.
+      const isEligibleForIncome = categoryId == null;
       isIncome = isEligibleForIncome
         ? (input.isIncome !== undefined ? Boolean(input.isIncome) : amount > 0)
         : false;
@@ -415,7 +398,7 @@ export async function createSplitWithChildren(
 ) {
   const parentAmount = assertValidAmount(parent.amount);
   assertValidISODate(parent.date, "date");
-  assertSplitsBalanced(parentAmount, children);
+  assertSplitsBalancedOr4xx(parentAmount, children);
 
   const parentStatus = parent.status ?? "c";
   if (parentStatus === "r") {
@@ -676,9 +659,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.isIncome = false;
     } else {
       const finalCatId = "categoryId" in p ? p.categoryId : current.categoryId;
-      const isEligibleForIncome =
-        current.parentId == null &&
-        finalCatId == null;
+      // Matches `createSplitWithChildren` / createSplit update semantics:
+      // an uncategorized positive inflow is income even when it is a
+      // split child (BUG-18.2).
+      const isEligibleForIncome = finalCatId == null;
 
       const isIncome = isEligibleForIncome
         ? ("isIncome" in p ? Boolean(p.isIncome) : newAmount > 0)
@@ -810,7 +794,7 @@ export async function updateSplit(
       parentFields.amount !== undefined && parentFields.amount != null
         ? assertValidAmount(parentFields.amount)
         : assertValidAmount(parent.amount);
-    assertSplitsBalanced(parentAmount, children);
+    assertSplitsBalancedOr4xx(parentAmount, children);
 
     for (const c of children) {
       if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {

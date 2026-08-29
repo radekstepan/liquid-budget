@@ -6,7 +6,6 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
-  assertSplitsBalanced,
   bulkDeleteTransactions,
   bulkUpdateTransactions,
   createSplitWithChildren,
@@ -17,6 +16,7 @@ import {
   updateSplit,
   updateTransaction,
 } from "../src/queries/transactions.js";
+import { assertSplitsBalanced } from "@ynab/logic";
 import * as schema from "../src/schema.js";
 import { reconcileAccount, unreconcileAccount } from "../src/queries/reconcile.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
@@ -623,7 +623,7 @@ describe("transactions queries", () => {
     it("rejects a single sub-transaction", () => {
       expect(() =>
         assertSplitsBalanced(-5000, [{ categoryId: 1, amount: -5000 }])
-      ).toThrow(TransactionError);
+      ).toThrow(/at least two/);
     });
 
     it("rejects a missing category or transfer account", () => {
@@ -4035,6 +4035,126 @@ describe("transactions queries", () => {
         expect(parentRow?.date).toBe("2026-08-20");
         expect(child1Row?.date).toBe("2026-08-20");
         expect(child2Row?.date).toBe("2026-08-20");
+      });
+    });
+
+    describe("BUG-18.2: split-child income parity", () => {
+      it("createTransaction(parentId) marks uncategorized positive children as income, matching createSplitWithChildren", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+
+        // Engine-level path: split parent + one uncategorized positive child,
+        // one categorized negative child, via createTransaction(parentId).
+        const parentA = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Parent A",
+          memo: "",
+          amount: 300,
+          skipBalance: true,
+        });
+        const enginePositiveChild = await createTransaction(db, {
+          accountId,
+          parentId: parentA!.id,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Income leg",
+          memo: "",
+          amount: 500,
+        });
+        const engineCategorizedChild = await createTransaction(db, {
+          accountId,
+          parentId: parentA!.id,
+          categoryId: cat1Id,
+          date: "2026-08-01",
+          payee: "Expense leg",
+          memo: "",
+          amount: -200,
+        });
+
+        // Split-handler path for the same child shapes.
+        const splitB = await createSplitWithChildren(
+          db,
+          { accountId, date: "2026-08-01", payee: "Parent B", memo: "", amount: 300 },
+          [
+            { categoryId: null, amount: 500 },
+            { categoryId: cat1Id, amount: -200 },
+          ]
+        );
+
+        expect(enginePositiveChild!.isIncome).toBe(
+          splitB.children[0]!.isIncome
+        );
+        expect(enginePositiveChild!.isIncome).toBe(true);
+        expect(engineCategorizedChild!.isIncome).toBe(
+          splitB.children[1]!.isIncome
+        );
+        expect(engineCategorizedChild!.isIncome).toBe(false);
+      });
+
+      it("createTransaction(parentId) marks categorized negative children as not income, matching createSplitWithChildren", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+        const parent = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Parent",
+          memo: "",
+          amount: -100,
+          skipBalance: true,
+        });
+        const engineCategorizedChild = await createTransaction(db, {
+          accountId,
+          parentId: parent!.id,
+          categoryId: cat1Id,
+          date: "2026-08-01",
+          payee: "Expense",
+          memo: "",
+          amount: -100,
+        });
+
+        const split = await createSplitWithChildren(
+          db,
+          { accountId, date: "2026-08-01", payee: "Split", memo: "", amount: -100 },
+          [
+            { categoryId: cat1Id, amount: -40 },
+            { categoryId: cat2Id, amount: -60 },
+          ]
+        );
+
+        expect(engineCategorizedChild!.isIncome).toBe(split.children[0]!.isIncome);
+        expect(engineCategorizedChild!.isIncome).toBe(false);
+      });
+
+      it("updateTransaction preserves income classification for uncategorized positive split children", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+
+        const split = await createSplitWithChildren(
+          db,
+          { accountId, date: "2026-08-01", payee: "Paycheck", memo: "", amount: 300 },
+          [
+            { categoryId: null, amount: 100 },
+            { categoryId: 1, amount: 200 },
+          ]
+        );
+        expect(split.children[0]!.isIncome).toBe(true);
+
+        // A memo-only edit on the uncategorized positive child must not
+        // silently clear its income classification.
+        const updated = await updateTransaction(db, split.children[0]!.id, {
+          memo: "edited",
+        });
+        expect(updated?.isIncome).toBe(true);
+
+        // And categorizing the child flips isIncome off, as everywhere else.
+        const recategorized = await updateTransaction(db, split.children[0]!.id, {
+          categoryId: 1,
+        });
+        expect(recategorized?.isIncome).toBe(false);
       });
     });
   });

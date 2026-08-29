@@ -15,7 +15,7 @@ import {
   isSplitParent,
   isTransfer,
   splitChildrenTotal,
-  validateSubTransactions,
+  assertSplitsBalanced,
 } from "../src/split.js";
 import type { SubTransaction, Transaction } from "../src/types.js";
 
@@ -79,90 +79,166 @@ describe("split classification helpers", () => {
   });
 });
 
-describe("validateSubTransactions", () => {
-  it("returns null for a balanced, uniformly-negative split", () => {
-    expect(
-      validateSubTransactions(-10000, [
+describe("assertSplitsBalanced (BUG-18.3 consolidated validator)", () => {
+  it("accepts a balanced, uniformly-negative split", () => {
+    expect(() =>
+      assertSplitsBalanced(-10000, [
         { categoryId: 1, amount: -6000 },
         { categoryId: 2, amount: -4000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
-  it("returns null for a balanced, uniformly-positive split", () => {
-    expect(
-      validateSubTransactions(20000, [
+  it("accepts a balanced, uniformly-positive split", () => {
+    expect(() =>
+      assertSplitsBalanced(20000, [
         { categoryId: 1, amount: 12000 },
         { categoryId: 2, amount: 8000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
-  it("returns null for a mixed-sign split (Paycheck + tax deduction)", () => {
-    expect(
-      validateSubTransactions(400000, [
+  it("accepts a mixed-sign split (Paycheck + tax deduction)", () => {
+    expect(() =>
+      assertSplitsBalanced(400000, [
         { categoryId: 1, amount: 500000 },
         { categoryId: 2, amount: -100000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
-  it("returns null for a mixed-sign paycheck split with an income leg (null category)", () => {
-    expect(
-      validateSubTransactions(400000, [
+  it("accepts a mixed-sign paycheck split with an income leg (null category)", () => {
+    expect(() =>
+      assertSplitsBalanced(400000, [
         { categoryId: null, amount: 500000 },
         { categoryId: 2, amount: -100000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
+  });
+
+  it("rounds float amounts to the cent before comparing", () => {
+    expect(() =>
+      assertSplitsBalanced(-10000.4, [
+        { categoryId: 1, amount: -6000.2 },
+        { categoryId: 2, amount: -4000.2 },
+      ])
+    ).not.toThrow();
   });
 
   it("rejects a mixed-sign split whose signed sum is off by a cent", () => {
-    const result = validateSubTransactions(400000, [
-      { categoryId: 1, amount: 500000 },
-      { categoryId: 2, amount: -100001 },
-    ]);
-    expect(result).toMatch(/sum to/i);
+    expect(() =>
+      assertSplitsBalanced(400000, [
+        { categoryId: 1, amount: 500000 },
+        { categoryId: 2, amount: -100001 },
+      ])
+    ).toThrow(/do not sum to parent/);
   });
 
   it("rejects fewer than 2 children", () => {
-    expect(
-      validateSubTransactions(-5000, [{ categoryId: 1, amount: -5000 }])
-    ).toMatch(/at least two/i);
+    expect(() =>
+      assertSplitsBalanced(-5000, [{ categoryId: 1, amount: -5000 }])
+    ).toThrow(/at least two/);
   });
 
   it("accepts a split with transfer subtransactions", () => {
-    expect(
-      validateSubTransactions(-10000, [
+    expect(() =>
+      assertSplitsBalanced(-10000, [
         { categoryId: 1, amount: -6000 },
         { categoryId: null, transferAccountId: 2, amount: -4000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
   it("rejects a missing-category child that is also not a transfer", () => {
-    expect(
-      validateSubTransactions(-5000, [
+    expect(() =>
+      assertSplitsBalanced(-5000, [
         { categoryId: 1, amount: -3000 },
         { categoryId: 0, amount: -2000 },
       ])
-    ).toMatch(/missing a category/i);
+    ).toThrow(/must have a category or transfer account/);
   });
 
   it("accepts a child with both a category and a transfer account (boundary transfer leg)", () => {
-    expect(
-      validateSubTransactions(-5000, [
+    expect(() =>
+      assertSplitsBalanced(-5000, [
         { categoryId: 1, amount: -3000 },
         { categoryId: 1, transferAccountId: 2, amount: -2000 },
       ])
-    ).toBeNull();
+    ).not.toThrow();
   });
 
   it("rejects non-finite amounts (NaN)", () => {
-    expect(
-      validateSubTransactions(-5000, [
+    expect(() =>
+      assertSplitsBalanced(-5000, [
         { categoryId: 1, amount: -3000 },
         { categoryId: 2, amount: NaN },
       ])
-    ).toMatch(/valid number/i);
+    ).toThrow(/valid number/);
+  });
+
+  it("rejects a zero parent amount", () => {
+    expect(() =>
+      assertSplitsBalanced(0, [
+        { categoryId: 1, amount: 3000 },
+        { categoryId: 2, amount: -3000 },
+      ])
+    ).toThrow(/Amount cannot be zero/);
+  });
+
+  it("rejects a zero-amount child", () => {
+    expect(() =>
+      assertSplitsBalanced(-5000, [
+        { categoryId: 1, amount: -5000 },
+        { categoryId: 2, amount: 0 },
+      ])
+    ).toThrow(/Amount cannot be zero/);
+  });
+
+  it("rejects when sign conventions conflict (negative parent with positive children)", () => {
+    expect(() =>
+      assertSplitsBalanced(-10000, [
+        { categoryId: 1, amount: 6000 },
+        { categoryId: 2, amount: 4000 },
+      ])
+    ).toThrow(/do not sum to parent/);
+  });
+
+  /**
+   * Property-based regression test (BUG-18.3): randomly generate balanced
+   * splits — the validator must accept every one of them; mutating a
+   * single child's amount by one cent must make it fail on the sum check.
+   */
+  it("property: random balanced splits pass; a one-cent mutation fails", () => {
+    let seed = 42;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const randInt = (min: number, max: number) => min + Math.floor(rand() * (max - min + 1));
+
+    for (let trial = 0; trial < 200; trial++) {
+      const n = randInt(2, 7);
+      let children: { categoryId: number; amount: number }[];
+      let parent: number;
+      do {
+        children = [];
+        let running = 0;
+        for (let i = 0; i < n - 1; i++) {
+          let amount = 0;
+          while (Math.abs(amount) < 2) amount = randInt(-50000, 50000);
+          children.push({ categoryId: i + 1, amount });
+          running += amount;
+        }
+        parent = running + randInt(-50000, 50000);
+        children.push({ categoryId: n, amount: parent - running });
+      } while (parent === 0 || children.some((c) => Math.abs(c.amount) < 2));
+
+      expect(() => assertSplitsBalanced(parent, children)).not.toThrow();
+
+      const idx = randInt(0, n - 1);
+      const delta = rand() < 0.5 ? -1 : 1;
+      const mutated = children.map((c, i) => (i === idx ? { ...c, amount: c.amount + delta } : c));
+      expect(() => assertSplitsBalanced(parent, mutated)).toThrow(/do not sum to parent/);
+    }
   });
 });

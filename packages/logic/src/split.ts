@@ -6,8 +6,8 @@
  * the budget engine and the UI to group / label rows consistently.
  */
 
-import type { Transaction, SubTransaction } from "./types.js";
-import { fmt, num } from "./format.js";
+import type { Transaction } from "./types.js";
+import { num } from "./format.js";
 
 /** A transaction is a child of a split iff its `parentId` is set. */
 export function isSplitChild(t: Transaction): boolean {
@@ -60,30 +60,74 @@ export function splitChildrenTotal(all: Transaction[], parentId: number): number
 }
 
 /**
- * Classify a set of sub-transactions for the UI. Mirrors the
- * server-side `assertSplitsBalanced` — returns an error string or null.
- *
- * Children use their *signed* amounts so mixed-sign splits (e.g. a
- * Paycheck with a negative tax deduction) are supported. The signed
- * sum must equal the parent's signed amount.
+ * Minimal shape of a split child accepted by {@link assertSplitsBalanced}.
+ * Covers transaction `SubTransactionInput`s, recurring
+ * `RecurringSubTransaction`s and the UI's live sub-row drafts.
  */
-export function validateSubTransactions(
+export type SplitChildLike = {
+  categoryId?: number | null;
+  transferAccountId?: number | null;
+  amount: number;
+};
+
+/**
+ * The single source of truth for split-balance validation (BUG-18.3).
+ * Used by the UI (transaction + recurring modals) and by the server's
+ * transaction and recurring queries, which convert the thrown error via
+ * the `errorFactory` parameter (e.g. `(m) => new TransactionError(m, 400)`).
+ *
+ * Rules (children use their *signed* amounts so mixed-sign splits — e.g.
+ * a Paycheck with a negative tax deduction — are supported):
+ *
+ *   - parent amount must be a valid non-zero number (rounded to the cent)
+ *   - at least 2 children
+ *   - every child has a valid non-zero amount
+ *   - every child has a category or transfer account (unless it is a
+ *     positive inflow, which is a legitimate income leg)
+ *   - the signed sum of children equals the signed parent amount to the cent
+ *
+ * Throws the error produced by `errorFactory` (default: plain `Error`).
+ */
+export function assertSplitsBalanced(
   parentAmount: number,
-  children: SubTransaction[]
-): string | null {
-  if (children.length < 2) return "Add at least two sub-transactions.";
+  children: SplitChildLike[],
+  errorFactory: (message: string) => unknown = (message) => new Error(message)
+): void {
+  const fail = (message: string): never => {
+    throw errorFactory(message);
+  };
+
+  const toCents = (value: unknown): number => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      return fail("Amount must be a valid number");
+    }
+    if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+      return fail("Amount exceeds safe integer range");
+    }
+    return Math.round(n);
+  };
+
+  const parent = toCents(parentAmount);
+  if (parent === 0) {
+    return fail("Amount cannot be zero");
+  }
+  if (children.length < 2) {
+    return fail("split must have at least two sub-transactions");
+  }
+  let sum = 0;
   for (let i = 0; i < children.length; i++) {
     const c = children[i]!;
-    if (!c.categoryId && !c.transferAccountId && Number(c.amount) <= 0) {
-      return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
+    const childAmount = toCents(c.amount);
+    if (childAmount === 0) {
+      return fail("Amount cannot be zero");
     }
-    if (!Number.isFinite(Number(c.amount))) {
-      return `Sub-transaction ${i + 1} amount is not a valid number.`;
+    if (!c.categoryId && !c.transferAccountId && childAmount <= 0) {
+      return fail(`sub-transaction ${i + 1} must have a category or transfer account`);
     }
+    sum += childAmount;
   }
-  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
-  if (sum !== parentAmount) {
-    return `Sub-transactions sum to ${fmt(sum)} but parent is ${fmt(parentAmount)}.`;
+  if (sum !== parent) {
+    return fail(`split children do not sum to parent: ${sum} vs ${parent}`);
   }
-  return null;
 }

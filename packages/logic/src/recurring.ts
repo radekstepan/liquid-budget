@@ -15,7 +15,7 @@
  */
 
 import type { Account, Recurring, RecurringSubTransaction } from "./types.js";
-import { fmt, isValidISODate, num, todayISO } from "./format.js";
+import { isValidISODate, num, todayISO } from "./format.js";
 
 export type RecurringFlavour = "single" | "transfer" | "split";
 
@@ -295,38 +295,6 @@ export function netMonthlyAmount(
     return children.reduce((s, c) => s + num(c.amount), 0);
   }
   return num(r.amount);
-}
-
-/**
- * Validate a set of recurring sub-transactions. Mirrors
- * `validateSubTransactions` and the server-side `assertSplitsBalanced`:
- *
- *   - at least 2 children
- *   - every child has a category or transfer account (mutually exclusive)
- *   - every child has a valid finite amount
- *   - the signed sum of children equals the signed parent amount
- */
-export function validateRecurringSubTransactions(
-  parentAmount: number,
-  children: { categoryId: number | null; amount: number; transferAccountId?: number | null }[]
-): string | null {
-  if (children.length < 2) {
-    return "Add at least two sub-transactions.";
-  }
-  for (let i = 0; i < children.length; i++) {
-    const c = children[i]!;
-    if (!c.categoryId && !c.transferAccountId && Number(c.amount) <= 0) {
-      return `Sub-transaction ${i + 1} is missing a category or transfer account.`;
-    }
-    if (!Number.isFinite(Number(c.amount))) {
-      return `Sub-transaction ${i + 1} amount is not a valid number.`;
-    }
-  }
-  const sum = children.reduce((s, c) => s + Number(c.amount), 0);
-  if (sum !== parentAmount) {
-    return `Sub-transactions sum to ${fmt(sum)} but parent is ${fmt(parentAmount)}.`;
-  }
-  return null;
 }
 
 /**

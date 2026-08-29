@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { Account, Category, CategoryGroup, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, validateSubTransactions, validateRecurringSubTransactions, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES, dollarsToCents } from "@ynab/logic";
+import { todayISO, num, evalAmount, getSplitChildren, assertSplitsBalanced, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES, dollarsToCents } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -205,13 +205,18 @@ export function TransactionModal({
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     const parentCents = dollarsToCents(parentAmount);
-    return validateSubTransactions(
-      parentCents,
-      subRows.map((r) => ({
-        ...r,
-        amount: dollarsToCents(evalAmount(String(r.amount))),
-      }))
-    );
+    try {
+      assertSplitsBalanced(
+        parentCents,
+        subRows.map((r) => ({
+          ...r,
+          amount: dollarsToCents(evalAmount(String(r.amount))),
+        }))
+      );
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
   }, [mode, parentAmount, subRows]);
 
   const switchingMode = (next: "single" | "transfer" | "split") => {
@@ -1236,13 +1241,18 @@ export function RecurringModal({
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     const parentCents = dollarsToCents(parentAmount);
-    return validateRecurringSubTransactions(
-      parentCents,
-      subRows.map((r) => ({
-        ...r,
-        amount: dollarsToCents(evalAmount(String(r.amount))),
-      }))
-    );
+    try {
+      assertSplitsBalanced(
+        parentCents,
+        subRows.map((r) => ({
+          ...r,
+          amount: dollarsToCents(evalAmount(String(r.amount))),
+        }))
+      );
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
   }, [mode, parentAmount, subRows]);
 
   const switchingMode = (next: "single" | "transfer" | "split") => {
