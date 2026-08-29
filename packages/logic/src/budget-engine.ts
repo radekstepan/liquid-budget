@@ -94,7 +94,10 @@ export function isIncomeTransaction(
     if (t.isIncome !== undefined) {
       return t.isIncome === true;
     }
-    if (t.parentId != null) return false;
+    // Uncategorized positive rows are income, including split children that
+    // omit `isIncome` (matches createSplitWithChildren semantics:
+    // categoryId == null && amount > 0). An explicit `isIncome` value above
+    // always wins.
     return true;
   }
 
@@ -109,7 +112,6 @@ export function isIncomeTransaction(
   if (t.isIncome !== undefined) {
     return t.isIncome === true;
   }
-  if (t.parentId != null) return false;
   return true;
 }
 

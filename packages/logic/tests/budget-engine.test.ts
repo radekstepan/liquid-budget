@@ -2672,6 +2672,82 @@ describe("computeBudget", () => {
       expect(isIncomeTransaction(offBudgetTx, accountMap)).toBe(false);
     });
 
+    it("BUG-01: split children without explicit isIncome fall back to categoryId/amount semantics", () => {
+      const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 0 };
+      const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Tracking", balance: "1000", onBudget: false, sort: 1 };
+      const accountMap = [onBudgetAccount, offBudgetAccount];
+
+      // Split child with categoryId == null, amount > 0, and NO isIncome field
+      // must be classified as income (matches createSplitWithChildren).
+      const splitChildNoFlag = {
+        id: 2,
+        parentId: 5,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Paycheck",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+      };
+      expect(isIncomeTransaction(splitChildNoFlag, accountMap)).toBe(true);
+
+      // Negative uncategorized split child (spending/refund) is not income
+      const splitChildNegative = { ...splitChildNoFlag, amount: "-5000" };
+      expect(isIncomeTransaction(splitChildNegative, accountMap)).toBe(false);
+
+      // Explicit isIncome: false still wins over the fallback
+      const splitChildExplicitFalse = { ...splitChildNoFlag, isIncome: false as const };
+      expect(isIncomeTransaction(splitChildExplicitFalse, accountMap)).toBe(false);
+
+      // Off-budget split child is not income
+      const offBudgetSplitChild = { ...splitChildNoFlag, accountId: 2 };
+      expect(isIncomeTransaction(offBudgetSplitChild, accountMap)).toBe(false);
+
+      // Fallback without accountMap: split child with no isIncome is income
+      expect(isIncomeTransaction(splitChildNoFlag)).toBe(true);
+      expect(isIncomeTransaction(splitChildNegative)).toBe(false);
+      expect(isIncomeTransaction(splitChildExplicitFalse)).toBe(false);
+    });
+
+    it("BUG-01: paycheck split with unflagged net-income child counts toward TBB", () => {
+      const checking = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "0", onBudget: true, sort: 0 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const taxes = makeCategory({ id: 10, groupId: 1, name: "Taxes" });
+
+      // Paycheck split: gross 5000 - 1200 withholding = 3800 net deposit.
+      // The net-income child has NO isIncome field (e.g. raw DB insert /
+      // future API path); the tax child is categorized spending.
+      const data: BudgetData = {
+        accounts: [checking],
+        groups: [group],
+        categories: [taxes],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-07-01", payee: "Employer", memo: "", amount: "380000", status: "c" as const, isIncome: false },
+          { id: 2, accountId: 1, parentId: 1, categoryId: null, date: "2026-07-01", payee: "Employer", memo: "Net deposit", amount: "500000", status: "c" as const },
+          { id: 3, accountId: 1, parentId: 1, categoryId: 10, date: "2026-07-01", payee: "Employer", memo: "Tax withholding", amount: "-120000", status: "c" as const },
+        ],
+        recurring: [],
+      };
+
+      const res = computeBudget(data, "2026-07");
+      expect(res.totalIncome).toBe(500000);
+      expect(res.tbb).toBe(500000);
+      expect(res.groups[0]?.rows[0]?.outflow).toBe(-120000);
+
+      // Budget integrity invariant: on-budget cash (380000) = available (-120000) + TBB (500000)
+      const totalCatAvailable = res.groups.reduce((s, g) => s + g.available, 0);
+      expect(380000 - totalCatAvailable - res.tbb).toBe(0);
+
+      // Pre-indexed mode must agree
+      const index = buildBudgetIndex(data);
+      expect(index.incomeByMonth["2026-07"]).toBe(500000);
+      const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-07");
+      expect(indexedRes.totalIncome).toBe(500000);
+      expect(indexedRes.tbb).toBe(500000);
+    });
+
     describe("BUG 1.6: transfers across budget boundary into/out of TBB", () => {
       const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000000", onBudget: true, sort: 0 };
       const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Tracking", balance: "5000000", onBudget: false, sort: 1 };
