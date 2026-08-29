@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
+      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date, true);
       return Response.json(res);
     } catch (e) {
       return apiErrorResponse(e);
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
+      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date, true);
       return Response.json(res);
     } catch (e) {
       return apiErrorResponse(e);
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
       const results = await withTransaction(db, async () => {
         const list = [];
         for (const id of parsed.data.ids) {
-          const res = await postRecurringTransaction(db, id, parsed.data.date);
+          const res = await postRecurringTransaction(db, id, parsed.data.date, true);
           list.push(res);
         }
         return list;

@@ -457,17 +457,17 @@ export async function deleteRecurring(db: Database, id: number): Promise<boolean
 export async function postRecurringTransaction(
   db: Database,
   recurringId: number,
-  postDate?: string
+  postDate?: string,
+  allowEarly = false
 ) {
   const validatedPostDate = postDate ? assertValidISODate(postDate, "date") : undefined;
   return withTransaction(db, async () => {
     const [r] = await db.select().from(recurring).where(eq(recurring.id, recurringId));
     if (!r) throw new RecurringError("Recurring transaction not found", 404);
     if (!r.active) throw new RecurringError("Recurring transaction is inactive", 400);
-    if (validatedPostDate && validatedPostDate < r.nextDate) {
+    if (!allowEarly && validatedPostDate && validatedPostDate < r.nextDate) {
       throw new RecurringError(`Recurring transaction occurrence for ${validatedPostDate} has already been posted`, 409);
     }
-
     const dateToUse = validatedPostDate || r.nextDate;
     const children = await db
       .select()
