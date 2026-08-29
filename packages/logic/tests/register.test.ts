@@ -80,7 +80,9 @@ describe("computeRunningBalances", () => {
     ]);
     const out = computeRunningBalances([a, b], balances, 1);
     expect(byId(out, a.id).runningBalance).toBe(100000);
-    expect(byId(out, b.id).runningBalance).toBe(50000);
+    // `b` is on another account with no transfer link to the anchor —
+    // it does not participate in the walk and gets null (BUG-17).
+    expect(byId(out, b.id).runningBalance).toBeNull();
   });
 
   it("applies transfer rows from the source's perspective when not anchored", () => {
@@ -168,14 +170,52 @@ describe("computeRunningBalances", () => {
     expect(byId(out, b.id).runningBalance).toBe(40000);
   });
 
-  it("falls back to the row's own account balance when no walk entry exists", () => {
+  it("returns null (not the live balance) for rows with no walk entry (BUG-17)", () => {
     const a = t({ accountId: 1, date: "2026-06-30", amount: -10000 });
     const balances = new Map([
       [1, 100000],
       [2, 20000],
     ]);
     const out = computeRunningBalances([a], balances, 2);
-    expect(byId(out, a.id).runningBalance).toBe(100000);
+    expect(byId(out, a.id).runningBalance).toBeNull();
+  });
+
+  it("mirrors a split parent to the first child that has a walk entry, never the live balance (BUG-17)", () => {
+    // Split on account A (1) whose chronologically-first child is a leg
+    // on account B (2) with no transfer link to the anchor — it produces
+    // no walk entry for the anchor walk. The parent must show the
+    // post-cluster value from the first participating child, NOT the
+    // account's live balance.
+    const parent = t({ accountId: 1, date: "2026-06-30", amount: -15000 });
+    const legOnB = t({ accountId: 2, date: "2026-06-30", amount: 5000, parentId: parent.id });
+    const childOnA = t({ accountId: 1, date: "2026-06-30", amount: -10000, parentId: parent.id });
+    const newer = t({ accountId: 1, date: "2026-07-01", amount: -30000 });
+    const balances = new Map([
+      [1, 100000],
+      [2, 20000],
+    ]);
+    const out = computeRunningBalances([newer, parent, legOnB, childOnA], balances, 1);
+    // The non-participating child shows "—", not account B's live balance.
+    expect(byId(out, legOnB.id).runningBalance).toBeNull();
+    // Post-cluster value from the participating child: 100000 (anchor)
+    // + 30000 (newer undone) = 130000 before the -10000 child is applied.
+    expect(byId(out, childOnA.id).runningBalance).toBe(130000);
+    expect(byId(out, parent.id).runningBalance).toBe(130000);
+    expect(byId(out, parent.id).runningBalance).not.toBe(balances.get(1));
+  });
+
+  it("gives a split parent null when none of its children have a walk entry (BUG-17)", () => {
+    const parent = t({ accountId: 1, date: "2026-06-30", amount: -15000 });
+    const c1 = t({ accountId: 2, date: "2026-06-30", amount: 5000, parentId: parent.id });
+    const c2 = t({ accountId: 2, date: "2026-06-30", amount: 10000, parentId: parent.id });
+    const balances = new Map([
+      [1, 100000],
+      [2, 20000],
+    ]);
+    const out = computeRunningBalances([parent, c1, c2], balances, 1);
+    expect(byId(out, c1.id).runningBalance).toBeNull();
+    expect(byId(out, c2.id).runningBalance).toBeNull();
+    expect(byId(out, parent.id).runningBalance).toBeNull();
   });
 
   it("correctly recomputes running balances when a transfer transaction is deleted", () => {
