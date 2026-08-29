@@ -2237,6 +2237,115 @@ describe("computeBudget", () => {
       expect(freshRes.groups[0]?.rows[0]?.available).toBe(25000);
     });
 
+    it("invalidates cache for both raw and normalized data keys when invalidateBudgetIndex(data) is called (BUG-02)", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const ccAccount = { id: 2, name: "Visa", kind: "credit" as const, groupLabel: "Cards", balance: "0", onBudget: true, sort: 1 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      // An on-budget credit account without a linked payment category forces
+      // normalizeBudgetData to produce a distinct normalized copy (normData !== data).
+      const data: BudgetData = {
+        accounts: [account, ccAccount],
+        groups: [group],
+        categories: [category],
+        assignments: [
+          { id: 1, categoryId: category.id, month: "2026-08", amount: "40000" }, // $400
+        ],
+        transactions: [
+          { id: 1, accountId: account.id, categoryId: null, date: "2026-08-01", payee: "Employer", memo: "Salary", amount: "100000", status: "c" as const },
+          { id: 2, accountId: ccAccount.id, categoryId: category.id, date: "2026-08-05", payee: "Supermarket", memo: "Food", amount: "-15000", status: "c" as const },
+        ],
+        recurring: [],
+      };
+
+      const res1 = computeBudget(data, "2026-08");
+      const row1 = res1.groups[0]?.rows[0];
+      expect(row1?.outflow).toBe(-15000);
+      expect(row1?.available).toBe(25000);
+      expect(res1.tbb).toBe(60000);
+
+      // Mutate in-place: add a second CC expense
+      data.transactions.push({
+        id: 3,
+        accountId: ccAccount.id,
+        categoryId: category.id,
+        date: "2026-08-06",
+        payee: "Supermarket",
+        memo: "Food 2",
+        amount: "-10000", // -$100
+        status: "c",
+      });
+
+      invalidateBudgetIndex(data);
+
+      // Both cache entries (raw `data` key set by computeBudget and the
+      // normalized-copy key set by getOrBuildIndex) must be gone, otherwise
+      // the stale epoch-1 index is returned here.
+      const res2 = computeBudget(data, "2026-08");
+      const row2 = res2.groups[0]?.rows[0];
+      expect(row2?.outflow).toBe(-25000);
+      expect(row2?.available).toBe(15000);
+      expect(res2.tbb).toBe(60000);
+    });
+
+    it("invalidateBudgetIndex(data) clears the normalized copy entry and attached serialized indexes (BUG-02)", () => {
+      const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
+      const ccAccount = { id: 2, name: "Visa", kind: "credit" as const, groupLabel: "Cards", balance: "0", onBudget: true, sort: 1 };
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [account, ccAccount],
+        groups: [group],
+        categories: [category],
+        assignments: [
+          { id: 1, categoryId: category.id, month: "2026-08", amount: "40000" },
+        ],
+        transactions: [
+          { id: 1, accountId: account.id, categoryId: null, date: "2026-08-01", payee: "Employer", memo: "Salary", amount: "100000", status: "c" as const },
+          { id: 2, accountId: ccAccount.id, categoryId: category.id, date: "2026-08-05", payee: "Supermarket", memo: "Food", amount: "-15000", status: "c" as const },
+        ],
+        recurring: [],
+      };
+
+      // Build the normalized copy and attach serialized indexes to BOTH the
+      // raw and normalized objects (mirrors a hydrated/pre-indexed dataset).
+      data.budgetIndex = buildBudgetIndex(data);
+      const norm1 = normalizeBudgetData(data);
+      expect(norm1).not.toBe(data);
+      norm1.budgetIndex = data.budgetIndex;
+
+      const res1 = computeBudget(data, "2026-08");
+      expect(res1.groups[0]?.rows[0]?.outflow).toBe(-15000);
+
+      // Mutate in-place
+      data.transactions.push({
+        id: 3,
+        accountId: ccAccount.id,
+        categoryId: category.id,
+        date: "2026-08-06",
+        payee: "Supermarket",
+        memo: "Food 2",
+        amount: "-10000",
+        status: "c",
+      });
+
+      invalidateBudgetIndex(data);
+
+      // Attached serialized indexes cleared on both objects
+      expect(data.budgetIndex).toBeUndefined();
+      expect(norm1.budgetIndex).toBeUndefined();
+
+      // normalizedDataCache entry cleared: a fresh normalization produces a new object
+      const norm2 = normalizeBudgetData(data);
+      expect(norm2).not.toBe(norm1);
+
+      // Behavioral proof: no stale WeakMap entry survives on either key
+      const res2 = computeBudget(data, "2026-08");
+      expect(res2.groups[0]?.rows[0]?.outflow).toBe(-25000);
+    });
+
     it("invalidates pre-attached data.budgetIndex and clears it", () => {
       const account = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 };
       const group = makeGroup({ id: 1, name: "Everyday" });

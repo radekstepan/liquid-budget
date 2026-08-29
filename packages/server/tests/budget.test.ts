@@ -1,6 +1,27 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "path";
+import { fileURLToPath } from "url";
+import * as schema from "../src/schema.js";
+import type { Db } from "../src/client.js";
 import { getBudgetData, isSeeded } from "../src/queries/budget.js";
+import { createAccount, createTransaction } from "../src/index.js";
+import { computeBudget, invalidateBudgetIndex } from "@ynab/logic";
 import { createMockDb, type MockDb } from "./mock-db.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
+function openMigratedDb(): Db {
+  const raw = new Database(":memory:");
+  raw.pragma("foreign_keys = ON");
+  const db = drizzle(raw, { schema });
+  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  return db;
+}
 
 describe("budget queries", () => {
   let mock: MockDb;
@@ -73,5 +94,58 @@ describe("budget queries", () => {
     expect(result).toBe(false);
     const selectCalls = mock.calls.filter((c) => c.op === "select");
     expect(selectCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // BUG-02: TBB and category available balances must reflect transaction
+  // mutations across successive getBudgetData calls, without a full page
+  // reload. Mirrors the web app flow: compute from the previous data snapshot,
+  // invalidate it, then compute from a fresh snapshot after mutating.
+  it("TBB and category available update after transaction mutations across getBudgetData calls (BUG-02)", async () => {
+    const db = openMigratedDb();
+
+    const acct = await createAccount(db, { name: "Checking", kind: "liquid" });
+    const [group] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0 })
+      .returning();
+    const [cat] = await db
+      .insert(schema.categories)
+      .values({ groupId: group!.id, name: "Groceries", sort: 0 })
+      .returning();
+
+    await createTransaction(db, {
+      accountId: acct.id,
+      categoryId: null,
+      date: "2026-08-01",
+      payee: "Employer",
+      memo: "Salary",
+      amount: 50000, // $500
+    });
+
+    // First snapshot: index built and attached by getBudgetData
+    const data1 = await getBudgetData(db);
+    const res1 = computeBudget(data1, "2026-08");
+    expect(res1.tbb).toBe(50000);
+    expect(res1.groups[0]?.rows[0]?.available).toBe(0);
+
+    await createTransaction(db, {
+      accountId: acct.id,
+      categoryId: cat!.id,
+      date: "2026-08-15",
+      payee: "Supermarket",
+      memo: "Food",
+      amount: -10000, // -$100
+    });
+
+    // Mimic BudgetAppShell.setData: invalidate the previous snapshot object
+    invalidateBudgetIndex(data1);
+
+    const data2 = await getBudgetData(db);
+    const res2 = computeBudget(data2, "2026-08");
+    expect(res2.tbb).toBe(50000); // expense does not change TBB
+    expect(res2.groups[0]?.rows[0]?.outflow).toBe(-10000);
+    expect(res2.groups[0]?.rows[0]?.available).toBe(-10000);
+
+    db.$client.close();
   });
 });
