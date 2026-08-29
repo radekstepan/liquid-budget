@@ -10,7 +10,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist } from "./helpers";
+import { fillSearchlist, pickSubCategory } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -220,4 +220,84 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   await editModal.getByRole("button", { name: "Cancel" }).click();
   await expect(editModal).toBeHidden();
   await expect(page.locator("tr.y-row--selected")).toHaveCount(0);
+});
+
+test("BUG-05: bulk editing a split parent propagates status and date to its children", async ({ page }) => {
+  const uniquePayee = `PW BulkSplit ${Date.now()}`;
+  const stamp = uniquePayee.split(" ").pop()!;
+
+  // Create a 2-way split (parent + two children, all cleared).
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  const modal = page.locator(".y-modal").last();
+  await modal.getByRole("button", { name: /^split$/i }).click();
+  await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
+  const allDecimals = modal.locator('input[inputmode="decimal"]');
+  await allDecimals.nth(0).fill("-100");
+  await pickSubCategory(modal, page, 1);
+  await pickSubCategory(modal, page, 2);
+  await allDecimals.nth(1).fill("-60");
+  await allDecimals.nth(2).fill("-40");
+  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(modal).toBeHidden();
+
+  // Create a plain companion transaction so the bulk action bar's
+  // multi-select Edit (N) opens the Bulk Edit modal (single selection
+  // opens the single-row editor instead).
+  const companionPayee = `PW BulkSplit Companion ${stamp}`;
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  const companionModal = page.locator(".y-modal").last();
+  await companionModal.locator('input[inputmode="decimal"]').first().fill("10.00");
+  await companionModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await fillSearchlist(companionModal, "e.g. Whole Foods", companionPayee);
+  await companionModal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(companionModal).toBeHidden();
+
+  const parentRow = page.getByRole("row").filter({ hasText: uniquePayee }).first();
+  await expect(parentRow).toBeVisible();
+  await expect(parentRow).toContainText("Split (Multiple Categories)");
+  await expect(parentRow.locator(".y-cleared")).toHaveText("C");
+  const companionRow = page.getByRole("row").filter({ hasText: companionPayee }).first();
+  await expect(companionRow).toBeVisible();
+
+  // Select the split parent (plus the companion row) and bulk edit
+  // cleared status and date.
+  await parentRow.locator('input[type="checkbox"]').click();
+  await companionRow.locator('input[type="checkbox"]').click();
+  await expect(page.getByText("2 selected")).toBeVisible();
+  await page.getByRole("button", { name: "Edit (2)" }).click();
+
+  const editModal = page.locator(".y-modal").last();
+  await expect(editModal.getByText("Edit 2 Transactions")).toBeVisible();
+
+  await editModal.getByText("Cleared Status", { exact: true }).click();
+  await editModal.getByRole("button", { name: "Uncleared" }).click();
+  await editModal.getByText("Date", { exact: true }).click();
+  await editModal.locator('input[type="date"]').fill("2026-09-15");
+
+  await editModal.getByRole("button", { name: /Review Changes/i }).click();
+  await expect(editModal.getByText("Confirm Changes (2 Transactions)")).toBeVisible();
+  await editModal.getByRole("button", { name: /Confirm & Update 2 Transactions/i }).click();
+  await expect(editModal).toBeHidden();
+
+  // The parent row reflects the new status and date in the register.
+  await expect(parentRow).toContainText("2026-09-15");
+  await expect(parentRow.locator(".y-cleared")).toHaveText("U");
+
+  // All split members (parent + children) share the new status and date.
+  const budget = await (await page.request.get("/api/budget")).json();
+  const parent = budget.transactions.find(
+    (t: { payee: string; parentId: number | null }) =>
+      t.payee === uniquePayee && t.parentId == null
+  );
+  expect(parent).toBeTruthy();
+  const family = budget.transactions.filter(
+    (t: { id: number; parentId: number | null }) =>
+      t.id === parent.id || t.parentId === parent.id
+  );
+  expect(family).toHaveLength(3);
+  for (const row of family) {
+    expect(row.status).toBe("u");
+    expect(row.date).toBe("2026-09-15");
+  }
 });
