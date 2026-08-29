@@ -300,6 +300,56 @@ describe("importYnab4 full import", () => {
     expect(splitChildren.some((c) => c.categoryId === null)).toBe(true);
   });
 
+  it("BUG-16: populates the payees table and links transactions and recurring rows via payeeId", async () => {
+    await importYnab4(db, ynabData);
+
+    // One payees row per distinct non-tombstone YNAB4 payee (tombstone pX dropped)
+    const payeeRows = await db.select().from(schema.payees).orderBy(schema.payees.id);
+    expect(payeeRows.map((p) => p.name)).toEqual([
+      "Grocery Store",
+      "Employer",
+      "Biennial Insurer",
+      "One-off Electrician",
+    ]);
+    const payeeIdByName = new Map(payeeRows.map((p) => [p.name, p.id]));
+
+    const txns = await db.select().from(schema.transactions);
+    expect(txns).toHaveLength(6);
+
+    // Transfers are modeled via transferAccountId and never link to a payee row
+    const transferRows = txns.filter((t) => t.transferAccountId != null);
+    expect(transferRows.length).toBeGreaterThan(0);
+    for (const t of transferRows) {
+      expect(t.payeeId).toBeNull();
+    }
+
+    // Every non-transfer transaction carries a non-null payeeId pointing at
+    // the payees row matching its payee text (regular, split parent + children)
+    const nonTransferRows = txns.filter((t) => t.transferAccountId == null);
+    expect(nonTransferRows.length).toBeGreaterThan(0);
+    for (const t of nonTransferRows) {
+      expect(t.payeeId).toBe(payeeIdByName.get(t.payee));
+    }
+
+    // Split children inherit the parent payee link
+    const childRows = txns.filter((t) => t.parentId != null);
+    expect(childRows).toHaveLength(2);
+    for (const c of childRows) {
+      expect(c.payeeId).toBe(payeeIdByName.get("Grocery Store"));
+    }
+
+    // Scheduled rows link via recurring.payeeId; transfer scheduled rows stay null
+    const recs = await db.select().from(schema.recurring);
+    expect(recs).toHaveLength(6);
+    for (const r of recs) {
+      if (r.transferAccountId != null) {
+        expect(r.payeeId).toBeNull();
+      } else {
+        expect(r.payeeId).toBe(payeeIdByName.get(r.payee));
+      }
+    }
+  });
+
   it("imports assignments only for non-zero budgeted amounts and ignores tombstones", async () => {
     await importYnab4(db, ynabData);
     const { assignments } = await getBudgetData(db);

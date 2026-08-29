@@ -16,6 +16,7 @@ import { withTransaction } from "./transaction.js";
 import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
+import { findOrCreatePayee } from "./queries/payees.js";
 
 /**
  * Detect whether YNAB4 amounts are stored as milliunits (integer × 1000) or
@@ -197,9 +198,18 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
     // Payees mapping (payeeId -> name)
     const payeeMap = new Map<string, string>();
+    // YNAB4 payee entityId -> local payees.id (BUG-16). The payees table is
+    // populated so transactions can link via payeeId instead of carrying
+    // duplicated text-only payees. Transfer payees (targetAccountId set) are
+    // modeled via transferAccountId and never get a payees row.
+    const payeeDbIdMap = new Map<string, number>();
     for (const p of yPayees) {
       if (!p.isTombstone) {
         payeeMap.set(p.entityId, p.name);
+        if (p.targetAccountId) continue;
+        if (typeof p.name !== "string" || !p.name.trim()) continue;
+        const payeeRow = findOrCreatePayee(db, p.name);
+        payeeDbIdMap.set(p.entityId, payeeRow.id);
       }
     }
 
@@ -615,6 +625,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       if (hasSubs) {
         // Split transaction parent
         let payee = payeeMap.get(t.payeeId) || "";
+        const parentPayeeId = (t.payeeId && payeeDbIdMap.get(t.payeeId)) || null;
         const isParentDeferred = t.categoryId === "Category/__DeferredIncome__";
         const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || isParentDeferred) && (t.amount || 0) > 0;
         const parentIncomeMonth = isParentIncome
@@ -642,6 +653,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             categoryId: null,
             date: t.date,
             payee,
+            payeeId: parentPayeeId,
             memo: t.memo || "",
             amount: convertAmount(t.amount),
             status: effectiveParentStatus,
@@ -665,6 +677,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let subCatId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
             let subPayee = "";
+            let subPayeeId: number | null = null;
             let subTransferAccountId: number | null = null;
 
             if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
@@ -682,8 +695,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               }
             } else if (st.payeeId) {
               subPayee = payeeMap.get(st.payeeId) || payee;
+              subPayeeId = payeeDbIdMap.get(st.payeeId) ?? parentPayeeId;
             } else {
               subPayee = payee;
+              subPayeeId = parentPayeeId;
             }
 
             const childAmt = convertAmount(st.amount);
@@ -743,6 +758,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               categoryId: subCatId,
               date: t.date,
               payee: subPayee,
+              payeeId: subPayeeId,
               memo: st.memo || "",
               amount: convertAmount(st.amount),
               status: effectiveChildStatus,
@@ -900,6 +916,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               categoryId: finalTransferCatId,
               date: t.date,
               payee,
+              payeeId: null,
               memo,
               amount: convertAmount(rawAmount),
               status:
@@ -923,6 +940,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             let cleared = t.cleared;
             let catEntityId = t.categoryId || (partner?.categoryId || null);
             let payee = (t.payeeId ? payeeMap.get(t.payeeId) : "") || (partner?.payeeId ? payeeMap.get(partner.payeeId) || "" : "") || "";
+            const fallbackPayeeId =
+              (t.payeeId ? payeeDbIdMap.get(t.payeeId) : undefined) ??
+              (partner?.payeeId ? payeeDbIdMap.get(partner.payeeId) : undefined) ??
+              null;
 
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let catId = (accIsOnBudget && catEntityId && categoryIdMap.get(catEntityId)) || null;
@@ -962,6 +983,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               categoryId: catId,
               date: t.date,
               payee,
+              payeeId: fallbackPayeeId,
               memo,
               amount: convertAmount(t.amount),
               status:
@@ -990,6 +1012,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           } else {
             payee = payeeMap.get(t.payeeId) || "";
           }
+          const plainPayeeId = destAccId ? null : (t.payeeId ? payeeDbIdMap.get(t.payeeId) ?? null : null);
 
           const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
           let catId = (accIsOnBudget && categoryIdMap.get(t.categoryId)) || null;
@@ -1061,6 +1084,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             categoryId: catId,
             date: t.date,
             payee,
+            payeeId: plainPayeeId,
             memo: t.memo || "",
             amount: convertAmount(t.amount),
             status:
@@ -1187,6 +1211,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       if (!accId) continue;
 
       let payee = payeeMap.get(st.payeeId) || "";
+      let recurringPayeeId: number | null = (st.payeeId && payeeDbIdMap.get(st.payeeId)) || null;
       let transferAccountId = st.targetAccountId ? accountIdMap.get(st.targetAccountId) || null : null;
 
       if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
@@ -1195,6 +1220,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         if (foundTarget) {
           transferAccountId = foundTarget;
           payee = "Transfer : " + (accNameMap.get(foundTarget) || "Unknown");
+          recurringPayeeId = null;
         }
       }
       if (transferAccountId === accId) {
@@ -1309,6 +1335,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           accountId: accId,
           categoryId: catId,
           payee,
+          payeeId: recurringPayeeId,
           memo: st.memo || "",
           flagColor: ynabFlagToColor(st.flag),
           amount: parentAmount,
