@@ -179,25 +179,43 @@ export function numCents(
   return finalVal === 0 ? 0 : finalVal;
 }
 
+/**
+ * Convert a dollar amount to integer cents, rounding half away from zero.
+ * Scaling is done with exact decimal-string arithmetic on the shortest
+ * representation of the input, so binary floating-point artifacts
+ * (e.g. `1.005 * 100 === 100.49999999999999`) cannot shift the result by
+ * a cent. Prefer string input (raw CSV/YNAB4 fields, or values from
+ * `parseAmount`/`evalAmount`) over pre-computed floats: strings with more
+ * than ~17 significant digits lose precision when coerced through `Number`.
+ */
 export function dollarsToCents(d: number | string | null | undefined): number {
   if (d == null) return 0;
   const n = typeof d === "number" ? d : Number(d);
   if (Number.isNaN(n) || n === 0 || !Number.isFinite(n)) return 0;
 
-  if (Math.abs(n) * 100 > Number.MAX_SAFE_INTEGER) {
+  const sign = n < 0 ? -1 : 1;
+  const absStr = String(Math.abs(n));
+
+  // E-notation only occurs for |n| < 1e-6 (always sub-half-cent -> 0) or
+  // |n| >= 1e21 (always overflow). `Number(str + "e2")` yields NaN here.
+  const eIdx = absStr.search(/[eE]/);
+  if (eIdx >= 0) {
+    if (Number(absStr.slice(eIdx + 1)) < 0) return 0;
     throw new RangeError(`Amount ${d} exceeds safe integer range`);
   }
 
-  const sign = n < 0 ? -1 : 1;
-  const absStr = String(Math.abs(n));
-  let scaled: number;
-  if (absStr.includes("e") || absStr.includes("E")) {
-    scaled = Math.abs(n) * 100;
-  } else {
-    scaled = Number(`${absStr}e2`);
+  const dotIdx = absStr.indexOf(".");
+  const intStr = dotIdx >= 0 ? absStr.slice(0, dotIdx) : absStr;
+  const fracStr = dotIdx >= 0 ? absStr.slice(dotIdx + 1) : "";
+
+  const intVal = Number(intStr || "0");
+  if (intVal * 100 > Number.MAX_SAFE_INTEGER - 100) {
+    throw new RangeError(`Amount ${d} exceeds safe integer range`);
   }
 
-  const c = sign * Math.round(scaled);
+  const twoDigits = Number((fracStr + "00").slice(0, 2));
+  const roundUp = fracStr.length > 2 && fracStr[2]! >= "5";
+  const c = sign * (intVal * 100 + twoDigits + (roundUp ? 1 : 0));
   if (!Number.isSafeInteger(c)) {
     throw new RangeError(`Amount ${d} exceeds safe integer range`);
   }
