@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
@@ -183,7 +183,7 @@ export async function deleteCategory(
       await db
         .update(transactions)
         .set({ categoryId: opts.moveToCategoryId })
-        .where(and(eq(transactions.categoryId, id), ne(transactions.status, "r")));
+        .where(eq(transactions.categoryId, id));
       await db
         .update(recurring)
         .set({ categoryId: opts.moveToCategoryId })
@@ -255,7 +255,7 @@ export async function deleteCategoryGroup(
         await db
           .update(transactions)
           .set({ categoryId: opts.moveToCategoryId })
-          .where(and(inArray(transactions.categoryId, catIds), ne(transactions.status, "r")));
+          .where(inArray(transactions.categoryId, catIds));
         await db
           .update(recurring)
           .set({ categoryId: opts.moveToCategoryId })
