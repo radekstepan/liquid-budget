@@ -1161,6 +1161,7 @@ export async function bulkUpdateTransactions(
 
   const updated = await withTransaction(db, async () => {
     const updatedRows: any[] = [];
+    const familyIntents = new Map<number, { date?: string; status?: ClearedStatus }>();
     for (const id of ids) {
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
@@ -1318,32 +1319,16 @@ export async function bulkUpdateTransactions(
           .returning();
         if (row) updatedRows.push(row);
 
-        if (isSplitParent && "date" in setFields && setFields.date != null) {
-          await db
-            .update(transactions)
-            .set({ date: String(setFields.date) })
-            .where(eq(transactions.parentId, id));
-        }
-
-        if (existing.parentId != null && "date" in setFields && setFields.date != null) {
-          await db
-            .update(transactions)
-            .set({ date: String(setFields.date) })
-            .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
-        }
-
-        if (isSplitParent && "status" in setFields && setFields.status != null) {
-          await db
-            .update(transactions)
-            .set({ status: setFields.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
-            .where(eq(transactions.parentId, id));
-        }
-
-        if (existing.parentId != null && "status" in setFields && setFields.status != null) {
-          await db
-            .update(transactions)
-            .set({ status: setFields.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
-            .where(or(eq(transactions.id, existing.parentId), eq(transactions.parentId, existing.parentId)));
+        const familyRoot = isSplitParent ? id : existing.parentId;
+        if (familyRoot != null) {
+          const intent = familyIntents.get(familyRoot) ?? {};
+          if ("date" in setFields && setFields.date != null) {
+            intent.date = String(setFields.date);
+          }
+          if ("status" in setFields && setFields.status != null) {
+            intent.status = setFields.status as ClearedStatus;
+          }
+          familyIntents.set(familyRoot, intent);
         }
       }
 
@@ -1355,6 +1340,29 @@ export async function bulkUpdateTransactions(
         !isSplitParent
       ) {
         renameRulesToLearn.push({ from: existing.payee, to: String(patch.payee) });
+      }
+    }
+
+    for (const [familyRoot, intent] of familyIntents) {
+      const familyFilter = or(
+        eq(transactions.id, familyRoot),
+        eq(transactions.parentId, familyRoot)
+      );
+      const familyRows = await db.select().from(transactions).where(familyFilter);
+      if (familyRows.some((row) => row.status === "r")) {
+        throw new TransactionError(
+          `Transaction ${familyRoot} is reconciled and locked. Unreconcile before editing.`,
+          422
+        );
+      }
+      if (intent.date != null) {
+        await db.update(transactions).set({ date: intent.date }).where(familyFilter);
+      }
+      if (intent.status != null) {
+        await db
+          .update(transactions)
+          .set({ status: intent.status, reconciledAt: null, reconciliationId: null })
+          .where(familyFilter);
       }
     }
 

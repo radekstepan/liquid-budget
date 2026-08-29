@@ -4038,6 +4038,128 @@ describe("transactions queries", () => {
       });
     });
 
+    describe("BUG-05: deterministic split propagation in bulkUpdateTransactions", () => {
+      async function seedSplitForBug05(db: ReturnType<typeof openMigratedDb>) {
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        return createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Target",
+            memo: "Split items",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { categoryId: cat2Id, amount: -2000, memo: "Household" },
+          ]
+        );
+      }
+
+      async function familyRows(db: ReturnType<typeof openMigratedDb>, parentId: number) {
+        return db
+          .select()
+          .from(schema.transactions)
+          .where(or(eq(schema.transactions.id, parentId), eq(schema.transactions.parentId, parentId)));
+      }
+
+      it("status propagation is order-independent: [child1, parent] and [parent, child1] converge", async () => {
+        const dbA = openMigratedDb();
+        const splitA = await seedSplitForBug05(dbA);
+        await bulkUpdateTransactions(dbA, [splitA.children[0]!.id, splitA.parent.id], { status: "u" });
+
+        const dbB = openMigratedDb();
+        const splitB = await seedSplitForBug05(dbB);
+        await bulkUpdateTransactions(dbB, [splitB.parent.id, splitB.children[0]!.id], { status: "u" });
+
+        const rowsA = await familyRows(dbA, splitA.parent.id);
+        const rowsB = await familyRows(dbB, splitB.parent.id);
+        expect(rowsA).toHaveLength(3);
+        expect(rowsB).toHaveLength(3);
+        for (const row of [...rowsA, ...rowsB]) {
+          expect(row.status).toBe("u");
+          expect(row.reconciledAt).toBeNull();
+          expect(row.reconciliationId).toBeNull();
+        }
+      });
+
+      it("date propagation is order-independent: [child1, child2] and [child2, child1] converge", async () => {
+        const dbA = openMigratedDb();
+        const splitA = await seedSplitForBug05(dbA);
+        await bulkUpdateTransactions(
+          dbA,
+          [splitA.children[0]!.id, splitA.children[1]!.id],
+          { date: "2026-08-20" }
+        );
+
+        const dbB = openMigratedDb();
+        const splitB = await seedSplitForBug05(dbB);
+        await bulkUpdateTransactions(
+          dbB,
+          [splitB.children[1]!.id, splitB.children[0]!.id],
+          { date: "2026-08-20" }
+        );
+
+        const rowsA = await familyRows(dbA, splitA.parent.id);
+        const rowsB = await familyRows(dbB, splitB.parent.id);
+        expect(rowsA).toHaveLength(3);
+        expect(rowsB).toHaveLength(3);
+        for (const row of [...rowsA, ...rowsB]) {
+          expect(row.date).toBe("2026-08-20");
+        }
+      });
+
+      it("bulk-updating one child rejects with 422 instead of clobbering a reconciled sibling", async () => {
+        const db = openMigratedDb();
+        const split = await seedSplitForBug05(db);
+        const child1 = split.children[0]!;
+        const child2 = split.children[1]!;
+
+        await db
+          .update(schema.transactions)
+          .set({ status: "r", reconciledAt: "2026-08-01" })
+          .where(eq(schema.transactions.id, child1.id));
+
+        await expect(bulkUpdateTransactions(db, [child2.id], { status: "u" })).rejects.toMatchObject({
+          status: 422,
+          name: "TransactionError",
+          message: /reconciled and locked/i,
+        });
+
+        const rows = await familyRows(db, split.parent.id);
+        const rowById = new Map(rows.map((r) => [r.id, r]));
+        expect(rowById.get(child1.id)?.status).toBe("r");
+        expect(rowById.get(child1.id)?.reconciledAt).toBe("2026-08-01");
+        expect(rowById.get(child2.id)?.status).toBe("c");
+        expect(rowById.get(split.parent.id)?.status).toBe("c");
+      });
+
+      it("batch containing parent and child rejects with 422 regardless of order when a sibling is reconciled", async () => {
+        for (const order of ["child-first", "parent-first"] as const) {
+          const db = openMigratedDb();
+          const split = await seedSplitForBug05(db);
+
+          await db
+            .update(schema.transactions)
+            .set({ status: "r", reconciledAt: "2026-08-01" })
+            .where(eq(schema.transactions.id, split.children[0]!.id));
+
+          const ids =
+            order === "child-first"
+              ? [split.children[1]!.id, split.parent.id]
+              : [split.parent.id, split.children[1]!.id];
+
+          await expect(bulkUpdateTransactions(db, ids, { status: "u" })).rejects.toMatchObject({
+            status: 422,
+            name: "TransactionError",
+            message: /reconciled and locked/i,
+          });
+        }
+      });
+    });
+
     describe("BUG-18.2: split-child income parity", () => {
       it("createTransaction(parentId) marks uncategorized positive children as income, matching createSplitWithChildren", async () => {
         const db = openMigratedDb();
