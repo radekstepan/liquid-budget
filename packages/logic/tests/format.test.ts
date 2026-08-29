@@ -274,6 +274,21 @@ describe("format", () => {
       expect(nextDateFor("twiceamonth", "2026-02-15")).toBe("2026-02-28");
     });
 
+    it("handles hand-set nextDate on days 16-19 for twiceamonth with anchor <= 15 (BUG-13)", () => {
+      // anchor 5: d1=5, d2=20. nextDate on day 17 should advance to 20, not skip to next month
+      expect(nextDateFor("twiceamonth", "2026-09-17", 5)).toBe("2026-09-20");
+      // anchor 5: nextDate on day 20 should advance to next month's 5th
+      expect(nextDateFor("twiceamonth", "2026-09-20", 5)).toBe("2026-10-05");
+      // anchor 31: d1=16, d2=31. nextDate on day 16 should advance to 31 (clamped)
+      expect(nextDateFor("twiceamonth", "2026-09-16", 31)).toBe("2026-09-30");
+      // anchor 1: d1=1, d2=16. nextDate on day 2 should advance to 16
+      expect(nextDateFor("twiceamonth", "2026-09-02", 1)).toBe("2026-09-16");
+      // anchor 10: d1=10, d2=25. nextDate on day 20 should advance to 25
+      expect(nextDateFor("twiceamonth", "2026-09-20", 10)).toBe("2026-09-25");
+      // anchor 10: nextDate on day 25 should advance to next month's 10th
+      expect(nextDateFor("twiceamonth", "2026-09-25", 10)).toBe("2026-10-10");
+    });
+
     it("prevents semimonthly schedule drift across February (BUG-06)", () => {
       // Starting from 2026-01-28 (anchor 28): pair is 13th and 28th
       let d = "2026-01-28";
