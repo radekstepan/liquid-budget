@@ -8,6 +8,7 @@ import type {
 import { findDuplicateGroups, TRANSACTION_DUPLICATE_FLAG } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, transactions } from "../schema.js";
+import { withTransaction } from "../transaction.js";
 
 /**
  * Analyze the whole database for duplicate transactions and mark the
@@ -58,79 +59,81 @@ export async function analyzeUnflaggedDuplicates(db: Db): Promise<DuplicateAnaly
 
   const groups = findDuplicateGroups(entries);
 
-  // Ids that remain duplicates after this run (either newly marked or
-  // already carrying the internal marker from a previous run).
-  const activeDuplicateIds = new Set<number>();
-  const flagIds: number[] = [];
-  let flaggedCount = 0;
-  let alreadyFlaggedCount = 0;
-  let lockedCount = 0;
+  return withTransaction(db, async () => {
+    // Ids that remain duplicates after this run (either newly marked or
+    // already carrying the internal marker from a previous run).
+    const activeDuplicateIds = new Set<number>();
+    const flagIds: number[] = [];
+    let flaggedCount = 0;
+    let alreadyFlaggedCount = 0;
+    let lockedCount = 0;
 
-  for (const group of groups) {
-    for (const dup of group.duplicates) {
-      if (dup.status === "r") {
-        lockedCount++;
-        continue;
-      }
-      if (dup.flagColor != null) {
-        alreadyFlaggedCount++;
-        if (dup.flagColor === TRANSACTION_DUPLICATE_FLAG && dup.id != null) {
-          activeDuplicateIds.add(dup.id);
+    for (const group of groups) {
+      for (const dup of group.duplicates) {
+        if (dup.status === "r") {
+          lockedCount++;
+          continue;
         }
-        continue;
-      }
-      if (dup.id != null) {
-        flagIds.push(dup.id);
-        activeDuplicateIds.add(dup.id);
-        flaggedCount++;
+        if (dup.flagColor != null) {
+          alreadyFlaggedCount++;
+          if (dup.flagColor === TRANSACTION_DUPLICATE_FLAG && dup.id != null) {
+            activeDuplicateIds.add(dup.id);
+          }
+          continue;
+        }
+        if (dup.id != null) {
+          flagIds.push(dup.id);
+          activeDuplicateIds.add(dup.id);
+          flaggedCount++;
+        }
       }
     }
-  }
 
-  if (flagIds.length > 0) {
-    await db
-      .update(transactions)
-      .set({ flagColor: TRANSACTION_DUPLICATE_FLAG })
-      .where(inArray(transactions.id, flagIds));
-  }
+    if (flagIds.length > 0) {
+      await db
+        .update(transactions)
+        .set({ flagColor: TRANSACTION_DUPLICATE_FLAG })
+        .where(inArray(transactions.id, flagIds));
+    }
 
-  // Clear stale internal duplicate markers on rows that are no longer part
-  // of an active duplicate group (and are not reconciled / locked).
-  let clearedCount = 0;
-  for (const r of rows) {
-    if (r.id == null) continue;
-    if (activeDuplicateIds.has(r.id)) continue;
-    if (r.flagColor !== TRANSACTION_DUPLICATE_FLAG) continue;
-    if (r.status === "r") continue;
-    clearedCount++;
-  }
-  if (clearedCount > 0) {
-    const staleIds = rows
-      .filter(
-        (r) =>
-          r.id != null &&
-          !activeDuplicateIds.has(r.id) &&
-          r.flagColor === TRANSACTION_DUPLICATE_FLAG &&
-          r.status !== "r"
-      )
-      .map((r) => r.id!);
-    await db
-      .update(transactions)
-      .set({ flagColor: null })
-      .where(inArray(transactions.id, staleIds));
-  }
+    // Clear stale internal duplicate markers on rows that are no longer part
+    // of an active duplicate group (and are not reconciled / locked).
+    let clearedCount = 0;
+    for (const r of rows) {
+      if (r.id == null) continue;
+      if (activeDuplicateIds.has(r.id)) continue;
+      if (r.flagColor !== TRANSACTION_DUPLICATE_FLAG) continue;
+      if (r.status === "r") continue;
+      clearedCount++;
+    }
+    if (clearedCount > 0) {
+      const staleIds = rows
+        .filter(
+          (r) =>
+            r.id != null &&
+            !activeDuplicateIds.has(r.id) &&
+            r.flagColor === TRANSACTION_DUPLICATE_FLAG &&
+            r.status !== "r"
+        )
+        .map((r) => r.id!);
+      await db
+        .update(transactions)
+        .set({ flagColor: null })
+        .where(inArray(transactions.id, staleIds));
+    }
 
-  const duplicateCount = groups.reduce(
-    (n, g) => n + g.duplicates.length,
-    0
-  );
+    const duplicateCount = groups.reduce(
+      (n, g) => n + g.duplicates.length,
+      0
+    );
 
-  return {
-    groups,
-    duplicateCount,
-    flaggedCount,
-    alreadyFlaggedCount,
-    lockedCount,
-    clearedCount,
-  };
+    return {
+      groups,
+      duplicateCount,
+      flaggedCount,
+      alreadyFlaggedCount,
+      lockedCount,
+      clearedCount,
+    };
+  });
 }
