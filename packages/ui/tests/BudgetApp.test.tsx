@@ -512,6 +512,35 @@ describe("BudgetApp", () => {
     ).toBe(true);
   });
 
+  it("BUG-07: calls api.updateAccount with onBudget when editing an account", async () => {
+    const { api, calls } = makeApi();
+    const seed = makeSeedBudgetData();
+    const account = seed.accounts.find((a) => a.id === 1);
+    render(<BudgetApp data={seed} api={api} />);
+
+    const editBtn = screen.getByRole("button", {
+      name: `Edit account ${account?.name ?? ""}`,
+    });
+    fireEvent.click(editBtn);
+
+    const nameInput = screen.getByPlaceholderText("e.g. TD Chequing");
+    fireEvent.change(nameInput, { target: { value: "TD Renamed" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    });
+
+    expect(
+      calls.some(
+        (c) =>
+          c.method === "updateAccount" &&
+          c.args[0] === 1 &&
+          (c.args[1] as any)?.name === "TD Renamed" &&
+          (c.args[1] as any)?.onBudget === true
+      )
+    ).toBe(true);
+  });
+
   it("considers all transactions regardless of list length for year range (UNI-39 / F-20)", () => {
     const { api } = makeApi();
     const seed = makeSeedBudgetData();
