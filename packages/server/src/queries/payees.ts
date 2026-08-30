@@ -1,6 +1,7 @@
 import { eq, asc, or, and, isNull } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { payees, transactions, recurring } from "../schema.js";
+import { withTransaction } from "../transaction.js";
 
 export type PayeeRow = typeof payees.$inferSelect;
 export type CreatePayeeInput = {
@@ -60,11 +61,11 @@ export function findOrCreatePayee(
   return inserted;
 }
 
-export function updatePayee(
+export async function updatePayee(
   db: Db,
   id: number,
   patch: UpdatePayeeInput
-): PayeeRow | null {
+): Promise<PayeeRow | null> {
   const current = getPayeeById(db, id);
   if (!current) return null;
 
@@ -78,8 +79,8 @@ export function updatePayee(
 
   if (Object.keys(updates).length === 0) return current;
 
-  return db.transaction((tx) => {
-    const updated = tx
+  return withTransaction(db, async () => {
+    const updated = db
       .update(payees)
       .set(updates)
       .where(eq(payees.id, id))
@@ -105,7 +106,7 @@ export function updatePayee(
           )
         : eq(transactions.payeeId, id);
 
-      tx.update(transactions)
+      db.update(transactions)
         .set({ payee: newName })
         .where(txCondition)
         .run();
@@ -120,7 +121,7 @@ export function updatePayee(
           )
         : eq(recurring.payeeId, id);
 
-      tx.update(recurring)
+      db.update(recurring)
         .set({ payee: newName })
         .where(recCondition)
         .run();

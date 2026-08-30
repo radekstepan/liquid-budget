@@ -164,9 +164,10 @@ export const ReportsView = memo(function ReportsView({
     for (const t of rangeTxns) {
       if (t.categoryId == null) continue;
       const a = num(t.amount);
-      if (a < 0) byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) + -a);
+      byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) - a);
     }
     return [...byCat.entries()]
+      .filter(([_, v]) => v > 0)
       .map(([id, v]) => ({ name: catMap.get(id) ?? "—", value: v }))
       .sort((a, b) => b.value - a.value);
   }, [rangeTxns, catMap]);

@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { assignments, categories, categoryGroups, payees, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
 export class CategoryError extends Error {
@@ -181,6 +181,10 @@ export async function deleteCategory(
   return withTransaction(db, async () => {
     if (opts?.moveToCategoryId) {
       await db
+        .update(payees)
+        .set({ autoCategoryId: opts.moveToCategoryId })
+        .where(eq(payees.autoCategoryId, id));
+      await db
         .update(transactions)
         .set({ categoryId: opts.moveToCategoryId })
         .where(eq(transactions.categoryId, id));
@@ -252,6 +256,10 @@ export async function deleteCategoryGroup(
   return withTransaction(db, async () => {
     if (catIds.length > 0) {
       if (opts?.moveToCategoryId) {
+        await db
+          .update(payees)
+          .set({ autoCategoryId: opts.moveToCategoryId })
+          .where(inArray(payees.autoCategoryId, catIds));
         await db
           .update(transactions)
           .set({ categoryId: opts.moveToCategoryId })

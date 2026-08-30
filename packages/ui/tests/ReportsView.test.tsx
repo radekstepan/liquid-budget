@@ -561,6 +561,38 @@ describe("ReportsView", () => {
     expect(screen.getByText("Top Payees")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
   });
+
+  it("BUG-04: Spending by Category nets refunds against category outflows", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [
+        { id: 10, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // Outflow $200.00
+        txn("2026-06", 5, "Clothing Store", -200, 10),
+        // Refund / Return $150.00
+        txn("2026-06", 10, "Clothing Store Return", 150, 10),
+      ],
+      recurring: [],
+    };
+
+    render(<ReportsView data={data} month="2026-06" />);
+    clickTab("Spending by Category");
+
+    const panel = findPanel("Spending by Category")!;
+    expect(panel).toBeInTheDocument();
+
+    // Net spend is $50.00 ($200 - $150), total is $50.00
+    expect(within(panel).getByText("Clothing")).toBeInTheDocument();
+    expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
+    expect(within(panel).getByText("Total:")).toBeInTheDocument();
+  });
 });
+
 
 
