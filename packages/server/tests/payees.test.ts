@@ -59,7 +59,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     expect(getPayees(db)).toHaveLength(1);
   });
 
-  it("updates payee name and propagates to transactions and recurring rules", () => {
+  it("updates payee name and propagates to transactions and recurring rules", async () => {
     const p = findOrCreatePayee(db, "Whole Foods", 10);
 
     db.run(
@@ -69,7 +69,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
       `INSERT INTO recurring (account_id, category_id, payee, payee_id, amount, frequency, next_date, active) VALUES (1, 10, 'Whole Foods', ${p.id}, -5000, 'monthly', '2026-07-01', 1);`
     );
 
-    const updated = updatePayee(db, p.id, { name: "Whole Foods Market" });
+    const updated = await updatePayee(db, p.id, { name: "Whole Foods Market" });
     expect(updated?.name).toBe("Whole Foods Market");
 
     const tx = db.select().from(transactions).all()[0]!;
@@ -79,7 +79,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     expect(rec.payee).toBe("Whole Foods Market");
   });
 
-  it("updates payee name and propagates to transactions and recurring with null payee_id by name", () => {
+  it("updates payee name and propagates to transactions and recurring with null payee_id by name", async () => {
     const p = findOrCreatePayee(db, "Target Superstore", 10);
 
     db.run(
@@ -89,7 +89,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
       `INSERT INTO recurring (account_id, category_id, payee, amount, frequency, next_date, active) VALUES (1, 10, 'Target Superstore', -5000, 'monthly', '2026-07-01', 1);`
     );
 
-    const updated = updatePayee(db, p.id, { name: "Target" });
+    const updated = await updatePayee(db, p.id, { name: "Target" });
     expect(updated?.name).toBe("Target");
 
     const tx = db.select().from(transactions).all()[0]!;
@@ -99,7 +99,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     expect(rec.payee).toBe("Target");
   });
 
-  it("BUG-22: does not cascade payee name to split children or transfer rows by raw text match", () => {
+  it("BUG-22: does not cascade payee name to split children or transfer rows by raw text match", async () => {
     const p = findOrCreatePayee(db, "Landlord", 10);
 
     // 1. Regular transaction with matching text (legacy, null payeeId) -> SHOULD update
@@ -132,7 +132,7 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
       `INSERT INTO transactions (id, account_id, parent_id, payee_id, date, payee, memo, amount, status, created_at, is_income) VALUES (103, 1, 100, ${p.id}, '2026-06-01', 'Landlord', '', -5000, 'c', '', 0);`
     );
 
-    const updated = updatePayee(db, p.id, { name: "Property Management Co" });
+    const updated = await updatePayee(db, p.id, { name: "Property Management Co" });
     expect(updated?.name).toBe("Property Management Co");
 
     const allTx = db.select().from(transactions).all();
@@ -154,6 +154,19 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     const allRec = db.select().from(recurring).all();
     const unlinkedRecTransfer = allRec[0]!;
     expect(unlinkedRecTransfer.payee).toBe("Landlord"); // Kept unchanged
+  });
+
+  it("BUG-05: updates payee inside an existing withTransaction block without throwing", async () => {
+    const { withTransaction } = await import("../src/transaction.js");
+    const p = findOrCreatePayee(db, "Coffee Shop", 10);
+
+    const result = await withTransaction(db, async () => {
+      return await updatePayee(db, p.id, { name: "Specialty Coffee" });
+    });
+
+    expect(result?.name).toBe("Specialty Coffee");
+    const fetched = getPayeeById(db, p.id);
+    expect(fetched?.name).toBe("Specialty Coffee");
   });
 
   it("deletes a payee", () => {

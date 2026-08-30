@@ -239,6 +239,7 @@ describe("categories queries", () => {
       await deleteCategory(mock.db, 1, { moveToCategoryId: 2 });
       const updateCalls = mock.calls.filter((c) => c.op === "update");
       expect(updateCalls.map((c) => c.table)).toEqual([
+        "payees",
         "transactions",
         "recurring",
         "recurring_sub_transactions",
@@ -342,6 +343,7 @@ describe("categories queries", () => {
       await deleteCategoryGroup(mock.db, 1, { moveToCategoryId: 20 });
       const updateCalls = mock.calls.filter((c) => c.op === "update");
       expect(updateCalls.map((c) => c.table)).toEqual([
+        "payees",
         "transactions",
         "recurring",
         "recurring_sub_transactions",
@@ -599,6 +601,43 @@ describe("categories queries", () => {
       const afterTotalAvail = afterResult.groups.reduce((s, g) => s + g.available, 0);
       const beforeTotalAvail = beforeResult.groups.reduce((s, g) => s + g.available, 0);
       expect(afterTotalAvail).toBe(beforeTotalAvail);
+    });
+
+    it("BUG-06: deleteCategory with replacement updates payees.autoCategoryId to moveToCategoryId", async () => {
+      const db = openMigratedDb();
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Living", sort: 0 }).returning();
+      const [catOld] = await db.insert(schema.categories).values({ name: "Groceries", groupId: group!.id, sort: 0 }).returning();
+      const [catNew] = await db.insert(schema.categories).values({ name: "Supermarket", groupId: group!.id, sort: 1 }).returning();
+
+      const [payee] = await db.insert(schema.payees).values({
+        name: "Whole Foods",
+        autoCategoryId: catOld!.id,
+        createdAt: "2026-01-01",
+      }).returning();
+
+      await deleteCategory(db, catOld!.id, { moveToCategoryId: catNew!.id });
+
+      const [payeeAfter] = await db.select().from(schema.payees).where(eq(schema.payees.id, payee!.id));
+      expect(payeeAfter?.autoCategoryId).toBe(catNew!.id);
+    });
+
+    it("BUG-06: deleteCategoryGroup with replacement updates payees.autoCategoryId to moveToCategoryId", async () => {
+      const db = openMigratedDb();
+      const [groupOld] = await db.insert(schema.categoryGroups).values({ name: "Old Group", sort: 0 }).returning();
+      const [groupNew] = await db.insert(schema.categoryGroups).values({ name: "New Group", sort: 1 }).returning();
+      const [catInOldGroup] = await db.insert(schema.categories).values({ name: "Old Cat", groupId: groupOld!.id, sort: 0 }).returning();
+      const [catInNewGroup] = await db.insert(schema.categories).values({ name: "New Cat", groupId: groupNew!.id, sort: 0 }).returning();
+
+      const [payee] = await db.insert(schema.payees).values({
+        name: "Trader Joe's",
+        autoCategoryId: catInOldGroup!.id,
+        createdAt: "2026-01-01",
+      }).returning();
+
+      await deleteCategoryGroup(db, groupOld!.id, { moveToCategoryId: catInNewGroup!.id });
+
+      const [payeeAfter] = await db.select().from(schema.payees).where(eq(schema.payees.id, payee!.id));
+      expect(payeeAfter?.autoCategoryId).toBe(catInNewGroup!.id);
     });
   });
 });
