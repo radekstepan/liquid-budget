@@ -181,6 +181,7 @@ export type BudgetAppApi = {
     patch: {
       name?: string;
       kind?: "liquid" | "credit" | "offbudget";
+      onBudget?: boolean;
       archived?: boolean;
     }
   ) => Promise<void>;
@@ -995,6 +996,7 @@ export function BudgetApp({
             await api.updateAccount(editingAccount.id, {
               name: v.name,
               kind: v.kind,
+              onBudget: v.onBudget,
             });
             setModal({ kind: "none" });
           }}

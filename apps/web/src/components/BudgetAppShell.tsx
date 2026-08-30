@@ -1045,7 +1045,22 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
-        const accounts = prev.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a));
+        const accounts = prev.accounts.map((a) => {
+          if (a.id !== id) return a;
+          const nextKind = patch.kind !== undefined ? patch.kind : a.kind;
+          const nextOnBudget =
+            patch.onBudget !== undefined
+              ? patch.onBudget
+              : patch.kind !== undefined
+                ? patch.kind !== "offbudget"
+                : a.onBudget;
+          return {
+            ...a,
+            ...patch,
+            kind: nextKind,
+            onBudget: nextOnBudget,
+          };
+        });
         return { ...prev, accounts, budgetIndex: undefined };
       });
       const successMsg =
