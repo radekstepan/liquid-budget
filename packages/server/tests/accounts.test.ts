@@ -1253,5 +1253,58 @@ describe("accounts queries", () => {
         onBudget: true,
       });
     });
+
+    it("BUG-01: createAccount seeds CC Payment category with negative carryover for credit cards with opening debt", async () => {
+      const db = openMigratedDb();
+      const acct = await createAccount(db, {
+        name: "MasterCard",
+        kind: "credit",
+        balance: -75000,
+      });
+
+      // Verify account
+      expect(acct).toMatchObject({
+        id: expect.any(Number),
+        name: "MasterCard",
+        kind: "credit",
+        balance: -75000,
+        onBudget: true,
+      });
+
+      // Verify starting transaction has isIncome: false
+      const [tx] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(tx).toBeDefined();
+      expect(tx?.amount).toBe(-75000);
+      expect(tx?.isIncome).toBe(false);
+
+      // Verify CC payment category is created and linked with negative carryover
+      const [cat] = await db
+        .select()
+        .from(schema.categories)
+        .where(eq(schema.categories.linkedAccountId, acct.id));
+      expect(cat).toBeDefined();
+      expect(cat?.name).toBe("MasterCard");
+      expect(Number(cat?.carryover)).toBe(-75000);
+    });
+
+    it("BUG-02: createAccount with positive credit card starting balance does not mark isIncome: true", async () => {
+      const db = openMigratedDb();
+      const acct = await createAccount(db, {
+        name: "Credit Buffer Card",
+        kind: "credit",
+        balance: 10000,
+      });
+
+      const [tx] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(tx).toBeDefined();
+      expect(tx?.amount).toBe(10000);
+      expect(tx?.isIncome).toBe(false);
+    });
   });
 });

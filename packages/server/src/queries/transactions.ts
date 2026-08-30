@@ -159,6 +159,20 @@ export async function isAccountOnBudget(db: Database, accountId: number): Promis
   return row?.onBudget ?? true;
 }
 
+export async function getAccountInfo(
+  db: Database,
+  accountId: number
+): Promise<{ onBudget: boolean; kind: string } | null> {
+  const [row] = await db
+    .select({ onBudget: accounts.onBudget, kind: accounts.kind })
+    .from(accounts)
+    .where(eq(accounts.id, accountId));
+  if (!row) return null;
+  const onBudget = row.onBudget ?? true;
+  const kind = row.kind ?? (onBudget ? "liquid" : "offbudget");
+  return { onBudget, kind };
+}
+
 async function childCount(db: Database, parentId: number): Promise<number> {
   const rows = await db
     .select({ id: transactions.id })
@@ -236,7 +250,9 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
   }
 
   return withTransaction(db, async () => {
-    const onBudget = await isAccountOnBudget(db, input.accountId);
+    const srcAccount = await getAccountInfo(db, input.accountId);
+    const onBudget = srcAccount?.onBudget ?? true;
+    const kind = srcAccount?.kind ?? "liquid";
     const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
 
@@ -262,6 +278,10 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       incomeMonth = classification.incomeMonth;
     } else if (!onBudget) {
       categoryId = null;
+      isIncome = false;
+      incomeMonth = null;
+    } else if (kind === "credit") {
+      categoryId = input.categoryId ?? null;
       isIncome = false;
       incomeMonth = null;
     } else {
@@ -431,7 +451,9 @@ export async function createSplitWithChildren(
       })
       .returning();
 
-    const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
+    const srcAccount = await getAccountInfo(db, parent.accountId);
+    const srcOnBudget = srcAccount?.onBudget ?? true;
+    const srcKind = srcAccount?.kind ?? "liquid";
     const childRows = [];
     for (const c of children) {
       const childAmount = assertValidAmount(c.amount);
@@ -456,6 +478,9 @@ export async function createSplitWithChildren(
       } else {
         if (!srcOnBudget) {
           categoryId = null;
+          isIncome = false;
+        } else if (srcKind === "credit") {
+          categoryId = c.categoryId ? Number(c.categoryId) : null;
           isIncome = false;
         } else {
           isIncome = categoryId == null && childAmount > 0;
@@ -626,7 +651,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       }
     }
 
-    const srcOnBudget = await isAccountOnBudget(db, newAccountId);
+    const srcAccount = await getAccountInfo(db, newAccountId);
+    const srcOnBudget = srcAccount?.onBudget ?? true;
+    const srcKind = srcAccount?.kind ?? "liquid";
     const destOnBudget =
       current.transferAccountId != null
         ? await isAccountOnBudget(db, current.transferAccountId)
@@ -651,6 +678,12 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.incomeMonth = null;
     } else if (!srcOnBudget) {
       p.categoryId = null;
+      p.incomeMonth = null;
+      p.isIncome = false;
+    } else if (srcKind === "credit") {
+      if ("categoryId" in p) {
+        p.categoryId = p.categoryId;
+      }
       p.incomeMonth = null;
       p.isIncome = false;
     } else {
@@ -838,7 +871,9 @@ export async function updateSplit(
     const newStatus: ClearedStatus =
       (pf.status as ClearedStatus | undefined) ?? (parent.status as ClearedStatus);
 
-    const srcOnBudget = await isAccountOnBudget(db, parent.accountId);
+    const srcAccount = await getAccountInfo(db, parent.accountId);
+    const srcOnBudget = srcAccount?.onBudget ?? true;
+    const srcKind = srcAccount?.kind ?? "liquid";
     const newChildren = [];
     const usedOldIndices = new Set<number>();
 
@@ -901,6 +936,9 @@ export async function updateSplit(
 
         if (!srcOnBudget) {
           categoryId = null;
+          isIncome = false;
+        } else if (srcKind === "credit") {
+          categoryId = c.categoryId ? Number(c.categoryId) : null;
           isIncome = false;
         } else {
           isIncome = categoryId == null && childAmount > 0;
@@ -1258,7 +1296,9 @@ export async function bulkUpdateTransactions(
       if (patch.accountId !== undefined && patch.accountId != null) setFields.accountId = newAccountId;
       if (patch.incomeMonth !== undefined) setFields.incomeMonth = patch.incomeMonth ?? null;
 
-      const srcOnBudget = await isAccountOnBudget(db, newAccountId);
+      const srcAccount = await getAccountInfo(db, newAccountId);
+      const srcOnBudget = srcAccount?.onBudget ?? true;
+      const srcKind = srcAccount?.kind ?? "liquid";
       const destOnBudget =
         existing.transferAccountId != null
           ? await isAccountOnBudget(db, existing.transferAccountId)
@@ -1285,11 +1325,15 @@ export async function bulkUpdateTransactions(
         setFields.categoryId = null;
         setFields.incomeMonth = null;
         setFields.isIncome = false;
+      } else if (srcKind === "credit") {
+        if ("categoryId" in patch) {
+          setFields.categoryId = patch.categoryId ?? null;
+        }
+        setFields.incomeMonth = null;
+        setFields.isIncome = false;
       } else {
         const finalCatId = "categoryId" in setFields ? setFields.categoryId : existing.categoryId;
-        const isEligibleForIncome =
-          existing.parentId == null &&
-          finalCatId == null;
+        const isEligibleForIncome = finalCatId == null;
 
         if (patch.accountId != null || patch.amount != null || patch.categoryId !== undefined) {
           const isIncome = isEligibleForIncome && newAmount > 0;

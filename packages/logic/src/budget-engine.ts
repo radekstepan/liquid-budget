@@ -90,6 +90,7 @@ export function isIncomeTransaction(
 
     // Regular transaction
     if (!onA) return false;
+    if (accA && accA.kind === "credit") return false;
     if (num(t.amount) <= 0) return false;
     if (t.isIncome !== undefined) {
       return t.isIncome === true;
