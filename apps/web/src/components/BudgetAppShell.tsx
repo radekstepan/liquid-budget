@@ -472,6 +472,9 @@ export function BudgetAppShell({
         snapshot = prev;
         const target = prev.transactions.find((x) => x.id === id);
         const deltas = new Map<number, number>();
+        const removedIds = new Set<number>([id]);
+        let splitParentIdToUpdate: number | null = null;
+        let splitParentNewAmount: number | null = null;
 
         if (target) {
           if (target.parentId != null) {
@@ -488,6 +491,13 @@ export function BudgetAppShell({
               if (lastChild.transferAccountId != null) {
                 deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
               }
+              removedIds.add(lastChild.id);
+              removedIds.add(target.parentId);
+            } else if (remaining.length === 0) {
+              removedIds.add(target.parentId);
+            } else {
+              splitParentIdToUpdate = target.parentId;
+              splitParentNewAmount = remaining.reduce((sum, c) => sum + num(c.amount), 0);
             }
           } else if (target.transferAccountId != null) {
             deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
@@ -500,6 +510,7 @@ export function BudgetAppShell({
                 if (c.transferAccountId != null) {
                   deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
                 }
+                removedIds.add(c.id);
               }
             } else {
               deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
@@ -508,9 +519,14 @@ export function BudgetAppShell({
         }
 
         const accounts = applyAccountDeltas(prev.accounts, deltas);
-        const transactions = prev.transactions.filter(
-          (x) => x.id !== id && x.parentId !== id
+        let transactions = prev.transactions.filter(
+          (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
         );
+        if (splitParentIdToUpdate != null && splitParentNewAmount != null) {
+          transactions = transactions.map((x) =>
+            x.id === splitParentIdToUpdate ? { ...x, amount: splitParentNewAmount!.toFixed(2) } : x
+          );
+        }
         return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       return withSync(() =>
@@ -535,17 +551,19 @@ export function BudgetAppShell({
         snapshot = prev;
         const idSet = new Set(ids);
         const deltas = new Map<number, number>();
+        const removedIds = new Set(ids);
+        const parentNewTotals = new Map<number, number>();
 
         for (const tx of prev.transactions) {
           if (!idSet.has(tx.id)) continue;
           if (tx.parentId != null) {
-            if (idSet.has(tx.parentId)) continue;
+            if (idSet.has(tx.parentId) || removedIds.has(tx.parentId)) continue;
             deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
             if (tx.transferAccountId != null) {
               deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
             }
             const remaining = prev.transactions.filter(
-              (x) => x.parentId === tx.parentId && !idSet.has(x.id)
+              (x) => x.parentId === tx.parentId && !idSet.has(x.id) && !removedIds.has(x.id)
             );
             if (remaining.length === 1) {
               const lastChild = remaining[0]!;
@@ -553,6 +571,15 @@ export function BudgetAppShell({
               if (lastChild.transferAccountId != null) {
                 deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
               }
+              removedIds.add(lastChild.id);
+              removedIds.add(tx.parentId);
+              parentNewTotals.delete(tx.parentId);
+            } else if (remaining.length === 0) {
+              removedIds.add(tx.parentId);
+              parentNewTotals.delete(tx.parentId);
+            } else {
+              const newTotal = remaining.reduce((sum, c) => sum + num(c.amount), 0);
+              parentNewTotals.set(tx.parentId, newTotal);
             }
           } else {
             const children = prev.transactions.filter((x) => x.parentId === tx.id);
@@ -562,6 +589,7 @@ export function BudgetAppShell({
                 if (c.transferAccountId != null) {
                   deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
                 }
+                removedIds.add(c.id);
               }
             } else {
               deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
@@ -573,9 +601,15 @@ export function BudgetAppShell({
         }
 
         const accounts = applyAccountDeltas(prev.accounts, deltas);
-        const transactions = prev.transactions.filter(
-          (x) => !idSet.has(x.id) && (x.parentId == null || !idSet.has(x.parentId))
+        let transactions = prev.transactions.filter(
+          (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
         );
+        if (parentNewTotals.size > 0) {
+          transactions = transactions.map((x) => {
+            const updatedTotal = parentNewTotals.get(x.id);
+            return updatedTotal !== undefined ? { ...x, amount: updatedTotal.toFixed(2) } : x;
+          });
+        }
         return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       return withSync(() =>

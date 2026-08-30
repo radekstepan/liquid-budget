@@ -622,11 +622,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     } else if (!isSplitParent) {
       if (newAccountId !== current.accountId || newAmount !== Number(current.amount)) {
         await applyBalance(db, current.accountId, -Number(current.amount));
-        if (newAccountId !== current.accountId) {
-          await applyBalance(db, newAccountId, newAmount);
-        } else {
-          await applyBalance(db, newAccountId, newAmount - Number(current.amount));
-        }
+        await applyBalance(db, newAccountId, newAmount);
       }
     }
 
@@ -783,10 +779,6 @@ export async function updateSplit(
         422
       );
     }
-    if ((await childCount(db, parentId)) === 0) {
-      throw new TransactionError("target row has no children; use a regular update");
-    }
-
     if (parentFields.date !== undefined && parentFields.date != null) {
       assertValidISODate(parentFields.date, "date");
     }
@@ -807,14 +799,17 @@ export async function updateSplit(
       throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
     }
 
-    for (const c of oldChildren) {
-      await applyBalance(db, c.accountId, -Number(c.amount));
-      if (c.transferAccountId != null) {
-        await applyBalance(db, c.transferAccountId, Number(c.amount));
-      }
-    }
     if (oldChildren.length > 0) {
+      for (const c of oldChildren) {
+        await applyBalance(db, c.accountId, -Number(c.amount));
+        if (c.transferAccountId != null) {
+          await applyBalance(db, c.transferAccountId, Number(c.amount));
+        }
+      }
       await db.delete(transactions).where(eq(transactions.parentId, parentId));
+    } else {
+      // Converting a single transaction to a split: reverse the single transaction's balance
+      await applyBalance(db, parent.accountId, -Number(parent.amount));
     }
 
     const pf: Record<string, unknown> = {};
@@ -828,6 +823,11 @@ export async function updateSplit(
       pf.reconciliationId = null;
     }
     if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
+    if (oldChildren.length === 0) {
+      pf.categoryId = null;
+      pf.isIncome = false;
+      pf.incomeMonth = null;
+    }
     if (Object.keys(pf).length > 0) {
       await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
     }
@@ -1234,11 +1234,7 @@ export async function bulkUpdateTransactions(
         } else if (!isSplitParent) {
           if (newAccountId !== existing.accountId || newAmount !== Number(existing.amount)) {
             await applyBalance(db, existing.accountId, -Number(existing.amount));
-            if (newAccountId !== existing.accountId) {
-              await applyBalance(db, newAccountId, newAmount);
-            } else {
-              await applyBalance(db, newAccountId, newAmount - Number(existing.amount));
-            }
+            await applyBalance(db, newAccountId, newAmount);
           }
         }
       }

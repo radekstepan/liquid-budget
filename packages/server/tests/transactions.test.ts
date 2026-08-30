@@ -1099,8 +1099,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 5, amount: -10000, payee: "Old", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
-      mock.respondWithNth("select:transactions", 3, [
+      mock.respondWithNth("select:transactions", 2, [
         { id: 2, accountId: 5, amount: -6000 },
         { id: 3, accountId: 5, amount: -4000 },
       ]);
@@ -1130,8 +1129,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
-      mock.respondWithNth("select:transactions", 3, [
+      mock.respondWithNth("select:transactions", 2, [
         { id: 2, accountId: 5, amount: -6000, payee: "Amazon Seller A", memo: "Item A", status: "c", transferAccountId: null, categoryId: 1 },
         { id: 3, accountId: 5, amount: -4000, payee: "Amazon", memo: "Item B", status: "c", transferAccountId: null, categoryId: 2 },
       ]);
@@ -1165,8 +1163,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
-      mock.respondWithNth("select:transactions", 3, [
+      mock.respondWithNth("select:transactions", 2, [
         { id: 2, accountId: 5, amount: -6000, payee: "Amazon Seller A", memo: "Item A", status: "c", transferAccountId: null, categoryId: 1 },
         { id: 3, accountId: 5, amount: -4000, payee: "Amazon", memo: "Item B", status: "c", transferAccountId: null, categoryId: 2 },
       ]);
@@ -1192,23 +1189,28 @@ describe("transactions queries", () => {
       expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon" });
     });
 
-    it("rejects a target row that has no children", async () => {
+    it("converts a single transaction that has no children into a split (BUG-02)", async () => {
       mock.respondWithNth("select:transactions", 1, [
-        { id: 1, accountId: 5, amount: -5000, payee: "X", categoryId: null, parentId: null, transferAccountId: null, date: "2026-07-01" },
+        { id: 1, accountId: 5, amount: -5000, payee: "X", categoryId: 10, parentId: null, transferAccountId: null, date: "2026-07-01", status: "c" },
       ]);
       mock.respondWith("select:transactions", []);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+      mock.respondWith("update:transactions", [{ id: 1 }]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 2, parentId: 1, amount: -2500 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 3, parentId: 1, amount: -2500 }]);
 
-      await expect(
-        updateSplit(
-          mock.db,
-          1,
-          {},
-          [
-            { categoryId: 1, amount: -2500 },
-            { categoryId: 2, amount: -2500 },
-          ]
-        )
-      ).rejects.toThrow(/no children/);
+      const result = await updateSplit(
+        mock.db,
+        1,
+        {},
+        [
+          { categoryId: 1, amount: -2500 },
+          { categoryId: 2, amount: -2500 },
+        ]
+      );
+      expect(result.parent.id).toBe(1);
+      expect(result.children).toHaveLength(2);
     });
 
     it("rejects changing the flag of a duplicate-flagged split parent", async () => {
@@ -1272,8 +1274,7 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 5, amount: -10000, payee: "Old", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
-      mock.respondWithNth("select:transactions", 3, [
+      mock.respondWithNth("select:transactions", 2, [
         { id: 2, accountId: 5, amount: -6000 },
         { id: 3, accountId: 5, amount: -4000 },
       ]);
@@ -1306,7 +1307,6 @@ describe("transactions queries", () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 1, accountId: 5, amount: -10000, payee: "Old", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
       ]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 2 }, { id: 3 }]);
 
       await expect(
         updateSplit(
@@ -4277,6 +4277,105 @@ describe("transactions queries", () => {
           categoryId: 1,
         });
         expect(recategorized?.isIncome).toBe(false);
+      });
+
+      describe("BUG-01: Correct balance delta on updateTransaction and bulkUpdateTransactions", () => {
+        it("updateTransaction: editing amount does not double-subtract old amount", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id } = await seedTestData(db);
+          // Initial balance from seedTestData: account has balance 0
+          // Set starting balance to 10000 cents ($100.00)
+          await db.update(schema.accounts).set({ balance: 10000 }).where(eq(schema.accounts.id, accountId));
+
+          // 1. Create transaction for -$10.00 (-1000 cents)
+          const txn = await createTransaction(db, {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "Coffee",
+            memo: "",
+            amount: -1000,
+          });
+          expect(txn).toBeDefined();
+
+          let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(9000); // $90.00
+
+          // 2. Edit amount to -$30.00 (-3000 cents)
+          await updateTransaction(db, txn!.id, { amount: -3000 });
+
+          [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          // Correct balance should be 10000 - 3000 = 7000 ($70.00)
+          // Under the bug, it was 8000 ($80.00) due to double-subtraction of old amount
+          expect(acct?.balance).toBe(7000);
+        });
+
+        it("bulkUpdateTransactions: editing amount does not double-subtract old amount", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id } = await seedTestData(db);
+          await db.update(schema.accounts).set({ balance: 10000 }).where(eq(schema.accounts.id, accountId));
+
+          const txn = await createTransaction(db, {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "Coffee",
+            memo: "",
+            amount: -1000,
+          });
+
+          let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(9000);
+
+          await bulkUpdateTransactions(db, [txn!.id], { amount: -3000 });
+
+          [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(7000);
+        });
+      });
+
+      describe("BUG-02: Converting single transaction to a split in updateSplit", () => {
+        it("converts a single transaction into a split transaction with correct balance", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+          await db.update(schema.accounts).set({ balance: 20000 }).where(eq(schema.accounts.id, accountId));
+
+          // 1. Create a regular single transaction of -$100.00 (-10000 cents)
+          const single = await createTransaction(db, {
+            accountId,
+            categoryId: cat1Id,
+            date: "2026-08-01",
+            payee: "Whole Foods",
+            memo: "Groceries",
+            amount: -10000,
+          });
+
+          let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(10000); // 20000 - 10000 = 10000 ($100.00)
+
+          // 2. Convert to a split transaction with two children (-6000, -4000)
+          const splitResult = await updateSplit(
+            db,
+            single!.id,
+            { payee: "Whole Foods Split" },
+            [
+              { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+              { categoryId: cat2Id, amount: -4000, memo: "household" },
+            ]
+          );
+
+          expect(splitResult.parent.id).toBe(single!.id);
+          expect(splitResult.children).toHaveLength(2);
+
+          // Verify parent row categoryId is cleared
+          const [parentRow] = await db.select().from(schema.transactions).where(eq(schema.transactions.id, single!.id));
+          expect(parentRow?.categoryId).toBeNull();
+          expect(parentRow?.isIncome).toBe(false);
+
+          // Account balance should remain 10000 (parent -10000 reversed, children -6000 + -4000 = -10000 applied)
+          [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(10000);
+        });
       });
     });
   });

@@ -149,7 +149,7 @@ describe("BudgetAppShell (BUG-24)", () => {
       });
     }) as any;
 
-    render(<BudgetAppShell initialView="budget" />);
+    render(<BudgetAppShell initialView="budget" initialMonth="2026-06" />);
 
     await waitFor(() => {
       expect(screen.queryByText("Loading budget")).toBeNull();
