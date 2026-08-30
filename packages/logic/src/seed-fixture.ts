@@ -84,8 +84,8 @@ const categories: Category[] = [
   { id: 28, groupId: 4, name: "Other Investments",              sort: 3, carryover: "0",       goalTarget: null,      linkedAccountId: null },
 
   // Credit Card Payments (linked to CC accounts)
-  { id: 29, groupId: 5, name: "AMEX Cobalt",           sort: 0, carryover: "389784", goalTarget: null, linkedAccountId: 5 },
-  { id: 30, groupId: 5, name: "Scotia Passport Visa",  sort: 1, carryover: "10348",  goalTarget: null, linkedAccountId: 6 },
+  { id: 29, groupId: 5, name: "AMEX Cobalt",           sort: 0, carryover: "-389784", goalTarget: null, linkedAccountId: 5 },
+  { id: 30, groupId: 5, name: "Scotia Passport Visa",  sort: 1, carryover: "-10348",  goalTarget: null, linkedAccountId: 6 },
   { id: 31, groupId: 5, name: "Rogers World Elite MC", sort: 2, carryover: "0",      goalTarget: null, linkedAccountId: 7 },
   { id: 32, groupId: 5, name: "Capital One Aspire MC", sort: 3, carryover: "0",      goalTarget: null, linkedAccountId: 8 },
 ];

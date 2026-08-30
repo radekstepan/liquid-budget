@@ -4378,5 +4378,127 @@ describe("transactions queries", () => {
         });
       });
     });
+
+    describe("BUG-02 & BUG-03: Income classification and bulk update invariants", () => {
+      it("BUG-02: manual uncategorized inflow on a credit card is never classified as income", async () => {
+        const db = openMigratedDb();
+        const { accountId: liquidId } = await seedTestData(db);
+        const [ccAcct] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Credit Card",
+            kind: "credit",
+            groupLabel: "Credit Cards",
+            balance: -50000,
+            onBudget: true,
+            sort: 10,
+          })
+          .returning();
+
+        // 1. Plain uncategorized positive transaction on credit card
+        const ccTx = await createTransaction(db, {
+          accountId: ccAcct!.id,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Cashback Refund",
+          memo: "Manual refund",
+          amount: 2500,
+        });
+        expect(ccTx?.isIncome).toBe(false);
+        expect(ccTx?.incomeMonth).toBeNull();
+
+        // 2. updateTransaction on credit card
+        const updatedCcTx = await updateTransaction(db, ccTx!.id, {
+          amount: 3000,
+        });
+        expect(updatedCcTx?.isIncome).toBe(false);
+        expect(updatedCcTx?.incomeMonth).toBeNull();
+
+        // 3. createSplitWithChildren on credit card with positive uncategorized child
+        const ccSplit = await createSplitWithChildren(
+          db,
+          {
+            accountId: ccAcct!.id,
+            date: "2026-08-02",
+            payee: "Card Adjustment",
+            memo: "",
+            amount: 5000,
+          },
+          [
+            { categoryId: null, amount: 2000, memo: "cashback" },
+            { categoryId: null, amount: 3000, memo: "bonus" },
+          ]
+        );
+        expect(ccSplit.children[0]?.isIncome).toBe(false);
+        expect(ccSplit.children[1]?.isIncome).toBe(false);
+
+        // 4. bulkUpdateTransactions on credit card
+        await bulkUpdateTransactions(db, [ccTx!.id], { memo: "Bulk edited CC memo" });
+        const [reloadedCcTx] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, ccTx!.id));
+        expect(reloadedCcTx?.isIncome).toBe(false);
+      });
+
+      it("BUG-03: bulkUpdateTransactions preserves isIncome and incomeMonth on split income children", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+
+        // 1. Create a split on a liquid account: $1000 paycheck ($800 income, $200 expense reimbursement)
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-15",
+            payee: "Employer Inc",
+            memo: "Paycheck split",
+            amount: 100000,
+          },
+          [
+            { categoryId: null, amount: 80000, memo: "Base salary" },
+            { categoryId: cat1Id, amount: 20000, memo: "Expense reimbursement" },
+          ]
+        );
+
+        const incomeChild = split.children.find((c) => c.categoryId == null);
+        expect(incomeChild).toBeDefined();
+        expect(incomeChild?.isIncome).toBe(true);
+
+        // 2. Bulk update non-financial fields (date, memo, status, flagColor) on the income split child
+        const bulkRes = await bulkUpdateTransactions(db, [incomeChild!.id], {
+          date: "2026-08-20",
+          memo: "Updated salary memo",
+          status: "c",
+          flagColor: "blue",
+        });
+
+        expect(bulkRes).toHaveLength(1);
+        expect(bulkRes[0]?.isIncome).toBe(true);
+
+        // Verify in database
+        const [dbChild] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, incomeChild!.id));
+        expect(dbChild?.isIncome).toBe(true);
+        expect(dbChild?.memo).toBe("Updated salary memo");
+        expect(dbChild?.date).toBe("2026-08-20");
+
+        // 3. If bulk updating categoryId to a real category, isIncome should become false
+        const bulkCatRes = await bulkUpdateTransactions(db, [incomeChild!.id], {
+          categoryId: cat1Id,
+        });
+        expect(bulkCatRes[0]?.isIncome).toBe(false);
+        expect(bulkCatRes[0]?.categoryId).toBe(cat1Id);
+
+        // 4. If bulk updating categoryId back to null on liquid account with amount > 0, isIncome becomes true
+        const bulkNullCatRes = await bulkUpdateTransactions(db, [incomeChild!.id], {
+          categoryId: null,
+        });
+        expect(bulkNullCatRes[0]?.isIncome).toBe(true);
+        expect(bulkNullCatRes[0]?.categoryId).toBeNull();
+      });
+    });
   });
 });

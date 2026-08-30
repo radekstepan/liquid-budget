@@ -259,7 +259,7 @@ export function BudgetAppShell({
               });
               childCategoryId = classification.categoryId;
               isIncome = classification.isIncome;
-            } else if (!srcOnBudget) {
+            } else if (!srcOnBudget || srcAccount?.kind === "credit") {
               childCategoryId = null;
               isIncome = false;
             } else {

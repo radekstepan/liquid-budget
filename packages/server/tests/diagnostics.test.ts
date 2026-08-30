@@ -467,5 +467,35 @@ describe("diagnostics queries", () => {
       const augReport = await verifyBudgetIntegrity(db, "2026-08");
       expect(augReport.difference).toBe(0);
     });
+
+    it("BUG-01: verifies budget integrity holds with negative CC opening debt carryover", async () => {
+      const db = openMigratedDb();
+
+      // Checking account with $1,000 starting balance
+      const chk = await createAccount(db, {
+        name: "Checking",
+        kind: "liquid",
+        balance: 100000,
+      });
+
+      // Credit card with -$750 starting balance (debt)
+      const cc = await createAccount(db, {
+        name: "Amex Card",
+        kind: "credit",
+        balance: -75000,
+      });
+
+      // verifyBudgetIntegrity in current month:
+      // totalAccountBalance = 100000 - 75000 = 25000
+      // CC Payment available = -75000
+      // TBB = 100000 (income from Checking starting balance)
+      // totalCategoryAvailable = -75000
+      // difference = 25000 - (-75000) - 100000 = 0
+      const report = await verifyBudgetIntegrity(db);
+      expect(report.difference).toBe(0);
+      expect(report.totalOnBudgetAccountBalance).toBe(25000);
+      expect(report.totalCategoryAvailable).toBe(-75000);
+      expect(report.tbb).toBe(100000);
+    });
   });
 });

@@ -216,6 +216,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
     // 2. Insert Accounts and Reconciliations
     const accountIdMap = new Map<string, number>();
     const accOnBudgetMap = new Map<string, boolean>();
+    const accKindMap = new Map<string, string>();
     const reconciliationIdMap = new Map<string, number>();
     const reconciliationDateMap = new Map<string, string>();
     const accountReconciliationIdMap = new Map<string, number>();
@@ -236,6 +237,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           : acc.onBudget
           ? "liquid"
           : "offbudget";
+      accKindMap.set(acc.entityId, kind);
 
       const groupLabel = acc.onBudget
         ? kind === "credit"
@@ -723,8 +725,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               isChildIncome = classification.isIncome;
             } else {
               const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
+              const accKind = accKindMap.get(t.accountId) ?? "liquid";
               isChildIncome =
                 accIsOnBudget &&
+                accKind !== "credit" &&
                 (st.categoryId === "Category/__ImmediateIncome__" ||
                   isChildDeferred ||
                   (subCatId === null && subTransferAccountId === null)) &&
@@ -958,8 +962,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               catId = null;
             }
 
+            const accKind = accKindMap.get(t.accountId) ?? "liquid";
             const isTxIncome =
               accIsOnBudget &&
+              accKind !== "credit" &&
               (isSpecialIncomeCat || catId === null) &&
               (t.amount || 0) > 0;
             const txIncomeMonth = isTxIncome
@@ -1037,8 +1043,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           if (isCrossBoundaryTx && netOnBudgetTx < 0 && catId === null) {
             catId = await getOrCreateFallbackTransferCategory();
           }
+          const srcKind = accKindMap.get(t.accountId) ?? "liquid";
           const isTxIncome =
-            (srcOnBudget && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
+            (srcOnBudget && srcKind !== "credit" && (isSpecialIncomeCat || (catId === null && destAccId === null)) && (t.amount || 0) > 0) ||
             (isCrossBoundaryTx && (catId === null || isSpecialIncomeCat) && netOnBudgetTx > 0);
           const txIncomeMonth = isTxIncome
             ? (t.incomeMonth || (isTxDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
@@ -1123,7 +1130,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         )
         .limit(1);
 
-      if (existingCat && Number(existingCat.carryover) > 0) {
+      if (existingCat && Number(existingCat.carryover) !== 0) {
         continue;
       }
 
@@ -1155,7 +1162,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
       let openingDebt = 0;
       if (initialBalance < 0) {
-        openingDebt = Math.abs(initialBalance);
+        openingDebt = initialBalance;
       } else {
         // Find explicit starting balance transaction: match standard and multi-language starting payees
         const [startingTx] = await db
@@ -1186,11 +1193,11 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           .limit(1);
 
         if (startingTx && Number(startingTx.amount) < 0) {
-          openingDebt = Math.abs(Number(startingTx.amount));
+          openingDebt = Number(startingTx.amount);
         }
       }
 
-      if (openingDebt > 0) {
+      if (openingDebt < 0) {
         await db
           .update(categories)
           .set({ carryover: openingDebt })

@@ -153,8 +153,8 @@ export async function seedDatabase(db: Db) {
       { groupId: g("Savings & Investments"), name: "Other Investments", sort: 3, carryover: 0,      goalTarget: null },
 
       // Credit Card Payments
-      { groupId: g("Credit Card Payments"), name: "AMEX Cobalt",           sort: 0, carryover: 389784, goalTarget: null, linkedAccountId: a("AMEX Cobalt") },
-      { groupId: g("Credit Card Payments"), name: "Scotia Passport Visa",  sort: 1, carryover: 10348,  goalTarget: null, linkedAccountId: a("Scotia Passport Visa") },
+      { groupId: g("Credit Card Payments"), name: "AMEX Cobalt",           sort: 0, carryover: -389784, goalTarget: null, linkedAccountId: a("AMEX Cobalt") },
+      { groupId: g("Credit Card Payments"), name: "Scotia Passport Visa",  sort: 1, carryover: -10348,  goalTarget: null, linkedAccountId: a("Scotia Passport Visa") },
       { groupId: g("Credit Card Payments"), name: "Rogers World Elite MC", sort: 2, carryover: 0,      goalTarget: null, linkedAccountId: a("Rogers World Elite MC") },
       { groupId: g("Credit Card Payments"), name: "Capital One Aspire MC", sort: 3, carryover: 0,      goalTarget: null, linkedAccountId: a("Capital One Aspire MC") },
     ])

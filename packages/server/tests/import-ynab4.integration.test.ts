@@ -504,7 +504,7 @@ describe("importYnab4 full import", () => {
     const { categories } = await getBudgetData(db);
     const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
     expect(visaPaymentCat).toBeTruthy();
-    expect(Number(visaPaymentCat.carryover)).toBe(75000); // 75000 cents ($750.00)
+    expect(Number(visaPaymentCat.carryover)).toBe(-75000); // -75000 cents (-$750.00 debt)
   });
 
   it("initializes credit card payment category carryover when starting balance payee is renamed or localized (BUG-06)", async () => {
@@ -531,7 +531,7 @@ describe("importYnab4 full import", () => {
     const { categories } = await getBudgetData(db);
     const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
     expect(visaPaymentCat).toBeTruthy();
-    expect(Number(visaPaymentCat.carryover)).toBe(62000); // 62000 cents ($620.00)
+    expect(Number(visaPaymentCat.carryover)).toBe(-62000); // -62000 cents (-$620.00 debt)
   });
 
   it("deterministically picks the earliest starting transaction when multiple uncategorized transactions exist (BUG-06)", async () => {
@@ -566,7 +566,7 @@ describe("importYnab4 full import", () => {
     const { categories } = await getBudgetData(db);
     const visaPaymentCat = categories.find((c) => c.name === "Visa")!;
     expect(visaPaymentCat).toBeTruthy();
-    expect(Number(visaPaymentCat.carryover)).toBe(80000); // 80000 cents from earliest 2026-05-10
+    expect(Number(visaPaymentCat.carryover)).toBe(-80000); // -80000 cents from earliest 2026-05-10
   });
 
   it("does not seed carryover when credit card has only categorized transactions (BUG-06)", async () => {
@@ -1407,10 +1407,10 @@ describe("importYnab4 full import", () => {
     const germanCat = ccCats.find((c) => c.name === "Kreditkarte");
 
     expect(frenchCat).toBeDefined();
-    expect(frenchCat!.carryover).toBe(35000); // 350.00 -> 35000 cents
+    expect(frenchCat!.carryover).toBe(-35000); // -350.00 -> -35000 cents
 
     expect(germanCat).toBeDefined();
-    expect(germanCat!.carryover).toBe(42000); // 420.00 -> 42000 cents
+    expect(germanCat!.carryover).toBe(-42000); // -420.00 -> -42000 cents
   });
 
   it("imports multiple explicit reconciliation rounds and links transactions (BUG-17)", async () => {

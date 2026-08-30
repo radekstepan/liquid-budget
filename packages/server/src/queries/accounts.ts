@@ -2,7 +2,7 @@ import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { todayISO } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { accounts, assignments, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
+import { accounts, assignments, categories, categoryGroups, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
 
 export class AccountError extends Error {
@@ -71,10 +71,70 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
         memo: "",
         amount: balance,
         status: "c",
-        isIncome: onBudget && balance > 0,
+        isIncome: onBudget && balance > 0 && kind !== "credit",
         transferAccountId: null,
         parentId: null,
       });
+    }
+
+    if (kind === "credit" && onBudget && balance < 0) {
+      let [ccGroup] = await db
+        .select()
+        .from(categoryGroups)
+        .where(
+          or(
+            eq(categoryGroups.isCreditCardPayments, true),
+            eq(categoryGroups.name, "Credit Card Payments")
+          )
+        )
+        .limit(1);
+      if (!ccGroup) {
+        const [maxGroup] = await db
+          .select({ max: sql<number>`coalesce(max(${categoryGroups.sort}), -1)` })
+          .from(categoryGroups);
+        const [newGroup] = await db
+          .insert(categoryGroups)
+          .values({
+            name: "Credit Card Payments",
+            sort: Number(maxGroup?.max ?? -1) + 1,
+            isCreditCardPayments: true,
+            isHidden: false,
+          })
+          .returning();
+        ccGroup = newGroup;
+      }
+      if (ccGroup) {
+        let [existingCat] = await db
+          .select()
+          .from(categories)
+          .where(
+            and(
+              eq(categories.groupId, ccGroup.id),
+              eq(categories.linkedAccountId, row.id)
+            )
+          )
+          .limit(1);
+        if (existingCat) {
+          await db
+            .update(categories)
+            .set({ carryover: balance })
+            .where(eq(categories.id, existingCat.id));
+        } else {
+          const [maxCat] = await db
+            .select({ max: sql<number>`coalesce(max(${categories.sort}), -1)` })
+            .from(categories)
+            .where(eq(categories.groupId, ccGroup.id));
+          await db.insert(categories).values({
+            groupId: ccGroup.id,
+            name: row.name,
+            sort: Number(maxCat?.max ?? -1) + 1,
+            carryover: balance,
+            goalTarget: null,
+            linkedAccountId: row.id,
+            overspendCarriesOver: false,
+          });
+        }
+      }
     }
 
     return row;
