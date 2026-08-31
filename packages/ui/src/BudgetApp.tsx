@@ -71,6 +71,8 @@ export type BudgetAppApi = {
     status: "u" | "c" | "r";
     flagColor?: TransactionFlagColor | null;
     transferAccountId?: number | null;
+    incomeMonth?: string | null;
+    isIncome?: boolean;
     subTransactions?: {
       categoryId: number | null;
       amount: number;
@@ -90,6 +92,8 @@ export type BudgetAppApi = {
       status?: "u" | "c" | "r";
       flagColor?: TransactionFlagColor | null;
       transferAccountId?: number | null;
+      incomeMonth?: string | null;
+      isIncome?: boolean;
       subTransactions?: {
         categoryId: number | null;
         amount: number;
@@ -400,7 +404,7 @@ export function BudgetApp({
   const avgSpentByCategory = useMemo(() => {
     if (!isBudgetView) return new Map<number, number>();
     const { year: y, month0 } = parseMonthKey(month);
-    const map = new Map<number, { sum: number; count: number }>();
+    const map = new Map<number, number>();
     const parentSet = new Set<number>();
     for (const t of data.transactions) {
       if (t.parentId != null) parentSet.add(t.parentId);
@@ -416,15 +420,14 @@ export function BudgetApp({
         if (parentSet.has(t.id)) continue;
         const amt = num(t.amount);
         if (amt >= 0) continue; // only outflows
-        const entry = map.get(t.categoryId) ?? { sum: 0, count: 0 };
-        entry.sum += -amt; // make positive
-        entry.count++;
-        map.set(t.categoryId, entry);
+        map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
       }
     }
     const result = new Map<number, number>();
-    for (const [catId, { sum, count }] of map) {
-      result.set(catId, Math.round(sum / count));
+    for (const [catId, sum] of map) {
+      if (sum > 0) {
+        result.set(catId, Math.round(sum / 3));
+      }
     }
     return result;
   }, [data, month, isBudgetView]);

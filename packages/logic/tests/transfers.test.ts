@@ -132,4 +132,22 @@ describe("classifyBoundaryTransfer", () => {
       })
     ).toThrow(CustomError);
   });
+
+  it("returns classification without throwing when allowMissingOutflowCategory is true for boundary outflow", () => {
+    const result = classifyBoundaryTransfer({
+      srcOnBudget: true,
+      destOnBudget: false,
+      amount: -5000,
+      categoryId: null,
+      allowMissingOutflowCategory: true,
+    });
+    expect(result).toEqual({
+      isBoundaryCrossing: true,
+      netOnBudgetDelta: -5000,
+      categoryId: null,
+      isIncome: false,
+      incomeMonth: null,
+    });
+  });
 });
+

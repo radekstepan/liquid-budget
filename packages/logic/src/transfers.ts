@@ -30,6 +30,7 @@ export interface ClassifyBoundaryTransferParams {
   categoryId?: number | null;
   incomeMonth?: string | null;
   errorFactory?: (message: string) => Error;
+  allowMissingOutflowCategory?: boolean;
 }
 
 /**
@@ -44,7 +45,7 @@ export interface ClassifyBoundaryTransferParams {
  *   (c) Boundary inflow without category (netOnBudgetDelta > 0 && categoryId == null):
  *       -> { isBoundaryCrossing: true, netOnBudgetDelta, categoryId: null, isIncome: true, incomeMonth }
  *   (d) Boundary outflow (netOnBudgetDelta < 0):
- *       -> categoryId is required; throws error via errorFactory if null/undefined.
+ *       -> categoryId is required; throws error via errorFactory if null/undefined unless allowMissingOutflowCategory is true.
  *       -> { isBoundaryCrossing: true, netOnBudgetDelta, categoryId, isIncome: false, incomeMonth: null }
  */
 export function classifyBoundaryTransfer({
@@ -54,6 +55,7 @@ export function classifyBoundaryTransfer({
   categoryId = null,
   incomeMonth = null,
   errorFactory = (msg) => new TransactionError(msg, 400),
+  allowMissingOutflowCategory = false,
 }: ClassifyBoundaryTransferParams): BoundaryTransferClassification {
   const isBoundaryCrossing = srcOnBudget !== destOnBudget;
   const netOnBudgetDelta = (srcOnBudget ? amount : 0) + (destOnBudget ? -amount : 0);
@@ -89,6 +91,15 @@ export function classifyBoundaryTransfer({
 
   if (netOnBudgetDelta < 0) {
     if (categoryId == null) {
+      if (allowMissingOutflowCategory) {
+        return {
+          isBoundaryCrossing: true,
+          netOnBudgetDelta,
+          categoryId: null,
+          isIncome: false,
+          incomeMonth: null,
+        };
+      }
       throw errorFactory("Boundary transfer outflow requires a category");
     }
     return {

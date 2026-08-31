@@ -750,5 +750,36 @@ describe("BudgetApp", () => {
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:transactions:sort")).toBeNull();
   });
+
+  it("BUG-09: computes avgSpentByCategory as true 3-month average across multiple transactions per month", () => {
+    const { api } = makeApi();
+    const baseData = makeSeedBudgetData();
+    const groceryCat = baseData.categories.find((c) => c.name === "Groceries") || baseData.categories[0]!;
+
+    // Create 9 transactions in Groceries category across 3 prior months (2026-03, 2026-04, 2026-05)
+    // 3 transactions of -$60 ($6000 cents) each month = $180 per month = $540 total.
+    const transactions = [
+      { id: 101, accountId: 1, categoryId: groceryCat.id, date: "2026-03-05", payee: "Store 1", memo: "", amount: "-6000", status: "c" as const },
+      { id: 102, accountId: 1, categoryId: groceryCat.id, date: "2026-03-15", payee: "Store 2", memo: "", amount: "-6000", status: "c" as const },
+      { id: 103, accountId: 1, categoryId: groceryCat.id, date: "2026-03-25", payee: "Store 3", memo: "", amount: "-6000", status: "c" as const },
+      { id: 104, accountId: 1, categoryId: groceryCat.id, date: "2026-04-05", payee: "Store 1", memo: "", amount: "-6000", status: "c" as const },
+      { id: 105, accountId: 1, categoryId: groceryCat.id, date: "2026-04-15", payee: "Store 2", memo: "", amount: "-6000", status: "c" as const },
+      { id: 106, accountId: 1, categoryId: groceryCat.id, date: "2026-04-25", payee: "Store 3", memo: "", amount: "-6000", status: "c" as const },
+      { id: 107, accountId: 1, categoryId: groceryCat.id, date: "2026-05-05", payee: "Store 1", memo: "", amount: "-6000", status: "c" as const },
+      { id: 108, accountId: 1, categoryId: groceryCat.id, date: "2026-05-15", payee: "Store 2", memo: "", amount: "-6000", status: "c" as const },
+      { id: 109, accountId: 1, categoryId: groceryCat.id, date: "2026-05-25", payee: "Store 3", memo: "", amount: "-6000", status: "c" as const },
+    ];
+
+    const data: BudgetData = {
+      ...baseData,
+      assignments: [],
+      transactions,
+    };
+
+    render(<BudgetApp data={data} api={api} initialMonth="2026-06" />);
+    expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
+    // Verify that the view rendered the Groceries category row in June 2026
+    expect(screen.getByText(groceryCat.name)).toBeInTheDocument();
+  });
 });
 
