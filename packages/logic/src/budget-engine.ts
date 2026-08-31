@@ -84,6 +84,7 @@ export function isIncomeTransaction(
         amount: num(t.amount),
         categoryId: t.categoryId,
         incomeMonth: t.incomeMonth,
+        allowMissingOutflowCategory: true,
       });
       return classification.isIncome;
     }
@@ -120,11 +121,12 @@ export function isIncomeTransaction(
 // Indexing & Memoization Cache for High Performance
 // ---------------------------------------------------------------------------
 
-type CCTransactionEntry = {
+type CategoryTxEntry = {
   id: number;
   accountId: number;
   date: string;
   amount: number;
+  isCC: boolean;
 };
 
 type RawIndexData = {
@@ -134,8 +136,7 @@ type RawIndexData = {
   incomeByMonth: Map<string, number>;
   cardPaymentsByAccountMonth: Map<string, Map<number, number>>;
   cardAdvancesByAccountMonth: Map<string, Map<number, number>>;
-  cashDeltaByCatMonth: Map<string, Map<number, number>>;
-  ccTransactionsByCatMonth: Map<string, Map<number, CCTransactionEntry[]>>;
+  categoryTransactionsByMonth: Map<string, Map<number, CategoryTxEntry[]>>;
 };
 
 type IndexedBudgetData = {
@@ -457,8 +458,7 @@ function buildRawIndexData(
   const incomeByMonth = new Map<string, number>();
   const cardPaymentsByAccountMonth = new Map<string, Map<number, number>>();
   const cardAdvancesByAccountMonth = new Map<string, Map<number, number>>();
-  const cashDeltaByCatMonth = new Map<string, Map<number, number>>();
-  const ccTransactionsByCatMonth = new Map<string, Map<number, CCTransactionEntry[]>>();
+  const categoryTransactionsByMonth = new Map<string, Map<number, CategoryTxEntry[]>>();
 
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
@@ -478,6 +478,7 @@ function buildRawIndexData(
         amount: amt,
         categoryId: t.categoryId,
         incomeMonth: t.incomeMonth,
+        allowMissingOutflowCategory: true,
       });
       netOnBudgetDelta = (onA ? amt : 0) + (onB ? -amt : 0);
       isInternalTransfer = !classification.isBoundaryCrossing;
@@ -493,33 +494,23 @@ function buildRawIndexData(
       }
       m.set(t.categoryId, Math.round((m.get(t.categoryId) ?? 0) + netOnBudgetDelta));
 
-      if (!ccAccountIds.has(t.accountId)) {
-        // Cash account transaction
-        let cm = cashDeltaByCatMonth.get(mk);
-        if (!cm) {
-          cm = new Map();
-          cashDeltaByCatMonth.set(mk, cm);
-        }
-        cm.set(t.categoryId, Math.round((cm.get(t.categoryId) ?? 0) + netOnBudgetDelta));
-      } else {
-        // Credit card account transaction
-        let ctm = ccTransactionsByCatMonth.get(mk);
-        if (!ctm) {
-          ctm = new Map();
-          ccTransactionsByCatMonth.set(mk, ctm);
-        }
-        let list = ctm.get(t.categoryId);
-        if (!list) {
-          list = [];
-          ctm.set(t.categoryId, list);
-        }
-        list.push({
-          id: t.id,
-          accountId: t.accountId,
-          date: t.date,
-          amount: netOnBudgetDelta,
-        });
+      let ctm = categoryTransactionsByMonth.get(mk);
+      if (!ctm) {
+        ctm = new Map();
+        categoryTransactionsByMonth.set(mk, ctm);
       }
+      let list = ctm.get(t.categoryId);
+      if (!list) {
+        list = [];
+        ctm.set(t.categoryId, list);
+      }
+      list.push({
+        id: t.id,
+        accountId: t.accountId,
+        date: t.date,
+        amount: netOnBudgetDelta,
+        isCC: ccAccountIds.has(t.accountId),
+      });
     }
 
     if (isIncomeTransaction(t, accountMap)) {
@@ -569,8 +560,7 @@ function buildRawIndexData(
     incomeByMonth,
     cardPaymentsByAccountMonth,
     cardAdvancesByAccountMonth,
-    cashDeltaByCatMonth,
-    ccTransactionsByCatMonth,
+    categoryTransactionsByMonth,
   };
 }
 
@@ -597,8 +587,7 @@ function computeAllMonths(
 
     const aMap = rawData.assignedByMonth.get(month) ?? new Map<number, number>();
     const oMap = rawData.outflowByMonth.get(month) ?? new Map<number, number>();
-    const cashDeltaMap = rawData.cashDeltaByCatMonth.get(month) ?? new Map<number, number>();
-    const ccTxMap = rawData.ccTransactionsByCatMonth.get(month) ?? new Map<number, CCTransactionEntry[]>();
+    const categoryTxMap = rawData.categoryTransactionsByMonth.get(month) ?? new Map<number, CategoryTxEntry[]>();
     const cardPayments = rawData.cardPaymentsByAccountMonth.get(month) ?? new Map<number, number>();
     const cardAdvances = rawData.cardAdvancesByAccountMonth.get(month) ?? new Map<number, number>();
 
@@ -613,46 +602,38 @@ function computeAllMonths(
       const prev = currentBalance.get(c.id) ?? 0;
       const assigned = aMap.get(c.id) ?? 0;
       const rawFlow = oMap.get(c.id) ?? 0;
-      const cashDelta = cashDeltaMap.get(c.id) ?? 0;
-      const ccTxs = ccTxMap.get(c.id) ?? [];
+      const txs = categoryTxMap.get(c.id) ?? [];
 
       const availableBeforeSpend = prev + assigned;
-      let cashPool: number;
-      let grossCashSpent: number;
-      if (cashDelta > 0) {
-        cashPool = availableBeforeSpend + cashDelta;
-        grossCashSpent = 0;
-      } else {
-        cashPool = availableBeforeSpend;
-        grossCashSpent = -cashDelta;
-      }
-
-      let remainingCashPool: number;
-      if (grossCashSpent > 0) {
-        remainingCashPool = Math.max(0, cashPool - grossCashSpent);
-      } else {
-        remainingCashPool = Math.max(0, cashPool);
-      }
-
+      let runningCashPool = availableBeforeSpend;
       let catFundedCC = 0;
-      const sortedCCTxs = ccTxs.slice().sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-      for (const tx of sortedCCTxs) {
-        if (tx.amount < 0) {
-          const spend = -tx.amount;
-          const funded = Math.min(remainingCashPool, spend);
-          remainingCashPool -= funded;
-          catFundedCC += funded;
-          monthFundedCCByAccount.set(
-            tx.accountId,
-            (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
-          );
-        } else if (tx.amount > 0) {
-          monthFundedCCByAccount.set(
-            tx.accountId,
-            (monthFundedCCByAccount.get(tx.accountId) ?? 0) - tx.amount
-          );
-          remainingCashPool += tx.amount;
-          catFundedCC -= tx.amount;
+      let netCCSpend = 0;
+
+      const sortedTxs = txs.slice().sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+      for (const tx of sortedTxs) {
+        if (tx.isCC) {
+          if (tx.amount < 0) {
+            const spend = -tx.amount;
+            netCCSpend += spend;
+            const funded = Math.max(0, Math.min(runningCashPool, spend));
+            runningCashPool -= funded;
+            catFundedCC += funded;
+            monthFundedCCByAccount.set(
+              tx.accountId,
+              (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
+            );
+          } else if (tx.amount > 0) {
+            netCCSpend -= tx.amount;
+            monthFundedCCByAccount.set(
+              tx.accountId,
+              (monthFundedCCByAccount.get(tx.accountId) ?? 0) - tx.amount
+            );
+            runningCashPool += tx.amount;
+            catFundedCC -= tx.amount;
+          }
+        } else {
+          // Cash account transaction
+          runningCashPool += tx.amount;
         }
       }
 
@@ -665,7 +646,6 @@ function computeAllMonths(
         } else {
           nextBalance.set(c.id, 0);
           const totalDeficit = -endAvailable;
-          const netCCSpend = ccTxs.reduce((sum, tx) => sum - tx.amount, 0);
           const ccOverspent = Math.max(0, Math.min(totalDeficit, netCCSpend - catFundedCC));
           const cashOverspent = totalDeficit - ccOverspent;
           monthCashOverspent += cashOverspent;

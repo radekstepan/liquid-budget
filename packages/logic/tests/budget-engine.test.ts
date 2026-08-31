@@ -3062,6 +3062,182 @@ describe("computeBudget", () => {
         expect(indexedRes.totalIncome).toBe(1000000);
         expect(indexedRes.tbb).toBe(1000000);
       });
+
+      it("BUG-07: defensive fallback allows computeBudget to succeed when an invariant-violating boundary transfer outflow lacks categoryId", () => {
+        const malformedBoundaryOutflow = {
+          id: 99,
+          accountId: onBudgetAccount.id,
+          transferAccountId: offBudgetAccount.id,
+          categoryId: null, // missing category on boundary outflow
+          date: "2026-07-05",
+          payee: "Transfer : Off Budget",
+          memo: "Malformed row",
+          amount: "-50000", // -$500 outflow
+          status: "c" as const,
+        };
+
+        // isIncomeTransaction must safely return false without throwing
+        expect(() => isIncomeTransaction(malformedBoundaryOutflow, [onBudgetAccount, offBudgetAccount])).not.toThrow();
+        expect(isIncomeTransaction(malformedBoundaryOutflow, [onBudgetAccount, offBudgetAccount])).toBe(false);
+
+        const data: BudgetData = {
+          accounts: [onBudgetAccount, offBudgetAccount],
+          groups: [group],
+          categories: [category],
+          assignments: [],
+          transactions: [
+            { id: 1, accountId: onBudgetAccount.id, categoryId: null, date: "2026-07-01", payee: "Salary", memo: "", amount: "100000", status: "c" as const, isIncome: true },
+            malformedBoundaryOutflow,
+          ],
+          recurring: [],
+        };
+
+        // computeBudget and buildBudgetIndex must not throw
+        expect(() => computeBudget(data, "2026-07")).not.toThrow();
+        const res = computeBudget(data, "2026-07");
+        expect(res.totalIncome).toBe(100000);
+
+        expect(() => buildBudgetIndex(data)).not.toThrow();
+        const index = buildBudgetIndex(data);
+        expect(index).toBeDefined();
+      });
+
+      describe("BUG-08: Chronological cash vs CC overspend funding", () => {
+        it("funds CC spend chronologically when CC spend precedes cash spend", () => {
+          const data: BudgetData = {
+            accounts: [
+              { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+              { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+            ],
+            groups: [
+              { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+              { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+            ],
+            categories: [
+              { id: 1, groupId: 1, name: "Dining Out", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+              { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            ],
+            assignments: [
+              { id: 1, categoryId: 1, month: "2026-01", amount: "8000" }, // $80 assigned
+            ],
+            transactions: [
+              { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+              { id: 2, accountId: 2, categoryId: 1, date: "2026-01-01", payee: "Restaurant (CC)", memo: "", amount: "-5000", status: "c" }, // $50 CC on Jan 1
+              { id: 3, accountId: 1, categoryId: 1, date: "2026-01-31", payee: "Cash Cafe", memo: "", amount: "-10000", status: "c" }, // $100 Cash on Jan 31
+            ],
+            recurring: [],
+          };
+
+          const jan = computeBudget(data, "2026-01");
+          const diningJan = jan.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+          const visaJan = jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+
+          // Total dining available: $80 - $50 - $100 = -$70
+          expect(diningJan.available).toBe(-7000);
+          // On Jan 1, $80 was available when $50 CC spent -> CC funded $50 -> Visa buffer = $50
+          expect(visaJan.ccBuffer).toBe(5000);
+          expect(visaJan.available).toBe(5000);
+          expect(jan.tbb).toBe(42000); // 50000 income - 8000 assigned
+
+          const feb = computeBudget(data, "2026-02");
+          const diningFeb = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+          const visaFeb = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+
+          expect(diningFeb.carryoverIn).toBe(0);
+          expect(visaFeb.carryoverIn).toBe(5000);
+          // Cash overspend is $70 (since $50 CC was fully funded) -> deducted from Feb TBB
+          expect(feb.overspentPrevious).toBe(7000);
+          expect(feb.priorSurplus).toBe(35000);
+          expect(feb.tbb).toBe(35000); // 42000 - 7000 = 35000
+
+          // Checking cash remaining = 50000 income - 10000 cash spend = 40000
+          // Invariant: Checking cash (40000) = Visa Payment Available (5000) + Feb TBB (35000)
+          expect(40000 - visaFeb.available - feb.tbb).toBe(0);
+        });
+
+        it("does not fund CC spend when cash overspend precedes CC spend", () => {
+          const data: BudgetData = {
+            accounts: [
+              { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+              { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+            ],
+            groups: [
+              { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+              { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+            ],
+            categories: [
+              { id: 1, groupId: 1, name: "Dining Out", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+              { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            ],
+            assignments: [
+              { id: 1, categoryId: 1, month: "2026-01", amount: "8000" }, // $80 assigned
+            ],
+            transactions: [
+              { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Income", memo: "", amount: "50000", status: "c", isIncome: true },
+              { id: 2, accountId: 1, categoryId: 1, date: "2026-01-01", payee: "Cash Cafe", memo: "", amount: "-10000", status: "c" }, // $100 Cash on Jan 1
+              { id: 3, accountId: 2, categoryId: 1, date: "2026-01-31", payee: "Restaurant (CC)", memo: "", amount: "-5000", status: "c" }, // $50 CC on Jan 31
+            ],
+            recurring: [],
+          };
+
+          const jan = computeBudget(data, "2026-01");
+          const diningJan = jan.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+          const visaJan = jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+
+          // Total dining available: $80 - $100 - $50 = -$70
+          expect(diningJan.available).toBe(-7000);
+          // On Jan 1, $100 cash spend depleted $80 pool -> $20 cash overspend.
+          // On Jan 31, pool is <= 0 -> CC spend is unfunded debt -> Visa buffer = $0
+          expect(visaJan.ccBuffer).toBe(0);
+          expect(visaJan.available).toBe(0);
+
+          const feb = computeBudget(data, "2026-02");
+          const diningFeb = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+          const visaFeb = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+
+          expect(diningFeb.carryoverIn).toBe(0);
+          expect(visaFeb.carryoverIn).toBe(0);
+          // Cash overspend was $20 (CC overspend was $50 debt) -> only $20 deducted from Feb TBB
+          expect(feb.overspentPrevious).toBe(2000);
+          expect(feb.priorSurplus).toBe(40000);
+          expect(feb.tbb).toBe(40000); // 42000 - 2000 = 40000
+
+          // Checking cash remaining = 50000 income - 10000 cash spend = 40000
+          // Invariant: Checking cash (40000) = Visa Payment Available (0) + Feb TBB (40000)
+          expect(40000 - visaFeb.available - feb.tbb).toBe(0);
+        });
+
+        it("replenishes cash pool with mid-month cash inflow so subsequent CC spend is funded", () => {
+          const data: BudgetData = {
+            accounts: [
+              { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+              { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+            ],
+            groups: [
+              { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+              { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+            ],
+            categories: [
+              { id: 1, groupId: 1, name: "Supplies", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+              { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+            ],
+            assignments: [],
+            transactions: [
+              { id: 1, accountId: 1, categoryId: 1, date: "2026-01-01", payee: "Cash Return", memo: "Refund", amount: "10000", status: "c" }, // +$100 cash refund
+              { id: 2, accountId: 2, categoryId: 1, date: "2026-01-10", payee: "Visa Purchase", memo: "", amount: "-6000", status: "c" }, // -$60 CC spend
+            ],
+            recurring: [],
+          };
+
+          const jan = computeBudget(data, "2026-01");
+          const suppliesJan = jan.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+          const visaJan = jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+
+          expect(suppliesJan.available).toBe(4000); // 10000 - 6000
+          expect(visaJan.ccBuffer).toBe(6000); // CC spend was fully funded by the cash refund
+          expect(visaJan.available).toBe(6000);
+        });
+      });
     });
   });
 });
