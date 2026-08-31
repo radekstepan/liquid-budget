@@ -22,7 +22,7 @@ function applyAccountDeltas(
 function applyOptimisticTransactionDeletion(
   prev: BudgetData,
   ids: number[]
-): BudgetData {
+): { nextData: BudgetData; deltas: Map<number, number> } {
   const idSet = new Set(ids);
   const deltas = new Map<number, number>();
   const removedIds = new Set(ids);
@@ -125,7 +125,7 @@ function applyOptimisticTransactionDeletion(
       return updatedTotal !== undefined ? { ...x, amount: updatedTotal.toFixed(2) } : x;
     });
   }
-  return { ...prev, accounts, transactions, budgetIndex: undefined };
+  return { nextData: { ...prev, accounts, transactions, budgetIndex: undefined }, deltas };
 }
 
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
@@ -327,7 +327,10 @@ export function BudgetAppShell({
   const api: BudgetAppApi = {
     reload,
     assign: async (categoryId, amount, month) => {
-      const snapshot = dataRef.current;
+      const prevAssignment = dataRef.current?.assignments.find(
+        (a) => a.categoryId === categoryId && a.month === month
+      );
+      const prevAssignmentSnapshot = prevAssignment ? { ...prevAssignment } : null;
       const tempId = -Date.now();
       setData((prev) => {
         if (!prev) return prev;
@@ -344,7 +347,7 @@ export function BudgetAppShell({
             ];
         return { ...prev, assignments, budgetIndex: undefined };
       });
-      return withSync(() =>
+      await withSync(() =>
         runMutation(
           async () => {
             const res = await jsonReq<Assignment>("/api/assignments", {
@@ -369,7 +372,27 @@ export function BudgetAppShell({
           { failure: "Failed to save assignment. Please try again." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              setData((current) => {
+                if (!current) return current;
+                let assignments: Assignment[];
+                if (prevAssignmentSnapshot) {
+                  assignments = current.assignments.map((a) =>
+                    a.id === prevAssignmentSnapshot.id ||
+                    (a.categoryId === categoryId && a.month === month)
+                      ? prevAssignmentSnapshot
+                      : a
+                  );
+                } else {
+                  assignments = current.assignments.filter(
+                    (a) =>
+                      !(
+                        a.id === tempId ||
+                        (a.categoryId === categoryId && a.month === month)
+                      )
+                  );
+                }
+                return { ...current, assignments, budgetIndex: undefined };
+              });
               reload().catch(() => {});
             },
             skipReload: true,
@@ -379,8 +402,28 @@ export function BudgetAppShell({
     },
     addTransaction: async (t) => {
       const successMsg = "Transaction added.";
-      const snapshot = dataRef.current;
       const tempId = -Date.now();
+      const childCount = t.subTransactions?.length ?? 0;
+      const createdTempIds = new Set<number>([tempId]);
+      for (let i = 1; i <= childCount; i++) {
+        createdTempIds.add(tempId - i);
+      }
+
+      const deltas = new Map<number, number>();
+      if (t.subTransactions && t.subTransactions.length > 0) {
+        for (const st of t.subTransactions) {
+          deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + st.amount);
+          if (st.transferAccountId != null) {
+            deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
+          }
+        }
+      } else {
+        deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + t.amount);
+        if (t.transferAccountId != null) {
+          deltas.set(t.transferAccountId, (deltas.get(t.transferAccountId) ?? 0) - t.amount);
+        }
+      }
+
       setData((prev) => {
         if (!prev) return prev;
 
@@ -422,7 +465,7 @@ export function BudgetAppShell({
           payee: t.payee,
           memo: t.memo ?? "",
           amount: t.amount.toFixed(2),
-          status: t.status,
+          status: t.status ?? "u",
           flagColor: t.flagColor ?? null,
           transferAccountId: t.transferAccountId ?? null,
           parentId: null,
@@ -430,17 +473,11 @@ export function BudgetAppShell({
           incomeMonth: initialIncomeMonth,
         };
 
-        const deltas = new Map<number, number>();
         let newTransactions: Transaction[] = [newTx];
 
         if (t.subTransactions && t.subTransactions.length > 0) {
           let childIdx = 1;
           for (const st of t.subTransactions) {
-            deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + st.amount);
-            if (st.transferAccountId != null) {
-              deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
-            }
-
             let childCategoryId = st.categoryId ?? null;
             let isIncome = false;
 
@@ -470,18 +507,13 @@ export function BudgetAppShell({
               payee: st.transferAccountId != null ? `Transfer : ${prev.accounts.find((a) => a.id === st.transferAccountId)?.name ?? "Unknown"}` : t.payee,
               memo: st.memo ?? "",
               amount: st.amount.toFixed(2),
-              status: t.status,
+              status: t.status ?? "u",
               flagColor: t.flagColor ?? null,
               transferAccountId: st.transferAccountId ?? null,
               parentId: tempId,
               isIncome,
             });
             childIdx++;
-          }
-        } else {
-          deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + t.amount);
-          if (t.transferAccountId != null) {
-            deltas.set(t.transferAccountId, (deltas.get(t.transferAccountId) ?? 0) - t.amount);
           }
         }
         const accounts = applyAccountDeltas(prev.accounts, deltas);
@@ -530,7 +562,18 @@ export function BudgetAppShell({
           { success: successMsg, failure: "Failed to add transaction. Please try again." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of deltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((current) => {
+                if (!current) return current;
+                const accounts = applyAccountDeltas(current.accounts, reverseDeltas);
+                const transactions = current.transactions.filter(
+                  (tx) => !createdTempIds.has(tx.id) && tx.parentId !== tempId
+                );
+                return { ...current, accounts, transactions, budgetIndex: undefined };
+              });
               reload().catch(() => {});
             },
           }
@@ -538,17 +581,25 @@ export function BudgetAppShell({
       });
     },
     updateTransaction: async (id, t) => {
-      const snapshot = dataRef.current;
+      const target = dataRef.current?.transactions.find((x) => x.id === id);
+      const splitParentId =
+        target?.parentId ?? (dataRef.current?.transactions.some((x) => x.parentId === id) ? id : null);
+
+      const prevAffectedTxs = (dataRef.current?.transactions ?? [])
+        .filter((x) => x.id === id || (splitParentId != null && (x.id === splitParentId || x.parentId === splitParentId)))
+        .map((x) => ({ ...x }));
+      const affectedTxIds = new Set(prevAffectedTxs.map((x) => x.id));
+      if (splitParentId != null) affectedTxIds.add(splitParentId);
+
+      const appliedDeltas = new Map<number, number>();
+
       setData((prev) => {
         if (!prev) return prev;
-        const target = prev.transactions.find((x) => x.id === id);
-        const splitParentId =
-          target?.parentId ?? (prev.transactions.some((x) => x.parentId === id) ? id : null);
-
+        const currentTarget = prev.transactions.find((x) => x.id === id);
         const isSplitParent = prev.transactions.some((x) => x.parentId === id);
         const deltas = new Map<number, number>();
 
-        if (target) {
+        if (currentTarget) {
           if (t.subTransactions !== undefined) {
             const oldChildren = prev.transactions.filter((x) => x.parentId === id);
             for (const c of oldChildren) {
@@ -558,22 +609,22 @@ export function BudgetAppShell({
               }
             }
             for (const st of t.subTransactions) {
-              deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) + st.amount);
+              deltas.set(currentTarget.accountId, (deltas.get(currentTarget.accountId) ?? 0) + st.amount);
               if (st.transferAccountId != null) {
                 deltas.set(st.transferAccountId, (deltas.get(st.transferAccountId) ?? 0) - st.amount);
               }
             }
           } else if (!isSplitParent) {
-            const oldAccountId = target.accountId;
-            const oldAmount = num(target.amount);
-            const newAccountId = t.accountId ?? target.accountId;
+            const oldAccountId = currentTarget.accountId;
+            const oldAmount = num(currentTarget.amount);
+            const newAccountId = t.accountId ?? currentTarget.accountId;
             const newAmount = t.amount !== undefined ? t.amount : oldAmount;
 
-            if (target.transferAccountId != null) {
+            if (currentTarget.transferAccountId != null) {
               deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
-              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + oldAmount);
+              deltas.set(currentTarget.transferAccountId, (deltas.get(currentTarget.transferAccountId) ?? 0) + oldAmount);
               deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
-              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) - newAmount);
+              deltas.set(currentTarget.transferAccountId, (deltas.get(currentTarget.transferAccountId) ?? 0) - newAmount);
             } else {
               if (newAccountId !== oldAccountId || newAmount !== oldAmount) {
                 deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
@@ -583,6 +634,10 @@ export function BudgetAppShell({
           }
         }
 
+        for (const [k, v] of deltas.entries()) {
+          appliedDeltas.set(k, v);
+        }
+
         const accounts = applyAccountDeltas(prev.accounts, deltas);
 
         // Recompute categoryId, isIncome, and incomeMonth to mirror server-side logic
@@ -590,17 +645,17 @@ export function BudgetAppShell({
         let nextIsIncome: boolean | undefined;
         let nextIncomeMonth: string | null | undefined = t.incomeMonth;
 
-        if (target) {
-          const newAccountId = t.accountId ?? target.accountId;
-          const newAmount = t.amount !== undefined ? t.amount : num(target.amount);
+        if (currentTarget) {
+          const newAccountId = t.accountId ?? currentTarget.accountId;
+          const newAmount = t.amount !== undefined ? t.amount : num(currentTarget.amount);
           const srcAccount = prev.accounts.find((a) => a.id === newAccountId);
           const srcOnBudget = srcAccount?.onBudget ?? true;
           const srcKind = srcAccount?.kind ?? "liquid";
 
-          if (target.transferAccountId != null) {
-            const destAccount = prev.accounts.find((a) => a.id === target.transferAccountId);
-            const rawCatId = "categoryId" in t ? (t.categoryId ?? null) : (target.categoryId ?? null);
-            const rawIncMonth = "incomeMonth" in t ? (t.incomeMonth ?? null) : (target.incomeMonth ?? null);
+          if (currentTarget.transferAccountId != null) {
+            const destAccount = prev.accounts.find((a) => a.id === currentTarget.transferAccountId);
+            const rawCatId = "categoryId" in t ? (t.categoryId ?? null) : (currentTarget.categoryId ?? null);
+            const rawIncMonth = "incomeMonth" in t ? (t.incomeMonth ?? null) : (currentTarget.incomeMonth ?? null);
             const classification = classifyBoundaryTransfer({
               srcOnBudget,
               destOnBudget: destAccount?.onBudget ?? true,
@@ -623,13 +678,13 @@ export function BudgetAppShell({
             if ("categoryId" in t) {
               nextCategoryId = t.categoryId ?? null;
             } else {
-              nextCategoryId = target.categoryId ?? null;
+              nextCategoryId = currentTarget.categoryId ?? null;
             }
             nextIsIncome = false;
             nextIncomeMonth = null;
           } else {
             // Liquid cash on-budget account
-            const finalCatId = "categoryId" in t ? (t.categoryId ?? null) : (target.categoryId ?? null);
+            const finalCatId = "categoryId" in t ? (t.categoryId ?? null) : (currentTarget.categoryId ?? null);
             nextCategoryId = finalCatId;
             const isEligibleForIncome = finalCatId == null;
             const isIncome = isEligibleForIncome
@@ -641,7 +696,7 @@ export function BudgetAppShell({
             } else if ("incomeMonth" in t) {
               nextIncomeMonth = t.incomeMonth ?? null;
             } else {
-              nextIncomeMonth = target.incomeMonth ?? null;
+              nextIncomeMonth = currentTarget.incomeMonth ?? null;
             }
           }
         }
@@ -700,7 +755,23 @@ export function BudgetAppShell({
           { success: isStatusOrFlagOnly ? undefined : "Transaction updated.", failure: "Failed to update transaction." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of appliedDeltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((current) => {
+                if (!current) return current;
+                const accounts = applyAccountDeltas(current.accounts, reverseDeltas);
+                const otherTransactions = current.transactions.filter(
+                  (x) => !affectedTxIds.has(x.id) && (splitParentId == null || x.parentId !== splitParentId)
+                );
+                return {
+                  ...current,
+                  accounts,
+                  transactions: [...otherTransactions, ...prevAffectedTxs],
+                  budgetIndex: undefined,
+                };
+              });
               reload().catch(() => {});
             },
             skipReload: !(
@@ -716,10 +787,29 @@ export function BudgetAppShell({
       );
     },
     deleteTransaction: async (id) => {
-      const snapshot = dataRef.current;
+      const idSet = new Set([id]);
+      const allAffectedIds = new Set<number>();
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (idSet.has(tx.id)) {
+          allAffectedIds.add(tx.id);
+          if (tx.parentId != null) allAffectedIds.add(tx.parentId);
+        }
+      }
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (tx.parentId != null && allAffectedIds.has(tx.parentId)) {
+          allAffectedIds.add(tx.id);
+        }
+      }
+      const prevAffectedTxs = (dataRef.current?.transactions ?? [])
+        .filter((tx) => allAffectedIds.has(tx.id))
+        .map((tx) => ({ ...tx }));
+
+      let appliedDeltas = new Map<number, number>();
       setData((prev) => {
         if (!prev) return prev;
-        return applyOptimisticTransactionDeletion(prev, [id]);
+        const result = applyOptimisticTransactionDeletion(prev, [id]);
+        appliedDeltas = result.deltas;
+        return result.nextData;
       });
       return withSync(() =>
         runMutation(
@@ -729,7 +819,23 @@ export function BudgetAppShell({
           { success: "Transaction deleted.", failure: "Failed to delete transaction." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of appliedDeltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((current) => {
+                if (!current) return current;
+                const accounts = applyAccountDeltas(current.accounts, reverseDeltas);
+                const otherTransactions = current.transactions.filter(
+                  (tx) => !allAffectedIds.has(tx.id) && (tx.parentId == null || !allAffectedIds.has(tx.parentId))
+                );
+                return {
+                  ...current,
+                  accounts,
+                  transactions: [...otherTransactions, ...prevAffectedTxs],
+                  budgetIndex: undefined,
+                };
+              });
               reload().catch(() => {});
             },
           }
@@ -737,10 +843,29 @@ export function BudgetAppShell({
       );
     },
     bulkDeleteTransactions: async (ids: number[]) => {
-      const snapshot = dataRef.current;
+      const idSet = new Set(ids);
+      const allAffectedIds = new Set<number>();
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (idSet.has(tx.id)) {
+          allAffectedIds.add(tx.id);
+          if (tx.parentId != null) allAffectedIds.add(tx.parentId);
+        }
+      }
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (tx.parentId != null && allAffectedIds.has(tx.parentId)) {
+          allAffectedIds.add(tx.id);
+        }
+      }
+      const prevAffectedTxs = (dataRef.current?.transactions ?? [])
+        .filter((tx) => allAffectedIds.has(tx.id))
+        .map((tx) => ({ ...tx }));
+
+      let appliedDeltas = new Map<number, number>();
       setData((prev) => {
         if (!prev) return prev;
-        return applyOptimisticTransactionDeletion(prev, ids);
+        const result = applyOptimisticTransactionDeletion(prev, ids);
+        appliedDeltas = result.deltas;
+        return result.nextData;
       });
       return withSync(() =>
         runMutation(
@@ -753,7 +878,23 @@ export function BudgetAppShell({
           { success: `Deleted ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete transactions." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of appliedDeltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((current) => {
+                if (!current) return current;
+                const accounts = applyAccountDeltas(current.accounts, reverseDeltas);
+                const otherTransactions = current.transactions.filter(
+                  (tx) => !allAffectedIds.has(tx.id) && (tx.parentId == null || !allAffectedIds.has(tx.parentId))
+                );
+                return {
+                  ...current,
+                  accounts,
+                  transactions: [...otherTransactions, ...prevAffectedTxs],
+                  budgetIndex: undefined,
+                };
+              });
               reload().catch(() => {});
             },
           }
@@ -764,10 +905,26 @@ export function BudgetAppShell({
       ids: number[],
       patch: BulkUpdateTransactionPatch
     ) => {
-      const snapshot = dataRef.current;
+      const idSet = new Set(ids);
+      const allAffectedIds = new Set<number>(ids);
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (idSet.has(tx.id)) {
+          if (tx.parentId != null) allAffectedIds.add(tx.parentId);
+        }
+      }
+      for (const tx of dataRef.current?.transactions ?? []) {
+        if (tx.parentId != null && allAffectedIds.has(tx.parentId)) {
+          allAffectedIds.add(tx.id);
+        }
+      }
+      const prevAffectedTxs = (dataRef.current?.transactions ?? [])
+        .filter((tx) => allAffectedIds.has(tx.id))
+        .map((tx) => ({ ...tx }));
+
+      const appliedDeltas = new Map<number, number>();
+
       setData((prev) => {
         if (!prev) return prev;
-        const idSet = new Set(ids);
         const affectedSplitParentIds = new Set<number>();
         for (const tx of prev.transactions) {
           if (idSet.has(tx.id)) {
@@ -798,6 +955,10 @@ export function BudgetAppShell({
               }
             }
           }
+        }
+
+        for (const [k, v] of deltas.entries()) {
+          appliedDeltas.set(k, v);
         }
 
         const accounts = applyAccountDeltas(prev.accounts, deltas);
@@ -851,7 +1012,23 @@ export function BudgetAppShell({
           { success: isStatusOnly ? undefined : `Updated ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update transactions." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of appliedDeltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((current) => {
+                if (!current) return current;
+                const accounts = applyAccountDeltas(current.accounts, reverseDeltas);
+                const otherTransactions = current.transactions.filter(
+                  (tx) => !allAffectedIds.has(tx.id) && (tx.parentId == null || !allAffectedIds.has(tx.parentId))
+                );
+                return {
+                  ...current,
+                  accounts,
+                  transactions: [...otherTransactions, ...prevAffectedTxs],
+                  budgetIndex: undefined,
+                };
+              });
               reload().catch(() => {});
             },
           }
@@ -869,7 +1046,13 @@ export function BudgetAppShell({
       );
     },
     updateRecurring: async (id, v) => {
-      const snapshot = dataRef.current;
+      const prevRecurring = dataRef.current?.recurring.find((r) => r.id === id);
+      const prevRecurringSnapshot = prevRecurring
+        ? {
+            ...prevRecurring,
+            subTransactions: prevRecurring.subTransactions?.map((st) => ({ ...st })),
+          }
+        : null;
       setData((prev) => {
         if (!prev) return prev;
         const recurring = prev.recurring.map((r) => {
@@ -906,14 +1089,32 @@ export function BudgetAppShell({
           { success: "Recurring transaction updated.", failure: "Failed to update recurring transaction." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevRecurringSnapshot) {
+                setData((current) => {
+                  if (!current) return current;
+                  return {
+                    ...current,
+                    recurring: current.recurring.map((r) =>
+                      r.id === id ? prevRecurringSnapshot : r
+                    ),
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
       );
     },
     deleteRecurring: async (id) => {
-      const snapshot = dataRef.current;
+      const prevRecurring = dataRef.current?.recurring.find((r) => r.id === id);
+      const prevRecurringSnapshot = prevRecurring
+        ? {
+            ...prevRecurring,
+            subTransactions: prevRecurring.subTransactions?.map((st) => ({ ...st })),
+          }
+        : null;
       setData((prev) => {
         if (!prev) return prev;
         const recurring = prev.recurring.filter((r) => r.id !== id);
@@ -927,7 +1128,18 @@ export function BudgetAppShell({
           { success: "Recurring transaction deleted.", failure: "Failed to delete recurring transaction." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevRecurringSnapshot) {
+                setData((current) => {
+                  if (!current) return current;
+                  if (current.recurring.some((r) => r.id === id)) return current;
+                  return {
+                    ...current,
+                    recurring: [...current.recurring, prevRecurringSnapshot],
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
@@ -973,10 +1185,15 @@ export function BudgetAppShell({
       );
     },
     bulkDeleteRecurring: async (ids: number[]) => {
-      const snapshot = dataRef.current;
+      const idSet = new Set(ids);
+      const prevRecurringSnapshots = (dataRef.current?.recurring ?? [])
+        .filter((r) => idSet.has(r.id))
+        .map((r) => ({
+          ...r,
+          subTransactions: r.subTransactions?.map((st) => ({ ...st })),
+        }));
       setData((prev) => {
         if (!prev) return prev;
-        const idSet = new Set(ids);
         const recurring = prev.recurring.filter((r) => !idSet.has(r.id));
         return { ...prev, recurring, budgetIndex: undefined };
       });
@@ -991,14 +1208,29 @@ export function BudgetAppShell({
           { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevRecurringSnapshots.length > 0) {
+                setData((current) => {
+                  if (!current) return current;
+                  const currentIds = new Set(current.recurring.map((r) => r.id));
+                  const toRestore = prevRecurringSnapshots.filter((r) => !currentIds.has(r.id));
+                  return {
+                    ...current,
+                    recurring: [...current.recurring, ...toRestore],
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
       );
     },
     saveCategory: async (groupId, categoryId, v) => {
-      const snapshot = dataRef.current;
+      const prevCategory = categoryId
+        ? dataRef.current?.categories.find((c) => c.id === categoryId)
+        : null;
+      const prevCategorySnapshot = prevCategory ? { ...prevCategory } : null;
       if (categoryId) {
         setData((prev) => {
           if (!prev) return prev;
@@ -1046,14 +1278,27 @@ export function BudgetAppShell({
           { success: categoryId ? "Category updated." : "Category created.", failure: "Failed to save category." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevCategorySnapshot && categoryId) {
+                setData((current) => {
+                  if (!current) return current;
+                  return {
+                    ...current,
+                    categories: current.categories.map((c) =>
+                      c.id === categoryId ? prevCategorySnapshot : c
+                    ),
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
       );
     },
     deleteCategory: async (id, opts) => {
-      const snapshot = dataRef.current;
+      const prevCategory = dataRef.current?.categories.find((c) => c.id === id);
+      const prevCategorySnapshot = prevCategory ? { ...prevCategory } : null;
       setData((prev) => {
         if (!prev) return prev;
         const categories = prev.categories.filter((c) => c.id !== id);
@@ -1070,7 +1315,18 @@ export function BudgetAppShell({
           { success: "Category deleted.", failure: "Failed to delete category." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevCategorySnapshot) {
+                setData((current) => {
+                  if (!current) return current;
+                  if (current.categories.some((c) => c.id === id)) return current;
+                  return {
+                    ...current,
+                    categories: [...current.categories, prevCategorySnapshot],
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
@@ -1143,7 +1399,8 @@ export function BudgetAppShell({
       );
     },
     deleteAccount: async (id) => {
-      const snapshot = dataRef.current;
+      const prevAccount = dataRef.current?.accounts.find((a) => a.id === id);
+      const prevAccountSnapshot = prevAccount ? { ...prevAccount } : null;
       setData((prev) => {
         if (!prev) return prev;
         const accounts = prev.accounts.filter((a) => a.id !== id);
@@ -1157,14 +1414,26 @@ export function BudgetAppShell({
           { success: "Account deleted.", failure: "Failed to delete account." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevAccountSnapshot) {
+                setData((current) => {
+                  if (!current) return current;
+                  if (current.accounts.some((a) => a.id === id)) return current;
+                  return {
+                    ...current,
+                    accounts: [...current.accounts, prevAccountSnapshot],
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )
       );
     },
     updateAccount: async (id, patch) => {
-      const snapshot = dataRef.current;
+      const prevAccount = dataRef.current?.accounts.find((a) => a.id === id);
+      const prevAccountSnapshot = prevAccount ? { ...prevAccount } : null;
       setData((prev) => {
         if (!prev) return prev;
         const accounts = prev.accounts.map((a) => {
@@ -1202,7 +1471,19 @@ export function BudgetAppShell({
           { success: successMsg, failure: "Failed to update account." },
           {
             onRollback: () => {
-              if (snapshot) setData(snapshot);
+              if (prevAccountSnapshot) {
+                setData((current) => {
+                  if (!current) return current;
+                  return {
+                    ...current,
+                    accounts: current.accounts.map((a) =>
+                      a.id === id ? prevAccountSnapshot : a
+                    ),
+                    budgetIndex: undefined,
+                  };
+                });
+              }
+              reload().catch(() => {});
             },
           }
         )

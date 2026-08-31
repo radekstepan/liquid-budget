@@ -367,4 +367,124 @@ describe("BudgetAppShell (BUG-24)", () => {
       });
     }
   });
+
+  it("BUG-09: rapid assignments where first fails and second succeeds retains second assignment in UI state without rollback wipe", async () => {
+    let putAssignmentResolverA: ((res: Response) => void) | null = null;
+    let putAssignmentResolverB: ((res: Response) => void) | null = null;
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/api/budget")) {
+        return new Response(JSON.stringify(initialBudget), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/api/assignments") && init?.method === "PUT") {
+        const body = JSON.parse(init.body as string);
+        if (body.categoryId === 13) {
+          return new Promise<Response>((resolve) => {
+            putAssignmentResolverA = resolve;
+          });
+        }
+        if (body.categoryId === 14) {
+          return new Promise<Response>((resolve) => {
+            putAssignmentResolverB = resolve;
+          });
+        }
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any;
+
+    render(<BudgetAppShell initialView="budget" initialMonth="2026-06" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading budget")).toBeNull();
+    });
+
+    // 1. Edit Category A: "Public Transport, Uber, Bike" (id: 13) -> change June assignment from $75.00 to $111.00
+    const rowA = screen
+      .getAllByText("Public Transport, Uber, Bike")
+      .map((el) => el.closest("tr"))
+      .find((tr) => tr?.getAttribute("data-cat-row") === "true")!;
+    expect(rowA).toBeDefined();
+
+    const assignButtonsA = within(rowA).getAllByRole("button", { name: "$75.00" });
+    const assignBtnA = assignButtonsA[assignButtonsA.length - 1]!;
+    fireEvent.click(assignBtnA);
+
+    const inputA = within(rowA).getByDisplayValue("75.00");
+    fireEvent.change(inputA, { target: { value: "111" } });
+    fireEvent.keyDown(inputA, { key: "Enter" });
+
+    // Verify rowA optimistically updated to $111.00
+    await waitFor(() => {
+      expect(within(rowA).getByRole("button", { name: "$111.00" })).toBeDefined();
+    });
+
+    // 2. Immediately edit Category B: "Fees, Charges, Loans" (id: 14) -> change June assignment from $35.00 to $222.00
+    const rowB = screen
+      .getAllByText("Fees, Charges, Loans")
+      .map((el) => el.closest("tr"))
+      .find((tr) => tr?.getAttribute("data-cat-row") === "true")!;
+    expect(rowB).toBeDefined();
+
+    const assignButtonsB = within(rowB).getAllByRole("button", { name: "$35.00" });
+    const assignBtnB = assignButtonsB[assignButtonsB.length - 1]!;
+    fireEvent.click(assignBtnB);
+
+    const inputB = within(rowB).getByDisplayValue("35.00");
+    fireEvent.change(inputB, { target: { value: "222" } });
+    fireEvent.keyDown(inputB, { key: "Enter" });
+
+    // Verify rowB optimistically updated to $222.00
+    await waitFor(() => {
+      expect(within(rowB).getByRole("button", { name: "$222.00" })).toBeDefined();
+    });
+
+    // 3. Fail Request A (network glitch 500 error)
+    await act(async () => {
+      if (putAssignmentResolverA) {
+        putAssignmentResolverA(
+          new Response(JSON.stringify({ error: "Server error on Cat A" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      }
+    });
+
+    // 4. Resolve Request B with 200 OK
+    await act(async () => {
+      if (putAssignmentResolverB) {
+        putAssignmentResolverB(
+          new Response(
+            JSON.stringify({
+              id: 14,
+              categoryId: 14,
+              month: "2026-06",
+              amount: 22200,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        );
+      }
+    });
+
+    // 5. Verify Cat A was rolled back to $75.00, BUT Cat B remains at $222.00
+    await waitFor(() => {
+      expect(within(rowA).getAllByRole("button", { name: "$75.00" }).length).toBe(2);
+      expect(within(rowA).queryByRole("button", { name: "$111.00" })).toBeNull();
+      expect(within(rowB).getByRole("button", { name: "$222.00" })).toBeDefined();
+    });
+  });
 });
