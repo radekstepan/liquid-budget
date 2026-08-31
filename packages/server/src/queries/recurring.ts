@@ -18,6 +18,7 @@ import {
   assertValidAmount,
   isAccountOnBudget,
   sanitizeFlagColor,
+  TransactionError,
   type SubTransactionInput as TxnSubTransactionInput,
 } from "./transactions.js";
 
@@ -597,15 +598,23 @@ export async function autoPostDueRecurringTransactions(
         if (!res.active || res.nextDate <= currentNextDate) break;
         currentNextDate = res.nextDate;
       } catch (err: any) {
-        const isConcurrency409 = err instanceof RecurringError && err.status === 409;
+        const isConcurrency409 = (err instanceof RecurringError && err.status === 409) || err?.status === 409;
+        const isDomainValidationError =
+          (err instanceof RecurringError ||
+            err instanceof TransactionError ||
+            (typeof err?.status === "number" && err.status >= 400 && err.status < 500)) &&
+          !isConcurrency409;
+
         failures.push({
           id: r.id,
           payee: r.payee,
           error: err instanceof Error ? err.message : String(err),
         });
-        // 409 = schedule mismatch / already posted (concurrent runner won).
-        // Do NOT deactivate — the rule is healthy, just beat by another process.
-        if (!isConcurrency409) {
+
+        // Only deactivate the recurring rule if it is a permanent domain / validation error (4xx client error other than 409).
+        // Transient/system errors (e.g. database locks, SQLite busy, IO errors, unexpected runtime exceptions) leave the rule
+        // active so it can retry on the next cycle.
+        if (isDomainValidationError) {
           // Deactivate the broken recurring rule so it doesn't repeatedly fail on every cycle
           try {
             await db

@@ -34,6 +34,7 @@ async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
 type BudgetResponse = BudgetData & {
   autoPostedRecurringCount?: number;
   autoPostedRecurringCapped?: { id: number; payee: string; remainingDue: number }[];
+  autoPostedRecurringFailures?: { id: number; payee: string; error: string }[];
 };
 
 type MutationMessages<T> = {
@@ -101,7 +102,7 @@ export function BudgetAppShell({
     }
     latestCompletedReloadSeqRef.current = seq;
 
-    const { autoPostedRecurringCount, autoPostedRecurringCapped, ...budget } = json;
+    const { autoPostedRecurringCount, autoPostedRecurringCapped, autoPostedRecurringFailures, ...budget } = json;
     setData(budget);
     if (autoPostedRecurringCount != null && autoPostedRecurringCount > 0) {
       addToast(
@@ -118,6 +119,15 @@ export function BudgetAppShell({
       addToast(
         `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
         "warn"
+      );
+    }
+    if (autoPostedRecurringFailures && autoPostedRecurringFailures.length > 0) {
+      const names = autoPostedRecurringFailures
+        .map((f) => (f.payee ? `${f.payee}: ${f.error}` : f.error))
+        .join("; ");
+      addToast(
+        `Failed to auto-post scheduled transaction: ${names}`,
+        "danger"
       );
     }
   }, [addToast]);
