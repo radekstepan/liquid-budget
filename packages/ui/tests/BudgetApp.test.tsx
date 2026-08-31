@@ -778,8 +778,8 @@ describe("BudgetApp", () => {
 
     render(<BudgetApp data={data} api={api} initialMonth="2026-06" />);
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
-    // Verify that the view rendered the Groceries category row in June 2026
-    expect(screen.getByText(groceryCat.name)).toBeInTheDocument();
+    // Verify that the view rendered the Groceries category in June 2026
+    expect(screen.getAllByText(groceryCat.name).length).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -1080,7 +1080,9 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
   if (!ids || ids.length === 0) return [];
   return withTransaction(db, async () => {
     const deleted: any[] = [];
+    const deletedIds = new Set<number>();
     for (const id of ids) {
+      if (deletedIds.has(id)) continue;
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
       if (existing.status === "r") {
@@ -1103,6 +1105,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         }
         await db.delete(transactions).where(eq(transactions.id, id));
         deleted.push(existing);
+        deletedIds.add(id);
 
         // Check remaining children of the split parent.
         const remaining = await getChildren(db, existing.parentId);
@@ -1120,8 +1123,18 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
           }
           await db.delete(transactions).where(eq(transactions.id, lastChild.id));
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+          deleted.push(lastChild);
+          deletedIds.add(lastChild.id);
+          if (parent) {
+            deleted.push(parent);
+            deletedIds.add(parent.id);
+          }
         } else if (remaining.length === 0) {
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));
+          if (parent) {
+            deleted.push(parent);
+            deletedIds.add(parent.id);
+          }
         } else {
           const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
           await db
@@ -1143,6 +1156,8 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
             if (c.transferAccountId != null) {
               await applyBalance(db, c.transferAccountId, Number(c.amount));
             }
+            deleted.push(c);
+            deletedIds.add(c.id);
           }
           await db.delete(transactions).where(eq(transactions.parentId, id));
         } else {
@@ -1153,6 +1168,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         }
         await db.delete(transactions).where(eq(transactions.id, id));
         deleted.push(existing);
+        deletedIds.add(id);
       }
     }
     return deleted;

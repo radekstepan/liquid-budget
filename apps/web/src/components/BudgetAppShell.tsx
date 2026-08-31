@@ -19,6 +19,94 @@ function applyAccountDeltas(
   });
 }
 
+function applyOptimisticTransactionDeletion(
+  prev: BudgetData,
+  ids: number[]
+): BudgetData {
+  const idSet = new Set(ids);
+  const deltas = new Map<number, number>();
+  const removedIds = new Set(ids);
+  const parentNewTotals = new Map<number, number>();
+  const deletedParentIds = new Set<number>();
+
+  for (const tx of prev.transactions) {
+    if (idSet.has(tx.id) && tx.parentId == null) {
+      const children = prev.transactions.filter((x) => x.parentId === tx.id);
+      if (children.length > 0) {
+        deletedParentIds.add(tx.id);
+        for (const c of children) {
+          deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
+          if (c.transferAccountId != null) {
+            deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
+          }
+          removedIds.add(c.id);
+        }
+      } else {
+        deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
+        if (tx.transferAccountId != null) {
+          deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
+        }
+      }
+    }
+  }
+
+  const childrenByParent = new Map<number, typeof prev.transactions>();
+  for (const tx of prev.transactions) {
+    if (tx.parentId != null) {
+      let list = childrenByParent.get(tx.parentId);
+      if (!list) {
+        list = [];
+        childrenByParent.set(tx.parentId, list);
+      }
+      list.push(tx);
+    }
+  }
+
+  for (const [parentId, allChildren] of childrenByParent.entries()) {
+    if (deletedParentIds.has(parentId)) continue;
+    const childrenToDelete = allChildren.filter((c) => idSet.has(c.id));
+    if (childrenToDelete.length === 0) continue;
+
+    for (const c of childrenToDelete) {
+      deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
+      if (c.transferAccountId != null) {
+        deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
+      }
+      removedIds.add(c.id);
+    }
+
+    const remainingChildren = allChildren.filter((c) => !idSet.has(c.id));
+    if (remainingChildren.length === 1) {
+      const lastChild = remainingChildren[0]!;
+      deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
+      if (lastChild.transferAccountId != null) {
+        deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
+      }
+      removedIds.add(lastChild.id);
+      removedIds.add(parentId);
+      parentNewTotals.delete(parentId);
+    } else if (remainingChildren.length === 0) {
+      removedIds.add(parentId);
+      parentNewTotals.delete(parentId);
+    } else {
+      const newTotal = remainingChildren.reduce((sum, c) => sum + num(c.amount), 0);
+      parentNewTotals.set(parentId, newTotal);
+    }
+  }
+
+  const accounts = applyAccountDeltas(prev.accounts, deltas);
+  let transactions = prev.transactions.filter(
+    (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
+  );
+  if (parentNewTotals.size > 0) {
+    transactions = transactions.map((x) => {
+      const updatedTotal = parentNewTotals.get(x.id);
+      return updatedTotal !== undefined ? { ...x, amount: updatedTotal.toFixed(2) } : x;
+    });
+  }
+  return { ...prev, accounts, transactions, budgetIndex: undefined };
+}
+
 async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -591,64 +679,7 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
-        const target = prev.transactions.find((x) => x.id === id);
-        const deltas = new Map<number, number>();
-        const removedIds = new Set<number>([id]);
-        let splitParentIdToUpdate: number | null = null;
-        let splitParentNewAmount: number | null = null;
-
-        if (target) {
-          if (target.parentId != null) {
-            deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
-            if (target.transferAccountId != null) {
-              deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + num(target.amount));
-            }
-            const remaining = prev.transactions.filter(
-              (x) => x.parentId === target.parentId && x.id !== id
-            );
-            if (remaining.length === 1) {
-              const lastChild = remaining[0]!;
-              deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
-              if (lastChild.transferAccountId != null) {
-                deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
-              }
-              removedIds.add(lastChild.id);
-              removedIds.add(target.parentId);
-            } else if (remaining.length === 0) {
-              removedIds.add(target.parentId);
-            } else {
-              splitParentIdToUpdate = target.parentId;
-              splitParentNewAmount = remaining.reduce((sum, c) => sum + num(c.amount), 0);
-            }
-          } else if (target.transferAccountId != null) {
-            deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
-            deltas.set(target.transferAccountId, (deltas.get(target.transferAccountId) ?? 0) + num(target.amount));
-          } else {
-            const children = prev.transactions.filter((x) => x.parentId === id);
-            if (children.length > 0) {
-              for (const c of children) {
-                deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
-                if (c.transferAccountId != null) {
-                  deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
-                }
-                removedIds.add(c.id);
-              }
-            } else {
-              deltas.set(target.accountId, (deltas.get(target.accountId) ?? 0) - num(target.amount));
-            }
-          }
-        }
-
-        const accounts = applyAccountDeltas(prev.accounts, deltas);
-        let transactions = prev.transactions.filter(
-          (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
-        );
-        if (splitParentIdToUpdate != null && splitParentNewAmount != null) {
-          transactions = transactions.map((x) =>
-            x.id === splitParentIdToUpdate ? { ...x, amount: splitParentNewAmount!.toFixed(2) } : x
-          );
-        }
-        return { ...prev, accounts, transactions, budgetIndex: undefined };
+        return applyOptimisticTransactionDeletion(prev, [id]);
       });
       return withSync(() =>
         runMutation(
@@ -670,68 +701,7 @@ export function BudgetAppShell({
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
-        const idSet = new Set(ids);
-        const deltas = new Map<number, number>();
-        const removedIds = new Set(ids);
-        const parentNewTotals = new Map<number, number>();
-
-        for (const tx of prev.transactions) {
-          if (!idSet.has(tx.id)) continue;
-          if (tx.parentId != null) {
-            if (idSet.has(tx.parentId) || removedIds.has(tx.parentId)) continue;
-            deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
-            if (tx.transferAccountId != null) {
-              deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
-            }
-            const remaining = prev.transactions.filter(
-              (x) => x.parentId === tx.parentId && !idSet.has(x.id) && !removedIds.has(x.id)
-            );
-            if (remaining.length === 1) {
-              const lastChild = remaining[0]!;
-              deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
-              if (lastChild.transferAccountId != null) {
-                deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
-              }
-              removedIds.add(lastChild.id);
-              removedIds.add(tx.parentId);
-              parentNewTotals.delete(tx.parentId);
-            } else if (remaining.length === 0) {
-              removedIds.add(tx.parentId);
-              parentNewTotals.delete(tx.parentId);
-            } else {
-              const newTotal = remaining.reduce((sum, c) => sum + num(c.amount), 0);
-              parentNewTotals.set(tx.parentId, newTotal);
-            }
-          } else {
-            const children = prev.transactions.filter((x) => x.parentId === tx.id);
-            if (children.length > 0) {
-              for (const c of children) {
-                deltas.set(c.accountId, (deltas.get(c.accountId) ?? 0) - num(c.amount));
-                if (c.transferAccountId != null) {
-                  deltas.set(c.transferAccountId, (deltas.get(c.transferAccountId) ?? 0) + num(c.amount));
-                }
-                removedIds.add(c.id);
-              }
-            } else {
-              deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
-              if (tx.transferAccountId != null) {
-                deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
-              }
-            }
-          }
-        }
-
-        const accounts = applyAccountDeltas(prev.accounts, deltas);
-        let transactions = prev.transactions.filter(
-          (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
-        );
-        if (parentNewTotals.size > 0) {
-          transactions = transactions.map((x) => {
-            const updatedTotal = parentNewTotals.get(x.id);
-            return updatedTotal !== undefined ? { ...x, amount: updatedTotal.toFixed(2) } : x;
-          });
-        }
-        return { ...prev, accounts, transactions, budgetIndex: undefined };
+        return applyOptimisticTransactionDeletion(prev, ids);
       });
       return withSync(() =>
         runMutation(
