@@ -110,7 +110,7 @@ export function computeRunningBalances(
       if (!isSource && !isDest) continue;
       runningBalanceById.set(r.id, bal);
       const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
-      const delta = isSource ? amt : -amt;
+      const delta = isSource && isDest ? 0 : isSource ? amt : -amt;
       bal -= delta;
     }
   } else {
@@ -124,7 +124,7 @@ export function computeRunningBalances(
         byAccount.set(r.accountId, srcList);
       }
       srcList.push(r);
-      if (r.transferAccountId != null) {
+      if (r.transferAccountId != null && r.transferAccountId !== r.accountId) {
         let destList = byAccount.get(r.transferAccountId);
         if (!destList) {
           destList = [];
@@ -138,11 +138,12 @@ export function computeRunningBalances(
       for (let i = 0; i < acctRows.length; i++) {
         const r = acctRows[i]!;
         const isSource = r.accountId === acctId;
+        const isDest = r.transferAccountId === acctId;
         if (isSource) {
           runningBalanceById.set(r.id, bal);
         }
         const amt = typeof r.amount === "number" ? Math.round(r.amount) : num(r.amount);
-        const delta = isSource ? amt : -amt;
+        const delta = isSource && isDest ? 0 : isSource ? amt : -amt;
         bal -= delta;
       }
     }
