@@ -233,7 +233,12 @@ export async function deleteAccount(db: Database, id: number) {
     const [reconciled] = await db
       .select({ id: transactions.id })
       .from(transactions)
-      .where(and(eq(transactions.accountId, id), eq(transactions.status, "r")))
+      .where(
+        or(
+          and(eq(transactions.accountId, id), eq(transactions.status, "r")),
+          and(eq(transactions.transferAccountId, id), eq(transactions.transferStatus, "r"))
+        )
+      )
       .limit(1);
 
     if (reconciled) {
@@ -251,6 +256,7 @@ export async function deleteAccount(db: Database, id: number) {
         amount: transactions.amount,
         parentId: transactions.parentId,
         status: transactions.status,
+        transferStatus: transactions.transferStatus,
         transferAccountId: transactions.transferAccountId,
       })
       .from(transactions)
@@ -263,7 +269,7 @@ export async function deleteAccount(db: Database, id: number) {
         .where(eq(transactions.id, cp.id));
       if (!existing) continue;
 
-      if (existing.status === "r") {
+      if (existing.status === "r" || existing.transferStatus === "r") {
         throw new AccountError(
           `Transaction ${existing.id} is reconciled and locked. Unreconcile before deleting.`,
           422
@@ -276,7 +282,7 @@ export async function deleteAccount(db: Database, id: number) {
           .select()
           .from(transactions)
           .where(eq(transactions.id, existing.parentId));
-        if (parent && parent.status === "r") {
+        if (parent && (parent.status === "r" || parent.transferStatus === "r")) {
           throw new AccountError(
             `Reconciled split transaction ${parent.id} cannot be modified. Unreconcile before deleting.`,
             422
@@ -300,13 +306,14 @@ export async function deleteAccount(db: Database, id: number) {
             amount: transactions.amount,
             transferAccountId: transactions.transferAccountId,
             status: transactions.status,
+            transferStatus: transactions.transferStatus,
           })
           .from(transactions)
           .where(eq(transactions.parentId, existing.parentId));
 
         if (remaining.length === 1) {
           const lastChild = remaining[0]!;
-          if (lastChild.status === "r") {
+          if (lastChild.status === "r" || lastChild.transferStatus === "r") {
             throw new AccountError(
               `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
               422

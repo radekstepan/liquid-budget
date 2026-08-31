@@ -54,10 +54,14 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       ...t,
       amount: String(t.amount),
       status: (t.status as ClearedStatus) ?? "c",
+      transferStatus: (t.transferStatus as ClearedStatus | null) ?? null,
       // createdAt is already a text string in SQLite
       createdAt: t.createdAt,
       isIncome: Boolean(t.isIncome),
       reconciledAt: t.reconciledAt,
+      reconciliationId: t.reconciliationId,
+      transferReconciledAt: t.transferReconciledAt,
+      transferReconciliationId: t.transferReconciliationId,
       // Sanitize any flag_color read from the DB so a rogue value never
       // reaches the UI. The internal "duplicate" marker is allowed here.
       flagColor: sanitizeFlagState(t.flagColor),

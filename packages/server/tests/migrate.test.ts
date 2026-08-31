@@ -91,8 +91,11 @@ describe("Drizzle migrations", () => {
 
     const transactionsCols = tableInfo(ctx.raw, "transactions").map((c) => c.name);
     expect(transactionsCols).toContain("status");
+    expect(transactionsCols).toContain("transfer_status");
     expect(transactionsCols).toContain("transfer_account_id");
     expect(transactionsCols).toContain("reconciliation_id");
+    expect(transactionsCols).toContain("transfer_reconciliation_id");
+    expect(transactionsCols).toContain("transfer_reconciled_at");
 
     const recurringCols = tableInfo(ctx.raw, "recurring").map((c) => c.name);
     expect(recurringCols).toContain("transfer_account_id");
@@ -135,6 +138,13 @@ describe("Drizzle migrations", () => {
     expect(() => {
       ctx.raw.prepare(
         "INSERT INTO transactions (account_id, date, payee, memo, amount, status) VALUES (1, '2026-06-01', 'P', '', 100, 'x')"
+      ).run();
+    }).toThrow(/CHECK constraint failed/i);
+
+    // transactions.transfer_status CHECK constraint ('u', 'c', 'r')
+    expect(() => {
+      ctx.raw.prepare(
+        "INSERT INTO transactions (account_id, date, payee, memo, amount, status, transfer_status) VALUES (1, '2026-06-01', 'P', '', 100, 'c', 'x')"
       ).run();
     }).toThrow(/CHECK constraint failed/i);
   });

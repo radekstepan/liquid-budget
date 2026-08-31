@@ -68,7 +68,8 @@ export type BudgetAppApi = {
     payee: string;
     amount: number;
     memo?: string;
-    status: "u" | "c" | "r";
+    status?: "u" | "c" | "r";
+    transferStatus?: "u" | "c" | "r";
     flagColor?: TransactionFlagColor | null;
     transferAccountId?: number | null;
     incomeMonth?: string | null;
@@ -78,6 +79,7 @@ export type BudgetAppApi = {
       amount: number;
       memo?: string;
       transferAccountId?: number | null;
+      transferStatus?: "u" | "c" | "r";
     }[];
   }) => Promise<void>;
   updateTransaction: (
@@ -90,6 +92,7 @@ export type BudgetAppApi = {
       amount?: number;
       memo?: string;
       status?: "u" | "c" | "r";
+      transferStatus?: "u" | "c" | "r";
       flagColor?: TransactionFlagColor | null;
       transferAccountId?: number | null;
       incomeMonth?: string | null;
@@ -99,6 +102,7 @@ export type BudgetAppApi = {
         amount: number;
         memo?: string;
         transferAccountId?: number | null;
+        transferStatus?: "u" | "c" | "r";
       }[];
     }
   ) => Promise<void>;
@@ -570,10 +574,17 @@ export function BudgetApp({
     async (id: number) => {
       const t = data.transactions.find((x) => x.id === id);
       if (!t) return;
-      const next: "u" | "c" = t.status === "c" ? "u" : "c";
-      await api.updateTransaction(id, { status: next });
+      const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+      const currentStatus = isIncoming ? (t.transferStatus ?? t.status) : t.status;
+      if (currentStatus === "r") return;
+      const next: "u" | "c" = currentStatus === "c" ? "u" : "c";
+      if (isIncoming) {
+        await api.updateTransaction(id, { transferStatus: next });
+      } else {
+        await api.updateTransaction(id, { status: next });
+      }
     },
-    [api, data.transactions]
+    [api, data.transactions, accountFilter]
   );
 
   const setFlag = useCallback(

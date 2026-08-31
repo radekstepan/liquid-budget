@@ -649,6 +649,7 @@ export function BudgetAppShell({
             ...(t.memo !== undefined ? { memo: t.memo } : {}),
             ...(t.amount !== undefined ? { amount: t.amount.toFixed(2) } : {}),
             ...(t.status !== undefined ? { status: t.status } : {}),
+            ...(t.transferStatus !== undefined ? { transferStatus: t.transferStatus } : {}),
             ...(t.flagColor !== undefined ? { flagColor: t.flagColor ?? null } : {}),
             ...(nextIsIncome !== undefined ? { isIncome: nextIsIncome } : {}),
             ...(nextIncomeMonth !== undefined ? { incomeMonth: nextIncomeMonth } : {}),
@@ -657,7 +658,7 @@ export function BudgetAppShell({
         return { ...prev, accounts, transactions, budgetIndex: undefined };
       });
       const isStatusOrFlagOnly =
-        (t.status !== undefined || t.flagColor !== undefined) &&
+        (t.status !== undefined || t.transferStatus !== undefined || t.flagColor !== undefined) &&
         t.accountId === undefined &&
         t.categoryId === undefined &&
         t.date === undefined &&

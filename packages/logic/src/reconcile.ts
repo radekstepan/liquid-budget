@@ -75,14 +75,15 @@ export function computeReconcileState(
 
     const amt = typeof t.amount === "number" ? Math.round(t.amount) : num(t.amount);
     const delta = isSource ? amt : -amt;
+    const effStatus = isSource ? t.status : (t.transferStatus ?? t.status ?? "c");
 
-    if (t.status === "u") {
+    if (effStatus === "u") {
       unclearedSum += delta;
       unclearedCount += 1;
-    } else if (t.status === "c") {
+    } else if (effStatus === "c") {
       clearedSum += delta;
       clearedCount += 1;
-    } else if (t.status === "r") {
+    } else if (effStatus === "r") {
       reconciledSum += delta;
       reconciledCount += 1;
     }

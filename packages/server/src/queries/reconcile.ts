@@ -64,12 +64,12 @@ export async function getReconcileState(
 
   const [agg] = await db
     .select({
-      unclearedSum: sql<number>`coalesce(sum(case when status = 'u' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
-      unclearedCount: sql<number>`coalesce(sum(case when status = 'u' and date <= ${statementDate} then 1 else 0 end), 0)`,
-      clearedSum: sql<number>`coalesce(sum(case when status = 'c' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
-      clearedCount: sql<number>`coalesce(sum(case when status = 'c' and date <= ${statementDate} then 1 else 0 end), 0)`,
-      reconciledSum: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
-      reconciledCount: sql<number>`coalesce(sum(case when status = 'r' and date <= ${statementDate} then 1 else 0 end), 0)`,
+      unclearedSum: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'u' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
+      unclearedCount: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'u' and date <= ${statementDate} then 1 else 0 end), 0)`,
+      clearedSum: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'c' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
+      clearedCount: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'c' and date <= ${statementDate} then 1 else 0 end), 0)`,
+      reconciledSum: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'r' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,
+      reconciledCount: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'r' and date <= ${statementDate} then 1 else 0 end), 0)`,
     })
     .from(transactions)
     .where(
@@ -177,18 +177,36 @@ export async function reconcileAccount(
         .where(eq(reconciliations.id, rec!.id));
     }
 
-    // Flip every Cleared row in the account dated on or before statementDate to Reconciled.
+    // Flip Cleared source rows in the account dated on or before statementDate to Reconciled.
     // Exclude split parents so only balance-contributing child transactions are counted and flipped.
-    const flip = await db
+    const flipSource = await db
       .update(transactions)
       .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
       .where(
         and(
-          or(
-            eq(transactions.accountId, input.accountId),
-            eq(transactions.transferAccountId, input.accountId)
-          ),
+          eq(transactions.accountId, input.accountId),
           eq(transactions.status, "c"),
+          sql`${transactions.date} <= ${statementDate}`,
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+        )
+      )
+      .returning({ id: transactions.id });
+
+    // Flip Cleared destination (inbound transfer) rows in the account dated on or before statementDate to Reconciled.
+    const flipDest = await db
+      .update(transactions)
+      .set({
+        transferStatus: "r",
+        transferReconciledAt: today,
+        transferReconciliationId: rec!.id,
+      })
+      .where(
+        and(
+          eq(transactions.transferAccountId, input.accountId),
+          or(
+            eq(transactions.transferStatus, "c"),
+            and(sql`${transactions.transferStatus} IS NULL`, eq(transactions.status, "c"))
+          ),
           sql`${transactions.date} <= ${statementDate}`,
           sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
         )
@@ -215,7 +233,7 @@ export async function reconcileAccount(
       .where(eq(accounts.id, input.accountId));
 
     return {
-      reconciledCount: flip.length + (adjustmentTransactionId ? 1 : 0),
+      reconciledCount: flipSource.length + flipDest.length + (adjustmentTransactionId ? 1 : 0),
       adjustmentTransactionId,
       finalDiff: 0,
       lastReconciledAt: today,
@@ -289,22 +307,33 @@ export async function unreconcileAccount(
       return { flipped: 0, deletedAdjustmentId: null };
     }
 
-    const flipped = await db
+    const flippedSource = await db
       .update(transactions)
       .set({ status: "c", reconciledAt: null, reconciliationId: null })
       .where(
         and(
-          or(
-            eq(transactions.accountId, accountId),
-            eq(transactions.transferAccountId, accountId)
-          ),
+          eq(transactions.accountId, accountId),
           eq(transactions.status, "r"),
           eq(transactions.reconciliationId, lastRec.id),
           sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
         )
       )
       .returning({ id: transactions.id });
-    const flippedCount = flipped.length;
+
+    const flippedDest = await db
+      .update(transactions)
+      .set({ transferStatus: "c", transferReconciledAt: null, transferReconciliationId: null })
+      .where(
+        and(
+          eq(transactions.transferAccountId, accountId),
+          eq(transactions.transferStatus, "r"),
+          eq(transactions.transferReconciliationId, lastRec.id),
+          sql`${transactions.id} NOT IN (SELECT parent_id FROM transactions WHERE parent_id IS NOT NULL)`
+        )
+      )
+      .returning({ id: transactions.id });
+
+    const flippedCount = flippedSource.length + flippedDest.length;
 
     // Also flip split parents back to cleared if any of their children are cleared
     await db

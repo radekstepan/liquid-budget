@@ -28,6 +28,7 @@ export type CreateTransactionInput = {
   memo?: string;
   amount: number;
   status?: ClearedStatus;
+  transferStatus?: ClearedStatus;
   /** YNAB4-style flag color; null/undefined leaves the row unflagged. */
   flagColor?: TransactionFlagColor | null;
   /**
@@ -62,6 +63,7 @@ export type UpdateTransactionInput = {
   memo?: string;
   amount?: number;
   status?: ClearedStatus;
+  transferStatus?: ClearedStatus;
   flagColor?: TransactionFlagColor | null;
   isIncome?: boolean;
   incomeMonth?: string | null;
@@ -74,6 +76,7 @@ export type SubTransactionInput = {
    */
   categoryId?: number | null;
   transferAccountId?: number | null;
+  transferStatus?: ClearedStatus;
   amount: number;
   memo?: string;
   payee?: string;
@@ -184,7 +187,7 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; payee: string; status: ClearedStatus }[]> {
+): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; payee: string; status: ClearedStatus; transferStatus: ClearedStatus | null }[]> {
   return db
     .select({
       id: transactions.id,
@@ -195,6 +198,7 @@ async function getChildren(
       memo: transactions.memo,
       payee: transactions.payee,
       status: transactions.status,
+      transferStatus: transactions.transferStatus,
     })
     .from(transactions)
     .where(eq(transactions.parentId, parentId));
@@ -229,7 +233,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
   if (input.incomeMonth) {
     assertValidISOMonth(input.incomeMonth, "incomeMonth");
   }
-  if (input.status === "r") {
+  if (input.status === "r" || input.transferStatus === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
     );
@@ -307,6 +311,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         memo: input.memo ?? "",
         amount,
         status: input.status ?? "c",
+        transferStatus: input.transferAccountId != null ? (input.transferStatus ?? input.status ?? "c") : null,
         flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: input.transferAccountId ?? null,
         parentId: input.parentId ?? null,
@@ -344,7 +349,7 @@ export async function createTransfer(
     throw new TransactionError("transfer requires a transferAccountId");
   }
   const amount = assertValidAmount(baseInput.amount);
-  if (baseInput.status === "r") {
+  if (baseInput.status === "r" || baseInput.transferStatus === "r") {
     throw new TransactionError(
       "cannot directly create a reconciled transaction; use the reconcile flow"
     );
@@ -383,6 +388,7 @@ export async function createTransfer(
         memo: baseInput.memo,
         amount,
         status: baseInput.status ?? "c",
+        transferStatus: baseInput.transferStatus ?? baseInput.status ?? "c",
         flagColor: sanitizeFlagColor(baseInput.flagColor),
         transferAccountId: destAccountId,
         parentId: baseInput.parentId ?? null,
@@ -428,6 +434,11 @@ export async function createSplitWithChildren(
   }
 
   for (const c of children) {
+    if (c.transferStatus === "r") {
+      throw new TransactionError(
+        "cannot directly create a reconciled transaction; use the reconcile flow"
+      );
+    }
     if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
       throw new TransactionError("transfer account must differ from source account");
     }
@@ -497,6 +508,7 @@ export async function createSplitWithChildren(
           memo: c.memo ?? "",
           amount: childAmount,
           status: parentStatus,
+          transferStatus: transferAccountId ? (c.transferStatus ?? parentStatus) : null,
           transferAccountId,
           parentId: parentRow!.id,
           isIncome,
@@ -533,13 +545,30 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
-  if (patch.status === "r") {
+  if (patch.status === "r" || patch.transferStatus === "r") {
     throw new TransactionError(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"
     );
   }
 
-  if (existing.status === "r") {
+  const touchesStructuralFields =
+    patch.accountId !== undefined ||
+    patch.categoryId !== undefined ||
+    patch.date !== undefined ||
+    patch.payee !== undefined ||
+    patch.memo !== undefined ||
+    patch.amount !== undefined ||
+    patch.incomeMonth !== undefined ||
+    patch.isIncome !== undefined;
+
+  if (existing.status === "r" && (patch.status !== undefined || touchesStructuralFields)) {
+    throw new TransactionError(
+      "Transaction is reconciled and locked. Unreconcile before editing.",
+      422
+    );
+  }
+
+  if (existing.transferStatus === "r" && (patch.transferStatus !== undefined || touchesStructuralFields)) {
     throw new TransactionError(
       "Transaction is reconciled and locked. Unreconcile before editing.",
       422
@@ -548,7 +577,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
   if (existing.parentId != null) {
     const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-    if (parent && parent.status === "r") {
+    if (parent && (parent.status === "r" || parent.transferStatus === "r") && (patch.status !== undefined || touchesStructuralFields)) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile before editing.",
         422
@@ -582,6 +611,11 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     p.reconciledAt = null;
     p.reconciliationId = null;
   }
+  if (patch.transferStatus !== undefined && patch.transferStatus != null) {
+    p.transferStatus = patch.transferStatus;
+    p.transferReconciledAt = null;
+    p.transferReconciliationId = null;
+  }
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if (patch.incomeMonth !== undefined) {
     p.incomeMonth = patch.incomeMonth ? assertValidISOMonth(patch.incomeMonth, "incomeMonth") : null;
@@ -597,6 +631,20 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     const [current] = await db.select().from(transactions).where(eq(transactions.id, id));
     if (!current) return null;
 
+    if (current.status === "r" && (patch.status !== undefined || touchesStructuralFields)) {
+      throw new TransactionError(
+        "Transaction is reconciled and locked. Unreconcile before editing.",
+        422
+      );
+    }
+
+    if (current.transferStatus === "r" && (patch.transferStatus !== undefined || touchesStructuralFields)) {
+      throw new TransactionError(
+        "Transaction is reconciled and locked. Unreconcile before editing.",
+        422
+      );
+    }
+
     if (current.transferAccountId != null && "accountId" in p && p.accountId !== current.accountId) {
       throw new TransactionError("cannot change account of a transfer; delete and recreate");
     }
@@ -607,7 +655,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
     if (isSplitParent) {
       const children = await getChildren(db, id);
-      if (children.some((c) => c.status === "r")) {
+      if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
         throw new TransactionError(
           "Transaction is reconciled and locked. Unreconcile before editing.",
           422
@@ -820,7 +868,7 @@ export async function updateSplit(
     }
 
     const oldChildren = await getChildren(db, parentId);
-    if (oldChildren.some((c) => c.status === "r")) {
+    if (oldChildren.some((c) => c.status === "r" || c.transferStatus === "r")) {
       throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
     }
 
@@ -941,6 +989,7 @@ export async function updateSplit(
           memo: c.memo ?? newMemo ?? "",
           amount: childAmount,
           status: newStatus,
+          transferStatus: transferAccountId ? (c.transferStatus ?? newStatus) : null,
           transferAccountId,
           parentId,
           isIncome,
@@ -990,7 +1039,7 @@ export async function deleteTransaction(db: Database, id: number) {
   const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!existing) return null;
 
-  if (existing.status === "r") {
+  if (existing.status === "r" || existing.transferStatus === "r") {
     throw new TransactionError(
       "Transaction is reconciled and locked. Unreconcile before deleting.",
       422
@@ -999,7 +1048,7 @@ export async function deleteTransaction(db: Database, id: number) {
 
   if (existing.parentId != null) {
     const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-    if (parent && parent.status === "r") {
+    if (parent && (parent.status === "r" || parent.transferStatus === "r")) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile before deleting.",
         422
@@ -1023,7 +1072,7 @@ export async function deleteTransaction(db: Database, id: number) {
       const remaining = await getChildren(db, current.parentId);
       if (remaining.length === 1) {
         const lastChild = remaining[0]!;
-        if (lastChild.status === "r") {
+        if (lastChild.status === "r" || lastChild.transferStatus === "r") {
           throw new TransactionError(
             "Transaction is reconciled and locked. Unreconcile before deleting.",
             422
@@ -1050,7 +1099,7 @@ export async function deleteTransaction(db: Database, id: number) {
       await db.delete(transactions).where(eq(transactions.id, id));
     } else {
       const children = await getChildren(db, id);
-      if (children.some((c) => c.status === "r")) {
+      if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
         throw new TransactionError(
           "Reconciled split transaction cannot be deleted. Unreconcile before deleting.",
           422
@@ -1086,7 +1135,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
       if (deletedIds.has(id)) continue;
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
-      if (existing.status === "r") {
+      if (existing.status === "r" || existing.transferStatus === "r") {
         throw new TransactionError(
           `Transaction ${id} is reconciled and locked. Unreconcile before deleting.`,
           422
@@ -1094,7 +1143,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
       }
       if (existing.parentId != null) {
         const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-        if (parent && parent.status === "r") {
+        if (parent && (parent.status === "r" || parent.transferStatus === "r")) {
           throw new TransactionError(
             `Transaction ${id} is reconciled and locked. Unreconcile before deleting.`,
             422
@@ -1112,7 +1161,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         const remaining = await getChildren(db, existing.parentId);
         if (remaining.length === 1) {
           const lastChild = remaining[0]!;
-          if (lastChild.status === "r") {
+          if (lastChild.status === "r" || lastChild.transferStatus === "r") {
             throw new TransactionError(
               `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
               422
@@ -1145,7 +1194,7 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         }
       } else {
         const children = await getChildren(db, id);
-        if (children.some((c) => c.status === "r")) {
+        if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
           throw new TransactionError(
             `Reconciled split transaction ${id} cannot be deleted. Unreconcile before deleting.`,
             422
@@ -1191,7 +1240,7 @@ export async function bulkUpdateTransactions(
   if (patch.incomeMonth !== undefined && patch.incomeMonth != null) {
     assertValidISOMonth(patch.incomeMonth, "incomeMonth");
   }
-  if (patch.status === "r") {
+  if (patch.status === "r" || patch.transferStatus === "r") {
     throw new TransactionError(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"
     );
@@ -1204,15 +1253,33 @@ export async function bulkUpdateTransactions(
     for (const id of ids) {
       const [existing] = await db.select().from(transactions).where(eq(transactions.id, id));
       if (!existing) continue;
-      if (existing.status === "r") {
+
+      const touchesStructural =
+        patch.accountId !== undefined ||
+        patch.categoryId !== undefined ||
+        patch.date !== undefined ||
+        patch.payee !== undefined ||
+        patch.memo !== undefined ||
+        patch.amount !== undefined ||
+        patch.incomeMonth !== undefined;
+
+      if (existing.status === "r" && (patch.status !== undefined || touchesStructural)) {
         throw new TransactionError(
           `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
           422
         );
       }
+
+      if (existing.transferStatus === "r" && (patch.transferStatus !== undefined || touchesStructural)) {
+        throw new TransactionError(
+          `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
+          422
+        );
+      }
+
       if (existing.parentId != null) {
         const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-        if (parent && parent.status === "r") {
+        if (parent && (parent.status === "r" || parent.transferStatus === "r") && (patch.status !== undefined || touchesStructural)) {
           throw new TransactionError(
             `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
             422
@@ -1226,7 +1293,7 @@ export async function bulkUpdateTransactions(
 
       if (isSplitParent) {
         const children = await getChildren(db, id);
-        if (children.some((c) => c.status === "r")) {
+        if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
           throw new TransactionError(
             `Transaction ${id} is reconciled and locked. Unreconcile before editing.`,
             422
@@ -1277,6 +1344,11 @@ export async function bulkUpdateTransactions(
         setFields.status = patch.status;
         setFields.reconciledAt = null;
         setFields.reconciliationId = null;
+      }
+      if (patch.transferStatus !== undefined && patch.transferStatus != null) {
+        setFields.transferStatus = patch.transferStatus;
+        setFields.transferReconciledAt = null;
+        setFields.transferReconciliationId = null;
       }
       if (patch.categoryId !== undefined) {
         setFields.categoryId = patch.categoryId ?? null;
@@ -1391,7 +1463,7 @@ export async function bulkUpdateTransactions(
         eq(transactions.parentId, familyRoot)
       );
       const familyRows = await db.select().from(transactions).where(familyFilter);
-      if (familyRows.some((row) => row.status === "r")) {
+      if (familyRows.some((row) => row.status === "r" || row.transferStatus === "r")) {
         throw new TransactionError(
           `Transaction ${familyRoot} is reconciled and locked. Unreconcile before editing.`,
           422

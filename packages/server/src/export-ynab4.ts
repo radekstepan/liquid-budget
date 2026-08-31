@@ -341,6 +341,10 @@ export async function exportYnab4(
           subTransferPayeeId = `Payee/Transfer:acc-${ch.transferAccountId}`;
           subTransferTxId = `tx-split-transfer-${ch.id}-dest`;
 
+          const destClearedStatus = ch.transferStatus ?? ch.status ?? t.status;
+          const destRecId = ch.transferReconciliationId ? `rec-${ch.transferReconciliationId}` : (ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.transferReconciliationId ? `rec-${t.transferReconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null)));
+          const destRecDate = ch.transferReconciledAt || ch.reconciledAt || t.transferReconciledAt || t.reconciledAt || null;
+
           // Generate counterpart on destination account
           yTransactions.push({
             entityId: `tx-split-transfer-${ch.id}-dest`,
@@ -348,14 +352,14 @@ export async function exportYnab4(
             targetAccountId: `acc-${t.accountId}`,
             date: t.date,
             amount: -(ch.amount / 100),
-            cleared: statusToCleared(t.status),
+            cleared: statusToCleared(destClearedStatus),
             flag: flagToName(ch.flagColor),
             memo: ch.memo || "",
             payeeId: `Payee/Transfer:acc-${t.accountId}`,
             transferTransactionId: `st-${ch.id}`,
             categoryId: null,
-            reconciliationId: ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null),
-            reconciledAt: ch.reconciledAt || t.reconciledAt || null,
+            reconciliationId: destRecId,
+            reconciledAt: destRecDate,
             accepted: true,
             entityType: "transaction",
             entityVersion: `tx-v-${ch.id}-dest`,
@@ -417,6 +421,7 @@ export async function exportYnab4(
       const srcCatId = sourceAcc?.onBudget ? transferCatId : (!destAcc?.onBudget ? transferCatId : null);
       const destCatId = destAcc?.onBudget && !sourceAcc?.onBudget ? transferCatId : null;
       const recId = t.reconciliationId ? `rec-${t.reconciliationId}` : null;
+      const destRecId = t.transferReconciliationId ? `rec-${t.transferReconciliationId}` : null;
 
       // Source transaction
       yTransactions.push({
@@ -446,14 +451,14 @@ export async function exportYnab4(
         targetAccountId: `acc-${t.accountId}`,
         date: t.date,
         amount: -(t.amount / 100),
-        cleared: statusToCleared(t.status),
+        cleared: statusToCleared(t.transferStatus ?? t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
         payeeId: `Payee/Transfer:acc-${t.accountId}`,
         transferTransactionId: `tx-${t.id}-src`,
         categoryId: destCatId,
-        reconciliationId: recId,
-        reconciledAt: t.reconciledAt || null,
+        reconciliationId: destRecId,
+        reconciledAt: t.transferReconciledAt || null,
         accepted: true,
         entityType: "transaction",
         entityVersion: `tx-v-${t.id}-dest`,
