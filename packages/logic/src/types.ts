@@ -179,6 +179,7 @@ export type SerializedBudgetIndex = {
   endingBalanceByMonth?: Record<string, Record<string | number, number>>;
   overspentByMonth: Record<string, number>;
   surplusByMonth: Record<string, number>;
+  unfundedPaydownByMonth?: Record<string, Record<string | number, number>>;
 };
 
 export type BudgetData = {
