@@ -1237,10 +1237,77 @@ describe("TransactionModal", () => {
       expect(payload.id).toBe(1);
       expect(payload.subTransactions).toHaveLength(2);
     });
+
+    it("disables Save button when amount evaluates to zero (BUG-21)", () => {
+      const onSave = vi.fn();
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      // Enter payee
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+        target: { value: "Test Payee" },
+      });
+      const saveBtn = screen.getByRole("button", { name: /save transaction/i });
+
+      // Default amount is empty -> disabled
+      expect(saveBtn).toBeDisabled();
+
+      // Amount = "0" -> disabled
+      const amountInput = screen.getByPlaceholderText("0.00");
+      fireEvent.change(amountInput, { target: { value: "0" } });
+      expect(saveBtn).toBeDisabled();
+
+      // Amount = "0.00" -> disabled
+      fireEvent.change(amountInput, { target: { value: "0.00" } });
+      expect(saveBtn).toBeDisabled();
+
+      // Amount = "$0" -> disabled
+      fireEvent.change(amountInput, { target: { value: "$0" } });
+      expect(saveBtn).toBeDisabled();
+
+      // Amount = "15.00" -> enabled
+      fireEvent.change(amountInput, { target: { value: "15.00" } });
+      expect(saveBtn).not.toBeDisabled();
+    });
   });
 });
 
 describe("RecurringModal", () => {
+  it("disables Save button when amount evaluates to zero (BUG-21)", () => {
+    const onSave = vi.fn();
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    // Enter payee
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Test Payee" },
+    });
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+
+    // Amount = "0" -> disabled
+    const amountInput = screen.getByPlaceholderText("0.00");
+    fireEvent.change(amountInput, { target: { value: "0" } });
+    expect(saveBtn).toBeDisabled();
+
+    // Amount = "0.00" -> disabled
+    fireEvent.change(amountInput, { target: { value: "0.00" } });
+    expect(saveBtn).toBeDisabled();
+
+    // Amount = "-50.00" -> enabled
+    fireEvent.change(amountInput, { target: { value: "-50.00" } });
+    expect(saveBtn).not.toBeDisabled();
+  });
   it("renders all 13 frequencies as available options (UNI-23)", () => {
     render(
       <RecurringModal

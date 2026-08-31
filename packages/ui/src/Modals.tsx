@@ -347,8 +347,8 @@ export function TransactionModal({
   };
 
   const canSave = (() => {
-    const a = Math.abs(evalAmount(amount) ?? NaN);
-    if (Number.isNaN(a) || !accountId) return false;
+    const evaled = evalAmount(amount);
+    if (evaled == null || Number.isNaN(evaled) || dollarsToCents(evaled) === 0 || !accountId) return false;
     if (mode === "transfer") {
       if (!transferAccountId || Number(transferAccountId) === accountId) return false;
       if (isBoundaryOutflow) {
@@ -1366,8 +1366,8 @@ export function RecurringModal({
   };
 
   const canSave = (() => {
-    const a = Math.abs(evalAmount(amount) ?? NaN);
-    if (Number.isNaN(a) || !accountId) return false;
+    const evaled = evalAmount(amount);
+    if (evaled == null || Number.isNaN(evaled) || dollarsToCents(evaled) === 0 || !accountId) return false;
     if (mode === "transfer") {
       if (!transferAccountId || Number(transferAccountId) === accountId) return false;
       if (isBoundaryOutflow) {

@@ -190,6 +190,17 @@ export const TransactionsView = memo(function TransactionsView({
     setShowScheduledDrawer((prev) => !prev);
   };
 
+  const [expandedSplitIds, setExpandedSplitIds] = useState<Set<number>>(new Set());
+
+  const toggleExpandSplit = useCallback((id: number) => {
+    setExpandedSplitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -255,9 +266,9 @@ export const TransactionsView = memo(function TransactionsView({
   }, [data.transactions]);
 
   const childrenByParent = useMemo(() => {
-    const map = new Map<number, Transaction[]>();
-    for (let i = 0; i < data.transactions.length; i++) {
-      const t = data.transactions[i]!;
+    const map = new Map<number, Txn[]>();
+    for (let i = 0; i < rows.length; i++) {
+      const t = rows[i]!;
       if (t.parentId != null) {
         let list = map.get(t.parentId);
         if (!list) {
@@ -267,20 +278,23 @@ export const TransactionsView = memo(function TransactionsView({
         list.push(t);
       }
     }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.id - b.id);
+    }
     return map;
-  }, [data.transactions]);
+  }, [rows]);
 
-  const searchFiltered = useMemo(() => {
+  const searchFilteredTopLevel = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
-    const isRowVisible = (r: Txn) => {
+    const isTopLevel = (r: Txn) => {
       if (r.parentId == null) return true;
       if (accountFilter != null && r.transferAccountId === accountFilter) return true;
       return false;
     };
-    const visibleRows = rows.filter(isRowVisible);
-    if (!q) return visibleRows;
+    const topLevelRows = rows.filter(isTopLevel);
+    if (!q) return topLevelRows;
 
-    return visibleRows.filter((r) => {
+    return topLevelRows.filter((r) => {
       const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
       const payeeText = isIncoming
         ? `Transfer : ${accountById.get(r.accountId)?.name ?? "Unknown"}`
@@ -311,11 +325,11 @@ export const TransactionsView = memo(function TransactionsView({
   }, [rows, deferredSearch, childrenByParent, categoryById, accountFilter, accountById]);
 
   // Apply the user-selected column sort on top of the search-filtered rows.
-  // The default (Date descending) returns `searchFiltered` unchanged since
+  // The default (Date descending) returns `searchFilteredTopLevel` unchanged since
   // `rows` is already date-descending — running balances stay anchored to
   // that canonical order regardless of how the display is sorted.
   const filtered = useMemo(() => {
-    if (sort.key === "date" && sort.dir === "desc") return searchFiltered;
+    const q = deferredSearch.trim().toLowerCase();
     const dir = sort.dir === "asc" ? 1 : -1;
     const payeeOf = (t: Txn): string => {
       const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
@@ -330,74 +344,130 @@ export const TransactionsView = memo(function TransactionsView({
       const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
       return isIncoming ? -t.amount : t.amount;
     };
-    return [...searchFiltered].sort((a, b) => {
-      let cmp = 0;
-      switch (sort.key) {
-        case "date":
-          cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-          break;
-        case "account": {
-          const an = accountById.get(a.accountId)?.name ?? "";
-          const bn = accountById.get(b.accountId)?.name ?? "";
-          cmp = an < bn ? -1 : an > bn ? 1 : 0;
-          break;
+
+    let sortedTopLevel: Txn[];
+    if (sort.key === "date" && sort.dir === "desc") {
+      sortedTopLevel = searchFilteredTopLevel;
+    } else {
+      sortedTopLevel = [...searchFilteredTopLevel].sort((a, b) => {
+        let cmp = 0;
+        switch (sort.key) {
+          case "date":
+            cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+            break;
+          case "account": {
+            const an = accountById.get(a.accountId)?.name ?? "";
+            const bn = accountById.get(b.accountId)?.name ?? "";
+            cmp = an < bn ? -1 : an > bn ? 1 : 0;
+            break;
+          }
+          case "payee": {
+            const an = payeeOf(a);
+            const bn = payeeOf(b);
+            cmp = an < bn ? -1 : an > bn ? 1 : 0;
+            break;
+          }
+          case "category": {
+            const an = catOf(a);
+            const bn = catOf(b);
+            cmp = an < bn ? -1 : an > bn ? 1 : 0;
+            break;
+          }
+          case "memo": {
+            const an = a.memo ?? "";
+            const bn = b.memo ?? "";
+            cmp = an < bn ? -1 : an > bn ? 1 : 0;
+            break;
+          }
+          case "outflow": {
+            const an = effAmtOf(a) < 0 ? -effAmtOf(a) : 0;
+            const bn = effAmtOf(b) < 0 ? -effAmtOf(b) : 0;
+            cmp = an - bn;
+            break;
+          }
+          case "inflow": {
+            const an = effAmtOf(a) > 0 ? effAmtOf(a) : 0;
+            const bn = effAmtOf(b) > 0 ? effAmtOf(b) : 0;
+            cmp = an - bn;
+            break;
+          }
+          case "cleared":
+            cmp = (CLEARED_RANK[a.status] ?? 0) - (CLEARED_RANK[b.status] ?? 0);
+            break;
+          case "flag": {
+            const an = a.flagColor != null ? FLAG_RANK[a.flagColor] ?? 0 : 0;
+            const bn = b.flagColor != null ? FLAG_RANK[b.flagColor] ?? 0 : 0;
+            cmp = an - bn;
+            break;
+          }
+          case "balance":
+            // Rows without a walk entry ("—") sort as 0.
+            cmp = (a.runningBalance ?? 0) - (b.runningBalance ?? 0);
+            break;
         }
-        case "payee": {
-          const an = payeeOf(a);
-          const bn = payeeOf(b);
-          cmp = an < bn ? -1 : an > bn ? 1 : 0;
-          break;
+        if (cmp === 0) {
+          if (sort.key === "date") {
+            cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+            if (cmp === 0) cmp = a.id - b.id;
+          } else {
+            cmp = a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+            if (cmp === 0) cmp = b.id - a.id;
+          }
         }
-        case "category": {
-          const an = catOf(a);
-          const bn = catOf(b);
-          cmp = an < bn ? -1 : an > bn ? 1 : 0;
-          break;
+        return cmp * dir;
+      });
+    }
+
+    const result: Txn[] = [];
+    for (const parent of sortedTopLevel) {
+      result.push(parent);
+      if (splitParentIds.has(parent.id)) {
+        const children = childrenByParent.get(parent.id);
+        if (children && children.length > 0) {
+          const hasMatchingChild =
+            q !== "" &&
+            children.some((c) => {
+              const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
+              const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
+              const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
+              return (
+                childPayee.toLowerCase().includes(q) ||
+                childCat.toLowerCase().includes(q) ||
+                (c.memo ?? "").toLowerCase().includes(q)
+              );
+            });
+          const isChildSelected = selectedId != null && children.some((c) => c.id === selectedId);
+          const isChildInMultiSelect = Array.from(selectedIds).some((id) => children.some((c) => c.id === id));
+          const isParentSelected = selectedId === parent.id || selectedIds.has(parent.id);
+          const isExpanded =
+            expandedSplitIds.has(parent.id) ||
+            isParentSelected ||
+            isChildSelected ||
+            isChildInMultiSelect ||
+            hasMatchingChild;
+
+          if (isExpanded) {
+            for (const child of children) {
+              result.push(child);
+            }
+          }
         }
-        case "memo": {
-          const an = a.memo ?? "";
-          const bn = b.memo ?? "";
-          cmp = an < bn ? -1 : an > bn ? 1 : 0;
-          break;
-        }
-        case "outflow": {
-          const an = effAmtOf(a) < 0 ? -effAmtOf(a) : 0;
-          const bn = effAmtOf(b) < 0 ? -effAmtOf(b) : 0;
-          cmp = an - bn;
-          break;
-        }
-        case "inflow": {
-          const an = effAmtOf(a) > 0 ? effAmtOf(a) : 0;
-          const bn = effAmtOf(b) > 0 ? effAmtOf(b) : 0;
-          cmp = an - bn;
-          break;
-        }
-        case "cleared":
-          cmp = (CLEARED_RANK[a.status] ?? 0) - (CLEARED_RANK[b.status] ?? 0);
-          break;
-        case "flag": {
-          const an = a.flagColor != null ? FLAG_RANK[a.flagColor] ?? 0 : 0;
-          const bn = b.flagColor != null ? FLAG_RANK[b.flagColor] ?? 0 : 0;
-          cmp = an - bn;
-          break;
-        }
-        case "balance":
-          // Rows without a walk entry ("—") sort as 0.
-          cmp = (a.runningBalance ?? 0) - (b.runningBalance ?? 0);
-          break;
       }
-      if (cmp === 0) {
-        if (sort.key === "date") {
-          cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-          if (cmp === 0) cmp = a.id - b.id;
-        } else {
-          cmp = a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
-          if (cmp === 0) cmp = b.id - a.id;
-        }
-      }
-      return cmp * dir;
-    });
-  }, [searchFiltered, sort, accountById, categoryById, accountFilter, splitParentIds]);
+    }
+    return result;
+  }, [
+    searchFilteredTopLevel,
+    sort,
+    accountById,
+    categoryById,
+    accountFilter,
+    splitParentIds,
+    childrenByParent,
+    deferredSearch,
+    expandedSplitIds,
+    selectedId,
+    selectedIds,
+  ]);
 
   const totals = useMemo(() => {
     let inflow = 0;
@@ -798,19 +868,54 @@ export const TransactionsView = memo(function TransactionsView({
                   const outflow = effAmt < 0 ? -effAmt : 0;
                   const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
+                  const isChildRow = t.parentId != null && !isIncoming;
                   const catName =
                     t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
-                  const displayCat = isSplit
-                    ? "Split (Multiple Categories)"
-                    : catName || (t.transferAccountId ? "Transfer" : "");
+                  const displayCat = isChildRow
+                    ? (catName || (t.transferAccountId ? "Transfer" : ""))
+                    : isSplit
+                      ? "Split (Multiple Categories)"
+                      : catName || (t.transferAccountId ? "Transfer" : "");
                   const displayPayee = isIncoming
                     ? `Transfer : ${accountById.get(t.accountId)?.name ?? "Unknown"}`
-                    : t.payee;
+                    : isChildRow && t.transferAccountId != null
+                      ? `Transfer : ${accountById.get(t.transferAccountId)?.name ?? "Unknown"}`
+                      : t.payee;
+
+                  const children = childrenByParent.get(t.id);
+                  const hasMatchingChild =
+                    deferredSearch.trim() !== "" &&
+                    (children?.some((c) => {
+                      const q = deferredSearch.trim().toLowerCase();
+                      const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
+                      const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
+                      const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
+                      return (
+                        childPayee.toLowerCase().includes(q) ||
+                        childCat.toLowerCase().includes(q) ||
+                        (c.memo ?? "").toLowerCase().includes(q)
+                      );
+                    }) ?? false);
+                  const isChildSelected = selectedId != null && (children?.some((c) => c.id === selectedId) ?? false);
+                  const isChildInMultiSelect = Array.from(selectedIds).some((id) => children?.some((c) => c.id === id) ?? false);
+                  const isParentSelected = selectedId === t.id || selectedIds.has(t.id);
+                  const isExpanded =
+                    expandedSplitIds.has(t.id) ||
+                    isParentSelected ||
+                    isChildSelected ||
+                    isChildInMultiSelect ||
+                    hasMatchingChild;
+
                   return (
                     <tr
                       key={t.id}
                       data-txn-id={t.id}
-                      className={cx("group y-row", isSelected && "y-row--selected is-sel", globalIndex % 2 === 1 && !isSelected && "alt")}
+                      className={cx(
+                        "group y-row",
+                        isChildRow && "y-subrow bg-slate-50/50 text-[11px]",
+                        isSelected && "y-row--selected is-sel",
+                        globalIndex % 2 === 1 && !isSelected && "alt"
+                      )}
                       onClick={() => {
                         setSelectedId(null);
                         onEdit(t.parentId ?? t.id);
@@ -841,24 +946,49 @@ export const TransactionsView = memo(function TransactionsView({
                           />
                         </td>
                       )}
-                      <td className="y-num">{t.date}</td>
+                      <td className={cx("y-num", isChildRow && "text-[11px]")} style={isChildRow ? { color: "var(--y-ink-soft)" } : undefined}>
+                        {t.date}
+                      </td>
                       {!accountFilter && (
-                        <td className="truncate" style={{ color: "var(--y-ink-soft)" }}>
+                        <td className={cx("truncate", isChildRow && "text-[11px]")} style={{ color: "var(--y-ink-soft)" }}>
                           {accountById.get(t.accountId)?.name ?? ""}
                         </td>
                       )}
-                      <td className="truncate" style={{ color: "var(--y-ink)" }}>
-                        {displayPayee}
+                      <td className={cx("truncate", isChildRow && "text-[11px]")} style={{ color: isChildRow ? "var(--y-ink-soft)" : "var(--y-ink)" }}>
+                        {isChildRow ? (
+                          <span className="inline-flex items-center">
+                            <span className="text-gray-400 mr-1.5 pl-2 select-none font-normal">↳</span>
+                            <span>{displayPayee}</span>
+                          </span>
+                        ) : (
+                          <>
+                            {isSplit && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleExpandSplit(t.id);
+                                }}
+                                className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors align-middle"
+                                aria-label={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
+                                title={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
+                              >
+                                {isExpanded ? "▼" : "▶"}
+                              </button>
+                            )}
+                            <span>{displayPayee}</span>
+                          </>
+                        )}
                       </td>
                       <td
-                        className="truncate"
+                        className={cx("truncate", isChildRow && "text-[11px]")}
                         style={{
                           color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
                         }}
                       >
                         {displayCat}
                       </td>
-                      <td className="truncate italic" style={{ color: "var(--y-ink-faint)" }}>
+                      <td className={cx("truncate italic", isChildRow && "text-[11px]")} style={{ color: "var(--y-ink-faint)" }}>
                         {t.memo}
                       </td>
                       <td className="num y-num">{outflow ? money(outflow) : ""}</td>
