@@ -443,12 +443,12 @@ describe("SQLite transaction concurrency & serialization", () => {
     });
 
     // Auto-posting due items should succeed without throwing
-    const posted = await autoPostDueRecurringTransactions(db, "2026-07-05");
+    const { posted, failures } = await autoPostDueRecurringTransactions(db, "2026-07-05");
 
     // Valid items (rec1 and rec3) posted successfully
     expect(posted).toHaveLength(2);
-    expect((posted as any).failures).toHaveLength(1);
-    expect((posted as any).failures[0]?.id).toBe(rec2!.id);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.id).toBe(rec2!.id);
 
     // Verify transactions in the account (starting balance + rec1 + rec3 = 3 rows)
     const txRows = await db
@@ -515,7 +515,7 @@ describe("SQLite transaction concurrency & serialization", () => {
 
     // Combined posted count is exactly 1
     const totalPosted = results.reduce(
-      (sum, r) => sum + (r.status === "fulfilled" ? (r.value as any[]).length : 0),
+      (sum, r) => sum + (r.status === "fulfilled" ? r.value.posted.length : 0),
       0
     );
     expect(totalPosted).toBe(1);
@@ -524,7 +524,7 @@ describe("SQLite transaction concurrency & serialization", () => {
     const totalFailures = results.reduce(
       (sum, r) =>
         sum +
-        (r.status === "fulfilled" ? ((r.value as any).failures || []).length : 0),
+        (r.status === "fulfilled" ? r.value.failures.length : 0),
       0
     );
     expect(totalFailures).toBeLessThanOrEqual(1);

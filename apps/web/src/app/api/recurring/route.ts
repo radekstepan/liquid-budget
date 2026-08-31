@@ -58,12 +58,12 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
+      const result = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
       return Response.json({
-        postedCount: posted.length,
-        posted,
-        failures: (posted as any).failures ?? [],
-        capped: (posted as any).capped ?? [],
+        postedCount: result.posted.length,
+        posted: result.posted,
+        failures: result.failures,
+        capped: result.capped,
       });
     } catch (e) {
       return apiErrorResponse(e);
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date, true);
+      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
       return Response.json(res);
     } catch (e) {
       return apiErrorResponse(e);
@@ -126,12 +126,12 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
     try {
-      const posted = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
+      const result = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
       return Response.json({
-        postedCount: posted.length,
-        posted,
-        failures: (posted as any).failures ?? [],
-        capped: (posted as any).capped ?? [],
+        postedCount: result.posted.length,
+        posted: result.posted,
+        failures: result.failures,
+        capped: result.capped,
       });
     } catch (e) {
       return apiErrorResponse(e);

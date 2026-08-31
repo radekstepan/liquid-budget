@@ -1006,7 +1006,7 @@ describe("recurring queries", () => {
       mock.respondWith("update:accounts", [{}]);
       mock.respondWith("update:recurring", [{ ...dueRow, nextDate: "2026-07-01" }]);
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      const { posted } = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
       expect(posted).toHaveLength(1);
     });
 
@@ -1410,10 +1410,10 @@ describe("recurring queries", () => {
       ]);
       mock.respondWith("update:recurring", [{ ...invalidRow, active: false }]);
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      const { posted, failures } = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
       expect(posted).toHaveLength(1);
-      expect((posted as any).failures).toHaveLength(1);
-      expect((posted as any).failures[0]).toMatchObject({
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
         id: 91,
         payee: "Corrupt Split",
         error: "split must have at least two sub-transactions",
@@ -1444,10 +1444,10 @@ describe("recurring queries", () => {
       // 2. Querying the rule inside postRecurringTransaction fails with a transient SQLITE_BUSY error
       mock.respondWithNth("select:recurring", 2, new Error("SQLITE_BUSY: database is locked"));
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      const { posted, failures } = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
       expect(posted).toHaveLength(0);
-      expect((posted as any).failures).toHaveLength(1);
-      expect((posted as any).failures[0]).toMatchObject({
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
         id: 95,
         payee: "Internet Bill",
         error: expect.stringContaining("database is locked"),
@@ -1556,10 +1556,10 @@ describe("recurring queries", () => {
       // 3. Optimistic update returns empty (another runner already advanced nextDate) => 409
       mock.respondWith("update:recurring", []);
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
+      const { posted, failures } = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
       expect(posted).toHaveLength(0);
-      expect((posted as any).failures).toHaveLength(1);
-      expect((posted as any).failures[0]).toMatchObject({
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
         id: 105,
         payee: "Rent",
       });
@@ -1596,7 +1596,7 @@ describe("recurring queries", () => {
       mock.respondWith("update:accounts", [{}]);
       mock.respondWith("update:recurring", [{ ...row, nextDate: "2026-09-01" }]);
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
+      const { posted } = await autoPostDueRecurringTransactions(mock.db, "2026-08-15");
       expect(posted).toHaveLength(1);
 
       // Verify only one postRecurringTransaction was attempted
@@ -1636,13 +1636,13 @@ describe("recurring queries", () => {
         mock.respondWith("update:recurring", [{ ...dailyRow, nextDate }]);
       }
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-10", {
+      const { posted, capped } = await autoPostDueRecurringTransactions(mock.db, "2026-06-10", {
         maxOccurrencesPerRule: 3,
       });
 
       expect(posted).toHaveLength(3);
-      expect((posted as any).capped).toHaveLength(1);
-      expect((posted as any).capped[0]).toMatchObject({
+      expect(capped).toHaveLength(1);
+      expect(capped[0]).toMatchObject({
         id: 104,
         payee: "Daily Coffee",
         remainingDue: 7,
@@ -1681,13 +1681,13 @@ describe("recurring queries", () => {
         mock.respondWith("update:recurring", [{ ...weeklyRow, nextDate }]);
       }
 
-      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-07-27", {
+      const { posted, capped } = await autoPostDueRecurringTransactions(mock.db, "2026-07-27", {
         maxOccurrencesPerRule: 2,
       });
 
       expect(posted).toHaveLength(2);
-      expect((posted as any).capped).toHaveLength(1);
-      expect((posted as any).capped[0]).toMatchObject({
+      expect(capped).toHaveLength(1);
+      expect(capped[0]).toMatchObject({
         id: 105,
         payee: "Weekly Cleaning",
         remainingDue: 7,
