@@ -21,12 +21,22 @@ import { findOrCreatePayee } from "./queries/payees.js";
 /**
  * Detect whether YNAB4 amounts are stored as milliunits (integer × 1000) or
  * decimal dollars (float). Stock YNAB4 backups encode amounts as milliunits
- * (e.g. -45000 for −$45.00), but this repo's backup.y4backup has been
- * converted to decimal dollars (e.g. -45.00). We detect the scale by
- * checking whether any amount has a non-zero fractional part (→ dollars) and
- * comparing the max magnitude against a threshold (→ milliunits).
+ * (e.g. -45000 for −$45.00), but exported or converted backups may use decimal
+ * dollars (e.g. -45.00 or integer whole dollars like 45).
+ *
+ * Detection algorithm:
+ * 1. If any non-zero amount has a fractional part (e.g., 45.25, 0.5) -> decimal dollars.
+ * 2. If the backup contains this app's export signatures (e.g. entityId "budget-metadata"
+ *    and entityVersion prefixes like "acc-v-"), it is decimal dollars.
+ * 3. Analyze all-integer amounts:
+ *    - In decimal dollars, everyday purchases are small integers: 1 to 999 (e.g. $5, $15, $45, $120).
+ *      In milliunits, these values would represent tiny fractions of a cent ($0.001 to $0.999).
+ *    - If there are non-multiple-of-100 values < 1000 (e.g. 15, 25, 45, 12, 1, 2) or if more than
+ *      5% of non-zero amounts are < 1000, it is decimal dollars.
+ *    - If virtually all (>= 95%) non-zero amounts are >= 1000 (e.g. 1000, 3990, 12500, 45000, 500000),
+ *      it is milliunits.
  */
-function detectMilliunitScale(ynabData: any): boolean {
+export function detectMilliunitScale(ynabData: any): boolean {
   const amounts: number[] = [];
 
   const collect = (v: unknown) => {
@@ -69,17 +79,47 @@ function detectMilliunitScale(ynabData: any): boolean {
 
   if (amounts.length === 0) return false;
 
-  // If any amount has a fractional part → decimal dollars
+  // 1. If any amount has a fractional part → decimal dollars
   for (const a of amounts) {
     if (a % 1 !== 0) return false;
   }
 
-  // All amounts are integers. If the max magnitude exceeds 10^6 it's
-  // almost certainly milliunits (in decimal dollars that would be $10K+,
-  // which exceeds the typical personal-budget range). This heuristic
-  // is recommended by the BUG-01 report.
-  const maxAbs = Math.max(...amounts.map((a) => Math.abs(a)));
-  return maxAbs > 1_000_000;
+  // 2. Check for app export signatures that indicate decimal dollar format
+  const isAppExport =
+    ynabData.budgetMetaData?.entityId === "budget-metadata" ||
+    (Array.isArray(ynabData.accounts) &&
+      ynabData.accounts.some((a: any) => typeof a.entityVersion === "string" && a.entityVersion.startsWith("acc-v-")));
+  if (isAppExport) {
+    return false;
+  }
+
+  // 3. All amounts are integers. Analyze distribution of magnitudes.
+  let smallCount = 0;
+  let smallNonMultipleOf100Count = 0;
+
+  for (const a of amounts) {
+    const abs = Math.abs(a);
+    if (abs < 1000) {
+      smallCount++;
+      if (abs % 100 !== 0) {
+        smallNonMultipleOf100Count++;
+      }
+    }
+  }
+
+  // If there are values like 1, 2, 5, 12, 15, 45 (< 1000 and not multiples of 100),
+  // in milliunits those would be 0.1¢ to 4.5¢, which are everyday dollar amounts in decimal budgets.
+  if (smallNonMultipleOf100Count > 0) {
+    return false;
+  }
+
+  // If more than 5% of amounts are < 1000 (sub-dollar in milliunits), it's decimal dollars.
+  if (smallCount / amounts.length > 0.05) {
+    return false;
+  }
+
+  // If all or virtually all amounts are >= 1000, it's milliunits.
+  return true;
 }
 
 export interface Ynab4Settings {

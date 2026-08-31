@@ -639,6 +639,124 @@ describe("categories queries", () => {
       const [payeeAfter] = await db.select().from(schema.payees).where(eq(schema.payees.id, payee!.id));
       expect(payeeAfter?.autoCategoryId).toBe(catInNewGroup!.id);
     });
+
+    it("BUG-05: deleteCategory with replacement migrates historical assignments and merges month amounts", async () => {
+      const db = openMigratedDb();
+      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Bills", sort: 0 }).returning();
+      const [catOld] = await db.insert(schema.categories).values({ name: "Rent", groupId: group!.id, sort: 0, carryover: 5000 }).returning();
+      const [catNew] = await db.insert(schema.categories).values({ name: "Housing", groupId: group!.id, sort: 1, carryover: 2000 }).returning();
+
+      // Inflow income for initial TBB
+      await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: null,
+        amount: 500000,
+        date: "2026-01-01",
+        status: "c",
+        isIncome: true,
+        incomeMonth: "2026-01",
+      });
+
+      // 12 months of assignments for catOld ($2000/mo = 200000 cents)
+      // and catNew already has $500/mo (50000 cents) in month 2026-06
+      for (let m = 1; m <= 12; m++) {
+        const monthStr = `2026-${m.toString().padStart(2, "0")}`;
+        await db.insert(schema.assignments).values({
+          categoryId: catOld!.id,
+          month: monthStr,
+          amount: 200000,
+        });
+      }
+
+      await db.insert(schema.assignments).values({
+        categoryId: catNew!.id,
+        month: "2026-06",
+        amount: 50000,
+      });
+
+      // Add a transaction to catOld so moveToCategoryId is required
+      await db.insert(schema.transactions).values({
+        accountId: acct!.id,
+        categoryId: catOld!.id,
+        amount: -150000,
+        date: "2026-06-15",
+        status: "c",
+      });
+
+      const { getBudgetData } = await import("../src/queries/budget.js");
+      const { computeBudget } = await import("@ynab/logic");
+      const beforeData = await getBudgetData(db);
+      const beforeJune = computeBudget(beforeData, "2026-06");
+      const beforeDec = computeBudget(beforeData, "2026-12");
+
+      // Delete catOld and move to catNew
+      await deleteCategory(db, catOld!.id, { moveToCategoryId: catNew!.id });
+
+      const afterData = await getBudgetData(db);
+
+      // Verify all 12 months of assignments exist on catNew
+      const targetAssignments = afterData.assignments.filter((a) => a.categoryId === catNew!.id);
+      expect(targetAssignments).toHaveLength(12);
+
+      // For non-collision month (2026-01): 200000
+      const janAssign = targetAssignments.find((a) => a.month === "2026-01");
+      expect(Number(janAssign?.amount)).toBe(200000);
+
+      // For collision month (2026-06): 200000 (from old) + 50000 (from new) = 250000
+      const juneAssign = targetAssignments.find((a) => a.month === "2026-06");
+      expect(Number(juneAssign?.amount)).toBe(250000);
+
+      // Carryover merged: 2000 + 5000 = 7000
+      const updatedCatNew = afterData.categories.find((c) => c.id === catNew!.id);
+      expect(Number(updatedCatNew?.carryover)).toBe(7000);
+
+      // TBB and budget metrics in later months are preserved
+      const afterJune = computeBudget(afterData, "2026-06");
+      const afterDec = computeBudget(afterData, "2026-12");
+      expect(afterJune.tbb).toBe(beforeJune.tbb);
+      expect(afterDec.tbb).toBe(beforeDec.tbb);
+      expect(afterJune.totalAssigned).toBe(beforeJune.totalAssigned);
+      expect(afterDec.totalAssigned).toBe(beforeDec.totalAssigned);
+    });
+
+    it("BUG-05: deleteCategoryGroup with replacement migrates historical assignments across all member categories", async () => {
+      const db = openMigratedDb();
+      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      const [groupOld] = await db.insert(schema.categoryGroups).values({ name: "Old Group", sort: 0 }).returning();
+      const [groupNew] = await db.insert(schema.categoryGroups).values({ name: "New Group", sort: 1 }).returning();
+      const [cat1] = await db.insert(schema.categories).values({ name: "Cat 1", groupId: groupOld!.id, sort: 0, carryover: 1000 }).returning();
+      const [cat2] = await db.insert(schema.categories).values({ name: "Cat 2", groupId: groupOld!.id, sort: 1, carryover: 2000 }).returning();
+      const [catTarget] = await db.insert(schema.categories).values({ name: "Target Cat", groupId: groupNew!.id, sort: 0, carryover: 500 }).returning();
+
+      // Assignments for cat1 and cat2 in same month (2026-05) and different months
+      await db.insert(schema.assignments).values([
+        { categoryId: cat1!.id, month: "2026-04", amount: 10000 },
+        { categoryId: cat1!.id, month: "2026-05", amount: 20000 },
+        { categoryId: cat2!.id, month: "2026-05", amount: 30000 },
+        { categoryId: cat2!.id, month: "2026-06", amount: 40000 },
+        { categoryId: catTarget!.id, month: "2026-05", amount: 5000 },
+      ]);
+
+      await deleteCategoryGroup(db, groupOld!.id, { moveToCategoryId: catTarget!.id });
+
+      const targetAssignments = await db.select().from(schema.assignments).where(eq(schema.assignments.categoryId, catTarget!.id));
+      expect(targetAssignments).toHaveLength(3); // months 04, 05, 06
+
+      const april = targetAssignments.find((a) => a.month === "2026-04");
+      expect(Number(april?.amount)).toBe(10000);
+
+      // May: 20000 (cat1) + 30000 (cat2) + 5000 (catTarget existing) = 55000
+      const may = targetAssignments.find((a) => a.month === "2026-05");
+      expect(Number(may?.amount)).toBe(55000);
+
+      const june = targetAssignments.find((a) => a.month === "2026-06");
+      expect(Number(june?.amount)).toBe(40000);
+
+      // Carryover merged: 500 + 1000 + 2000 = 3500
+      const [updatedTarget] = await db.select().from(schema.categories).where(eq(schema.categories.id, catTarget!.id));
+      expect(Number(updatedTarget?.carryover)).toBe(3500);
+    });
   });
 });
 
