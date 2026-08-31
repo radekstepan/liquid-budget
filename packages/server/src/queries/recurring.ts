@@ -588,10 +588,22 @@ export async function autoPostDueRecurringTransactions(
       attemptedKeys.add(key);
 
       if (maxPerRule > 0 && occurrencesForThisRule >= maxPerRule) {
+        let remainingDue = 0;
+        let tempDate = currentNextDate;
+        const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
+        const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+        const isOneOff = normFreq === "never" || normFreq === "once";
+        while (tempDate <= validatedAsOfDate) {
+          remainingDue++;
+          if (isOneOff) break;
+          const nextTemp = nextDateFor(r.frequency, tempDate, anchor);
+          if (nextTemp <= tempDate) break;
+          tempDate = nextTemp;
+        }
         capped.push({
           id: r.id,
           payee: r.payee,
-          remainingDue: 1,
+          remainingDue,
         });
         break;
       }

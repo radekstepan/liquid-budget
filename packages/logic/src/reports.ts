@@ -353,6 +353,7 @@ export function computeMonthlyInsights(
   const m3 = getOffsetMonth(month, -3);
   const priorMonths = new Set([m1, m2, m3]);
 
+  let earliestMonth: string | null = null;
   const currentSpendByCat = new Map<number, number>();
   const priorSpendByCatMonth = new Map<number, Map<string, number>>();
 
@@ -366,6 +367,9 @@ export function computeMonthlyInsights(
 
     const netOutflow = -num(t.amount);
     const mk = t.date.slice(0, 7);
+    if (!earliestMonth || mk < earliestMonth) {
+      earliestMonth = mk;
+    }
 
     if (mk === month) {
       currentSpendByCat.set(
@@ -382,26 +386,40 @@ export function computeMonthlyInsights(
     }
   }
 
-  // Calculate 3-month average and % difference for categories
-  for (const [catId, currentSpend] of currentSpendByCat.entries()) {
-    const mMap = priorSpendByCatMonth.get(catId);
-    if (mMap && mMap.size > 0) {
-      const divisor = 3;
-      const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
-      const avg3mo = Math.round(totalPriorSpend / divisor);
-      if (avg3mo > 0) {
-        const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
-        const name = catMap.get(catId) ?? "Unknown";
-        insights.push({
-          id: `trend-${catId}`,
-          type: "trend",
-          categoryId: catId,
-          categoryName: name,
-          amount: currentSpend,
-          avgAmount: avg3mo,
-          pctChange: pct,
-          message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
-        });
+  // Count how many of the 3 prior months are present in the budget history
+  const availablePriorMonths = [m1, m2, m3].filter(
+    (m) => earliestMonth != null && m >= earliestMonth
+  );
+  const divisor = availablePriorMonths.length;
+
+  if (divisor > 0) {
+    // Evaluate all categories that had spend either in the current month or in prior baseline months
+    const candidateCatIds = new Set<number>([
+      ...currentSpendByCat.keys(),
+      ...priorSpendByCatMonth.keys(),
+    ]);
+
+    // Calculate baseline average and % difference for categories
+    for (const catId of candidateCatIds) {
+      const currentSpend = currentSpendByCat.get(catId) ?? 0;
+      const mMap = priorSpendByCatMonth.get(catId);
+      if (mMap && mMap.size > 0) {
+        const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
+        const avg3mo = Math.round(totalPriorSpend / divisor);
+        if (avg3mo > 0) {
+          const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
+          const name = catMap.get(catId) ?? "Unknown";
+          insights.push({
+            id: `trend-${catId}`,
+            type: "trend",
+            categoryId: catId,
+            categoryName: name,
+            amount: currentSpend,
+            avgAmount: avg3mo,
+            pctChange: pct,
+            message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
+          });
+        }
       }
     }
   }

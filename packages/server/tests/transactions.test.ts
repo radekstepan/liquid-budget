@@ -1607,7 +1607,7 @@ describe("transactions queries", () => {
       mock.respondWith("delete:transactions", [{}, {}, {}]);
 
       const res = await bulkDeleteTransactions(mock.db, [2]);
-      expect(res).toHaveLength(1);
+      expect(res).toHaveLength(3);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
       expect(deletes).toHaveLength(3);
     });
@@ -1658,10 +1658,43 @@ describe("transactions queries", () => {
       mock.respondWith("update:transactions", [{}]);
 
       const res = await bulkDeleteTransactions(mock.db, [2, 3]);
-      expect(res).toHaveLength(2);
+      expect(res).toHaveLength(4);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
       // 1 (id 2) + 1 (id 3) + 1 (id 4 collapsed) + 1 (parent 1 collapsed) = 4
       expect(deletes).toHaveLength(4);
+    });
+
+    it("BUG-24: bulkDeleteTransactions on 1 child of a 2-child split returns all 3 cascade-deleted transactions", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Grocery Store",
+          memo: "Split purchase",
+          amount: -5000,
+        },
+        [
+          { categoryId: cat1Id, amount: -3000, memo: "Apples" },
+          { categoryId: cat2Id, amount: -2000, memo: "Bread" },
+        ]
+      );
+
+      const child1 = split.children[0]!;
+      const deleted = await bulkDeleteTransactions(db, [child1.id]);
+
+      // Returns all 3 cascade-removed records: child1, sibling child2, and parent
+      expect(deleted).toHaveLength(3);
+      const deletedIds = deleted.map((t) => t.id);
+      expect(deletedIds).toContain(child1.id);
+      expect(deletedIds).toContain(split.children[1]!.id);
+      expect(deletedIds).toContain(split.parent.id);
+
+      const remainingTx = await db.select().from(schema.transactions);
+      expect(remainingTx).toHaveLength(0);
     });
   });
 

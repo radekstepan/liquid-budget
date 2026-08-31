@@ -1645,7 +1645,52 @@ describe("recurring queries", () => {
       expect((posted as any).capped[0]).toMatchObject({
         id: 104,
         payee: "Daily Coffee",
-        remainingDue: 1,
+        remainingDue: 7,
+      });
+    });
+
+    it("BUG-22: computes true remainingDue count for weekly rule backlog when capped", async () => {
+      const weeklyRow = {
+        id: 105,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Weekly Cleaning",
+        amount: -8000,
+        frequency: "weekly",
+        nextDate: "2026-06-01",
+        anchorDay: 1,
+        active: true,
+        transferAccountId: null,
+      };
+
+      // 1. Initial select:recurring
+      mock.respondWithNth("select:recurring", 1, [weeklyRow]);
+
+      // Overdue from 2026-06-01 to 2026-07-27 (9 weekly occurrences: June 1, 8, 15, 22, 29, July 6, 13, 20, 27)
+      // Cap at maxOccurrencesPerRule = 2 -> 2 posted, 7 remaining
+      const dates = ["2026-06-01", "2026-06-08"];
+      const nextDates = ["2026-06-08", "2026-06-15"];
+      for (let i = 1; i <= 2; i++) {
+        const curDate = dates[i - 1];
+        const nextDate = nextDates[i - 1];
+        mock.respondWithNth("select:recurring", i + 1, [{ ...weeklyRow, nextDate: curDate }]);
+        mock.respondWithNth("select:recurring_sub_transactions", i, []);
+        mock.respondWithNth("select:accounts", i, [{ onBudget: true }]);
+        mock.respondWith("insert:transactions", [{ id: 2000 + i, date: curDate, amount: -8000 }]);
+        mock.respondWith("update:accounts", [{}]);
+        mock.respondWith("update:recurring", [{ ...weeklyRow, nextDate }]);
+      }
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-07-27", {
+        maxOccurrencesPerRule: 2,
+      });
+
+      expect(posted).toHaveLength(2);
+      expect((posted as any).capped).toHaveLength(1);
+      expect((posted as any).capped[0]).toMatchObject({
+        id: 105,
+        payee: "Weekly Cleaning",
+        remainingDue: 7,
       });
     });
   });

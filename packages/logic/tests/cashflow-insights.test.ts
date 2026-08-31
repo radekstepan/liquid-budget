@@ -194,30 +194,37 @@ describe("computeMonthlyInsights", () => {
     expect(insights[1]?.pctChange).toBe(20);
   });
 
-  it("divides baseline average by fixed 3-month window regardless of activity count (BUG-12)", () => {
+  it("divides baseline average by months present in the window and handles 0-spend categories (BUG-23)", () => {
     const data1PriorMonth: BudgetData = {
       accounts: [{ id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 }],
       groups: [{ id: 1, name: "Daily", sort: 1, isCreditCardPayments: false }],
       categories: [
         { id: 10, groupId: 1, name: "Category A", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 11, groupId: 1, name: "Category B", sort: 2, carryover: "0", goalTarget: null, linkedAccountId: null },
       ],
       assignments: [],
       recurring: [],
       transactions: [
-        // Spend 30000 cents ($300) in one prior month (May) and zero in March and April
+        // Spend 30000 cents ($300) in one prior month (May) for Category A
         { id: 1, accountId: 1, categoryId: 10, date: "2026-05-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
-        // Current month spend is $300 in June -> baseline is 30000 / 3 = 10000, % change is +200%
+        // Current month spend is $300 in June -> baseline is 30000 / 1 = 30000, % change is 0%
         { id: 2, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Shop", memo: "", amount: "-30000", status: "c" },
+        // Category B has $100 spent in May, $0 in June -> baseline is 10000 / 1 = 10000, % change is -100%
+        { id: 3, accountId: 1, categoryId: 11, date: "2026-05-10", payee: "Market", memo: "", amount: "-10000", status: "c" },
       ],
     };
 
     const insights1 = computeMonthlyInsights(data1PriorMonth, "2026-06");
-    expect(insights1).toHaveLength(1);
+    expect(insights1).toHaveLength(2);
     expect(insights1[0]?.categoryName).toBe("Category A");
-    expect(insights1[0]?.avgAmount).toBe(10000); // 30000 / 3 = 10000
-    expect(insights1[0]?.pctChange).toBe(200); // (30000 - 10000) / 10000 = 200%
+    expect(insights1[0]?.avgAmount).toBe(30000); // 30000 / 1 = 30000
+    expect(insights1[0]?.pctChange).toBe(0); // (30000 - 30000) / 30000 = 0%
+    expect(insights1[1]?.categoryName).toBe("Category B");
+    expect(insights1[1]?.amount).toBe(0);
+    expect(insights1[1]?.avgAmount).toBe(10000);
+    expect(insights1[1]?.pctChange).toBe(-100);
 
-    // 2 prior months with data
+    // 2 prior months with data (April & May)
     const data2PriorMonths: BudgetData = {
       ...data1PriorMonth,
       transactions: [
@@ -230,8 +237,8 @@ describe("computeMonthlyInsights", () => {
     const insights2 = computeMonthlyInsights(data2PriorMonths, "2026-06");
     expect(insights2).toHaveLength(1);
     expect(insights2[0]?.categoryName).toBe("Category A");
-    expect(insights2[0]?.avgAmount).toBe(20000); // (40000 + 20000) / 3 = 20000
-    expect(insights2[0]?.pctChange).toBe(50); // (30000 - 20000) / 20000 = 50%
+    expect(insights2[0]?.avgAmount).toBe(30000); // (40000 + 20000) / 2 = 30000
+    expect(insights2[0]?.pctChange).toBe(0); // (30000 - 30000) / 30000 = 0%
 
     // 0 prior months with data -> clean insight
     const data0PriorMonths: BudgetData = {
