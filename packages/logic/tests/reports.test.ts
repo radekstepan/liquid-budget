@@ -225,6 +225,125 @@ describe("computeNetWorthReport", () => {
     expect(pts[3]?.assets).toBe(150000);
     expect(pts[3]?.net).toBe(150000);
   });
+
+  it("BUG-15: includes tracking account base balance in net worth from account createdAt before first transaction month", () => {
+    const data: BudgetData = {
+      accounts: [
+        {
+          id: 1,
+          name: "House Tracking",
+          kind: "offbudget",
+          groupLabel: "Property",
+          balance: "105000",
+          onBudget: false,
+          sort: 0,
+          createdAt: "2025-01-15T00:00:00.000Z",
+        },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        // First adjustment transaction in Feb 2025 ($5,000 appreciation)
+        {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2025-02-10",
+          payee: "Market Value Adjustment",
+          memo: "",
+          amount: "5000",
+          status: "c",
+        },
+      ],
+      recurring: [],
+    };
+
+    const pts = computeNetWorthReport(data, "2024-12", "2025-03");
+    expect(pts).toHaveLength(4);
+
+    // 2024-12: Prior to account creation in Jan 2025 -> clamped to 0
+    expect(pts[0]?.month).toBe("2024-12");
+    expect(pts[0]?.assets).toBe(0);
+    expect(pts[0]?.net).toBe(0);
+
+    // 2025-01: Created in Jan 2025 with base balance $100,000 (105000 - 5000)
+    expect(pts[1]?.month).toBe("2025-01");
+    expect(pts[1]?.assets).toBe(100000);
+    expect(pts[1]?.net).toBe(100000);
+
+    // 2025-02: After first transaction in Feb 2025 ($100,000 + $5,000 = $105,000)
+    expect(pts[2]?.month).toBe("2025-02");
+    expect(pts[2]?.assets).toBe(105000);
+    expect(pts[2]?.net).toBe(105000);
+
+    // 2025-03: Steady at $105,000
+    expect(pts[3]?.month).toBe("2025-03");
+    expect(pts[3]?.assets).toBe(105000);
+    expect(pts[3]?.net).toBe(105000);
+  });
+
+  it("BUG-15: includes starting balance from transaction date when createdAt is not explicitly set", () => {
+    const data: BudgetData = {
+      accounts: [
+        {
+          id: 1,
+          name: "Car Asset",
+          kind: "offbudget",
+          groupLabel: "Property",
+          balance: "2450000",
+          onBudget: false,
+          sort: 0,
+        },
+      ],
+      groups: [],
+      categories: [],
+      assignments: [],
+      transactions: [
+        // Starting balance transaction in Jan 2025 ($25,000)
+        {
+          id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2025-01-01",
+          payee: "Starting Balance",
+          memo: "",
+          amount: "2500000",
+          status: "c",
+        },
+        // First maintenance transaction in March 2025 (-$500)
+        {
+          id: 2,
+          accountId: 1,
+          categoryId: null,
+          date: "2025-03-15",
+          payee: "Depreciation",
+          memo: "",
+          amount: "-50000",
+          status: "c",
+        },
+      ],
+      recurring: [],
+    };
+
+    const pts = computeNetWorthReport(data, "2024-12", "2025-03");
+    expect(pts).toHaveLength(4);
+
+    // 2024-12: Clamped to 0 before starting balance transaction in Jan 2025
+    expect(pts[0]?.month).toBe("2024-12");
+    expect(pts[0]?.assets).toBe(0);
+    expect(pts[0]?.net).toBe(0);
+
+    // 2025-01 & 2025-02: Includes $25,000.00
+    expect(pts[1]?.month).toBe("2025-01");
+    expect(pts[1]?.assets).toBe(2500000);
+    expect(pts[2]?.month).toBe("2025-02");
+    expect(pts[2]?.assets).toBe(2500000);
+
+    // 2025-03: $25,000 - $500 = $24,500
+    expect(pts[3]?.month).toBe("2025-03");
+    expect(pts[3]?.assets).toBe(2450000);
+  });
 });
 
 describe("computeTrailingNetWorth", () => {

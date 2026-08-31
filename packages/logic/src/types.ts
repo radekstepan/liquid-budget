@@ -9,6 +9,7 @@ export type Account = {
   lastReconciledAt?: string | null;
   lastReconciledBalance?: number | string | null;
   archived?: boolean;
+  createdAt?: string | null;
 };
 
 export type CategoryGroup = {
