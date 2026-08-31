@@ -3307,7 +3307,164 @@ describe("computeBudget", () => {
       warnSpy.mockRestore();
     });
   });
+
+  describe("BUG-01: CC Refund Processing Order Invariance and Clamping", () => {
+    it("yields identical ccBuffer and category balances regardless of whether refund arrives before or after spend (Order Invariance)", () => {
+      // Scenario A: Spend $100, then Refund $50 on CC (Category has $0 assigned)
+      const dataA: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Salary", memo: "", amount: "50000", status: "c", isIncome: true },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-01-05", payee: "Store", memo: "Spend", amount: "-10000", status: "c" },
+          { id: 3, accountId: 2, categoryId: 1, date: "2026-01-10", payee: "Store", memo: "Refund", amount: "5000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      // Scenario B: Refund $50, then Spend $100 on CC (Category has $0 assigned)
+      const dataB: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Salary", memo: "", amount: "50000", status: "c", isIncome: true },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-01-05", payee: "Store", memo: "Refund", amount: "5000", status: "c" },
+          { id: 3, accountId: 2, categoryId: 1, date: "2026-01-10", payee: "Store", memo: "Spend", amount: "-10000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const resultA = computeBudget(dataA, "2026-01");
+      const resultB = computeBudget(dataB, "2026-01");
+
+      const visaA = resultA.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      const visaB = resultB.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      const grocA = resultA.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const grocB = resultB.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+
+      // Both should have $0 CC buffer and $0 cash overspent ($50 unfunded debt on card)
+      expect(visaA.ccBuffer).toBe(0);
+      expect(visaB.ccBuffer).toBe(0);
+      expect(visaA.available).toBe(0);
+      expect(visaB.available).toBe(0);
+      expect(grocA.available).toBe(-5000);
+      expect(grocB.available).toBe(-5000);
+      expect(resultA.overspentPrevious).toBe(0);
+      expect(resultB.overspentPrevious).toBe(0);
+
+      // Verify next month is also identical
+      const febA = computeBudget(dataA, "2026-02");
+      const febB = computeBudget(dataB, "2026-02");
+      const grocFebA = febA.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const grocFebB = febB.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      expect(grocFebA.available).toBe(0);
+      expect(grocFebB.available).toBe(0);
+      expect(febA.overspentPrevious).toBe(0);
+      expect(febB.overspentPrevious).toBe(0);
+      expect(febA.tbb).toBe(50000);
+      expect(febB.tbb).toBe(50000);
+    });
+
+    it("reverses funded CC buffer and returns cash to category pool on CC refund (Funded Refund Reversal)", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "10000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-05", payee: "Store", memo: "Spend", amount: "-10000", status: "c" },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-01-10", payee: "Store", memo: "Refund", amount: "4000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const result = computeBudget(data, "2026-01");
+      const visa = result.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      const groc = result.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+
+      // CC Payment category buffer = $60 (10000 spent - 4000 refunded)
+      expect(visa.ccBuffer).toBe(6000);
+      expect(visa.available).toBe(6000);
+      // Groceries available = $40 (10000 assigned - 6000 net outflow)
+      expect(groc.available).toBe(4000);
+    });
+
+    it("clamps refund reversals per account when multiple cards are used in the same category", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+          { id: 3, name: "Amex", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 2 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+          { id: 3, groupId: 2, name: "Amex Payment", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: 3 },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "10000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-05", payee: "Visa Store", memo: "Spend", amount: "-6000", status: "c" },
+          { id: 2, accountId: 3, categoryId: 1, date: "2026-01-06", payee: "Amex Store", memo: "Spend", amount: "-4000", status: "c" },
+          { id: 3, accountId: 3, categoryId: 1, date: "2026-01-10", payee: "Amex Store", memo: "Refund", amount: "3000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const result = computeBudget(data, "2026-01");
+      const ccRows = result.groups.find((g) => g.group.isCreditCardPayments)!.rows;
+      const visa = ccRows.find((r) => r.category.name === "Visa Payment")!;
+      const amex = ccRows.find((r) => r.category.name === "Amex Payment")!;
+      const groc = result.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+
+      // Visa buffer should remain $60
+      expect(visa.ccBuffer).toBe(6000);
+      // Amex buffer should be $10 (4000 spent - 3000 refunded)
+      expect(amex.ccBuffer).toBe(1000);
+      // Groceries available = $30 (10000 assigned - 7000 net outflow)
+      expect(groc.available).toBe(3000);
+    });
+  });
 });
+
 
 
 

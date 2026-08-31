@@ -606,6 +606,7 @@ function computeAllMonths(
 
       const availableBeforeSpend = prev + assigned;
       let runningCashPool = availableBeforeSpend;
+      const catFundedCCByAccount = new Map<number, number>();
       let catFundedCC = 0;
       let netCCSpend = 0;
 
@@ -618,18 +619,28 @@ function computeAllMonths(
             const funded = Math.max(0, Math.min(runningCashPool, spend));
             runningCashPool -= funded;
             catFundedCC += funded;
+            catFundedCCByAccount.set(
+              tx.accountId,
+              (catFundedCCByAccount.get(tx.accountId) ?? 0) + funded
+            );
             monthFundedCCByAccount.set(
               tx.accountId,
               (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
             );
           } else if (tx.amount > 0) {
             netCCSpend -= tx.amount;
+            const currentFunded = catFundedCCByAccount.get(tx.accountId) ?? 0;
+            const fundedRefund = Math.max(0, Math.min(currentFunded, tx.amount));
+            catFundedCCByAccount.set(
+              tx.accountId,
+              currentFunded - fundedRefund
+            );
+            catFundedCC -= fundedRefund;
             monthFundedCCByAccount.set(
               tx.accountId,
-              (monthFundedCCByAccount.get(tx.accountId) ?? 0) - tx.amount
+              (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefund
             );
-            runningCashPool += tx.amount;
-            catFundedCC -= tx.amount;
+            runningCashPool += fundedRefund;
           }
         } else {
           // Cash account transaction
