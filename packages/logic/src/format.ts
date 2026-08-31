@@ -316,7 +316,7 @@ export function evalAmount(
             num += cc;
             sawDot = true;
             i++;
-          } else if (cc === " " || cc === "\t" || cc === "\n") {
+          } else if (num.length === 0 && (cc === " " || cc === "\t" || cc === "\n")) {
             i++;
           } else {
             break;
