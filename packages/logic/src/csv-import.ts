@@ -89,7 +89,7 @@ export function parseCsv(text: string): string[][] {
       i += 1;
       continue;
     }
-    if (ch === '"') {
+    if (ch === '"' && cell.length === 0) {
       inQuotes = true;
       quoteStartLine = currentLine;
       i += 1;
