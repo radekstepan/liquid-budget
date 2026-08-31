@@ -196,6 +196,47 @@ export async function deleteCategory(
         .update(recurringSubTransactions)
         .set({ categoryId: opts.moveToCategoryId })
         .where(eq(recurringSubTransactions.categoryId, id));
+
+      // Migrate historical assignments to moveToCategoryId (summing amounts on month collision)
+      const sourceAssignments = await db
+        .select()
+        .from(assignments)
+        .where(eq(assignments.categoryId, id));
+
+      for (const a of sourceAssignments) {
+        const [existing] = await db
+          .select()
+          .from(assignments)
+          .where(and(eq(assignments.categoryId, opts.moveToCategoryId), eq(assignments.month, a.month)));
+
+        if (existing) {
+          await db
+            .update(assignments)
+            .set({ amount: Number(existing.amount) + Number(a.amount) })
+            .where(eq(assignments.id, existing.id));
+        } else {
+          await db
+            .insert(assignments)
+            .values({
+              categoryId: opts.moveToCategoryId,
+              month: a.month,
+              amount: a.amount,
+            });
+        }
+      }
+
+      if (Number(cat.carryover ?? 0) !== 0) {
+        const [targetCat] = await db
+          .select()
+          .from(categories)
+          .where(eq(categories.id, opts.moveToCategoryId));
+        if (targetCat) {
+          await db
+            .update(categories)
+            .set({ carryover: Number(targetCat.carryover ?? 0) + Number(cat.carryover ?? 0) })
+            .where(eq(categories.id, opts.moveToCategoryId));
+        }
+      }
     }
     await db.delete(assignments).where(eq(assignments.categoryId, id));
     await db.delete(categories).where(eq(categories.id, id));
@@ -272,6 +313,53 @@ export async function deleteCategoryGroup(
           .update(recurringSubTransactions)
           .set({ categoryId: opts.moveToCategoryId })
           .where(inArray(recurringSubTransactions.categoryId, catIds));
+
+        // Migrate historical assignments across all categories in the group
+        const sourceAssignments = await db
+          .select()
+          .from(assignments)
+          .where(inArray(assignments.categoryId, catIds));
+
+        const monthSums = new Map<string, number>();
+        for (const a of sourceAssignments) {
+          monthSums.set(a.month, (monthSums.get(a.month) ?? 0) + Number(a.amount));
+        }
+
+        for (const [month, sumAmt] of monthSums.entries()) {
+          const [existing] = await db
+            .select()
+            .from(assignments)
+            .where(and(eq(assignments.categoryId, opts.moveToCategoryId), eq(assignments.month, month)));
+
+          if (existing) {
+            await db
+              .update(assignments)
+              .set({ amount: Number(existing.amount) + sumAmt })
+              .where(eq(assignments.id, existing.id));
+          } else {
+            await db
+              .insert(assignments)
+              .values({
+                categoryId: opts.moveToCategoryId,
+                month,
+                amount: sumAmt,
+              });
+          }
+        }
+
+        const totalCarryover = cats.reduce((sum, c) => sum + Number(c.carryover ?? 0), 0);
+        if (totalCarryover !== 0) {
+          const [targetCat] = await db
+            .select()
+            .from(categories)
+            .where(eq(categories.id, opts.moveToCategoryId));
+          if (targetCat) {
+            await db
+              .update(categories)
+              .set({ carryover: Number(targetCat.carryover ?? 0) + totalCarryover })
+              .where(eq(categories.id, opts.moveToCategoryId));
+          }
+        }
       }
       await db.delete(assignments).where(inArray(assignments.categoryId, catIds));
       await db.delete(categories).where(inArray(categories.id, catIds));

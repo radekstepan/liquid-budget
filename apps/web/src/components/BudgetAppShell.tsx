@@ -218,10 +218,40 @@ export function BudgetAppShell({
         if (!prev) return prev;
         snapshot = prev;
 
+        const srcAccount = prev.accounts.find((a) => a.id === t.accountId);
+        const srcOnBudget = srcAccount?.onBudget ?? true;
+        const srcKind = srcAccount?.kind ?? "liquid";
+        let initialCatId = t.subTransactions?.length ? null : (t.categoryId ?? null);
+        let initialIsIncome = false;
+        let initialIncomeMonth: string | null = t.incomeMonth ?? null;
+
+        if (t.transferAccountId != null) {
+          const destAccount = prev.accounts.find((a) => a.id === t.transferAccountId);
+          const destOnBudget = destAccount?.onBudget ?? true;
+          const classification = classifyBoundaryTransfer({
+            srcOnBudget,
+            destOnBudget,
+            amount: t.amount,
+            categoryId: initialCatId,
+            incomeMonth: initialIncomeMonth,
+          });
+          initialCatId = classification.categoryId;
+          initialIsIncome = classification.isIncome;
+          initialIncomeMonth = classification.incomeMonth;
+        } else if (!t.subTransactions?.length) {
+          if (!srcOnBudget || srcKind === "credit") {
+            initialIsIncome = false;
+            initialIncomeMonth = null;
+          } else {
+            initialIsIncome = initialCatId == null && t.amount > 0;
+            if (!initialIsIncome) initialIncomeMonth = null;
+          }
+        }
+
         const newTx: Transaction = {
           id: tempId,
           accountId: t.accountId,
-          categoryId: t.subTransactions?.length ? null : t.categoryId,
+          categoryId: initialCatId,
           date: t.date,
           payee: t.payee,
           memo: t.memo ?? "",
@@ -230,14 +260,14 @@ export function BudgetAppShell({
           flagColor: t.flagColor ?? null,
           transferAccountId: t.transferAccountId ?? null,
           parentId: null,
+          isIncome: initialIsIncome,
+          incomeMonth: initialIncomeMonth,
         };
 
         const deltas = new Map<number, number>();
         let newTransactions: Transaction[] = [newTx];
 
         if (t.subTransactions && t.subTransactions.length > 0) {
-          const srcAccount = prev.accounts.find((a) => a.id === t.accountId);
-          const srcOnBudget = srcAccount?.onBudget ?? true;
           let childIdx = 1;
           for (const st of t.subTransactions) {
             deltas.set(t.accountId, (deltas.get(t.accountId) ?? 0) + st.amount);
@@ -390,21 +420,65 @@ export function BudgetAppShell({
 
         const accounts = applyAccountDeltas(prev.accounts, deltas);
 
-        // Re-classify categoryId for transfer rows to mirror server-side classifyBoundaryTransfer
-        let transferCategoryId: number | null | undefined = t.categoryId;
-        let transferIsIncome: boolean | undefined;
-        if (target?.transferAccountId != null && "categoryId" in t) {
-          const srcAccount = prev.accounts.find((a) => a.id === (t.accountId ?? target.accountId));
-          const destAccount = prev.accounts.find((a) => a.id === target.transferAccountId);
-          const newAmount = t.amount ?? num(target.amount);
-          const classification = classifyBoundaryTransfer({
-            srcOnBudget: srcAccount?.onBudget ?? true,
-            destOnBudget: destAccount?.onBudget ?? true,
-            amount: newAmount,
-            categoryId: t.categoryId,
-          });
-          transferCategoryId = classification.categoryId;
-          transferIsIncome = classification.isIncome;
+        // Recompute categoryId, isIncome, and incomeMonth to mirror server-side logic
+        let nextCategoryId: number | null | undefined = t.categoryId;
+        let nextIsIncome: boolean | undefined;
+        let nextIncomeMonth: string | null | undefined = t.incomeMonth;
+
+        if (target) {
+          const newAccountId = t.accountId ?? target.accountId;
+          const newAmount = t.amount !== undefined ? t.amount : num(target.amount);
+          const srcAccount = prev.accounts.find((a) => a.id === newAccountId);
+          const srcOnBudget = srcAccount?.onBudget ?? true;
+          const srcKind = srcAccount?.kind ?? "liquid";
+
+          if (target.transferAccountId != null) {
+            const destAccount = prev.accounts.find((a) => a.id === target.transferAccountId);
+            const rawCatId = "categoryId" in t ? (t.categoryId ?? null) : (target.categoryId ?? null);
+            const rawIncMonth = "incomeMonth" in t ? (t.incomeMonth ?? null) : (target.incomeMonth ?? null);
+            const classification = classifyBoundaryTransfer({
+              srcOnBudget,
+              destOnBudget: destAccount?.onBudget ?? true,
+              amount: newAmount,
+              categoryId: rawCatId,
+              incomeMonth: rawIncMonth,
+            });
+            nextCategoryId = classification.categoryId;
+            nextIsIncome = classification.isIncome;
+            nextIncomeMonth = classification.incomeMonth;
+          } else if (isSplitParent) {
+            nextCategoryId = null;
+            nextIsIncome = false;
+            nextIncomeMonth = null;
+          } else if (!srcOnBudget) {
+            nextCategoryId = null;
+            nextIsIncome = false;
+            nextIncomeMonth = null;
+          } else if (srcKind === "credit") {
+            if ("categoryId" in t) {
+              nextCategoryId = t.categoryId ?? null;
+            } else {
+              nextCategoryId = target.categoryId ?? null;
+            }
+            nextIsIncome = false;
+            nextIncomeMonth = null;
+          } else {
+            // Liquid cash on-budget account
+            const finalCatId = "categoryId" in t ? (t.categoryId ?? null) : (target.categoryId ?? null);
+            nextCategoryId = finalCatId;
+            const isEligibleForIncome = finalCatId == null;
+            const isIncome = isEligibleForIncome
+              ? ("isIncome" in t && t.isIncome !== undefined ? Boolean(t.isIncome) : newAmount > 0)
+              : false;
+            nextIsIncome = isIncome;
+            if (!isIncome) {
+              nextIncomeMonth = null;
+            } else if ("incomeMonth" in t) {
+              nextIncomeMonth = t.incomeMonth ?? null;
+            } else {
+              nextIncomeMonth = target.incomeMonth ?? null;
+            }
+          }
         }
 
         const transactions = prev.transactions.map((x) => {
@@ -425,14 +499,15 @@ export function BudgetAppShell({
           return {
             ...x,
             ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
-            ...(t.categoryId !== undefined ? { categoryId: transferCategoryId } : {}),
+            ...(nextCategoryId !== undefined ? { categoryId: nextCategoryId } : {}),
             ...(t.date !== undefined ? { date: t.date } : {}),
             ...(t.payee !== undefined ? { payee: t.payee } : {}),
             ...(t.memo !== undefined ? { memo: t.memo } : {}),
             ...(t.amount !== undefined ? { amount: t.amount.toFixed(2) } : {}),
             ...(t.status !== undefined ? { status: t.status } : {}),
             ...(t.flagColor !== undefined ? { flagColor: t.flagColor ?? null } : {}),
-            ...(transferIsIncome !== undefined ? { isIncome: transferIsIncome } : {}),
+            ...(nextIsIncome !== undefined ? { isIncome: nextIsIncome } : {}),
+            ...(nextIncomeMonth !== undefined ? { incomeMonth: nextIncomeMonth } : {}),
           };
         });
         return { ...prev, accounts, transactions, budgetIndex: undefined };
@@ -445,6 +520,8 @@ export function BudgetAppShell({
         t.payee === undefined &&
         t.memo === undefined &&
         t.amount === undefined &&
+        t.incomeMonth === undefined &&
+        t.isIncome === undefined &&
         t.subTransactions === undefined;
       return withSync(() =>
         runMutation(
@@ -460,7 +537,14 @@ export function BudgetAppShell({
               if (snapshot) setData(snapshot);
               reload().catch(() => {});
             },
-            skipReload: !(t.amount !== undefined || t.accountId !== undefined || t.subTransactions !== undefined || t.date !== undefined),
+            skipReload: !(
+              t.amount !== undefined ||
+              t.accountId !== undefined ||
+              t.subTransactions !== undefined ||
+              t.date !== undefined ||
+              t.categoryId !== undefined ||
+              t.incomeMonth !== undefined
+            ),
           }
         )
       );
