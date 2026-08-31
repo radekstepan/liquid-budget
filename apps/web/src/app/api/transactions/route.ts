@@ -13,37 +13,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type SubTxn = {
-  categoryId?: number | null;
-  transferAccountId?: number | null;
-  amount: number;
-  memo?: string;
-};
-
-function parseSubTransactions(raw: unknown): SubTxn[] {
-  if (!Array.isArray(raw)) {
-    throw new TransactionError("subTransactions must be an array");
-  }
-  return raw.map((c, i) => {
-    if (!c || typeof c !== "object") {
-      throw new TransactionError(`subTransactions[${i}] is not an object`);
-    }
-    const o = c as Record<string, unknown>;
-    const categoryId = o.categoryId ? Number(o.categoryId) : null;
-    const transferAccountId = o.transferAccountId ? Number(o.transferAccountId) : null;
-    const amount = Number(o.amount);
-    if ((!categoryId && !transferAccountId && amount <= 0) || Number.isNaN(amount)) {
-      throw new TransactionError(`subTransactions[${i}] missing categoryId/transferAccountId or amount`);
-    }
-    return {
-      categoryId,
-      transferAccountId,
-      amount,
-      memo: typeof o.memo === "string" ? o.memo : undefined,
-    };
-  });
-}
-
 import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
