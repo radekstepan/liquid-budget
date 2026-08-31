@@ -82,4 +82,52 @@ describe("useLocalStorage", () => {
     expect(result.current[0]).toBe(10);
     expect(window.localStorage.getItem("test-key")).toBeNull();
   });
+
+  it("updates internal React state without throwing and logs a console warning when localStorage.setItem throws QuotaExceededError", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError");
+      });
+
+    const { result } = renderHook(() => useLocalStorage("test-key", "initial"));
+
+    expect(() => {
+      act(() => {
+        result.current[1]("new-val");
+      });
+    }).not.toThrow();
+
+    expect(result.current[0]).toBe("new-val");
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Error setting localStorage key "test-key":',
+      expect.any(DOMException)
+    );
+
+    setItemSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("supports functional update when localStorage.setItem throws QuotaExceededError", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError");
+      });
+
+    const { result } = renderHook(() => useLocalStorage("test-key", 10));
+
+    expect(() => {
+      act(() => {
+        result.current[1]((prev) => prev + 5);
+      });
+    }).not.toThrow();
+
+    expect(result.current[0]).toBe(15);
+
+    setItemSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });
