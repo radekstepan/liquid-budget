@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
+import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
 import { invalidateBudgetIndex, num, classifyBoundaryTransfer } from "@ynab/logic";
 
 function applyAccountDeltas(
@@ -300,6 +300,7 @@ export function BudgetAppShell({
     reload,
     assign: async (categoryId, amount, month) => {
       let snapshot: BudgetData | null = null;
+      const tempId = -Date.now();
       setData((prev) => {
         if (!prev) return prev;
         snapshot = prev;
@@ -312,17 +313,31 @@ export function BudgetAppShell({
             )
           : [
               ...prev.assignments,
-              { id: -Date.now(), categoryId, month, amount: String(Math.round(amount)) },
+              { id: tempId, categoryId, month, amount: String(Math.round(amount)) },
             ];
         return { ...prev, assignments, budgetIndex: undefined };
       });
       return withSync(() =>
         runMutation(
           async () => {
-            return await jsonReq("/api/assignments", {
+            const res = await jsonReq<Assignment>("/api/assignments", {
               method: "PUT",
               body: JSON.stringify({ categoryId, month, amount }),
             });
+            if (res && typeof res.id === "number") {
+              setData((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  assignments: prev.assignments.map((a) =>
+                    a.id === tempId || (a.categoryId === categoryId && a.month === month)
+                      ? { ...a, id: res.id, amount: String(res.amount) }
+                      : a
+                  ),
+                };
+              });
+            }
+            return res;
           },
           { failure: "Failed to save assignment. Please try again." },
           {

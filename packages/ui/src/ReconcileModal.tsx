@@ -7,7 +7,14 @@ import type {
   CategoryGroup,
   Transaction,
 } from "@ynab/logic";
-import { computeReconcileState, evalAmount, dollarsToCents, todayISO } from "@ynab/logic";
+import {
+  adjustDateShortcut,
+  computeReconcileState,
+  evalAmount,
+  dollarsToCents,
+  isValidISODate,
+  todayISO,
+} from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
@@ -120,9 +127,12 @@ export function ReconcileModal({
     }
   }, [adjustmentCategoryId, eligibleCategories]);
 
+  const dateValid = isValidISODate(statementDate);
+
   const canSubmit =
     !submitting &&
     !busy &&
+    dateValid &&
     !!Number.isFinite(statementBalance) &&
     (balanced || (needsAdjustment && armed && adjustmentCategoryId !== ""));
 
@@ -220,8 +230,16 @@ export function ReconcileModal({
 
       <Field label="Statement Date">
         <TextField
+          type="date"
           value={statementDate}
           onChange={(e) => setStatementDate(e.target.value)}
+          onKeyDown={(e) => {
+            const adjusted = adjustDateShortcut(statementDate, e.key);
+            if (adjusted) {
+              e.preventDefault();
+              setStatementDate(adjusted);
+            }
+          }}
           placeholder="YYYY-MM-DD"
           className="w-full"
         />

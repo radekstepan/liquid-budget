@@ -82,9 +82,40 @@ describe("ReconcileModal", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  it("shows the statement date field defaulting to today", () => {
+  it("shows the statement date field defaulting to today with type=date", () => {
     renderModal();
     const dateInput = screen.getByPlaceholderText("YYYY-MM-DD");
+    expect(dateInput).toHaveValue("2026-08-28");
+    expect(dateInput).toHaveAttribute("type", "date");
+  });
+
+  it("disables Reconcile when statement date is invalid (BUG-27)", () => {
+    const { onReconcile } = renderModal();
+    const dateInput = screen.getByPlaceholderText("YYYY-MM-DD");
+    const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
+    expect(reconcile).toBeEnabled();
+
+    // Invalid date string
+    fireEvent.change(dateInput, { target: { value: "June statement" } });
+    expect(reconcile).toBeDisabled();
+    fireEvent.click(reconcile);
+    expect(onReconcile).not.toHaveBeenCalled();
+
+    // Empty date
+    fireEvent.change(dateInput, { target: { value: "" } });
+    expect(reconcile).toBeDisabled();
+
+    // Restore valid date
+    fireEvent.change(dateInput, { target: { value: "2026-08-28" } });
+    expect(reconcile).toBeEnabled();
+  });
+
+  it("adjusts statement date with keyboard shortcuts (BUG-27)", () => {
+    renderModal();
+    const dateInput = screen.getByPlaceholderText("YYYY-MM-DD");
+    fireEvent.keyDown(dateInput, { key: "+" });
+    expect(dateInput).toHaveValue("2026-08-29");
+    fireEvent.keyDown(dateInput, { key: "-" });
     expect(dateInput).toHaveValue("2026-08-28");
   });
 
