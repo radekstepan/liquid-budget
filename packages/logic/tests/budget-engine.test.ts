@@ -5,7 +5,7 @@
  * Covers: cumulative carryover, TBB, over-budgeted detection,
  * multi-month chains, credit card buffers, goal funding, and edge cases.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   computeBudget,
   buildBudgetIndex,
@@ -3275,6 +3275,39 @@ describe("computeBudget", () => {
       expect(serializedIndex.surplusByMonth["2026-05"]).toBeUndefined();
     });
   });
+
+  describe("BUG-35: Tolerating out-of-range amounts on read paths", () => {
+    it("computeBudget and buildBudgetIndex do not crash on out-of-range transaction amounts like 1e999", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "10000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Salary", memo: "", amount: "1e999", status: "c", isIncome: true },
+          { id: 2, accountId: 1, categoryId: 1, date: "2026-01-02", payee: "Corrupted Store", memo: "", amount: "-1e999", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      expect(() => buildBudgetIndex(data)).not.toThrow();
+      expect(() => computeBudget(data, "2026-01")).not.toThrow();
+      const res = computeBudget(data, "2026-01");
+      expect(res).toBeDefined();
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
 });
+
 
 

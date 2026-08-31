@@ -44,14 +44,29 @@ export function fmtSigned(cents: number): string {
   return fmt(cents);
 }
 
-export function num(s: string | number | null | undefined): number {
+export function num(
+  s: string | number | null | undefined,
+  options?: { strict?: boolean }
+): number {
+  const strict = options?.strict ?? false;
   if (s == null) return 0;
   if (typeof s === "number") {
-    if (Number.isNaN(s) || s === 0 || !Number.isFinite(s)) return 0;
+    if (Number.isNaN(s) || s === 0) return 0;
     const sign = s < 0 ? -1 : 1;
+    if (!Number.isFinite(s)) {
+      if (strict) {
+        throw new RangeError(`Amount ${s} exceeds safe integer range`);
+      }
+      console.warn(`[num] Amount ${s} is not finite, clamping to safe integer range`);
+      return sign * Number.MAX_SAFE_INTEGER;
+    }
     const rounded = sign * Math.round(Math.abs(s));
     if (!Number.isSafeInteger(rounded)) {
-      throw new RangeError(`Amount ${s} exceeds safe integer range`);
+      if (strict) {
+        throw new RangeError(`Amount ${s} exceeds safe integer range`);
+      }
+      console.warn(`[num] Amount ${s} exceeds safe integer range, clamping to safe integer range`);
+      return sign * Number.MAX_SAFE_INTEGER;
     }
     return rounded === 0 ? 0 : rounded;
   }
@@ -79,11 +94,22 @@ export function num(s: string | number | null | undefined): number {
   }
 
   const rawNum = Number(str);
-  if (Number.isNaN(rawNum) || rawNum === 0 || !Number.isFinite(rawNum)) return 0;
+  if (Number.isNaN(rawNum) || rawNum === 0) return 0;
+  if (!Number.isFinite(rawNum)) {
+    if (strict) {
+      throw new RangeError(`Amount ${s} exceeds safe integer range`);
+    }
+    console.warn(`[num] Amount ${s} is not finite, clamping to safe integer range`);
+    return sign * Number.MAX_SAFE_INTEGER;
+  }
   const rounded = Math.round(Math.abs(rawNum));
   const finalVal = sign * rounded;
-  if (!Number.isSafeInteger(finalVal)) {
-    throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
+  if (!Number.isSafeInteger(finalVal) || Math.abs(finalVal) > Number.MAX_SAFE_INTEGER) {
+    if (strict) {
+      throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
+    }
+    console.warn(`[num] Amount ${s} exceeds safe integer range, clamping to safe integer range`);
+    return sign * Number.MAX_SAFE_INTEGER;
   }
   return finalVal === 0 ? 0 : finalVal;
 }
