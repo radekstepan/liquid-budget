@@ -237,4 +237,23 @@ describe("ProjectionsView", () => {
     // Starting balance should be $5,000.00
     expect(screen.getAllByText("$5,000.00").length).toBeGreaterThan(0);
   });
+
+  it("BUG-29: renders extrapolation notice explaining projection assumptions", () => {
+    const data = {
+      accounts: [acct({ id: 1, balance: "100000" })],
+      groups: emptyGroups,
+      categories: emptyCategories,
+      assignments: [],
+      transactions: [],
+      recurring: [rec(1, "monthly", -100)],
+    };
+
+    render(<ProjectionsView data={data} month="2026-07" />);
+    expect(
+      screen.getByText(/Projections extrapolate active recurring transactions as a smoothed monthly average/i)
+    ).toBeDefined();
+    expect(
+      screen.getByText(/Based on 1 recurring items \(monthly average\)/i)
+    ).toBeDefined();
+  });
 });

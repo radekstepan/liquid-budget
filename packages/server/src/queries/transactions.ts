@@ -563,9 +563,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (
     existing.transferAccountId != null &&
     patch.accountId != null &&
-    Number(patch.accountId) === existing.transferAccountId
+    Number(patch.accountId) !== existing.accountId
   ) {
-    throw new TransactionError("transfer account must differ from source account");
+    throw new TransactionError("cannot change account of a transfer; delete and recreate");
   }
 
   const p: Record<string, unknown> = {};
@@ -596,6 +596,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     // Re-read inside the transaction for an authoritative snapshot
     const [current] = await db.select().from(transactions).where(eq(transactions.id, id));
     if (!current) return null;
+
+    if (current.transferAccountId != null && "accountId" in p && p.accountId !== current.accountId) {
+      throw new TransactionError("cannot change account of a transfer; delete and recreate");
+    }
 
     const isParent = current.parentId == null && current.transferAccountId == null;
     const hasChildren = (await childCount(db, id)) > 0;
@@ -650,6 +654,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         : null;
 
     if (current.transferAccountId != null) {
+      if (patch.payee !== undefined && !String(patch.payee).trim()) {
+        const destName = await getAccountName(db, current.transferAccountId);
+        p.payee = `Transfer : ${destName ?? "Unknown"}`;
+      }
       const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : current.categoryId;
       const incMonth = "incomeMonth" in p ? (p.incomeMonth as string | null) : (current.incomeMonth ?? null);
       const classification = classifyBoundaryTransfer({
@@ -1249,9 +1257,9 @@ export async function bulkUpdateTransactions(
       if (
         existing.transferAccountId != null &&
         patch.accountId != null &&
-        Number(patch.accountId) === existing.transferAccountId
+        Number(patch.accountId) !== existing.accountId
       ) {
-        throw new TransactionError("transfer account must differ from source account");
+        throw new TransactionError("cannot change account of a transfer; delete and recreate");
       }
 
       const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
@@ -1284,7 +1292,14 @@ export async function bulkUpdateTransactions(
         setFields.flagColor = sanitizeFlagColor(patch.flagColor);
       }
       if (patch.date !== undefined && patch.date != null) setFields.date = String(patch.date);
-      if (patch.payee !== undefined && patch.payee != null) setFields.payee = String(patch.payee);
+      if (patch.payee !== undefined && patch.payee != null) {
+        if (existing.transferAccountId != null && !String(patch.payee).trim()) {
+          const destName = await getAccountName(db, existing.transferAccountId);
+          setFields.payee = `Transfer : ${destName ?? "Unknown"}`;
+        } else {
+          setFields.payee = String(patch.payee);
+        }
+      }
       if (patch.memo !== undefined) setFields.memo = patch.memo == null ? "" : String(patch.memo);
       if (patch.amount !== undefined && patch.amount != null) setFields.amount = newAmount;
       if (patch.accountId !== undefined && patch.accountId != null) setFields.accountId = newAccountId;

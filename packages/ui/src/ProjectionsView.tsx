@@ -11,7 +11,7 @@ import {
   parseMonthKey,
   todayISO,
 } from "@ynab/logic";
-import { Icon, Toolbar, Panel, MathCell } from "@ynab/theme";
+import { Icon, Toolbar, Panel, MathCell, Notice } from "@ynab/theme";
 import { ChartTip, TipLabel, useElementSize } from "./chartUtils.js";
 
 export const ProjectionsView = memo(function ProjectionsView({
@@ -103,7 +103,7 @@ export const ProjectionsView = memo(function ProjectionsView({
           <span className="text-[13px] font-bold" style={{ color: "var(--y-ink)" }}>Projections</span>
         </div>
         <span className="ml-auto y-hint">
-          Based on {data.recurring.filter((r) => r.active).length} recurring items
+          Based on {data.recurring.filter((r) => r.active).length} recurring items (monthly average)
         </span>
       </Toolbar>
 
@@ -125,6 +125,10 @@ export const ProjectionsView = memo(function ProjectionsView({
             style={{ minWidth: 150 }}
           />
         </div>
+
+        <Notice tone="info" className="mb-3">
+          Projections extrapolate active recurring transactions as a smoothed monthly average over the next 12 months. One-off future transactions and recurring rule end dates are not modeled.
+        </Notice>
 
         <Panel title="12-Month Liquid Balance Forecast">
           <div

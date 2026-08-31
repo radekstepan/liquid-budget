@@ -1799,14 +1799,14 @@ describe("transactions queries", () => {
       ).rejects.toThrow(/split child/);
     });
 
-    it("rejects changing accountId to transferAccountId on a transfer transaction in bulk update", async () => {
+    it("rejects changing accountId on a transfer transaction in bulk update", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 10, parentId: null, accountId: 1, amount: -5000, payee: "Transfer : Savings", categoryId: null, date: "2026-07-01", transferAccountId: 2 },
       ]);
 
       await expect(
         bulkUpdateTransactions(mock.db, [10], { accountId: 2 })
-      ).rejects.toThrow(/transfer account must differ from source account/);
+      ).rejects.toThrow(/cannot change account of a transfer/);
     });
 
     it("rejects setting status to 'r' via bulkUpdateTransactions", async () => {
@@ -2470,6 +2470,74 @@ describe("transactions queries", () => {
           .from(schema.transactions)
           .where(eq(schema.transactions.id, transfer.id));
         expect(row?.categoryId).toBeNull();
+      });
+
+      it("BUG-28: rejects changing accountId on a transfer via updateTransaction and bulkUpdateTransactions", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 1,
+          })
+          .returning();
+        const [acct3] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Checking 2",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 0,
+            sort: 2,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "",
+            memo: "Transfer",
+            amount: -5000,
+          },
+          acct2!.id
+        );
+
+        // Reject updating accountId to a different account in updateTransaction
+        await expect(
+          updateTransaction(db, transfer.id, {
+            accountId: acct3!.id,
+          })
+        ).rejects.toThrow(/cannot change account of a transfer/);
+
+        // Reject updating accountId in bulkUpdateTransactions
+        await expect(
+          bulkUpdateTransactions(db, [transfer.id], {
+            accountId: acct3!.id,
+          })
+        ).rejects.toThrow(/cannot change account of a transfer/);
+
+        // Updating with the same accountId succeeds
+        const updatedSame = await updateTransaction(db, transfer.id, {
+          accountId,
+          memo: "Updated memo",
+        });
+        expect(updatedSame?.memo).toBe("Updated memo");
+        expect(updatedSame?.accountId).toBe(accountId);
+
+        // Updating with blank payee auto-regenerates payee
+        const updatedBlankPayee = await updateTransaction(db, transfer.id, {
+          payee: "",
+        });
+        expect(updatedBlankPayee?.payee).toBe("Transfer : Savings");
       });
 
       it("forces categoryId to null when updating a split parent", async () => {
