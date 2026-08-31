@@ -1055,7 +1055,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   }
 
   // Build cumulative carryover per category up to (but not including) `month`.
-  const { carryoverMap, overspentPrevious } = buildCarryoverMap(
+  const { carryoverMap, overspentPrevious, overspentPreviousMonthKey } = buildCarryoverMap(
     normData,
     index,
     months,
@@ -1137,6 +1137,7 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
     overBudgeted: tbb < 0,
     totalAssigned,
     overspentPrevious,
+    overspentPreviousMonthKey,
     incomeFromFuture,
     incomeFromPast,
     incomeDeferredToFuture,
@@ -1170,7 +1171,11 @@ function buildCarryoverMap(
   index: IndexedBudgetData,
   orderedMonths: string[],
   targetMonth: string
-): { carryoverMap: Map<number, number>; overspentPrevious: number } {
+): {
+  carryoverMap: Map<number, number>;
+  overspentPrevious: number;
+  overspentPreviousMonthKey?: string;
+} {
   const priorMonths = orderedMonths.filter((m) => m < targetMonth);
   const mostRecentPrior = priorMonths.length > 0 ? priorMonths[priorMonths.length - 1] : null;
   const overspentPrevious = mostRecentPrior
@@ -1183,7 +1188,11 @@ function buildCarryoverMap(
       ? new Map(index.endingBalanceByMonth.get(mostRecentPrior))
       : new Map(data.categories.map((c) => [c.id, num(c.carryover)])));
 
-  return { carryoverMap, overspentPrevious };
+  return {
+    carryoverMap,
+    overspentPrevious,
+    ...(mostRecentPrior ? { overspentPreviousMonthKey: mostRecentPrior } : {}),
+  };
 }
 
 /**

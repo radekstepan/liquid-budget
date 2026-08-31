@@ -25,6 +25,7 @@ export const Inspector = memo(function Inspector({
   totalIncome,
   totalAssigned,
   overspentPrevious,
+  overspentPreviousMonthKey,
   incomeFromFuture,
   incomeFromPast,
   incomeDeferredToFuture,
@@ -49,6 +50,7 @@ export const Inspector = memo(function Inspector({
   totalIncome?: number;
   totalAssigned?: number;
   overspentPrevious?: number;
+  overspentPreviousMonthKey?: string;
   incomeFromFuture?: number;
   incomeFromPast?: number;
   incomeDeferredToFuture?: number;

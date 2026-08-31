@@ -311,18 +311,53 @@ describe("computeBudget", () => {
     // June: current month overspent
     const june = computeBudget(data, "2025-06");
     expect(june.overspentPrevious).toBe(0);
+    expect(june.overspentPreviousMonthKey).toBeUndefined();
 
     // July: June is the immediate preceding data month -> returns 200000
     const july = computeBudget(data, "2025-07");
     expect(july.overspentPrevious).toBe(200000);
+    expect(july.overspentPreviousMonthKey).toBe("2025-06");
 
     // August: June is still the most recent prior data month -> returns 200000
     const august = computeBudget(data, "2025-08");
     expect(august.overspentPrevious).toBe(200000);
+    expect(august.overspentPreviousMonthKey).toBe("2025-06");
 
     // Cache hit path for August: still returns 200000
     const augustCached = computeBudget(data, "2025-08");
     expect(augustCached.overspentPrevious).toBe(200000);
+    expect(augustCached.overspentPreviousMonthKey).toBe("2025-06");
+  });
+
+  it("BUG-14: overspentPreviousMonthKey accurately tracks prior data month across gap months", () => {
+    // Jan cash overspend $50. Feb no data. Compute budget for March.
+    const data: BudgetData = {
+      ...emptyData(),
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [makeCategory({ id: 1, carryover: "0" })],
+      assignments: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: 1, date: "2025-01-15", payee: "Store", memo: "", amount: "-5000", status: "c" },
+      ],
+    };
+
+    const jan = computeBudget(data, "2025-01");
+    expect(jan.overspentPrevious).toBe(0);
+    expect(jan.overspentPreviousMonthKey).toBeUndefined();
+
+    const feb = computeBudget(data, "2025-02");
+    expect(feb.priorSurplus).toBe(-5000);
+    expect(feb.overspentPrevious).toBe(5000);
+    expect(feb.overspentPreviousMonthKey).toBe("2025-01");
+
+    const march = computeBudget(data, "2025-03");
+    // Assert priorSurplus correctly subtracts $50 and overspentPreviousMonthKey === "2025-01"
+    expect(march.priorSurplus).toBe(-5000);
+    expect(march.overspentPrevious).toBe(5000);
+    expect(march.overspentPreviousMonthKey).toBe("2025-01");
   });
 
   it("overspentPrevious correctly handles year boundaries across gap months", () => {
@@ -341,9 +376,13 @@ describe("computeBudget", () => {
     };
 
     // 2025-12 has most recent prior data month (2025-11) with overspend
-    expect(computeBudget(dataNov, "2025-12").overspentPrevious).toBe(10000);
+    const decNov = computeBudget(dataNov, "2025-12");
+    expect(decNov.overspentPrevious).toBe(10000);
+    expect(decNov.overspentPreviousMonthKey).toBe("2025-11");
     // 2026-01 still has most recent prior data month (2025-11) with overspend
-    expect(computeBudget(dataNov, "2026-01").overspentPrevious).toBe(10000);
+    const janNov = computeBudget(dataNov, "2026-01");
+    expect(janNov.overspentPrevious).toBe(10000);
+    expect(janNov.overspentPreviousMonthKey).toBe("2025-11");
 
     // Overspend in 2025-12
     const dataDec: BudgetData = {
@@ -360,7 +399,9 @@ describe("computeBudget", () => {
     };
 
     // 2026-01 previous data month is 2025-12 -> 15000
-    expect(computeBudget(dataDec, "2026-01").overspentPrevious).toBe(15000);
+    const janDec = computeBudget(dataDec, "2026-01");
+    expect(janDec.overspentPrevious).toBe(15000);
+    expect(janDec.overspentPreviousMonthKey).toBe("2025-12");
   });
 
   it("credit card overspending does NOT get clamped and does NOT affect TBB", () => {
