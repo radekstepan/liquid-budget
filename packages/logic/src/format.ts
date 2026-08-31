@@ -555,9 +555,10 @@ export function nextDateFor(
         Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
       ).getUTCDate();
       const clampedD2 = Math.min(d2, lastDay);
-      const isFirstHalf = currentDay < clampedD2;
 
-      if (isFirstHalf) {
+      if (currentDay < d1) {
+        d.setUTCDate(d1);
+      } else if (currentDay < clampedD2) {
         d.setUTCDate(clampedD2);
       } else {
         d.setUTCDate(1);
