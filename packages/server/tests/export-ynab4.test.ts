@@ -467,7 +467,7 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     expect(sched.isTombstone).toBe(false);
     expect(sched.active).toBe(false);
     expect(sched.anchorDay).toBe(20);
-    expect(sched.amount).toBe(-150);
+    expect(sched.amount).toBe(-150000);
   });
 
   it("falls back to next month for legacy YNAB4 backups missing incomeMonth (BUG-18)", async () => {
@@ -605,12 +605,12 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     expect(exportedCcSub).toBeDefined();
 
     // cachedBalance must reflect live engine available ($50.00), not the static seed carryover ($0)
-    expect(exportedCcSub.cachedBalance).toBe(50.0);
-    expect(exportedCcSub.carryover).toBe(0.0);
+    expect(exportedCcSub.cachedBalance).toBe(50000);
+    expect(exportedCcSub.carryover).toBe(0);
 
     const exportedGenGroup = ynabData.masterCategories.find((mc: any) => mc.name === "Everyday Expenses");
     const exportedGrocSub = exportedGenGroup.subCategories.find((sc: any) => sc.name === "Groceries");
-    expect(exportedGrocSub.cachedBalance).toBe(150.0);
+    expect(exportedGrocSub.cachedBalance).toBe(150000);
 
     // Roundtrip test: export to zip and import into DB2
     const zipBuf = await exportYnab4Zip(db1);
@@ -627,5 +627,84 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     // Both initial and imported budgets produce identical account balances and transaction totals
     expect(Number(data2.accounts.find((a) => a.name === "Credit Card")?.balance)).toBe(-5000);
     expect(data2.transactions).toHaveLength(1);
+  });
+
+  it("exports transactions, subtransactions, assignments, reconciliations, and scheduled transactions in integer milliunits (BUG-05)", async () => {
+    const db = openMigratedDb();
+    const [acc] = await db.insert(schema.accounts).values({
+      name: "Checking",
+      kind: "liquid",
+      groupLabel: "Cash",
+      balance: 12345,
+      lastReconciledBalance: 50000,
+    }).returning();
+
+    const [grp] = await db.insert(schema.categoryGroups).values({
+      name: "Immediate Obligations",
+      sort: 0,
+    }).returning();
+
+    const [cat] = await db.insert(schema.categories).values({
+      groupId: grp!.id,
+      name: "Groceries",
+      sort: 0,
+      carryover: 1000,
+    }).returning();
+
+    await db.insert(schema.assignments).values({
+      categoryId: cat!.id,
+      month: "2026-08",
+      amount: 45000,
+    });
+
+    const [tx] = await db.insert(schema.transactions).values({
+      accountId: acc!.id,
+      categoryId: cat!.id,
+      date: "2026-08-15",
+      payee: "Supermarket",
+      memo: "Weekly shop",
+      amount: 12345,
+      status: "c",
+    }).returning();
+
+    const [rec] = await db.insert(schema.reconciliations).values({
+      accountId: acc!.id,
+      reconciledAt: "2026-08-31",
+      statementDate: "2026-08-31",
+      statementBalance: 50000,
+    }).returning();
+
+    await db.insert(schema.recurring).values({
+      accountId: acc!.id,
+      categoryId: cat!.id,
+      payee: "Internet Provider",
+      amount: -6000,
+      frequency: "monthly",
+      nextDate: "2026-09-01",
+    });
+
+    const { ynabData } = await exportYnab4(db);
+
+    const exportedTx = ynabData.transactions.find((t: any) => t.entityId === `tx-${tx!.id}`);
+    expect(exportedTx).toBeDefined();
+    expect(exportedTx.amount).toBe(123450);
+
+    const exportedAcc = ynabData.accounts.find((a: any) => a.entityId === `acc-${acc!.id}`);
+    expect(exportedAcc).toBeDefined();
+    expect(exportedAcc.lastReconciledBalance).toBe(500000);
+
+    const exportedBudget = ynabData.monthlyBudgets.find((mb: any) => mb.entityId === "MB/2026-08");
+    expect(exportedBudget).toBeDefined();
+    const exportedCatBudget = exportedBudget.monthlySubCategoryBudgets.find((b: any) => b.categoryId === `sc-${cat!.id}`);
+    expect(exportedCatBudget).toBeDefined();
+    expect(exportedCatBudget.budgeted).toBe(450000);
+
+    const exportedRec = ynabData.reconciliations.find((r: any) => r.entityId === `rec-${rec!.id}`);
+    expect(exportedRec).toBeDefined();
+    expect(exportedRec.statementBalance).toBe(500000);
+
+    const exportedSched = ynabData.scheduledTransactions.find((s: any) => s.payeeId?.includes("internet"));
+    expect(exportedSched).toBeDefined();
+    expect(exportedSched.amount).toBe(-60000);
   });
 });

@@ -26,9 +26,7 @@ import { findOrCreatePayee } from "./queries/payees.js";
  *
  * Detection algorithm:
  * 1. If any non-zero amount has a fractional part (e.g., 45.25, 0.5) -> decimal dollars.
- * 2. If the backup contains this app's export signatures (e.g. entityId "budget-metadata"
- *    and entityVersion prefixes like "acc-v-"), it is decimal dollars.
- * 3. Analyze all-integer amounts:
+ * 2. Analyze all-integer amounts:
  *    - In decimal dollars, everyday purchases are small integers: 1 to 999 (e.g. $5, $15, $45, $120).
  *      In milliunits, these values would represent tiny fractions of a cent ($0.001 to $0.999).
  *    - If there are non-multiple-of-100 values < 1000 (e.g. 15, 25, 45, 12, 1, 2) or if more than
@@ -84,16 +82,7 @@ export function detectMilliunitScale(ynabData: any): boolean {
     if (a % 1 !== 0) return false;
   }
 
-  // 2. Check for app export signatures that indicate decimal dollar format
-  const isAppExport =
-    ynabData.budgetMetaData?.entityId === "budget-metadata" ||
-    (Array.isArray(ynabData.accounts) &&
-      ynabData.accounts.some((a: any) => typeof a.entityVersion === "string" && a.entityVersion.startsWith("acc-v-")));
-  if (isAppExport) {
-    return false;
-  }
-
-  // 3. All amounts are integers. Analyze distribution of magnitudes.
+  // 2. All amounts are integers. Analyze distribution of magnitudes.
   let smallCount = 0;
   let smallNonMultipleOf100Count = 0;
 

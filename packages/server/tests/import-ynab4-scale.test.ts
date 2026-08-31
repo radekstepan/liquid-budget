@@ -33,16 +33,29 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
       expect(detectMilliunitScale(data)).toBe(false);
     });
 
-    it("detects decimal dollars for app export signature even with whole-dollar amounts >= 10k", () => {
+    it("detects decimal dollars for whole-dollar budget containing everyday dollar amounts alongside large amounts", () => {
       const data = {
         budgetMetaData: { entityId: "budget-metadata" },
         accounts: [{ entityId: "acc-1", entityVersion: "acc-v-1", accountName: "Checking" }],
         transactions: [
           { amount: 15000 }, // $15,000 house repair
           { amount: 2000 },  // $2,000 rent
+          { amount: 45 },    // $45 groceries
         ],
       };
       expect(detectMilliunitScale(data)).toBe(false);
+    });
+
+    it("detects milliunits for app export signature with milliunit amounts (BUG-05)", () => {
+      const data = {
+        budgetMetaData: { entityId: "budget-metadata" },
+        accounts: [{ entityId: "acc-1", entityVersion: "acc-v-1", accountName: "Checking" }],
+        transactions: [
+          { amount: 150000 }, // $150.00 in milliunits
+          { amount: 20000 },  // $20.00 in milliunits
+        ],
+      };
+      expect(detectMilliunitScale(data)).toBe(true);
     });
 
     it("detects decimal dollars for whole-dollar budget containing everyday dollar amounts (< 1000)", () => {
@@ -163,7 +176,7 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
       expect(Number(budget.assignments[0]?.amount)).toBe(10000);
     });
 
-    it("correctly imports whole-dollar decimal budget containing large amounts", async () => {
+    it("correctly imports whole-dollar decimal budget containing small amounts", async () => {
       const decimalBackup = {
         budgetMetaData: { entityId: "budget-metadata" },
         accounts: [
@@ -171,13 +184,14 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
         ],
         payees: [
           { entityId: "p-1", name: "Downpayment" },
+          { entityId: "p-2", name: "Lunch" },
         ],
         masterCategories: [
           {
             entityId: "mc-1",
             name: "Housing",
             type: "OUTFLOW",
-            subCategories: [{ entityId: "sc-1", name: "House" }],
+            subCategories: [{ entityId: "sc-1", name: "House" }, { entityId: "sc-2", name: "Food" }],
           },
         ],
         transactions: [
@@ -190,12 +204,22 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
             payeeId: "p-1",
             categoryId: "sc-1",
           },
+          {
+            entityId: "t-2",
+            accountId: "acc-1",
+            date: "2026-06-02",
+            amount: 15, // $15.00 lunch (identifies file as decimal dollars)
+            cleared: "Cleared",
+            payeeId: "p-2",
+            categoryId: "sc-2",
+          },
         ],
         monthlyBudgets: [
           {
             month: "2026-06-01",
             monthlySubCategoryBudgets: [
               { categoryId: "sc-1", budgeted: 25000 }, // $25,000.00 in decimal dollars
+              { categoryId: "sc-2", budgeted: 15 },
             ],
           },
         ],
@@ -205,11 +229,15 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
       const budget = await getBudgetData(db);
 
       // Transaction amount = $25,000.00 = 2,500,000 cents
-      const tx = budget.transactions[0];
+      const tx = budget.transactions.find((t) => t.payee === "Downpayment");
       expect(Number(tx?.amount)).toBe(2500000);
 
+      const tx2 = budget.transactions.find((t) => t.payee === "Lunch");
+      expect(Number(tx2?.amount)).toBe(1500);
+
       // Assignment amount = $25,000.00 = 2,500,000 cents
-      expect(Number(budget.assignments[0]?.amount)).toBe(2500000);
+      const assign = budget.assignments.find((a) => Number(a.amount) === 2500000);
+      expect(assign).toBeDefined();
     });
   });
 });
