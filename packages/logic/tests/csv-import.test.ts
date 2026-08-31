@@ -934,4 +934,74 @@ describe("parseAmount (BUG-20)", () => {
       error: null,
     });
   });
+
+  it("imports single-row headerless CSV starting directly with data without losing row 1 (BUG-13)", () => {
+    const csv = "01/05/2026,Shell,-42.10\n";
+    const result = parseCsvImport(csv);
+    expect(result.headerError).toBeNull();
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toEqual({
+      rowNumber: 1,
+      date: "2026-05-01",
+      payee: "Shell",
+      memo: "",
+      category: "",
+      amountCents: -4210,
+      error: null,
+    });
+  });
+
+  it("imports multi-row headerless CSV with 3, 4, and 5 columns (BUG-13)", () => {
+    // 3 columns: Date, Payee, Amount
+    const csv3 = [
+      "2026-08-01,Shell,-42.10",
+      "2026-08-02,Starbucks,-5.50",
+      "2026-08-03,Employer,2500.00",
+    ].join("\n");
+    const res3 = parseCsvImport(csv3);
+    expect(res3.headerError).toBeNull();
+    expect(res3.rows).toHaveLength(3);
+    expect(res3.rows[0]).toMatchObject({ rowNumber: 1, date: "2026-08-01", payee: "Shell", amountCents: -4210 });
+    expect(res3.rows[1]).toMatchObject({ rowNumber: 2, date: "2026-08-02", payee: "Starbucks", amountCents: -550 });
+    expect(res3.rows[2]).toMatchObject({ rowNumber: 3, date: "2026-08-03", payee: "Employer", amountCents: 250000 });
+
+    // 4 columns: Date, Payee, Memo, Amount
+    const csv4 = [
+      "2026-08-01,Shell,Gas station,-42.10",
+      "2026-08-02,Starbucks,Coffee,-5.50",
+    ].join("\n");
+    const res4 = parseCsvImport(csv4);
+    expect(res4.headerError).toBeNull();
+    expect(res4.rows).toHaveLength(2);
+    expect(res4.rows[0]).toMatchObject({
+      rowNumber: 1,
+      date: "2026-08-01",
+      payee: "Shell",
+      memo: "Gas station",
+      amountCents: -4210,
+    });
+
+    // 5 columns: Date, Payee, Memo, Outflow, Inflow
+    const csv5 = [
+      "2026-08-01,Shell,Gas station,42.10,",
+      "2026-08-02,Employer,Payroll,,2500.00",
+    ].join("\n");
+    const res5 = parseCsvImport(csv5);
+    expect(res5.headerError).toBeNull();
+    expect(res5.rows).toHaveLength(2);
+    expect(res5.rows[0]).toMatchObject({
+      rowNumber: 1,
+      date: "2026-08-01",
+      payee: "Shell",
+      memo: "Gas station",
+      amountCents: -4210,
+    });
+    expect(res5.rows[1]).toMatchObject({
+      rowNumber: 2,
+      date: "2026-08-02",
+      payee: "Employer",
+      memo: "Payroll",
+      amountCents: 250000,
+    });
+  });
 });
