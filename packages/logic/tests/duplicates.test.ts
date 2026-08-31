@@ -184,6 +184,16 @@ describe("findDuplicateGroups", () => {
     expect(groups[0]!.duplicates.map((d) => d.id)).toEqual([1]);
   });
 
+  it("prefers reconciled ('r') transaction as primary over uncleared ('u') duplicate (BUG-17)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, status: "u" }),
+      row({ id: 2, status: "r" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.keeper.id).toBe(2);
+    expect(groups[0]!.duplicates.map((d) => d.id)).toEqual([1]);
+  });
+
   it("preserves relative order among multiple reconciled rows when choosing keeper (BUG-33)", () => {
     const groups = findDuplicateGroups([
       row({ id: 1, status: "c" }),
