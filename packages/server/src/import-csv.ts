@@ -3,7 +3,7 @@ import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
 import { applyRenameRules, buildExistingImportFingerprints, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
-import { accounts, categories, transactions } from "./schema.js";
+import { accounts, categories, categoryGroups, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
 import { findOrCreatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
@@ -18,6 +18,90 @@ export type ImportCsvResult = {
   skipped: ImportSkippedEntry[];
 };
 
+export type CategoryLookupItem = {
+  id: number;
+  name: string;
+  groupName: string;
+};
+
+/**
+ * Deterministically match a CSV category input against the budget categories.
+ *
+ * Matching priority:
+ * 1. Exact match on category name across all groups (if unambiguous). If multiple
+ *    categories in different groups share the exact name without a group prefix,
+ *    it is considered ambiguous and resolves to null.
+ * 2. Compound match with group qualification (e.g. "Group: Category",
+ *    "Group / Category", "Group - Category"), tried exact-case then case-insensitive.
+ * 3. Case-insensitive category name match (if unambiguous). If multiple categories
+ *    match case-insensitively across groups, resolves to null.
+ */
+export function resolveImportCategory(
+  rawInput: string | null | undefined,
+  categoriesList: CategoryLookupItem[]
+): number | null {
+  if (!rawInput) return null;
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  // 1. Exact match on category name if unambiguous
+  const exactCatMatches = categoriesList.filter((c) => c.name.trim() === trimmed);
+  if (exactCatMatches.length === 1) {
+    return exactCatMatches[0]!.id;
+  }
+  if (exactCatMatches.length > 1) {
+    // Ambiguous: multiple categories in different groups share the exact name
+    return null;
+  }
+
+  // 2. Compound match (Group: Category, Group / Category, Group - Category)
+  const isCompoundExact = (c: CategoryLookupItem) => {
+    const gn = c.groupName.trim();
+    const cn = c.name.trim();
+    return (
+      trimmed === `${gn}: ${cn}` ||
+      trimmed === `${gn}:${cn}` ||
+      trimmed === `${gn} / ${cn}` ||
+      trimmed === `${gn}/${cn}` ||
+      trimmed === `${gn} - ${cn}`
+    );
+  };
+  const compoundExactMatches = categoriesList.filter(isCompoundExact);
+  if (compoundExactMatches.length === 1) {
+    return compoundExactMatches[0]!.id;
+  }
+  if (compoundExactMatches.length > 1) {
+    return null;
+  }
+
+  const trimmedLower = trimmed.toLowerCase();
+  const isCompoundCI = (c: CategoryLookupItem) => {
+    const gn = c.groupName.trim().toLowerCase();
+    const cn = c.name.trim().toLowerCase();
+    return (
+      trimmedLower === `${gn}: ${cn}` ||
+      trimmedLower === `${gn}:${cn}` ||
+      trimmedLower === `${gn} / ${cn}` ||
+      trimmedLower === `${gn}/${cn}` ||
+      trimmedLower === `${gn} - ${cn}`
+    );
+  };
+  const compoundCIMatches = categoriesList.filter(isCompoundCI);
+  if (compoundCIMatches.length === 1) {
+    return compoundCIMatches[0]!.id;
+  }
+  if (compoundCIMatches.length > 1) {
+    return null;
+  }
+
+  // 3. Case-insensitive category name match
+  const ciCatMatches = categoriesList.filter((c) => c.name.trim().toLowerCase() === trimmedLower);
+  if (ciCatMatches.length === 1) {
+    return ciCatMatches[0]!.id;
+  }
+  return null;
+}
+
 export async function importCsvTransactions(db: Db, input: ImportCsvInput): Promise<ImportCsvResult> {
   return withTransaction(db, async () => {
     const [account] = await db.select().from(accounts).where(eq(accounts.id, input.accountId));
@@ -27,14 +111,15 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     const allAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts);
     const accountNameById = new Map(allAccounts.map((a) => [a.id, a.name]));
 
-    const categoryRows = await db
-      .select({ id: categories.id, name: categories.name })
-      .from(categories);
-    const categoryByName = new Map<string, number>();
-    for (const c of categoryRows) {
-      const key = c.name.trim().toLowerCase();
-      if (!categoryByName.has(key)) categoryByName.set(key, c.id);
-    }
+    const categoryRows: CategoryLookupItem[] = await db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        groupName: categoryGroups.name,
+      })
+      .from(categories)
+      .innerJoin(categoryGroups, eq(categories.groupId, categoryGroups.id))
+      .orderBy(categoryGroups.sort, categories.sort, categories.id);
     // Automatic payee rename rules are applied to every incoming row before
     // duplicate detection and insertion, so re-importing a bank statement
     // produces clean, consistent payee names.
@@ -136,7 +221,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         continue;
       }
       const categoryId = account.onBudget && row.category
-        ? (categoryByName.get(row.category.trim().toLowerCase()) ?? null)
+        ? resolveImportCategory(row.category, categoryRows)
         : null;
       // Link the row to a payee entity (creating it on first sight, BUG-16) and
       // fall back to the payee's auto-category when the statement row carries no

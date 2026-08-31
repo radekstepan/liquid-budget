@@ -561,16 +561,6 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   }
 
   if (
-    patch.flagColor !== undefined &&
-    existing.flagColor === TRANSACTION_DUPLICATE_FLAG
-  ) {
-    throw new TransactionError(
-      "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
-      422
-    );
-  }
-
-  if (
     existing.transferAccountId != null &&
     patch.accountId != null &&
     Number(patch.accountId) === existing.transferAccountId
@@ -805,12 +795,6 @@ export async function updateSplit(
     }
     if (parent.parentId != null || parent.transferAccountId != null) {
       throw new TransactionError("target row is not a split parent");
-    }
-    if ("flagColor" in parentFields && parentFields.flagColor !== undefined && parent.flagColor === TRANSACTION_DUPLICATE_FLAG) {
-      throw new TransactionError(
-        "This transaction is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.",
-        422
-      );
     }
     if (parentFields.date !== undefined && parentFields.date != null) {
       assertValidISODate(parentFields.date, "date");
@@ -1217,12 +1201,6 @@ export async function bulkUpdateTransactions(
             422
           );
         }
-      }
-      if ("flagColor" in patch && patch.flagColor !== undefined && existing.flagColor === TRANSACTION_DUPLICATE_FLAG) {
-        throw new TransactionError(
-          `Transaction ${id} is flagged as a duplicate; its flag cannot be changed. Remove the duplicate and rerun the duplicate check.`,
-          422
-        );
       }
 
       const isParent = existing.parentId == null && existing.transferAccountId == null;

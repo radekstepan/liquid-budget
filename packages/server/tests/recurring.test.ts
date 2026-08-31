@@ -1375,6 +1375,40 @@ describe("recurring queries", () => {
       expect(deactivationCall).toBeDefined();
     });
 
+    it("BUG-12: autoPostDueRecurringTransactions leaves rule active on transient / system errors", async () => {
+      const dueRow = {
+        id: 95,
+        accountId: 1,
+        categoryId: 2,
+        payee: "Internet Bill",
+        amount: -8000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        active: true,
+        transferAccountId: null,
+      };
+
+      // 1. Initial query finds the due rule
+      mock.respondWithNth("select:recurring", 1, [dueRow]);
+      // 2. Querying the rule inside postRecurringTransaction fails with a transient SQLITE_BUSY error
+      mock.respondWithNth("select:recurring", 2, new Error("SQLITE_BUSY: database is locked"));
+
+      const posted = await autoPostDueRecurringTransactions(mock.db, "2026-06-15");
+      expect(posted).toHaveLength(0);
+      expect((posted as any).failures).toHaveLength(1);
+      expect((posted as any).failures[0]).toMatchObject({
+        id: 95,
+        payee: "Internet Bill",
+        error: expect.stringContaining("database is locked"),
+      });
+
+      // Verify NO deactivation update was issued (active=false was NOT called)
+      const deactivationCall = mock.calls.find(
+        (c) => c.op === "update" && c.table === "recurring" && c.set && c.set.active === false
+      );
+      expect(deactivationCall).toBeUndefined();
+    });
+
     it("BUG-07: refuses anchorDay: null on month-based frequencies in updateRecurring", async () => {
       const monthlyRow = {
         id: 101,

@@ -133,24 +133,45 @@ function makeChain(
       return chain;
     },
     async returning() {
-      return resolve() as Row[];
+      const value = resolve();
+      if (value instanceof Error) throw value;
+      return value as Row[];
     },
     all() {
-      return resolve() as Row[];
+      const value = resolve();
+      if (value instanceof Error) throw value;
+      return value as Row[];
     },
     get() {
-      const rows = resolve() as Row[];
+      const value = resolve();
+      if (value instanceof Error) throw value;
+      const rows = value as Row[];
       return rows[0];
     },
     then(resolveFn, reject) {
       const value = resolve();
-      try {
-        resolveFn(value as never);
-      } catch (e) {
-        if (reject) reject(e);
-        else throw e;
+      if (value instanceof Error) {
+        if (reject) {
+          try {
+            return Promise.resolve(reject(value));
+          } catch (e) {
+            return Promise.reject(e);
+          }
+        }
+        return Promise.reject(value);
       }
-      return Promise.resolve();
+      try {
+        return Promise.resolve(resolveFn(value as never));
+      } catch (e) {
+        if (reject) {
+          try {
+            return Promise.resolve(reject(e));
+          } catch (re) {
+            return Promise.reject(re);
+          }
+        }
+        return Promise.reject(e);
+      }
     },
   };
   return chain;

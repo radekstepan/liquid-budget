@@ -185,7 +185,7 @@ describe("importCsvTransactions", () => {
     expect(data.transactions[0]!.isIncome).toBe(false);
   });
 
-  it("resolves category names case-insensitively", async () => {
+  it("resolves category names case-insensitively when unambiguous", async () => {
     const accountId = await seedAccount();
     const [g] = await db
       .insert(schema.categoryGroups)
@@ -207,6 +207,107 @@ describe("importCsvTransactions", () => {
     const data = await getBudgetData(db);
     const catId = data.categories.find((c) => c.name === "Groceries")?.id;
     expect(data.transactions[0]!.categoryId).toBe(catId);
+  });
+
+  it("leaves ambiguous category names across different groups uncategorized (BUG-11)", async () => {
+    const accountId = await seedAccount();
+    const [g1] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Home", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [g2] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Work", sort: 1, isCreditCardPayments: false })
+      .returning();
+
+    const [c1] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: g1!.id,
+        name: "Misc",
+        sort: 0,
+        carryover: 0,
+        goalTarget: null,
+        linkedAccountId: null,
+        overspendCarriesOver: false,
+      })
+      .returning();
+
+    const [c2] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: g2!.id,
+        name: "Misc",
+        sort: 0,
+        carryover: 0,
+        goalTarget: null,
+        linkedAccountId: null,
+        overspendCarriesOver: false,
+      })
+      .returning();
+
+    // Ambiguous unqualified name "misc" / "Misc" should remain uncategorized
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Ambiguous Store", category: "Misc" }),
+        row({ rowNumber: 3, payee: "Ambiguous Lower Store", category: "misc" }),
+      ],
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.find((t) => t.payee === "Ambiguous Store")?.categoryId).toBeNull();
+    expect(data.transactions.find((t) => t.payee === "Ambiguous Lower Store")?.categoryId).toBeNull();
+  });
+
+  it("resolves compound Group: Category names deterministically (BUG-11)", async () => {
+    const accountId = await seedAccount();
+    const [g1] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Home", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [g2] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Work", sort: 1, isCreditCardPayments: false })
+      .returning();
+
+    const [c1] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: g1!.id,
+        name: "Supplies",
+        sort: 0,
+        carryover: 0,
+        goalTarget: null,
+        linkedAccountId: null,
+        overspendCarriesOver: false,
+      })
+      .returning();
+
+    const [c2] = await db
+      .insert(schema.categories)
+      .values({
+        groupId: g2!.id,
+        name: "Supplies",
+        sort: 0,
+        carryover: 0,
+        goalTarget: null,
+        linkedAccountId: null,
+        overspendCarriesOver: false,
+      })
+      .returning();
+
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [
+        row({ rowNumber: 2, payee: "Home Store", category: "Home: Supplies" }),
+        row({ rowNumber: 3, payee: "Work Store", category: "Work / Supplies" }),
+      ],
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.find((t) => t.payee === "Home Store")?.categoryId).toBe(c1!.id);
+    expect(data.transactions.find((t) => t.payee === "Work Store")?.categoryId).toBe(c2!.id);
   });
 
   it("leaves unmatched category names uncategorized", async () => {
