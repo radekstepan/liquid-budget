@@ -42,12 +42,6 @@ async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-type BudgetResponse = BudgetData & {
-  autoPostedRecurringCount?: number;
-  autoPostedRecurringCapped?: { id: number; payee: string; remainingDue: number }[];
-  autoPostedRecurringFailures?: { id: number; payee: string; error: string }[];
-};
-
 type MutationMessages<T> = {
   success?: string;
   failure: string;
@@ -105,7 +99,7 @@ export function BudgetAppShell({
   const reload = useCallback(async () => {
     const seq = ++reloadSeqRef.current;
     const currentMutationSeq = mutationSeqRef.current;
-    const json = await jsonReq<BudgetResponse>("/api/budget");
+    const budget = await jsonReq<BudgetData>("/api/budget");
 
     // Drop stale responses if a newer reload has completed or if a newer mutation started
     if (seq <= latestCompletedReloadSeqRef.current || currentMutationSeq < mutationSeqRef.current) {
@@ -113,35 +107,8 @@ export function BudgetAppShell({
     }
     latestCompletedReloadSeqRef.current = seq;
 
-    const { autoPostedRecurringCount, autoPostedRecurringCapped, autoPostedRecurringFailures, ...budget } = json;
     setData(budget);
-    if (autoPostedRecurringCount != null && autoPostedRecurringCount > 0) {
-      addToast(
-        `Automatically entered ${autoPostedRecurringCount} scheduled transaction${
-          autoPostedRecurringCount === 1 ? "" : "s"
-        }.`,
-        "ok"
-      );
-    }
-    if (autoPostedRecurringCapped && autoPostedRecurringCapped.length > 0) {
-      const names = autoPostedRecurringCapped
-        .map((c) => c.payee || "Scheduled transaction")
-        .join(", ");
-      addToast(
-        `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
-        "warn"
-      );
-    }
-    if (autoPostedRecurringFailures && autoPostedRecurringFailures.length > 0) {
-      const names = autoPostedRecurringFailures
-        .map((f) => (f.payee ? `${f.payee}: ${f.error}` : f.error))
-        .join("; ");
-      addToast(
-        `Failed to auto-post scheduled transaction: ${names}`,
-        "danger"
-      );
-    }
-  }, [addToast]);
+  }, []);
 
   const runMutation = useCallback(
     async <T,>(
@@ -189,8 +156,57 @@ export function BudgetAppShell({
   }, []);
 
   useEffect(() => {
-    reload().catch((e: unknown) => setError(String(e)));
-  }, [reload]);
+    let mounted = true;
+    (async () => {
+      try {
+        // Auto-post due scheduled transactions on mount (keeping GET /api/budget pure, BUG-20)
+        try {
+          const autoPostRes = await jsonReq<{
+            postedCount?: number;
+            failures?: { id: number; payee?: string; error: string }[];
+            capped?: { id: number; payee?: string; remainingDue: number }[];
+          }>("/api/recurring?action=autopost", { method: "POST" });
+          if (mounted && autoPostRes) {
+            const count = autoPostRes.postedCount ?? 0;
+            if (count > 0) {
+              addToast(
+                `Automatically entered ${count} scheduled transaction${
+                  count === 1 ? "" : "s"
+                }.`,
+                "ok"
+              );
+            }
+            if (autoPostRes.capped && autoPostRes.capped.length > 0) {
+              const names = autoPostRes.capped
+                .map((c) => c.payee || "Scheduled transaction")
+                .join(", ");
+              addToast(
+                `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
+                "warn"
+              );
+            }
+            if (autoPostRes.failures && autoPostRes.failures.length > 0) {
+              const names = autoPostRes.failures
+                .map((f) => (f.payee ? `${f.payee}: ${f.error}` : f.error))
+                .join("; ");
+              addToast(
+                `Failed to auto-post scheduled transaction: ${names}`,
+                "danger"
+              );
+            }
+          }
+        } catch (autoErr) {
+          console.error("Auto-post on mount failed:", autoErr);
+        }
+        await reload();
+      } catch (e: unknown) {
+        if (mounted) setError(String(e));
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [reload, addToast]);
 
   const api: BudgetAppApi = {
     reload,

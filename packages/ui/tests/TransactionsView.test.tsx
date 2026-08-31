@@ -107,7 +107,7 @@ describe("TransactionsView", () => {
       parentId: 9001,
     };
 
-    data.transactions.unshift(splitParent, splitChild1, splitChild2);
+    data.transactions = [splitParent, splitChild1, splitChild2, ...data.transactions];
 
     render(
       <TransactionsView
@@ -124,12 +124,142 @@ describe("TransactionsView", () => {
     expect(screen.getAllByText("Costco Wholesale Split").length).toBe(1);
     expect(screen.getByText("Split (Multiple Categories)")).toBeInTheDocument();
 
+    // Collapsed by default
     expect(screen.queryByText("Groceries part")).not.toBeInTheDocument();
     expect(screen.queryByText("Electronics part")).not.toBeInTheDocument();
     expect(screen.queryByText("↳")).not.toBeInTheDocument();
 
+    // Click expand button
+    const expandBtn = screen.getByRole("button", { name: /expand split sub-transactions/i });
+    fireEvent.click(expandBtn);
+
+    // Now sub-rows are visible with their categories, memos, and ↳ glyphs
+    expect(screen.getByText("Groceries part")).toBeInTheDocument();
+    expect(screen.getByText("Electronics part")).toBeInTheDocument();
+    expect(screen.getAllByText("↳").length).toBe(2);
+
+    // Clicking collapse button hides them again
+    const collapseBtn = screen.getByRole("button", { name: /collapse split sub-transactions/i });
+    fireEvent.click(collapseBtn);
+    expect(screen.queryByText("Groceries part")).not.toBeInTheDocument();
+    expect(screen.queryByText("Electronics part")).not.toBeInTheDocument();
+
+    // Clicking the parent row opens the edit modal with parent id
     fireEvent.click(screen.getByText("Costco Wholesale Split"));
     expect(onEdit).toHaveBeenCalledWith(9001);
+  });
+
+  it("clicking a child sub-row opens the parent split transaction in the edit modal (BUG-19)", () => {
+    const data = makeSeedBudgetData();
+    const onEdit = vi.fn();
+    const splitParent = {
+      id: 9001,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Combined run",
+      amount: "-15000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    const splitChild1 = {
+      id: 9002,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Groceries part",
+      amount: "-10000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+    const splitChild2 = {
+      id: 9003,
+      accountId: 1,
+      categoryId: 2,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Electronics part",
+      amount: "-5000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+
+    data.transactions = [splitParent, splitChild1, splitChild2, ...data.transactions];
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // Expand
+    fireEvent.click(screen.getByRole("button", { name: /expand split sub-transactions/i }));
+
+    // Click child row
+    fireEvent.click(screen.getByText("Groceries part"));
+    expect(onEdit).toHaveBeenCalledWith(9001);
+  });
+
+  it("auto-expands split sub-transactions when searching for a child's memo or category (BUG-19)", () => {
+    const data = makeSeedBudgetData();
+    const splitParent = {
+      id: 9001,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Combined run",
+      amount: "-15000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    const splitChild1 = {
+      id: 9002,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "UniqueGroceriesMemo123",
+      amount: "-10000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+
+    data.transactions = [splitParent, splitChild1, ...data.transactions];
+
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // Search for child memo
+    const searchInput = screen.getByPlaceholderText("Search register");
+    fireEvent.change(searchInput, { target: { value: "UniqueGroceriesMemo123" } });
+
+    // Both parent and child should be rendered
+    expect(screen.getAllByText("Costco Wholesale Split").length).toBe(2);
+    expect(screen.getByText("UniqueGroceriesMemo123")).toBeInTheDocument();
+    expect(screen.getByText("↳")).toBeInTheDocument();
   });
 
   it("renders incoming split transfers on the destination account register", () => {
@@ -172,7 +302,7 @@ describe("TransactionsView", () => {
       parentId: 9100,
     };
 
-    data.transactions.unshift(splitParent, splitExpenseChild, splitTransferChild);
+    data.transactions = [splitParent, splitExpenseChild, splitTransferChild, ...data.transactions];
 
     render(
       <TransactionsView
