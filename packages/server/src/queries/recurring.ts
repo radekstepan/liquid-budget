@@ -341,9 +341,13 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       }
       p.anchorDay = numAnchor;
     }
-  } else if (p.frequency !== undefined && isMonthBasedFrequency(effectiveFreq) && existing.anchorDay == null) {
-    const dateForAnchor = (p.nextDate as string | undefined) ?? existing.nextDate;
-    p.anchorDay = parseInt(dateForAnchor.slice(8, 10), 10);
+  } else if (isMonthBasedFrequency(effectiveFreq)) {
+    if (patch.nextDate !== undefined) {
+      p.anchorDay = parseInt((p.nextDate as string).slice(8, 10), 10);
+    } else if (p.frequency !== undefined) {
+      const dateForAnchor = (p.nextDate as string | undefined) ?? existing.nextDate;
+      p.anchorDay = parseInt(dateForAnchor.slice(8, 10), 10);
+    }
   }
   if (patch.active !== undefined && patch.active != null) p.active = !!patch.active;
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);

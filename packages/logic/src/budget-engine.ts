@@ -1006,7 +1006,6 @@ function computePriorTBBSurplus(
 
   const priorMonths = orderedMonths.filter((m) => m < targetMonth);
   if (priorMonths.length === 0) {
-    index.surplusByMonth.set(targetMonth, 0);
     return 0;
   }
 
@@ -1020,7 +1019,6 @@ function computePriorTBBSurplus(
     surplus = tbb;
   }
 
-  index.surplusByMonth.set(targetMonth, surplus);
   return surplus;
 }
 

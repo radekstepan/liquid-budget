@@ -3240,6 +3240,41 @@ describe("computeBudget", () => {
       });
     });
   });
+
+  describe("BUG-18: Engine cache purity", () => {
+    it("computeBudget does not mutate cached index.surplusByMonth for unindexed months", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 0 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "10000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Salary", memo: "", amount: "50000", status: "c", isIncome: true },
+        ],
+        recurring: [],
+      };
+
+      const serializedIndex = buildBudgetIndex(data);
+      const copyData = { ...data, budgetIndex: serializedIndex };
+
+      // Before computeBudget on future month 2026-05
+      expect(serializedIndex.surplusByMonth["2026-05"]).toBeUndefined();
+
+      const res = computeBudget(copyData, "2026-05");
+      expect(res.priorSurplus).toBe(40000);
+
+      // Verify serializedIndex.surplusByMonth was NOT mutated
+      expect(serializedIndex.surplusByMonth["2026-05"]).toBeUndefined();
+    });
+  });
 });
 
 

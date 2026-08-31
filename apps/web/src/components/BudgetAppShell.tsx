@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, Transaction } from "@ynab/logic";
+import type { Account, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
 import { invalidateBudgetIndex, num, classifyBoundaryTransfer } from "@ynab/logic";
 
 function applyAccountDeltas(
@@ -25,8 +25,19 @@ async function jsonReq<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Request failed (${res.status}): ${text}`);
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      const text = await res.text().catch(() => "");
+      body = { error: text };
+    }
+    const err = new Error(body?.error || `Request failed (${res.status})`);
+    (err as any).status = res.status;
+    if (body?.state) {
+      (err as any).state = body.state;
+    }
+    throw err;
   }
   return res.json() as Promise<T>;
 }
@@ -1193,7 +1204,18 @@ export function BudgetAppShell({
         )
       );
     },
-    reconcileAccount: async ({ accountId, statementBalance, adjustmentCategoryId }) => {
+    getReconcileState: async (accountId: number, statementDate?: string) => {
+      const qs = new URLSearchParams({ accountId: String(accountId) });
+      if (statementDate) qs.set("statementDate", statementDate);
+      return await jsonReq<ReconcileState>(`/api/reconcile?${qs.toString()}`);
+    },
+    reconcileAccount: async ({
+      accountId,
+      statementBalance,
+      statementDate,
+      adjustmentCategoryId,
+      expectedWorkingBalance,
+    }) => {
       return withSync(() =>
         runMutation(
           async () => {
@@ -1203,7 +1225,9 @@ export function BudgetAppShell({
                 action: "reconcile",
                 accountId,
                 statementBalance,
+                statementDate,
                 adjustmentCategoryId,
+                expectedWorkingBalance,
               }),
             });
           },

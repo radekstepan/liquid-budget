@@ -43,6 +43,7 @@ export function ReconcileModal({
   groups,
   onClose,
   onReconcile,
+  onFetchState,
   onUnreconcile,
   busy,
 }: {
@@ -56,15 +57,22 @@ export function ReconcileModal({
     statementBalance: number;
     statementDate: string;
     adjustmentCategoryId: number | null;
+    expectedWorkingBalance?: number | null;
   }) => Promise<void>;
+  onFetchState?: (accountId: number, statementDate: string) => Promise<any>;
   onUnreconcile?: (accountId: number) => Promise<void>;
   busy?: boolean;
 }) {
   const [statementDate, setStatementDate] = useState(todayISO());
-  const state = useMemo(
+  const [overrideState, setOverrideState] = useState<ReturnType<typeof computeReconcileState> | null>(null);
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const computedState = useMemo(
     () => computeReconcileState(account, transactions, statementDate),
     [account, transactions, statementDate]
   );
+  const state = overrideState ?? computedState;
 
   const [statementInput, setStatementInput] = useState(
     (state.workingBalance / 100).toFixed(2)
@@ -113,21 +121,48 @@ export function ReconcileModal({
   }, [adjustmentCategoryId, eligibleCategories]);
 
   const canSubmit =
+    !submitting &&
+    !busy &&
     !!Number.isFinite(statementBalance) &&
     (balanced || (needsAdjustment && armed && adjustmentCategoryId !== ""));
 
   const onSubmit = async () => {
     if (!canSubmit) return;
-    await onReconcile({
-      accountId: state.accountId,
-      statementBalance,
-      statementDate,
-      adjustmentCategoryId: balanced
-        ? null
-        : adjustmentCategoryId === ""
+    setSubmitting(true);
+    setStaleNotice(null);
+    try {
+      await onReconcile({
+        accountId: state.accountId,
+        statementBalance,
+        statementDate,
+        adjustmentCategoryId: balanced
           ? null
-          : Number(adjustmentCategoryId),
-    });
+          : adjustmentCategoryId === ""
+            ? null
+            : Number(adjustmentCategoryId),
+        expectedWorkingBalance: state.workingBalance,
+      });
+    } catch (err: any) {
+      let freshState: any = err?.state ?? null;
+      if (!freshState && onFetchState) {
+        try {
+          freshState = await onFetchState(state.accountId, statementDate);
+        } catch {
+          // ignore
+        }
+      }
+      if (freshState) {
+        setOverrideState(freshState);
+        setArmed(false);
+        setStaleNotice(
+          `Account transactions changed since this modal was opened. Working balance has been refreshed to ${money(freshState.workingBalance)}.`
+        );
+      } else {
+        setStaleNotice(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -144,7 +179,7 @@ export function ReconcileModal({
             <Btn
               variant="primary"
               onClick={onSubmit}
-              disabled={!canSubmit || busy}
+              disabled={!canSubmit}
             >
               Reconcile
             </Btn>
@@ -152,6 +187,13 @@ export function ReconcileModal({
         </>
       }
     >
+      {staleNotice && (
+        <div className="mb-3">
+          <Notice tone="warn" title="Account data changed">
+            {staleNotice}
+          </Notice>
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-3 mb-3">
         <SummaryStat
           label="Working Balance"

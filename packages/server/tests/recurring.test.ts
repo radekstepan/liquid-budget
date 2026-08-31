@@ -549,7 +549,58 @@ describe("recurring queries", () => {
       await updateRecurring(mock.db, 1, { payee: "New", nextDate: "2026-08-15" });
       const updateCall = mock.calls.find((c) => c.op === "update");
       const set = updateCall?.set as Record<string, unknown>;
-      expect(set).toEqual({ payee: "New", nextDate: "2026-08-15" });
+      expect(set).toEqual({ payee: "New", nextDate: "2026-08-15", anchorDay: 15 });
+    });
+
+    it("BUG-16: recomputes anchorDay when nextDate changes for month-based recurring rules", async () => {
+      const monthEndRule = {
+        ...existingRow,
+        frequency: "monthly",
+        nextDate: "2026-01-31",
+        anchorDay: 31,
+      };
+      mock.respondWith("select:recurring", [monthEndRule]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [monthEndRule]);
+
+      await updateRecurring(mock.db, 1, { nextDate: "2026-02-15" });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toMatchObject({ nextDate: "2026-02-15", anchorDay: 15 });
+    });
+
+    it("BUG-16: recomputes anchorDay when frequency is changed to a month-based frequency", async () => {
+      const weeklyRule = {
+        ...existingRow,
+        frequency: "weekly",
+        nextDate: "2026-06-18",
+        anchorDay: null,
+      };
+      mock.respondWith("select:recurring", [weeklyRule]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [weeklyRule]);
+
+      await updateRecurring(mock.db, 1, { frequency: "monthly" });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toMatchObject({ frequency: "monthly", anchorDay: 18 });
+    });
+
+    it("BUG-16: respects explicit anchorDay when provided alongside nextDate", async () => {
+      const monthEndRule = {
+        ...existingRow,
+        frequency: "monthly",
+        nextDate: "2026-01-31",
+        anchorDay: 31,
+      };
+      mock.respondWith("select:recurring", [monthEndRule]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [monthEndRule]);
+
+      await updateRecurring(mock.db, 1, { nextDate: "2026-02-15", anchorDay: 31 });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toMatchObject({ nextDate: "2026-02-15", anchorDay: 31 });
     });
 
     it("allows null categoryId to clear the link", async () => {
