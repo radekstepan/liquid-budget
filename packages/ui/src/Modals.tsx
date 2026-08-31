@@ -36,6 +36,13 @@ export type TransactionSavePayload = {
   subTransactions?: SubTransaction[];
 };
 
+export type DraftSubRow = {
+  categoryId: number | null;
+  transferAccountId: number | null;
+  amount: string;
+  memo: string;
+};
+
 /**
  * The single transaction entry point. Supports three modes that the user
  * picks via a segmented toggle:
@@ -183,17 +190,17 @@ export function TransactionModal({
   const isBoundaryInflow = isTransferBoundary && transferNetOnBudgetDelta > 0;
 
   // Split sub-rows
-  const [subRows, setSubRows] = useState<SubTransaction[]>(
+  const [subRows, setSubRows] = useState<DraftSubRow[]>(
     initialChildren
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
-          amount: ((num(c.amount) / 100).toFixed(2) as unknown) as number,
+          amount: (num(c.amount) / 100).toFixed(2),
           memo: c.memo ?? "",
         }))
       : [
-          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
         ]
   );
 
@@ -201,7 +208,7 @@ export function TransactionModal({
 
   // Signed parent amount and signed child total in dollars for UI display
   const parentAmount = evalAmount(amount) ?? 0;
-  const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
+  const subTotal = subRows.reduce((s, r) => s + (evalAmount(r.amount) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     const parentCents = dollarsToCents(parentAmount);
@@ -210,7 +217,7 @@ export function TransactionModal({
         parentCents,
         subRows.map((r) => ({
           ...r,
-          amount: dollarsToCents(evalAmount(String(r.amount))),
+          amount: dollarsToCents(evalAmount(r.amount)),
         }))
       );
       return null;
@@ -224,16 +231,16 @@ export function TransactionModal({
     if (next === "single") {
       setTransferAccountId("");
       setSubRows([
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
       ]);
     } else if (next === "transfer") {
       if (!isInitialTransfer) {
         setCategoryId("");
       }
       setSubRows([
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
       ]);
     } else {
       setTransferAccountId("");
@@ -318,7 +325,7 @@ export function TransactionModal({
           return {
             categoryId: finalCatId,
             transferAccountId: r.transferAccountId ?? null,
-            amount: dollarsToCents(evalAmount(String(r.amount))),
+            amount: dollarsToCents(evalAmount(r.amount)),
             memo: r.memo,
           };
         }),
@@ -363,7 +370,7 @@ export function TransactionModal({
         if (!dest) return false;
         const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
         if (!isBoundary) return false;
-        const rAmount = dollarsToCents(evalAmount(String(r.amount)));
+        const rAmount = dollarsToCents(evalAmount(r.amount));
         const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
         if (netDelta <= 0) {
           return !r.categoryId;
@@ -647,7 +654,7 @@ export function TransactionModal({
                 {subRows.map((row, i) => {
                   const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
                   const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
-                  const rowAmtCents = dollarsToCents(evalAmount(String(row.amount)));
+                  const rowAmtCents = dollarsToCents(evalAmount(row.amount));
                   const rowNetOnBudget = isRowBoundary
                     ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
                     : 0;
@@ -740,11 +747,11 @@ export function TransactionModal({
                           aria-label={`Sub-transaction ${i + 1} memo`}
                         />
                         <TextField
-                          value={row.amount === 0 ? "" : String(row.amount)}
+                          value={row.amount}
                           onChange={(e) => {
                             const val = e.target.value;
                             setSubRows((rs) =>
-                              rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
+                              rs.map((r, j) => (i === j ? { ...r, amount: val } : r))
                             );
                           }}
                           placeholder="0.00"
@@ -812,7 +819,7 @@ export function TransactionModal({
                 <Button
                   size="sm"
                   onClick={() =>
-                    setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
+                    setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: "", memo: "" }])
                   }
                 >
                   + Add sub-transaction
@@ -1219,17 +1226,17 @@ export function RecurringModal({
   const isBoundaryOutflow = isTransferBoundary && transferNetOnBudgetDelta <= 0;
 
   // Split sub-rows
-  const [subRows, setSubRows] = useState<SubTransaction[]>(
+  const [subRows, setSubRows] = useState<DraftSubRow[]>(
     initialChildren.length > 0
       ? initialChildren.map((c) => ({
           categoryId: c.categoryId,
           transferAccountId: c.transferAccountId ?? null,
-          amount: ((num(c.amount) / 100).toFixed(2) as unknown) as number,
+          amount: (num(c.amount) / 100).toFixed(2),
           memo: c.memo ?? "",
         }))
       : [
-          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-          { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
         ]
   );
 
@@ -1237,7 +1244,7 @@ export function RecurringModal({
 
   // Signed parent amount and signed child total in dollars for UI display
   const parentAmount = evalAmount(amount) ?? 0;
-  const subTotal = subRows.reduce((s, r) => s + (evalAmount(String(r.amount)) ?? 0), 0);
+  const subTotal = subRows.reduce((s, r) => s + (evalAmount(r.amount) ?? 0), 0);
   const subValidation = useMemo(() => {
     if (mode !== "split") return null;
     const parentCents = dollarsToCents(parentAmount);
@@ -1246,7 +1253,7 @@ export function RecurringModal({
         parentCents,
         subRows.map((r) => ({
           ...r,
-          amount: dollarsToCents(evalAmount(String(r.amount))),
+          amount: dollarsToCents(evalAmount(r.amount)),
         }))
       );
       return null;
@@ -1260,16 +1267,16 @@ export function RecurringModal({
     if (next === "single") {
       setTransferAccountId("");
       setSubRows([
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
       ]);
     } else if (next === "transfer") {
       if (!isInitialTransfer) {
         setCategoryId("");
       }
       setSubRows([
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
-        { categoryId: null, transferAccountId: null, amount: 0, memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+        { categoryId: null, transferAccountId: null, amount: "", memo: "" },
       ]);
     } else {
       setTransferAccountId("");
@@ -1341,7 +1348,7 @@ export function RecurringModal({
           return {
             categoryId: finalCatId,
             transferAccountId: r.transferAccountId ?? null,
-            amount: dollarsToCents(evalAmount(String(r.amount))),
+            amount: dollarsToCents(evalAmount(r.amount)),
             memo: r.memo,
           };
         }),
@@ -1382,7 +1389,7 @@ export function RecurringModal({
         if (!dest) return false;
         const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
         if (!isBoundary) return false;
-        const rAmount = dollarsToCents(evalAmount(String(r.amount)));
+        const rAmount = dollarsToCents(evalAmount(r.amount));
         const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
         if (netDelta <= 0) {
           return !r.categoryId;
@@ -1596,7 +1603,7 @@ export function RecurringModal({
             {subRows.map((row, i) => {
               const targetAcc = row.transferAccountId ? otherAccounts.find((a) => a.id === row.transferAccountId) : null;
               const isRowBoundary = targetAcc != null && Boolean(selectedAccount?.onBudget) !== Boolean(targetAcc.onBudget);
-              const rowAmtCents = dollarsToCents(evalAmount(String(row.amount)));
+              const rowAmtCents = dollarsToCents(evalAmount(row.amount));
               const rowNetOnBudget = isRowBoundary
                 ? (selectedAccount?.onBudget ? rowAmtCents : 0) + (targetAcc?.onBudget ? -rowAmtCents : 0)
                 : 0;
@@ -1689,11 +1696,11 @@ export function RecurringModal({
                       aria-label={`Sub-transaction ${i + 1} memo`}
                     />
                     <TextField
-                      value={row.amount === 0 ? "" : String(row.amount)}
+                      value={row.amount}
                       onChange={(e) => {
                         const val = e.target.value;
                         setSubRows((rs) =>
-                          rs.map((r, j) => (i === j ? { ...r, amount: val as unknown as number } : r))
+                          rs.map((r, j) => (i === j ? { ...r, amount: val } : r))
                         );
                       }}
                       placeholder="0.00"
@@ -1761,7 +1768,7 @@ export function RecurringModal({
             <Button
               size="sm"
               onClick={() =>
-                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: 0, memo: "" }])
+                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: "", memo: "" }])
               }
             >
               + Add sub-transaction

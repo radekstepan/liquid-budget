@@ -54,7 +54,7 @@ describe("BudgetAppShell (BUG-09)", () => {
     fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
 
     // Open Add Transaction modal
-    const addBtn = screen.getByRole("button", { name: /add a new transaction/i });
+    const addBtn = screen.getAllByRole("button", { name: /add a new transaction/i })[0]!;
     fireEvent.click(addBtn);
 
     // Switch to Split mode

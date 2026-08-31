@@ -85,7 +85,7 @@ describe("BudgetAppShell (BUG-24)", () => {
     fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
 
     // Open Add Transaction modal
-    const addBtn = screen.getByRole("button", { name: /add a new transaction/i });
+    const addBtn = screen.getAllByRole("button", { name: /add a new transaction/i })[0]!;
     fireEvent.click(addBtn);
 
     // Fill in Payee via SearchList trigger
@@ -247,7 +247,7 @@ describe("BudgetAppShell (BUG-24)", () => {
     fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
 
     // Open Add Transaction modal
-    const addBtn = screen.getByRole("button", { name: /add a new transaction/i });
+    const addBtn = screen.getAllByRole("button", { name: /add a new transaction/i })[0]!;
     fireEvent.click(addBtn);
 
     // Fill Payee

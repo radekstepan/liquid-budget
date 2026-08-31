@@ -147,12 +147,19 @@ export function BudgetAppShell({
   initialAccount?: number;
 }) {
   const [data, _setData] = useState<BudgetData | null>(null);
+  const dataRef = useRef<BudgetData | null>(null);
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
   const setData = useCallback((value: React.SetStateAction<BudgetData | null>) => {
     _setData((prev) => {
       if (prev) {
         invalidateBudgetIndex(prev);
       }
       const next = typeof value === "function" ? (value as (p: BudgetData | null) => BudgetData | null)(prev) : value;
+      dataRef.current = next;
       return next;
     });
   }, []);
@@ -299,11 +306,10 @@ export function BudgetAppShell({
   const api: BudgetAppApi = {
     reload,
     assign: async (categoryId, amount, month) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       const tempId = -Date.now();
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const existing = prev.assignments.find(
           (a) => a.categoryId === categoryId && a.month === month
         );
@@ -352,11 +358,10 @@ export function BudgetAppShell({
     },
     addTransaction: async (t) => {
       const successMsg = "Transaction added.";
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       const tempId = -Date.now();
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
 
         const srcAccount = prev.accounts.find((a) => a.id === t.accountId);
         const srcOnBudget = srcAccount?.onBudget ?? true;
@@ -512,10 +517,9 @@ export function BudgetAppShell({
       });
     },
     updateTransaction: async (id, t) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const target = prev.transactions.find((x) => x.id === id);
         const splitParentId =
           target?.parentId ?? (prev.transactions.some((x) => x.parentId === id) ? id : null);
@@ -690,10 +694,9 @@ export function BudgetAppShell({
       );
     },
     deleteTransaction: async (id) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         return applyOptimisticTransactionDeletion(prev, [id]);
       });
       return withSync(() =>
@@ -712,10 +715,9 @@ export function BudgetAppShell({
       );
     },
     bulkDeleteTransactions: async (ids: number[]) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         return applyOptimisticTransactionDeletion(prev, ids);
       });
       return withSync(() =>
@@ -740,10 +742,9 @@ export function BudgetAppShell({
       ids: number[],
       patch: BulkUpdateTransactionPatch
     ) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const idSet = new Set(ids);
         const affectedSplitParentIds = new Set<number>();
         for (const tx of prev.transactions) {
@@ -846,10 +847,9 @@ export function BudgetAppShell({
       );
     },
     updateRecurring: async (id, v) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const recurring = prev.recurring.map((r) => {
           if (r.id !== id) return r;
           const { subTransactions, amount, ...rest } = v;
@@ -891,10 +891,9 @@ export function BudgetAppShell({
       );
     },
     deleteRecurring: async (id) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const recurring = prev.recurring.filter((r) => r.id !== id);
         return { ...prev, recurring, budgetIndex: undefined };
       });
@@ -952,10 +951,9 @@ export function BudgetAppShell({
       );
     },
     bulkDeleteRecurring: async (ids: number[]) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const idSet = new Set(ids);
         const recurring = prev.recurring.filter((r) => !idSet.has(r.id));
         return { ...prev, recurring, budgetIndex: undefined };
@@ -978,11 +976,10 @@ export function BudgetAppShell({
       );
     },
     saveCategory: async (groupId, categoryId, v) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       if (categoryId) {
         setData((prev) => {
           if (!prev) return prev;
-          snapshot = prev;
           const categories = prev.categories.map((c) =>
             c.id === categoryId
               ? {
@@ -1034,10 +1031,9 @@ export function BudgetAppShell({
       );
     },
     deleteCategory: async (id, opts) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const categories = prev.categories.filter((c) => c.id !== id);
         return { ...prev, categories, budgetIndex: undefined };
       });
@@ -1125,10 +1121,9 @@ export function BudgetAppShell({
       );
     },
     deleteAccount: async (id) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const accounts = prev.accounts.filter((a) => a.id !== id);
         return { ...prev, accounts, budgetIndex: undefined };
       });
@@ -1147,10 +1142,9 @@ export function BudgetAppShell({
       );
     },
     updateAccount: async (id, patch) => {
-      let snapshot: BudgetData | null = null;
+      const snapshot = dataRef.current;
       setData((prev) => {
         if (!prev) return prev;
-        snapshot = prev;
         const accounts = prev.accounts.map((a) => {
           if (a.id !== id) return a;
           const nextKind = patch.kind !== undefined ? patch.kind : a.kind;

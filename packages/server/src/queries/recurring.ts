@@ -551,6 +551,12 @@ export type AutoPostCapped = {
   remainingDue: number;
 };
 
+export type AutoPostResult = {
+  posted: any[];
+  failures: AutoPostFailure[];
+  capped: AutoPostCapped[];
+};
+
 /**
  * Automatically materialize all active recurring transactions whose nextDate <= asOfDate.
  * Each due rule is isolated so that a single corrupted or un-postable rule
@@ -563,7 +569,7 @@ export async function autoPostDueRecurringTransactions(
   db: Database,
   asOfDate: string = todayISO(),
   options?: { maxOccurrencesPerRule?: number }
-) {
+): Promise<AutoPostResult> {
   const validatedAsOfDate = assertValidISODate(asOfDate, "asOfDate");
   const due = await db
     .select()
@@ -646,9 +652,11 @@ export async function autoPostDueRecurringTransactions(
     }
   }
 
-  (posted as any).failures = failures;
-  (posted as any).capped = capped;
-  return posted;
+  return {
+    posted,
+    failures,
+    capped,
+  };
 }
 
 export const createRecurringTransaction = createRecurring;
