@@ -24,6 +24,12 @@ export type ReconcileInput = {
    * adjustment transaction is posted against this category.
    */
   adjustmentCategoryId?: number | null;
+  /**
+   * Working balance computed by the client when the reconcile modal was open.
+   * If provided and it does not match authoritative working balance, the
+   * server returns an explicit concurrency/staleness notice.
+   */
+  expectedWorkingBalance?: number | null;
 };
 
 export type ReconcileResult = {
@@ -121,6 +127,16 @@ export async function reconcileAccount(
 
     if (diff !== 0) {
       if (input.adjustmentCategoryId == null) {
+        if (
+          input.expectedWorkingBalance !== undefined &&
+          input.expectedWorkingBalance !== null &&
+          input.expectedWorkingBalance !== state.workingBalance
+        ) {
+          throw new TransactionError(
+            `Account balance changed since the reconcile modal was opened (expected working balance ${input.expectedWorkingBalance}, actual is ${state.workingBalance}). Please review the updated difference.`,
+            422
+          );
+        }
         throw new TransactionError(
           "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
           422

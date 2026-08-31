@@ -189,6 +189,34 @@ describe("reconcile queries", () => {
       });
     });
 
+    it("BUG-17: throws informative error when expectedWorkingBalance differs from actual on unbalanced submission", async () => {
+      mock.respondWithNth("select:accounts", 1, [
+        { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },
+      ]);
+      mock.respondWithNth("select:transactions", 1, [
+        {
+          unclearedSum: 0,
+          unclearedCount: 0,
+          clearedSum: 60000,
+          clearedCount: 4,
+          reconciledSum: 0,
+          reconciledCount: 0,
+        },
+      ]);
+
+      await expect(
+        reconcileAccount(mock.db, {
+          accountId: 1,
+          statementBalance: 50000,
+          expectedWorkingBalance: 50000,
+        })
+      ).rejects.toMatchObject({
+        status: 422,
+        name: "TransactionError",
+        message: expect.stringContaining("Account balance changed since the reconcile modal was opened"),
+      });
+    });
+
     it("UNI-10 / BUG-32, BUG-33: posts adjustment with status 'r' and reconciliation_id when diff is non-zero", async () => {
       mock.respondWithNth("select:accounts", 1, [
         { id: 1, name: "Chequing", balance: 50000, lastReconciledAt: null, lastReconciledBalance: null },

@@ -1,5 +1,6 @@
 import {
   getDefaultDb,
+  getReconcileState,
   reconcileAccount,
   unreconcileAccount,
 } from "@ynab/server";
@@ -11,6 +12,28 @@ import {
 } from "../schemas";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const accountIdParam = url.searchParams.get("accountId");
+  const statementDateParam = url.searchParams.get("statementDate") ?? undefined;
+
+  if (!accountIdParam) {
+    return Response.json({ error: "accountId is required" }, { status: 400 });
+  }
+  const accountId = Number(accountIdParam);
+  if (isNaN(accountId) || accountId <= 0) {
+    return Response.json({ error: "invalid accountId" }, { status: 400 });
+  }
+
+  const db = getDefaultDb();
+  try {
+    const state = await getReconcileState(db, accountId, statementDateParam);
+    return Response.json(state);
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
+}
 
 export async function POST(req: Request) {
   let json: unknown;
@@ -46,9 +69,18 @@ export async function POST(req: Request) {
       statementBalance: body.statementBalance,
       statementDate: body.statementDate,
       adjustmentCategoryId: body.adjustmentCategoryId ?? null,
+      expectedWorkingBalance: body.expectedWorkingBalance ?? null,
     });
     return Response.json({ action: "reconcile", ...result });
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.status === 422) {
+      try {
+        const state = await getReconcileState(db, body.accountId, body.statementDate);
+        return Response.json({ error: e.message, state }, { status: 422 });
+      } catch {
+        // Fallback to standard error response
+      }
+    }
     return apiErrorResponse(e);
   }
 }

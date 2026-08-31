@@ -99,6 +99,7 @@ describe("ReconcileModal", () => {
       statementBalance: 125050,
       statementDate: "2026-08-28",
       adjustmentCategoryId: null,
+      expectedWorkingBalance: 125050,
     });
   });
 
@@ -134,6 +135,7 @@ describe("ReconcileModal", () => {
       statementBalance: 100000,
       statementDate: "2026-08-28",
       adjustmentCategoryId: 10,
+      expectedWorkingBalance: 125050,
     });
   });
 
@@ -206,6 +208,7 @@ describe("ReconcileModal", () => {
       statementBalance: 125050,
       statementDate: "2026-08-28",
       adjustmentCategoryId: null,
+      expectedWorkingBalance: 125050,
     });
   });
 
@@ -254,6 +257,58 @@ describe("ReconcileModal", () => {
       statementBalance: 125050,
       statementDate: "2026-07-31",
       adjustmentCategoryId: null,
+      expectedWorkingBalance: 125050,
     });
+  });
+
+  it("BUG-17: catches submission error with fresh state, updates working balance, and shows notice", async () => {
+    const freshState = {
+      accountId: 7,
+      accountName: "Chequing",
+      workingBalance: 135050,
+      unclearedTotal: 0,
+      unclearedCount: 0,
+      clearedCount: 4,
+      reconciledCount: 10,
+      lastReconciledAt: null,
+      lastReconciledBalance: null,
+    };
+    const onReconcile = vi.fn().mockRejectedValueOnce({
+      status: 422,
+      message: "Account balance changed",
+      state: freshState,
+    });
+
+    renderModal({ onReconcile });
+    const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
+    fireEvent.click(reconcile);
+
+    expect(await screen.findByText(/Account transactions changed since this modal was opened/)).toBeInTheDocument();
+    expect(screen.getByText("$1,350.50")).toBeInTheDocument();
+    expect(screen.getByText("Difference: -$100.00")).toBeInTheDocument();
+  });
+
+  it("BUG-17: fetches fresh state on submission failure when onFetchState is provided", async () => {
+    const freshState = {
+      accountId: 7,
+      accountName: "Chequing",
+      workingBalance: 140000,
+      unclearedTotal: 0,
+      unclearedCount: 0,
+      clearedCount: 5,
+      reconciledCount: 10,
+      lastReconciledAt: null,
+      lastReconciledBalance: null,
+    };
+    const onReconcile = vi.fn().mockRejectedValueOnce(new Error("Request failed (422)"));
+    const onFetchState = vi.fn().mockResolvedValueOnce(freshState);
+
+    renderModal({ onReconcile, onFetchState });
+    const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
+    fireEvent.click(reconcile);
+
+    expect(await screen.findByText(/Account transactions changed since this modal was opened/)).toBeInTheDocument();
+    expect(onFetchState).toHaveBeenCalledWith(7, "2026-08-28");
+    expect(screen.getByText("$1,400.00")).toBeInTheDocument();
   });
 });

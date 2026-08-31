@@ -239,6 +239,7 @@ export const ReconcileAccountSchema = z.object({
   statementBalance: z.number().int(),
   statementDate: ISODateSchema.optional(),
   adjustmentCategoryId: z.number().int().positive().nullable().optional(),
+  expectedWorkingBalance: z.number().int().nullable().optional(),
 });
 
 export const UnreconcileAccountSchema = z.object({

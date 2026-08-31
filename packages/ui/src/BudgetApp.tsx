@@ -195,7 +195,9 @@ export type BudgetAppApi = {
     statementBalance: number;
     statementDate: string;
     adjustmentCategoryId: number | null;
+    expectedWorkingBalance?: number | null;
   }) => Promise<void>;
+  getReconcileState?: (accountId: number, statementDate?: string) => Promise<any>;
   unreconcileAccount: (accountId: number) => Promise<void>;
   importYnab4?: (file: File) => Promise<ImportSummary | void>;
   importCsv?: (input: { accountId: number; swap: boolean; dateFormat?: "auto" | "dmy" | "mdy"; csv: string }) => Promise<any>;
@@ -1098,6 +1100,7 @@ export function BudgetApp({
             await api.reconcileAccount(input);
             setModal({ kind: "none" });
           }}
+          onFetchState={api.getReconcileState}
           onUnreconcile={async (accountId) => {
             await api.unreconcileAccount(accountId);
             setModal({ kind: "none" });
