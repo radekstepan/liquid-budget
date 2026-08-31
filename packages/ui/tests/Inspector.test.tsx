@@ -93,6 +93,54 @@ describe("Inspector", () => {
       );
       expect(title).not.toContain("Overspent");
     });
+
+    it("renders deferred income indicator and tooltip breakdown when income originates from future transaction dates (BUG-13)", () => {
+      const { container } = render(
+        <Inspector
+          {...baseProps}
+          tbb={100000}
+          overBudgeted={false}
+          priorSurplus={0}
+          totalIncome={100000}
+          totalAssigned={0}
+          incomeFromFuture={100000}
+        />
+      );
+      const indicator = screen.getByTestId("deferred-income-indicator");
+      expect(indicator).toBeInTheDocument();
+      expect(indicator).toHaveTextContent("$1,000.00 of income originated from future transaction dates.");
+
+      const atbCard = container.querySelector(".y-atb--green");
+      expect(atbCard).toBeInTheDocument();
+      const title = atbCard?.getAttribute("title");
+      expect(title).toBe(
+        "Prior surplus: $0.00\nIncome this month: $1,000.00\n  ↳ $1,000.00 from future transaction dates\nAssigned this month: $0.00\n─────────────────\n= TBB: $1,000.00"
+      );
+    });
+
+    it("renders deferred income indicator and tooltip breakdown when income originates from past transaction dates (BUG-13)", () => {
+      const { container } = render(
+        <Inspector
+          {...baseProps}
+          tbb={150000}
+          overBudgeted={false}
+          priorSurplus={0}
+          totalIncome={150000}
+          totalAssigned={0}
+          incomeFromPast={150000}
+        />
+      );
+      const indicator = screen.getByTestId("deferred-income-indicator");
+      expect(indicator).toBeInTheDocument();
+      expect(indicator).toHaveTextContent("$1,500.00 of income originated from past transaction dates.");
+
+      const atbCard = container.querySelector(".y-atb--green");
+      expect(atbCard).toBeInTheDocument();
+      const title = atbCard?.getAttribute("title");
+      expect(title).toBe(
+        "Prior surplus: $0.00\nIncome this month: $1,500.00\n  ↳ $1,500.00 from past transaction dates\nAssigned this month: $0.00\n─────────────────\n= TBB: $1,500.00"
+      );
+    });
   });
 
   describe("Net Monthly Card", () => {

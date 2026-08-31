@@ -1885,11 +1885,65 @@ describe("computeBudget", () => {
       const june = computeBudget(data, "2025-06");
       expect(june.totalIncome).toBe(0);
       expect(june.tbb).toBe(0);
+      expect(june.incomeDeferredToFuture).toBe(500000);
 
       // In July (targeted income month): income is 500000, TBB is 500000
       const july = computeBudget(data, "2025-07");
       expect(july.totalIncome).toBe(500000);
       expect(july.tbb).toBe(500000);
+      expect(july.incomeFromPast).toBe(500000);
+    });
+
+    it("BUG-13: deferred income to past months is included in target month totalIncome and flows forward via cumulative TBB", () => {
+      const groups = [makeGroup({ id: 1, name: "General" })];
+      const cats = [makeCategory({ id: 1, groupId: 1, name: "Savings" })];
+      const accounts = [
+        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+      ];
+
+      // Transaction dated March 15, 2026, deferred to January 2026
+      const backwardDeferredTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-03-15",
+        payee: "Late Bonus",
+        memo: "Bonus attributed to Jan",
+        amount: "100000", // $1,000.00
+        status: "c" as const,
+        isIncome: true,
+        incomeMonth: "2026-01",
+      };
+
+      const data: BudgetData = {
+        accounts,
+        groups,
+        categories: cats,
+        assignments: [],
+        transactions: [backwardDeferredTx],
+        recurring: [],
+      };
+
+      // January 2026: totalIncome has the $1,000.00 income, incomeFromFuture is $1,000.00, TBB is $1,000.00
+      const jan = computeBudget(data, "2026-01");
+      expect(jan.totalIncome).toBe(100000);
+      expect(jan.incomeFromFuture).toBe(100000);
+      expect(jan.incomeFromPast).toBe(0);
+      expect(jan.tbb).toBe(100000);
+
+      // February 2026 (gap month): totalIncome is 0, priorSurplus carries forward $1,000.00, TBB is $1,000.00
+      const feb = computeBudget(data, "2026-02");
+      expect(feb.totalIncome).toBe(0);
+      expect(feb.priorSurplus).toBe(100000);
+      expect(feb.tbb).toBe(100000);
+
+      // March 2026 (transaction date month): totalIncome is 0 (since income was deferred back to Jan),
+      // priorSurplus carries forward $1,000.00, TBB is $1,000.00, incomeDeferredToPast is $1,000.00
+      const mar = computeBudget(data, "2026-03");
+      expect(mar.totalIncome).toBe(0);
+      expect(mar.priorSurplus).toBe(100000);
+      expect(mar.tbb).toBe(100000);
+      expect(mar.incomeDeferredToPast).toBe(100000);
     });
 
     it("UNI-20 / F-16: Red Arrow to the Right carries negative category balance into next month instead of deducting from TBB", () => {

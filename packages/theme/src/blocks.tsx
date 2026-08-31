@@ -146,7 +146,8 @@ export const BudgetHeader: React.FC<{
   ops?: string[];
   atb: number;
   atbLabel?: string;
-}> = ({ parts, ops, atb, atbLabel = "Available to Budget" }) => {
+  deferredIncomeNotice?: string;
+}> = ({ parts, ops, atb, atbLabel = "Available to Budget", deferredIncomeNotice }) => {
   const tone = atb > 0 ? "green" : atb < 0 ? "red" : "orange";
   const renderedOps = ops ?? parts.slice(0, -1).map(() => "+");
   return (
@@ -164,6 +165,11 @@ export const BudgetHeader: React.FC<{
           {atbLabel}
         </div>
       </div>
+      {deferredIncomeNotice && (
+        <div className="w-full text-[11px] text-[var(--y-ink-soft)] italic" data-testid="budget-header-deferred-notice">
+          {deferredIncomeNotice}
+        </div>
+      )}
     </div>
   );
 };
