@@ -1608,4 +1608,116 @@ describe("importYnab4 full import", () => {
     // 3000.00 dollars → 300000 cents
     expect(Number(inflow!.amount)).toBe(300000);
   });
+
+  it("skips and reports zero-amount and zero-sum scheduled transactions without aborting import (BUG-14)", async () => {
+    const backupWithZeroScheduled = {
+      accounts: [
+        {
+          entityId: "acc1",
+          accountName: "Checking",
+          accountType: "Checking",
+          onBudget: true,
+          sortableIndex: 1,
+        },
+      ],
+      payees: [
+        { entityId: "p1", name: "Landlord" },
+        { entityId: "p2", name: "Transfer Item" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Bills",
+          type: "OUTFLOW",
+          sortableIndex: 1,
+          subCategories: [
+            {
+              entityId: "sc1",
+              name: "Rent",
+              sortableIndex: 1,
+            },
+          ],
+        },
+      ],
+      transactions: [
+        {
+          entityId: "t1",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -100.0,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "sc1",
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [
+        // 1. Regular scheduled transaction with $0 amount
+        {
+          entityId: "sched1",
+          accountId: "acc1",
+          date: "2026-07-01",
+          amount: 0,
+          frequency: "monthly",
+          payeeId: "p1",
+          categoryId: "sc1",
+          memo: "Zero amount reminder",
+        },
+        // 2. Split scheduled transaction with subtransactions that sum to $0
+        {
+          entityId: "sched2",
+          accountId: "acc1",
+          date: "2026-07-05",
+          amount: 0,
+          frequency: "monthly",
+          payeeId: "p2",
+          memo: "Zero-sum split schedule",
+          subTransactions: [
+            {
+              entityId: "sub1",
+              amount: 50.0,
+              categoryId: "sc1",
+              memo: "Plus 50",
+            },
+            {
+              entityId: "sub2",
+              amount: -50.0,
+              categoryId: "sc1",
+              memo: "Minus 50",
+            },
+          ],
+        },
+        // 3. Valid non-zero scheduled transaction
+        {
+          entityId: "sched3",
+          accountId: "acc1",
+          date: "2026-07-10",
+          amount: -1200.0,
+          frequency: "monthly",
+          payeeId: "p1",
+          categoryId: "sc1",
+          memo: "Real rent payment",
+        },
+      ],
+    };
+
+    const summary = await importYnab4(db, backupWithZeroScheduled);
+    expect(summary.accounts).toBe(1);
+    expect(summary.transactions).toBe(1);
+    expect(summary.duplicatesSkipped).toBeDefined();
+
+    // Verify skipped duplicates contains the 2 zero-amount scheduled items
+    const zeroSchedSkipped = summary.duplicatesSkipped?.filter(
+      (s) => s.reason === "Zero-amount scheduled transaction"
+    );
+    expect(zeroSchedSkipped).toHaveLength(2);
+    expect(zeroSchedSkipped?.some((s) => s.memo === "Zero amount reminder")).toBe(true);
+    expect(zeroSchedSkipped?.some((s) => s.memo === "Zero-sum split schedule")).toBe(true);
+
+    // Verify database state: only the valid non-zero scheduled transaction was inserted
+    const budgetData = await getBudgetData(db);
+    expect(budgetData.recurring).toHaveLength(1);
+    expect(budgetData.recurring[0]!.memo).toBe("Real rent payment");
+    expect(Number(budgetData.recurring[0]!.amount)).toBe(-120000);
+  });
 });

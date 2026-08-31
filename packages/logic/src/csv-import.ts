@@ -446,12 +446,149 @@ export function swapPayeeMemo(rows: CsvImportRow[], swap?: boolean): CsvImportRo
   });
 }
 
+function analyzeHeaderless(
+  firstDataRow: string[],
+  allRows: string[][],
+  convention: DateFormatConvention
+) {
+  const numCols = firstDataRow.length;
+  if (numCols < 2) {
+    return {
+      dateIdx: -1,
+      payeeIdx: -1,
+      memoIdx: -1,
+      categoryIdx: -1,
+      outflowIdx: -1,
+      inflowIdx: -1,
+      amountIdx: -1,
+      typeIdx: -1,
+      isValid: false,
+    };
+  }
+
+  // 1. Find date column
+  let dateIdx = -1;
+  if (parseDate(firstDataRow[0] ?? "", convention) != null) {
+    dateIdx = 0;
+  } else {
+    for (let c = 0; c < numCols; c++) {
+      if (parseDate(firstDataRow[c] ?? "", convention) != null) {
+        dateIdx = c;
+        break;
+      }
+    }
+  }
+
+  if (dateIdx < 0) {
+    return {
+      dateIdx: -1,
+      payeeIdx: -1,
+      memoIdx: -1,
+      categoryIdx: -1,
+      outflowIdx: -1,
+      inflowIdx: -1,
+      amountIdx: -1,
+      typeIdx: -1,
+      isValid: false,
+    };
+  }
+
+  // 2. Find payee column
+  let payeeIdx = -1;
+  const nonDateCols = Array.from({ length: numCols }, (_, i) => i).filter((i) => i !== dateIdx);
+  if (dateIdx === 0 && numCols > 1) {
+    payeeIdx = 1;
+  } else if (nonDateCols.length > 0) {
+    payeeIdx = nonDateCols[0]!;
+  }
+
+  // 3. Map remaining columns (amount / outflow / inflow / memo / category)
+  const remaining = nonDateCols.filter((i) => i !== payeeIdx);
+  let outflowIdx = -1;
+  let inflowIdx = -1;
+  let amountIdx = -1;
+  let memoIdx = -1;
+  let categoryIdx = -1;
+
+  if (remaining.length === 1) {
+    amountIdx = remaining[0]!;
+  } else if (remaining.length === 2) {
+    const [c1, c2] = remaining;
+    let c1HasAmount = false;
+    let c1HasText = false;
+    for (const r of allRows) {
+      const val = (r[c1!] ?? "").trim();
+      if (!val) continue;
+      if (parseAmount(val) != null) {
+        c1HasAmount = true;
+      } else {
+        c1HasText = true;
+      }
+    }
+    if (c1HasAmount && !c1HasText) {
+      outflowIdx = c1!;
+      inflowIdx = c2!;
+    } else {
+      memoIdx = c1!;
+      amountIdx = c2!;
+    }
+  } else if (remaining.length >= 3) {
+    const last1 = remaining[remaining.length - 2]!;
+    const last2 = remaining[remaining.length - 1]!;
+    let last1HasAmount = false;
+    let last1HasText = false;
+    for (const r of allRows) {
+      const val = (r[last1] ?? "").trim();
+      if (!val) continue;
+      if (parseAmount(val) != null) {
+        last1HasAmount = true;
+      } else {
+        last1HasText = true;
+      }
+    }
+
+    if (last1HasAmount && !last1HasText) {
+      outflowIdx = last1;
+      inflowIdx = last2;
+      memoIdx = remaining[0]!;
+      if (remaining.length >= 3) {
+        categoryIdx = remaining[1]!;
+      }
+    } else {
+      amountIdx = last2;
+      memoIdx = remaining[0]!;
+      if (remaining.length >= 3) {
+        categoryIdx = remaining[1]!;
+      }
+    }
+  }
+
+  const isValid = dateIdx >= 0 && payeeIdx >= 0 && (outflowIdx >= 0 || inflowIdx >= 0 || amountIdx >= 0);
+
+  return {
+    dateIdx,
+    payeeIdx,
+    memoIdx,
+    categoryIdx,
+    outflowIdx,
+    inflowIdx,
+    amountIdx,
+    typeIdx: -1,
+    isValid,
+  };
+}
+
 export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImportResult {
   let rows: string[][];
   try {
     rows = parseCsv(text);
   } catch (err: any) {
     return { headerError: err?.message || "Invalid CSV", rows: [] };
+  }
+
+  const nonEmptyRows = rows.filter((r) => r.some((c) => c.trim() !== ""));
+  if (nonEmptyRows.length === 0) {
+    return { headerError: "The file is empty", rows: [] };
   }
 
   let headerIdx = -1;
@@ -468,18 +605,46 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
     }
   }
 
-  if (headerIdx < 0) {
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i]!.some((c) => c.trim() !== "")) {
-        headerIdx = i;
-        headerAnalysis = analyzeHeader(rows[i]!);
-        break;
+  let convention: DateFormatConvention = "dmy";
+  let dateAmbiguous = false;
+
+  if (headerIdx >= 0 && headerAnalysis) {
+    const isMultiSection = headerAnalysis.typeIdx === 0;
+    if (opts?.dateFormat && opts.dateFormat !== "auto") {
+      convention = opts.dateFormat;
+    } else if (headerAnalysis.dateIdx >= 0) {
+      const detection = detectDateFormatDetailed(rows, headerAnalysis.dateIdx, headerIdx, isMultiSection);
+      convention = detection.convention;
+      dateAmbiguous = detection.ambiguous;
+    }
+  } else {
+    const firstNonEmpty = nonEmptyRows[0]!;
+    let candidateDateIdx = 0;
+    if (parseDate(firstNonEmpty[0] ?? "") == null) {
+      for (let c = 0; c < firstNonEmpty.length; c++) {
+        if (parseDate(firstNonEmpty[c] ?? "") != null) {
+          candidateDateIdx = c;
+          break;
+        }
       }
     }
-  }
 
-  if (rows.length === 0 || headerIdx < 0 || !headerAnalysis) {
-    return { headerError: "The file is empty", rows: [] };
+    if (opts?.dateFormat && opts.dateFormat !== "auto") {
+      convention = opts.dateFormat;
+    } else {
+      const detection = detectDateFormatDetailed(rows, candidateDateIdx, -1, false);
+      convention = detection.convention;
+      dateAmbiguous = detection.ambiguous;
+    }
+
+    const headerlessAnalysis = analyzeHeaderless(firstNonEmpty, nonEmptyRows, convention);
+    if (headerlessAnalysis.isValid) {
+      headerIdx = -1;
+      headerAnalysis = headerlessAnalysis;
+    } else {
+      headerIdx = rows.indexOf(firstNonEmpty);
+      headerAnalysis = analyzeHeader(firstNonEmpty);
+    }
   }
 
   const { dateIdx, payeeIdx, memoIdx, categoryIdx, outflowIdx, inflowIdx, amountIdx, typeIdx } = headerAnalysis;
@@ -491,18 +656,18 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   else if (outflowIdx < 0 && inflowIdx < 0 && amountIdx < 0)
     headerError = "Could not find an Outflow, Inflow, or Amount column";
 
-  let convention: DateFormatConvention = "dmy";
-  let dateAmbiguous = false;
-  if (opts?.dateFormat && opts.dateFormat !== "auto") {
-    convention = opts.dateFormat;
-  } else if (dateIdx >= 0) {
-    const detection = detectDateFormatDetailed(rows, dateIdx, headerIdx, isMultiSection);
-    convention = detection.convention;
-    dateAmbiguous = detection.ambiguous;
+  if (headerError) {
+    return {
+      headerError,
+      rows: [],
+      detectedDateFormat: convention,
+      dateAmbiguous,
+    };
   }
 
   const parsedRows: CsvImportRow[] = [];
-  for (let i = headerIdx + 1; i < rows.length; i++) {
+  const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
+  for (let i = startRow; i < rows.length; i++) {
     const cells = rows[i]!;
     if (cells.every((c) => c.trim() === "")) continue;
     if (isMultiSection && cells[0]?.trim().toLowerCase() !== "transaction") continue;

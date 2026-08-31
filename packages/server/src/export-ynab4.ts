@@ -1,7 +1,9 @@
 import AdmZip from "adm-zip";
 import { asc } from "drizzle-orm";
+import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { getBudgetData } from "./queries/budget.js";
 
 const FLAG_NAMES: Record<string, string> = {
   red: "Red",
@@ -104,6 +106,7 @@ export async function exportYnab4(
     allRecurring,
     allRecurringSubs,
     allReconciliations,
+    budgetData,
   ] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort), asc(accounts.id)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort), asc(categoryGroups.id)),
@@ -113,7 +116,22 @@ export async function exportYnab4(
     db.select().from(recurring).orderBy(asc(recurring.nextDate), asc(recurring.id)),
     db.select().from(recurringSubTransactions).orderBy(asc(recurringSubTransactions.sort), asc(recurringSubTransactions.id)),
     db.select().from(reconciliations).orderBy(asc(reconciliations.id)),
+    getBudgetData(db),
   ]);
+
+  const allMonths = getMonthsWithData(budgetData);
+  const currentMonth = todayISO().slice(0, 7);
+  const targetMonth = allMonths.length > 0
+    ? (allMonths.includes(currentMonth) ? currentMonth : allMonths[allMonths.length - 1]!)
+    : currentMonth;
+
+  const budgetResult = computeBudget(budgetData, targetMonth);
+  const availableByCatId = new Map<number, number>();
+  for (const g of budgetResult.groups) {
+    for (const r of g.rows) {
+      availableByCatId.set(r.category.id, r.available);
+    }
+  }
 
   const categoryMap = new Map<number, typeof allCategories[number]>();
   for (const c of allCategories) {
@@ -225,7 +243,8 @@ export async function exportYnab4(
         sortableIndex: (c.sort ?? 0) * 1000,
         type: "OUTFLOW",
         overspendingHandling: c.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
-        cachedBalance: (c.carryover ?? 0) / 100,
+        cachedBalance: (availableByCatId.get(c.id) ?? c.carryover ?? 0) / 100,
+        carryover: (c.carryover ?? 0) / 100,
         accountId: c.linkedAccountId ? `acc-${c.linkedAccountId}` : undefined,
         entityType: "subCategory",
         entityVersion: `sc-v-${c.id}`,

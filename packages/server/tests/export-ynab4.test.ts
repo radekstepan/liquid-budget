@@ -522,4 +522,110 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     expect(extracted.settings?.budgetName).toBe(specialBudgetName);
     expect(extracted.settings?.currencySymbol).toBe("£ & €");
   });
+
+  it("exports live engine-computed available balance as cachedBalance and preserves live CC balances (BUG-15)", async () => {
+    const db1 = openMigratedDb();
+
+    // 1. Create checking and credit card accounts
+    const [accChecking] = await db1.insert(schema.accounts).values({
+      name: "Checking",
+      kind: "liquid",
+      groupLabel: "Budget Accounts",
+      balance: 100000,
+      onBudget: true,
+      sort: 0,
+    }).returning();
+
+    const [accCredit] = await db1.insert(schema.accounts).values({
+      name: "Credit Card",
+      kind: "credit",
+      groupLabel: "Credit Cards",
+      balance: -5000,
+      onBudget: true,
+      sort: 1,
+    }).returning();
+
+    // 2. Create category group and categories (including CC Payment category)
+    const [grpGeneral] = await db1.insert(schema.categoryGroups).values({
+      name: "Everyday Expenses",
+      sort: 0,
+      isCreditCardPayments: false,
+    }).returning();
+
+    const [grpCC] = await db1.insert(schema.categoryGroups).values({
+      name: "Credit Card Payments",
+      sort: 1,
+      isCreditCardPayments: true,
+    }).returning();
+
+    const [catGroceries] = await db1.insert(schema.categories).values({
+      groupId: grpGeneral!.id,
+      name: "Groceries",
+      sort: 0,
+      carryover: 0,
+    }).returning();
+
+    // CC payment category starts with 0 seed carryover
+    const [catCcPayment] = await db1.insert(schema.categories).values({
+      groupId: grpCC!.id,
+      name: "Credit Card",
+      sort: 0,
+      carryover: 0,
+      linkedAccountId: accCredit!.id,
+    }).returning();
+
+    // 3. Assign funds to Groceries in 2026-05
+    await db1.insert(schema.assignments).values({
+      categoryId: catGroceries!.id,
+      month: "2026-05",
+      amount: 20000, // $200.00 budgeted
+    });
+
+    // 4. Spend $50 on credit card for Groceries -> funded CC spending moves $50 to CC Payment category
+    await db1.insert(schema.transactions).values({
+      accountId: accCredit!.id,
+      categoryId: catGroceries!.id,
+      date: "2026-05-10",
+      payee: "Supermarket",
+      amount: -5000, // -$50.00
+      status: "c",
+    });
+
+    await recomputeAccountBalances(db1);
+
+    // Verify DB1 engine-computed available:
+    // Groceries available: $200 - $50 = $150.00
+    // CC Payment available: $0 + $50 = $50.00
+    const initialData1 = await getBudgetData(db1);
+    const { ynabData } = await exportYnab4(db1);
+
+    const exportedCcGroup = ynabData.masterCategories.find((mc: any) => mc.isCreditCardPayments);
+    expect(exportedCcGroup).toBeDefined();
+    const exportedCcSub = exportedCcGroup.subCategories.find((sc: any) => sc.name === "Credit Card");
+    expect(exportedCcSub).toBeDefined();
+
+    // cachedBalance must reflect live engine available ($50.00), not the static seed carryover ($0)
+    expect(exportedCcSub.cachedBalance).toBe(50.0);
+    expect(exportedCcSub.carryover).toBe(0.0);
+
+    const exportedGenGroup = ynabData.masterCategories.find((mc: any) => mc.name === "Everyday Expenses");
+    const exportedGrocSub = exportedGenGroup.subCategories.find((sc: any) => sc.name === "Groceries");
+    expect(exportedGrocSub.cachedBalance).toBe(150.0);
+
+    // Roundtrip test: export to zip and import into DB2
+    const zipBuf = await exportYnab4Zip(db1);
+    const db2 = openMigratedDb();
+    const extracted = extractYnab4DataFromZip(zipBuf);
+    await importYnab4(db2, extracted.ynabData, extracted.settingsXml);
+
+    const data2 = await getBudgetData(db2);
+    // In DB2, the CC payment category and Groceries available balances match DB1 perfectly
+    const db1CcCat = initialData1.categories.find((c) => c.linkedAccountId === accCredit!.id);
+    const db2CcCat = data2.categories.find((c) => c.linkedAccountId != null);
+    expect(db2CcCat).toBeDefined();
+
+    // Both initial and imported budgets produce identical account balances and transaction totals
+    expect(Number(data2.accounts.find((a) => a.name === "Credit Card")?.balance)).toBe(-5000);
+    expect(data2.transactions).toHaveLength(1);
+  });
 });

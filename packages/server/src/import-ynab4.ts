@@ -533,11 +533,12 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         matchingSc?.overspendingHandling === "OverspendCarriedForward" ||
         matchingSc?.entityVersion?.overspendingHandling === "OverspendCarriedForward" ||
         false;
-      const initialCarryover = matchingSc?.cachedBalance
-        ? convertAmount(Number(matchingSc.cachedBalance))
-        : matchingSc?.carryover
-        ? convertAmount(Number(matchingSc.carryover))
-        : 0;
+      const initialCarryover =
+        matchingSc?.carryover !== undefined
+          ? convertAmount(Number(matchingSc.carryover))
+          : matchingSc?.cachedBalance !== undefined
+          ? convertAmount(Number(matchingSc.cachedBalance))
+          : 0;
 
       const [cRow] = await db
         .insert(categories)
@@ -1285,17 +1286,18 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       }
 
       const rawSubs = (st.subTransactions || []).filter((sub: any) => !sub.isTombstone);
-      const hasSubs = rawSubs.length >= 2;
+      const nonZeroSubs = rawSubs.filter((sub: any) => convertAmount(sub.amount) !== 0);
+      const hasSubs = nonZeroSubs.length >= 2;
 
       let parentAmount = convertAmount(st.amount);
       if (hasSubs) {
         catId = null;
         transferAccountId = null;
         // Rebalance parent amount to match the sum of sub-transactions to guarantee split balance invariant
-        parentAmount = rawSubs.reduce((sum: number, sub: any) => sum + convertAmount(sub.amount), 0);
-      } else if (rawSubs.length === 1) {
+        parentAmount = nonZeroSubs.reduce((sum: number, sub: any) => sum + convertAmount(sub.amount), 0);
+      } else if (nonZeroSubs.length === 1) {
         // A single child is not a valid split; collapse to a regular recurring transaction
-        const single = rawSubs[0]!;
+        const single = nonZeroSubs[0]!;
         parentAmount = convertAmount(single.amount);
         catId = (accIsOnBudget && categoryIdMap.get(single.categoryId)) || null;
         if (
@@ -1314,6 +1316,18 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         if (transferAccountId === accId) {
           transferAccountId = null;
         }
+      }
+
+      if (parentAmount === 0) {
+        skippedDuplicates.push({
+          accountName: accNameMap.get(accId) || "",
+          date: st.date,
+          payee,
+          memo: st.memo || "",
+          amount: 0,
+          reason: "Zero-amount scheduled transaction",
+        });
+        continue;
       }
 
       if (transferAccountId != null) {
@@ -1396,7 +1410,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
 
       if (hasSubs && insertedR) {
         let sort = 0;
-        for (const sub of rawSubs) {
+        for (const sub of nonZeroSubs) {
           let subCatId = (accIsOnBudget && categoryIdMap.get(sub.categoryId)) || null;
           if (
             sub.categoryId === "Category/__ImmediateIncome__" ||
