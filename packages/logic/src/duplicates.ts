@@ -25,6 +25,7 @@ export type DuplicateEntry = {
   status?: ClearedStatus;
   parentId?: number | null;
   transferAccountId?: number | null;
+  fitId?: string | null;
 };
 
 export type DuplicateGroup = {
@@ -92,7 +93,7 @@ export function normalizeText(value: string): string {
 
 /**
  * A conservative "exact match" identity for a transaction:
- * account + date + amount + normalized payee + normalized memo.
+ * account + date + amount + normalized payee + normalized memo (+ optional fitId).
  * Serialized as JSON array to prevent delimiter collision issues.
  */
 export function duplicateFingerprint(f: {
@@ -101,14 +102,19 @@ export function duplicateFingerprint(f: {
   amount: number;
   payee: string;
   memo: string;
+  fitId?: string | null;
 }): string {
-  return JSON.stringify([
+  const parts: (string | number)[] = [
     f.accountId,
     f.date,
     f.amount,
     normalizeText(f.payee),
     normalizeText(f.memo),
-  ]);
+  ];
+  if (f.fitId != null && f.fitId.trim() !== "") {
+    parts.push(f.fitId.trim());
+  }
+  return JSON.stringify(parts);
 }
 
 /**
@@ -135,6 +141,7 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
       amount: r.amount,
       payee: r.payee,
       memo: r.memo,
+      fitId: r.fitId,
     });
     let list = byFingerprint.get(fp);
     if (!list) {
@@ -231,6 +238,7 @@ export function buildExistingImportFingerprints(
     payee: string;
     memo?: string | null;
     amount: number | string;
+    fitId?: string | null;
   }>,
   accountNameById?: Map<number, string>,
   renameRules?: RenameRule[]
@@ -254,6 +262,7 @@ export function buildExistingImportFingerprints(
           amount: amt,
           payee: t.payee,
           memo: t.memo ?? "",
+          fitId: t.fitId,
         })
       );
       if (renameRules && renameRules.length > 0) {
@@ -266,6 +275,7 @@ export function buildExistingImportFingerprints(
               amount: amt,
               payee: renamed,
               memo: t.memo ?? "",
+              fitId: t.fitId,
             })
           );
         }
@@ -281,6 +291,7 @@ export function buildExistingImportFingerprints(
           amount: destAmount,
           payee: t.payee,
           memo: t.memo ?? "",
+          fitId: t.fitId,
         })
       );
       if (renameRules && renameRules.length > 0) {
@@ -293,6 +304,7 @@ export function buildExistingImportFingerprints(
               amount: destAmount,
               payee: renamed,
               memo: t.memo ?? "",
+              fitId: t.fitId,
             })
           );
         }
@@ -307,6 +319,7 @@ export function buildExistingImportFingerprints(
             amount: destAmount,
             payee: transferPayee,
             memo: t.memo ?? "",
+            fitId: t.fitId,
           })
         );
         if (renameRules && renameRules.length > 0) {
@@ -319,6 +332,7 @@ export function buildExistingImportFingerprints(
                 amount: destAmount,
                 payee: renamed,
                 memo: t.memo ?? "",
+                fitId: t.fitId,
               })
             );
           }
@@ -347,6 +361,7 @@ export function identifyImportDuplicates<
     memo?: string | null;
     amountCents?: number | null;
     error?: string | null;
+    fitId?: string | null;
   }
 >(
   accountId: number,
@@ -370,6 +385,7 @@ export function identifyImportDuplicates<
       payee: row.payee ?? "",
       memo: row.memo ?? "",
       amount,
+      fitId: row.fitId,
     });
 
     const isMatch =
