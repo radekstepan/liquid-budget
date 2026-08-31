@@ -106,10 +106,12 @@ export function TransactionModal({
 
   const isEdit = !!initial;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingUnreconcile, setConfirmingUnreconcile] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setConfirmingDelete(false);
+    setConfirmingUnreconcile(false);
     setDeleting(false);
   }, [initial?.id]);
 
@@ -262,6 +264,9 @@ export function TransactionModal({
     const a = evalAmount(amount);
     if (a == null || !accountId) return;
     const amountCents = dollarsToCents(a);
+    const finalStatus: "u" | "c" | "r" = cleared
+      ? (initial?.status === "r" ? "r" : "c")
+      : "u";
 
     if (mode === "transfer") {
       if (!payee.trim() && !transferAccountId) return;
@@ -290,7 +295,7 @@ export function TransactionModal({
         payee: payee.trim() || `Transfer : ${destName}`,
         memo: memo.trim(),
         amount: amountCents,
-        status: cleared ? "c" : "u",
+        status: finalStatus,
         flagColor: savedFlagColor,
         transferAccountId: Number(transferAccountId),
         incomeMonth: incMonth,
@@ -309,7 +314,7 @@ export function TransactionModal({
         payee: payee.trim(),
         memo: memo.trim(),
         amount: amountCents,
-        status: cleared ? "c" : "u",
+        status: finalStatus,
         flagColor: savedFlagColor,
         subTransactions: subRows.map((r) => {
           const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
@@ -347,7 +352,7 @@ export function TransactionModal({
       payee: payee.trim(),
       memo: memo.trim(),
       amount: amountCents,
-      status: cleared ? "c" : "u",
+      status: finalStatus,
       flagColor: savedFlagColor,
       incomeMonth: incMonth,
     });
@@ -385,15 +390,17 @@ export function TransactionModal({
 
   return (
     <Modal
-      wide={!confirmingDelete && mode === "split"}
+      wide={!confirmingDelete && !confirmingUnreconcile && mode === "split"}
       title={
         confirmingDelete
           ? initial?.payee?.trim()
             ? `Delete "${initial.payee.trim()}"?`
             : "Delete Transaction?"
-          : initial
-            ? "Edit Transaction"
-            : "Add Transaction"
+          : confirmingUnreconcile
+            ? "Unreconcile Transaction?"
+            : initial
+              ? "Edit Transaction"
+              : "Add Transaction"
       }
       onClose={onClose}
       footer={
@@ -407,6 +414,25 @@ export function TransactionModal({
             <div className="flex items-center gap-2 ml-auto">
               <Btn variant="danger" onClick={confirmDelete} disabled={deleting}>
                 {deleting ? "Deleting" : "Yes, delete it"}
+              </Btn>
+            </div>
+          </>
+        ) : confirmingUnreconcile ? (
+          <>
+            <div className="flex items-center gap-2 mr-auto">
+              <Btn onClick={() => setConfirmingUnreconcile(false)}>
+                Cancel
+              </Btn>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Btn
+                variant="danger"
+                onClick={() => {
+                  setCleared(false);
+                  setConfirmingUnreconcile(false);
+                }}
+              >
+                Yes, unreconcile
               </Btn>
             </div>
           </>
@@ -445,6 +471,15 @@ export function TransactionModal({
           ) : (
             <p className="y-hint text-[11.5px]">This transaction will be permanently removed.</p>
           )}
+        </div>
+      ) : confirmingUnreconcile ? (
+        <div className="space-y-2 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
+          <p>
+            Are you sure you want to mark this transaction as uncleared?
+          </p>
+          <Notice tone="warn" title="Past reconciliation affected">
+            Unreconciling a transaction will affect past reconciliation rounds.
+          </Notice>
         </div>
       ) : (
         <>
@@ -860,7 +895,13 @@ export function TransactionModal({
           <div className="pt-1">
             <Checkbox
               checked={cleared}
-              onChange={setCleared}
+              onChange={(nextChecked) => {
+                if (!nextChecked && initial?.status === "r") {
+                  setConfirmingUnreconcile(true);
+                } else {
+                  setCleared(nextChecked);
+                }
+              }}
               label="Cleared (bank has processed this)"
             />
           </div>
