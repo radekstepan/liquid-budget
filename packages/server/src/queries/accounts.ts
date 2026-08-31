@@ -307,30 +307,32 @@ export async function deleteAccount(db: Database, id: number) {
             transferAccountId: transactions.transferAccountId,
             status: transactions.status,
             transferStatus: transactions.transferStatus,
+            payee: transactions.payee,
+            payeeId: transactions.payeeId,
+            flagColor: transactions.flagColor,
           })
           .from(transactions)
           .where(eq(transactions.parentId, existing.parentId));
 
         if (remaining.length === 1) {
           const lastChild = remaining[0]!;
-          if (lastChild.status === "r" || lastChild.transferStatus === "r") {
-            throw new AccountError(
-              `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
-              422
-            );
-          }
-          await db
-            .update(accounts)
-            .set({ balance: sql`${accounts.balance} - ${Number(lastChild.amount)}` })
-            .where(eq(accounts.id, lastChild.accountId));
+          const childPayee =
+            lastChild.payee && lastChild.payee.trim() !== ""
+              ? lastChild.payee
+              : (parent?.payee ?? "");
+          const childFlagColor = lastChild.flagColor ?? (parent?.flagColor ?? null);
+          const childPayeeId = lastChild.payeeId ?? (parent?.payeeId ?? null);
 
-          if (lastChild.transferAccountId != null) {
-            await db
-              .update(accounts)
-              .set({ balance: sql`${accounts.balance} + ${Number(lastChild.amount)}` })
-              .where(eq(accounts.id, lastChild.transferAccountId));
-          }
-          await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+          await db
+            .update(transactions)
+            .set({
+              parentId: null,
+              payee: childPayee,
+              payeeId: childPayeeId,
+              flagColor: childFlagColor,
+            })
+            .where(eq(transactions.id, lastChild.id));
+
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));
         } else if (remaining.length === 0) {
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));

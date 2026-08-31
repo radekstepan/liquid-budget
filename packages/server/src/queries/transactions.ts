@@ -187,7 +187,19 @@ async function childCount(db: Database, parentId: number): Promise<number> {
 async function getChildren(
   db: Database,
   parentId: number
-): Promise<{ id: number; accountId: number; amount: number; transferAccountId: number | null; categoryId: number | null; memo: string; payee: string; status: ClearedStatus; transferStatus: ClearedStatus | null }[]> {
+): Promise<{
+  id: number;
+  accountId: number;
+  amount: number;
+  transferAccountId: number | null;
+  categoryId: number | null;
+  memo: string;
+  payee: string;
+  payeeId: number | null;
+  flagColor: string | null;
+  status: ClearedStatus;
+  transferStatus: ClearedStatus | null;
+}[]> {
   return db
     .select({
       id: transactions.id,
@@ -197,6 +209,8 @@ async function getChildren(
       categoryId: transactions.categoryId,
       memo: transactions.memo,
       payee: transactions.payee,
+      payeeId: transactions.payeeId,
+      flagColor: transactions.flagColor,
       status: transactions.status,
       transferStatus: transactions.transferStatus,
     })
@@ -1068,21 +1082,32 @@ export async function deleteTransaction(db: Database, id: number) {
       await db.delete(transactions).where(eq(transactions.id, id));
 
       // Check remaining children of the split parent.
-      // If only 1 child remains, a 1-child split is invalid so delete parent and the remaining child.
+      // If only 1 child remains, flatten the remaining child into a regular transaction and delete the parent.
       const remaining = await getChildren(db, current.parentId);
       if (remaining.length === 1) {
         const lastChild = remaining[0]!;
-        if (lastChild.status === "r" || lastChild.transferStatus === "r") {
-          throw new TransactionError(
-            "Transaction is reconciled and locked. Unreconcile before deleting.",
-            422
-          );
-        }
-        await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
-        if (lastChild.transferAccountId != null) {
-          await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
-        }
-        await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+        const [parent] = await db
+          .select()
+          .from(transactions)
+          .where(eq(transactions.id, current.parentId));
+
+        const childPayee =
+          lastChild.payee && lastChild.payee.trim() !== ""
+            ? lastChild.payee
+            : (parent?.payee ?? "");
+        const childFlagColor = lastChild.flagColor ?? (parent?.flagColor ?? null);
+        const childPayeeId = lastChild.payeeId ?? (parent?.payeeId ?? null);
+
+        await db
+          .update(transactions)
+          .set({
+            parentId: null,
+            payee: childPayee,
+            payeeId: childPayeeId,
+            flagColor: childFlagColor,
+          })
+          .where(eq(transactions.id, lastChild.id));
+
         await db.delete(transactions).where(eq(transactions.id, current.parentId));
       } else if (remaining.length === 0) {
         await db.delete(transactions).where(eq(transactions.id, current.parentId));
@@ -1161,30 +1186,26 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
         const remaining = await getChildren(db, existing.parentId);
         if (remaining.length === 1) {
           const lastChild = remaining[0]!;
-          if (lastChild.status === "r" || lastChild.transferStatus === "r") {
-            throw new TransactionError(
-              `Transaction ${lastChild.id} is reconciled and locked. Unreconcile before deleting.`,
-              422
-            );
-          }
-          await applyBalance(db, lastChild.accountId, -Number(lastChild.amount));
-          if (lastChild.transferAccountId != null) {
-            await applyBalance(db, lastChild.transferAccountId, Number(lastChild.amount));
-          }
-          await db.delete(transactions).where(eq(transactions.id, lastChild.id));
+          const childPayee =
+            lastChild.payee && lastChild.payee.trim() !== ""
+              ? lastChild.payee
+              : (parent?.payee ?? "");
+          const childFlagColor = lastChild.flagColor ?? (parent?.flagColor ?? null);
+          const childPayeeId = lastChild.payeeId ?? (parent?.payeeId ?? null);
+
+          await db
+            .update(transactions)
+            .set({
+              parentId: null,
+              payee: childPayee,
+              payeeId: childPayeeId,
+              flagColor: childFlagColor,
+            })
+            .where(eq(transactions.id, lastChild.id));
+
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));
-          deleted.push(lastChild);
-          deletedIds.add(lastChild.id);
-          if (parent) {
-            deleted.push(parent);
-            deletedIds.add(parent.id);
-          }
         } else if (remaining.length === 0) {
           await db.delete(transactions).where(eq(transactions.id, existing.parentId));
-          if (parent) {
-            deleted.push(parent);
-            deletedIds.add(parent.id);
-          }
         } else {
           const newTotal = remaining.reduce((sum, c) => sum + Number(c.amount), 0);
           await db
