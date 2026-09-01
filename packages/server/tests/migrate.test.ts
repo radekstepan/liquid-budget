@@ -88,6 +88,16 @@ describe("Drizzle migrations", () => {
     expect(accountsCols).toContain("last_reconciled_at");
     expect(accountsCols).toContain("last_reconciled_balance");
     expect(accountsCols).toContain("archived");
+    expect(accountsCols).toContain("entity_id");
+
+    const categoryGroupsCols = tableInfo(ctx.raw, "category_groups").map((c) => c.name);
+    expect(categoryGroupsCols).toContain("entity_id");
+
+    const categoriesCols = tableInfo(ctx.raw, "categories").map((c) => c.name);
+    expect(categoriesCols).toContain("entity_id");
+
+    const payeesCols = tableInfo(ctx.raw, "payees").map((c) => c.name);
+    expect(payeesCols).toContain("entity_id");
 
     const transactionsCols = tableInfo(ctx.raw, "transactions").map((c) => c.name);
     expect(transactionsCols).toContain("status");
@@ -96,10 +106,19 @@ describe("Drizzle migrations", () => {
     expect(transactionsCols).toContain("reconciliation_id");
     expect(transactionsCols).toContain("transfer_reconciliation_id");
     expect(transactionsCols).toContain("transfer_reconciled_at");
+    expect(transactionsCols).toContain("entity_id");
+    expect(transactionsCols).toContain("transfer_entity_id");
 
     const recurringCols = tableInfo(ctx.raw, "recurring").map((c) => c.name);
     expect(recurringCols).toContain("transfer_account_id");
     expect(recurringCols).toContain("anchor_day");
+    expect(recurringCols).toContain("entity_id");
+
+    const recurringSubCols = tableInfo(ctx.raw, "recurring_sub_transactions").map((c) => c.name);
+    expect(recurringSubCols).toContain("entity_id");
+
+    const reconciliationsCols = tableInfo(ctx.raw, "reconciliations").map((c) => c.name);
+    expect(reconciliationsCols).toContain("entity_id");
   });
 
   it("is idempotent — running twice does not fail or duplicate", () => {

@@ -237,7 +237,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         payeeMap.set(p.entityId, p.name);
         if (p.targetAccountId) continue;
         if (typeof p.name !== "string" || !p.name.trim()) continue;
-        const payeeRow = findOrCreatePayee(db, p.name);
+        const payeeRow = findOrCreatePayee(db, p.name, undefined, p.entityId);
         payeeDbIdMap.set(p.entityId, payeeRow.id);
       }
     }
@@ -371,6 +371,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const [row] = await db
         .insert(accounts)
         .values({
+          entityId: acc.entityId,
           name: acc.accountName,
           kind,
           groupLabel,
@@ -394,6 +395,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           const [rec] = await db
             .insert(reconciliations)
             .values({
+              entityId: r.entityId,
               accountId: row!.id,
               reconciledAt: rDate,
               statementDate: sDate,
@@ -456,6 +458,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const [gRow] = await db
         .insert(categoryGroups)
         .values({
+          entityId: mc.entityId,
           name: mc.name,
           sort: groupSort++,
           isCreditCardPayments: false,
@@ -475,6 +478,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         const [cRow] = await db
           .insert(categories)
           .values({
+            entityId: sc.entityId,
             groupId: gRow!.id,
             name: sc.name,
             sort: catSort++,
@@ -488,16 +492,6 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       }
     }
 
-    // Create special "Credit Card Payments" group
-    const [ccGroup] = await db
-      .insert(categoryGroups)
-      .values({
-        name: "Credit Card Payments",
-        sort: groupSort++,
-        isCreditCardPayments: true,
-      })
-      .returning();
-
     const exportedCcMC = yMasterCategories.find(
       (mc: any) =>
         !mc.isTombstone &&
@@ -506,6 +500,17 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           mc.entityId === "MasterCategory/CreditCardPayments")
     );
     const exportedCcSubs: any[] = exportedCcMC?.subCategories || [];
+
+    // Create special "Credit Card Payments" group
+    const [ccGroup] = await db
+      .insert(categoryGroups)
+      .values({
+        entityId: exportedCcMC?.entityId ?? null,
+        name: "Credit Card Payments",
+        sort: groupSort++,
+        isCreditCardPayments: true,
+      })
+      .returning();
 
     const creditAccounts = await db.select().from(accounts).where(eq(accounts.kind, "credit"));
     let ccCatSort = 0;
@@ -532,6 +537,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const [cRow] = await db
         .insert(categories)
         .values({
+          entityId: matchingSc?.entityId ?? null,
           groupId: ccGroup!.id,
           name: acc.name,
           sort: ccCatSort++,
@@ -681,6 +687,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         const [insertedT] = await db
           .insert(transactions)
           .values({
+            entityId: t.entityId,
             accountId: accId,
             categoryId: null,
             date: t.date,
@@ -786,8 +793,10 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             let effectiveChildDestStatus: "u" | "c" | "r" | null = null;
             let childDestRecId: number | null = null;
             let childDestRecDate: string | null = null;
+            let childDestTxEntityId: string | null = null;
             if (subTransferAccountId != null) {
               const destPartner = st.transferTransactionId ? txById.get(st.transferTransactionId) : null;
+              childDestTxEntityId = destPartner?.entityId ?? st.transferTransactionId ?? null;
               if (destPartner) {
                 const destAccEntId = destPartner.accountId;
                 const isDestReconciled = destPartner.cleared === "Reconciled" || Boolean(destPartner.reconciliationId);
@@ -817,6 +826,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             }
 
             await db.insert(transactions).values({
+              entityId: st.entityId,
+              transferEntityId: childDestTxEntityId,
               accountId: accId,
               categoryId: subCatId,
               date: t.date,
@@ -1000,6 +1011,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               : (destYTx?.cleared === "Uncleared" ? "u" : "c");
 
             await db.insert(transactions).values({
+              entityId: sourceYTx?.entityId ?? t.entityId,
+              transferEntityId: destYTx?.entityId ?? (partner?.entityId || t.transferTransactionId || null),
               accountId: sourceAccId,
               categoryId: finalTransferCatId,
               date: t.date,
@@ -1067,6 +1080,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               : null;
 
             await db.insert(transactions).values({
+              entityId: t.entityId,
               accountId: accId,
               categoryId: catId,
               date: t.date,
@@ -1169,6 +1183,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             : null;
 
           await db.insert(transactions).values({
+            entityId: t.entityId,
             accountId: accId,
             categoryId: catId,
             date: t.date,
@@ -1434,6 +1449,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       const [insertedR] = await db
         .insert(recurring)
         .values({
+          entityId: st.entityId,
           accountId: accId,
           categoryId: catId,
           payee,
@@ -1491,6 +1507,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           }
 
           await db.insert(recurringSubTransactions).values({
+            entityId: sub.entityId,
             recurringId: insertedR.id,
             categoryId: subCatId,
             amount: childAmt,

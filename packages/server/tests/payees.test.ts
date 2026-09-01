@@ -1,3 +1,6 @@
+import path from "path";
+import { fileURLToPath } from "url";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { describe, expect, it, beforeEach } from "vitest";
 import { openDb, type Db } from "../src/client.js";
 import {
@@ -17,20 +20,19 @@ import {
   deletePayee,
 } from "../src/queries/payees.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MIGRATIONS_FOLDER = path.resolve(__dirname, "../src/migrations");
+
 describe("Payees Entity & Management (UNI-38 / F-19)", () => {
   let db: Db;
 
   beforeEach(() => {
     db = openDb(":memory:");
-    // Setup tables manually for isolated in-memory test
-    db.run(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT, kind TEXT, group_label TEXT, balance INTEGER, on_budget INTEGER, sort INTEGER, archived INTEGER);`);
-    db.run(`CREATE TABLE category_groups (id INTEGER PRIMARY KEY, name TEXT, sort INTEGER, is_credit_card_payments INTEGER);`);
-    db.run(`CREATE TABLE categories (id INTEGER PRIMARY KEY, group_id INTEGER, name TEXT, sort INTEGER, carryover INTEGER, goal_target INTEGER, linked_account_id INTEGER, overspend_carries_over INTEGER);`);
-    db.run(`CREATE TABLE payees (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, auto_category_id INTEGER, created_at TEXT NOT NULL);`);
-    db.run(`CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, category_id INTEGER, date TEXT NOT NULL, payee TEXT NOT NULL, payee_id INTEGER, memo TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL, transfer_status TEXT, flag_color TEXT, created_at TEXT NOT NULL, parent_id INTEGER, transfer_account_id INTEGER, is_income INTEGER NOT NULL, income_month TEXT, reconciled_at TEXT, reconciliation_id INTEGER, transfer_reconciled_at TEXT, transfer_reconciliation_id INTEGER);`);
-    db.run(`CREATE TABLE recurring (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, category_id INTEGER, payee TEXT NOT NULL, payee_id INTEGER, memo TEXT NOT NULL DEFAULT '', amount INTEGER NOT NULL, frequency TEXT NOT NULL, next_date TEXT NOT NULL, anchor_day INTEGER, active INTEGER NOT NULL, flag_color TEXT, transfer_account_id INTEGER);`);
+    migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 
     db.run(`INSERT INTO accounts (id, name, kind, group_label, balance, on_budget, sort, archived) VALUES (1, 'Checking', 'liquid', 'Budget', 100000, 1, 0, 0);`);
+    db.run(`INSERT INTO accounts (id, name, kind, group_label, balance, on_budget, sort, archived) VALUES (2, 'Savings', 'liquid', 'Budget', 50000, 1, 1, 0);`);
     db.run(`INSERT INTO category_groups (id, name, sort, is_credit_card_payments) VALUES (1, 'Daily', 0, 0);`);
     db.run(`INSERT INTO categories (id, group_id, name, sort, carryover) VALUES (10, 1, 'Groceries', 0, 0);`);
   });

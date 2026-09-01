@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { asc } from "drizzle-orm";
 import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
-import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { getBudgetData } from "./queries/budget.js";
 
 const FLAG_NAMES: Record<string, string> = {
@@ -106,6 +106,7 @@ export async function exportYnab4(
     allRecurring,
     allRecurringSubs,
     allReconciliations,
+    allPayees,
     budgetData,
   ] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort), asc(accounts.id)),
@@ -116,6 +117,7 @@ export async function exportYnab4(
     db.select().from(recurring).orderBy(asc(recurring.nextDate), asc(recurring.id)),
     db.select().from(recurringSubTransactions).orderBy(asc(recurringSubTransactions.sort), asc(recurringSubTransactions.id)),
     db.select().from(reconciliations).orderBy(asc(reconciliations.id)),
+    db.select().from(payees),
     getBudgetData(db),
   ]);
 
@@ -138,6 +140,30 @@ export async function exportYnab4(
     categoryMap.set(c.id, c);
   }
 
+  const getAccountEntityId = (accountId: number | null | undefined): string => {
+    if (accountId == null) return "";
+    const acc = allAccounts.find((a) => a.id === accountId);
+    return acc?.entityId || `acc-${accountId}`;
+  };
+
+  const getCategoryEntityId = (categoryId: number | null | undefined): string | null => {
+    if (categoryId == null) return null;
+    const cat = categoryMap.get(categoryId);
+    return cat?.entityId || `sc-${categoryId}`;
+  };
+
+  const getReconciliationEntityId = (recId: number | null | undefined): string | null => {
+    if (recId == null) return null;
+    const rec = allReconciliations.find((r) => r.id === recId);
+    return rec?.entityId || `rec-${recId}`;
+  };
+
+  const getTransactionEntityId = (txId: number | null | undefined): string | null => {
+    if (txId == null) return null;
+    const t = allTransactions.find((tx) => tx.id === txId);
+    return t?.entityId || `tx-${txId}`;
+  };
+
   // 1. Budget Metadata
   const budgetMetaData = {
     currencyLocale: "en_US",
@@ -159,7 +185,7 @@ export async function exportYnab4(
     }
 
     return {
-      entityId: `acc-${a.id}`,
+      entityId: a.entityId || `acc-${a.id}`,
       accountName: a.name,
       accountType,
       onBudget: Boolean(a.onBudget),
@@ -179,11 +205,12 @@ export async function exportYnab4(
 
   // Add transfer payees for every account
   for (const a of allAccounts) {
-    const transferEntityId = `Payee/Transfer:acc-${a.id}`;
+    const accEntityId = a.entityId || `acc-${a.id}`;
+    const transferEntityId = `Payee/Transfer:${accEntityId}`;
     payeeMap.set(transferEntityId, {
       entityId: transferEntityId,
       name: `Transfer : ${a.name}`,
-      targetAccountId: `acc-${a.id}`,
+      targetAccountId: accEntityId,
       entityType: "payee",
       enabled: true,
     });
@@ -197,19 +224,21 @@ export async function exportYnab4(
       const targetAccName = trimmed.replace("Transfer : ", "").trim();
       const matchAcc = allAccounts.find((a) => a.name.toLowerCase() === targetAccName.toLowerCase());
       if (matchAcc) {
-        return `Payee/Transfer:acc-${matchAcc.id}`;
+        const accEntId = matchAcc.entityId || `acc-${matchAcc.id}`;
+        return `Payee/Transfer:${accEntId}`;
       }
     }
-    const key = `payee-${trimmed.toLowerCase()}`;
-    if (!payeeMap.has(key)) {
-      payeeMap.set(key, {
-        entityId: key,
+    const matchPayee = allPayees.find((p) => p.name.toLowerCase() === trimmed.toLowerCase());
+    const entityId = matchPayee?.entityId || `payee-${trimmed.toLowerCase()}`;
+    if (!payeeMap.has(entityId)) {
+      payeeMap.set(entityId, {
+        entityId,
         name: trimmed,
         entityType: "payee",
         enabled: true,
       });
     }
-    return key;
+    return entityId;
   };
 
   // 4. Master Categories & Subcategories
@@ -227,7 +256,7 @@ export async function exportYnab4(
       ? "MasterCategory/__Hidden__"
       : g.isCreditCardPayments
       ? "MasterCategory/CreditCardPayments"
-      : `mc-${g.id}`;
+      : (g.entityId || `mc-${g.id}`);
     return {
       entityId,
       name: g.name,
@@ -236,19 +265,22 @@ export async function exportYnab4(
       isCreditCardPayments: Boolean(g.isCreditCardPayments),
       entityType: "masterCategory",
       entityVersion: `mc-v-${g.id}`,
-      subCategories: groupCats.map((c) => ({
-        entityId: `sc-${c.id}`,
-        masterCategoryId: entityId,
-        name: c.name,
-        sortableIndex: (c.sort ?? 0) * 1000,
-        type: "OUTFLOW",
-        overspendingHandling: c.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
-        cachedBalance: Math.round((availableByCatId.get(c.id) ?? c.carryover ?? 0) * 10),
-        carryover: Math.round((c.carryover ?? 0) * 10),
-        accountId: c.linkedAccountId ? `acc-${c.linkedAccountId}` : undefined,
-        entityType: "subCategory",
-        entityVersion: `sc-v-${c.id}`,
-      })),
+      subCategories: groupCats.map((c) => {
+        const linkedAccEntityId = c.linkedAccountId ? getAccountEntityId(c.linkedAccountId) : undefined;
+        return {
+          entityId: c.entityId || `sc-${c.id}`,
+          masterCategoryId: entityId,
+          name: c.name,
+          sortableIndex: (c.sort ?? 0) * 1000,
+          type: "OUTFLOW",
+          overspendingHandling: c.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
+          cachedBalance: Math.round((availableByCatId.get(c.id) ?? c.carryover ?? 0) * 10),
+          carryover: Math.round((c.carryover ?? 0) * 10),
+          accountId: linkedAccEntityId,
+          entityType: "subCategory",
+          entityVersion: `sc-v-${c.id}`,
+        };
+      }),
     };
   });
 
@@ -281,10 +313,11 @@ export async function exportYnab4(
       entityVersion: `mb-v-${month}`,
       monthlySubCategoryBudgets: assigns.map((a) => {
         const cat = categoryMap.get(a.categoryId);
+        const catEntityId = cat?.entityId || `sc-${a.categoryId}`;
         return {
-          entityId: `MCB/${month}/sc-${a.categoryId}`,
+          entityId: `MCB/${month}/${catEntityId}`,
           parentMonthlyBudgetId: `MB/${month}`,
-          categoryId: `sc-${a.categoryId}`,
+          categoryId: catEntityId,
           budgeted: Math.round(a.amount * 10),
           overspendingHandling: cat?.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
           entityType: "monthlyCategoryBudget",
@@ -315,6 +348,9 @@ export async function exportYnab4(
 
     if (children && children.length > 0) {
       // Split Transaction
+      const parentTxEntityId = t.entityId || `tx-${t.id}`;
+      const parentAccEntityId = getAccountEntityId(t.accountId);
+      const parentRecId = getReconciliationEntityId(t.reconciliationId);
       const payeeId = getOrCreatePayeeId(t.payee);
       const isParentDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
       const parentCatId = t.isIncome
@@ -324,39 +360,45 @@ export async function exportYnab4(
         : "Category/__Split__";
 
       const subTransactions = children.map((ch) => {
+        const childTxEntityId = ch.entityId || `st-${ch.id}`;
         let subTargetAccId: string | undefined = undefined;
         let subTransferPayeeId: string | undefined = undefined;
         let subTransferTxId: string | undefined = undefined;
         let subCatId: string | null = null;
 
         if (ch.categoryId != null) {
-          subCatId = `sc-${ch.categoryId}`;
+          subCatId = getCategoryEntityId(ch.categoryId);
         } else if (ch.isIncome) {
           const isChildDeferred = ch.incomeMonth && t.date ? ch.incomeMonth > t.date.slice(0, 7) : false;
           subCatId = isChildDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
         }
 
         if (ch.transferAccountId != null) {
-          subTargetAccId = `acc-${ch.transferAccountId}`;
-          subTransferPayeeId = `Payee/Transfer:acc-${ch.transferAccountId}`;
-          subTransferTxId = `tx-split-transfer-${ch.id}-dest`;
+          const destAccEntityId = getAccountEntityId(ch.transferAccountId);
+          const counterpartTxEntityId = ch.transferEntityId || `tx-split-transfer-${ch.id}-dest`;
+
+          subTargetAccId = destAccEntityId;
+          subTransferPayeeId = `Payee/Transfer:${destAccEntityId}`;
+          subTransferTxId = counterpartTxEntityId;
 
           const destClearedStatus = ch.transferStatus ?? ch.status ?? t.status;
-          const destRecId = ch.transferReconciliationId ? `rec-${ch.transferReconciliationId}` : (ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.transferReconciliationId ? `rec-${t.transferReconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null)));
+          const destRecId = getReconciliationEntityId(
+            ch.transferReconciliationId || ch.reconciliationId || t.transferReconciliationId || t.reconciliationId
+          );
           const destRecDate = ch.transferReconciledAt || ch.reconciledAt || t.transferReconciledAt || t.reconciledAt || null;
 
           // Generate counterpart on destination account
           yTransactions.push({
-            entityId: `tx-split-transfer-${ch.id}-dest`,
-            accountId: `acc-${ch.transferAccountId}`,
-            targetAccountId: `acc-${t.accountId}`,
+            entityId: counterpartTxEntityId,
+            accountId: destAccEntityId,
+            targetAccountId: parentAccEntityId,
             date: t.date,
             amount: Math.round(-ch.amount * 10),
             cleared: statusToCleared(destClearedStatus),
             flag: flagToName(ch.flagColor),
             memo: ch.memo || "",
-            payeeId: `Payee/Transfer:acc-${t.accountId}`,
-            transferTransactionId: `st-${ch.id}`,
+            payeeId: `Payee/Transfer:${parentAccEntityId}`,
+            transferTransactionId: childTxEntityId,
             categoryId: null,
             reconciliationId: destRecId,
             reconciledAt: destRecDate,
@@ -367,10 +409,11 @@ export async function exportYnab4(
         }
 
         const childPayeeId = ch.payee ? getOrCreatePayeeId(ch.payee) : undefined;
+        const childRecId = getReconciliationEntityId(ch.reconciliationId || t.reconciliationId);
 
         return {
-          entityId: `st-${ch.id}`,
-          parentTransactionId: `tx-${t.id}`,
+          entityId: childTxEntityId,
+          parentTransactionId: parentTxEntityId,
           amount: Math.round(ch.amount * 10),
           memo: ch.memo || "",
           categoryId: subCatId,
@@ -378,7 +421,7 @@ export async function exportYnab4(
           payeeId: subTransferPayeeId || childPayeeId || payeeId,
           transferTransactionId: subTransferTxId,
           flag: flagToName(ch.flagColor),
-          reconciliationId: ch.reconciliationId ? `rec-${ch.reconciliationId}` : (t.reconciliationId ? `rec-${t.reconciliationId}` : null),
+          reconciliationId: childRecId,
           reconciledAt: ch.reconciledAt || t.reconciledAt || null,
           entityType: "subTransaction",
           entityVersion: `st-v-${ch.id}`,
@@ -387,8 +430,8 @@ export async function exportYnab4(
       });
 
       yTransactions.push({
-        entityId: `tx-${t.id}`,
-        accountId: `acc-${t.accountId}`,
+        entityId: parentTxEntityId,
+        accountId: parentAccEntityId,
         date: t.date,
         amount: Math.round(t.amount * 10),
         cleared: statusToCleared(t.status),
@@ -397,7 +440,7 @@ export async function exportYnab4(
         payeeId,
         categoryId: parentCatId,
         subTransactions,
-        reconciliationId: t.reconciliationId ? `rec-${t.reconciliationId}` : null,
+        reconciliationId: parentRecId,
         reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
@@ -408,10 +451,14 @@ export async function exportYnab4(
       // Transfer Pair
       const sourceAcc = allAccounts.find((a) => a.id === t.accountId);
       const destAcc = allAccounts.find((a) => a.id === t.transferAccountId);
+      const sourceAccEntityId = getAccountEntityId(t.accountId);
+      const destAccEntityId = getAccountEntityId(t.transferAccountId);
+      const srcTxEntityId = t.entityId || `tx-${t.id}-src`;
+      const destTxEntityId = t.transferEntityId || `tx-${t.id}-dest`;
 
       let transferCatId: string | null = null;
       if (t.categoryId != null) {
-        transferCatId = `sc-${t.categoryId}`;
+        transferCatId = getCategoryEntityId(t.categoryId);
       } else if (t.isIncome) {
         const isTxDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
         transferCatId = isTxDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
@@ -420,21 +467,21 @@ export async function exportYnab4(
       // For cross-boundary transfers, assign the category to the on-budget leg
       const srcCatId = sourceAcc?.onBudget ? transferCatId : (!destAcc?.onBudget ? transferCatId : null);
       const destCatId = destAcc?.onBudget && !sourceAcc?.onBudget ? transferCatId : null;
-      const recId = t.reconciliationId ? `rec-${t.reconciliationId}` : null;
-      const destRecId = t.transferReconciliationId ? `rec-${t.transferReconciliationId}` : null;
+      const recId = getReconciliationEntityId(t.reconciliationId);
+      const destRecId = getReconciliationEntityId(t.transferReconciliationId);
 
       // Source transaction
       yTransactions.push({
-        entityId: `tx-${t.id}-src`,
-        accountId: `acc-${t.accountId}`,
-        targetAccountId: `acc-${t.transferAccountId}`,
+        entityId: srcTxEntityId,
+        accountId: sourceAccEntityId,
+        targetAccountId: destAccEntityId,
         date: t.date,
         amount: Math.round(t.amount * 10),
         cleared: statusToCleared(t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
-        payeeId: `Payee/Transfer:acc-${t.transferAccountId}`,
-        transferTransactionId: `tx-${t.id}-dest`,
+        payeeId: `Payee/Transfer:${destAccEntityId}`,
+        transferTransactionId: destTxEntityId,
         categoryId: srcCatId,
         reconciliationId: recId,
         reconciledAt: t.reconciledAt || null,
@@ -446,16 +493,16 @@ export async function exportYnab4(
 
       // Destination counterpart transaction
       yTransactions.push({
-        entityId: `tx-${t.id}-dest`,
-        accountId: `acc-${t.transferAccountId}`,
-        targetAccountId: `acc-${t.accountId}`,
+        entityId: destTxEntityId,
+        accountId: destAccEntityId,
+        targetAccountId: sourceAccEntityId,
         date: t.date,
         amount: Math.round(-t.amount * 10),
         cleared: statusToCleared(t.transferStatus ?? t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
-        payeeId: `Payee/Transfer:acc-${t.accountId}`,
-        transferTransactionId: `tx-${t.id}-src`,
+        payeeId: `Payee/Transfer:${sourceAccEntityId}`,
+        transferTransactionId: srcTxEntityId,
         categoryId: destCatId,
         reconciliationId: destRecId,
         reconciledAt: t.transferReconciledAt || null,
@@ -473,12 +520,15 @@ export async function exportYnab4(
           ? "Category/__DeferredIncome__"
           : "Category/__ImmediateIncome__"
         : t.categoryId != null
-        ? `sc-${t.categoryId}`
+        ? getCategoryEntityId(t.categoryId)
         : null;
+      const recId = getReconciliationEntityId(t.reconciliationId);
+      const accEntityId = getAccountEntityId(t.accountId);
+      const txEntityId = t.entityId || `tx-${t.id}`;
 
       yTransactions.push({
-        entityId: `tx-${t.id}`,
-        accountId: `acc-${t.accountId}`,
+        entityId: txEntityId,
+        accountId: accEntityId,
         date: t.date,
         amount: Math.round(t.amount * 10),
         cleared: statusToCleared(t.status),
@@ -486,7 +536,7 @@ export async function exportYnab4(
         memo: t.memo || "",
         payeeId,
         categoryId: catId,
-        reconciliationId: t.reconciliationId ? `rec-${t.reconciliationId}` : null,
+        reconciliationId: recId,
         reconciledAt: t.reconciledAt || null,
         accepted: true,
         entityType: "transaction",
@@ -507,6 +557,10 @@ export async function exportYnab4(
   const yScheduledTransactions = allRecurring.map((r) => {
     const subs = subsByRecurringId.get(r.id) ?? [];
     const hasSubs = subs.length > 0;
+    const schedEntityId = r.entityId || `sched-${r.id}`;
+    const schedAccEntityId = getAccountEntityId(r.accountId);
+    const schedTargetAccEntityId = r.transferAccountId != null ? getAccountEntityId(r.transferAccountId) : undefined;
+    const schedCatEntityId = r.categoryId != null ? getCategoryEntityId(r.categoryId) : null;
 
     let catId: string | null = null;
     let targetAccId: string | undefined = undefined;
@@ -514,42 +568,47 @@ export async function exportYnab4(
 
     if (hasSubs) {
       catId = "Category/__Split__";
-      payeeId = r.transferAccountId != null
-        ? `Payee/Transfer:acc-${r.transferAccountId}`
+      payeeId = schedTargetAccEntityId
+        ? `Payee/Transfer:${schedTargetAccEntityId}`
         : getOrCreatePayeeId(r.payee);
-    } else if (r.transferAccountId != null) {
-      targetAccId = `acc-${r.transferAccountId}`;
-      payeeId = `Payee/Transfer:acc-${r.transferAccountId}`;
+    } else if (schedTargetAccEntityId) {
+      targetAccId = schedTargetAccEntityId;
+      payeeId = `Payee/Transfer:${schedTargetAccEntityId}`;
       catId = null;
     } else {
-      catId = r.categoryId != null ? `sc-${r.categoryId}` : null;
+      catId = schedCatEntityId;
       payeeId = getOrCreatePayeeId(r.payee);
     }
 
     const subTransactions = hasSubs
-      ? subs.map((s) => ({
-          entityId: `st-sched-${s.id}`,
-          parentTransactionId: `sched-${r.id}`,
-          amount: Math.round(s.amount * 10),
-          memo: s.memo || "",
-          categoryId:
-            s.transferAccountId != null
-              ? null
-              : s.categoryId != null
-              ? `sc-${s.categoryId}`
-              : s.amount > 0
-              ? "Category/__ImmediateIncome__"
-              : null,
-          targetAccountId: s.transferAccountId != null ? `acc-${s.transferAccountId}` : undefined,
-          payeeId: s.transferAccountId != null ? `Payee/Transfer:acc-${s.transferAccountId}` : undefined,
-          entityType: "subTransaction",
-          entityVersion: `st-sched-v-${s.id}`,
-        }))
+      ? subs.map((s) => {
+          const subTargetAccEntityId = s.transferAccountId != null ? getAccountEntityId(s.transferAccountId) : undefined;
+          const subCatEntityId = s.categoryId != null ? getCategoryEntityId(s.categoryId) : null;
+
+          return {
+            entityId: s.entityId || `st-sched-${s.id}`,
+            parentTransactionId: schedEntityId,
+            amount: Math.round(s.amount * 10),
+            memo: s.memo || "",
+            categoryId:
+              subTargetAccEntityId != null
+                ? null
+                : subCatEntityId != null
+                ? subCatEntityId
+                : s.amount > 0
+                ? "Category/__ImmediateIncome__"
+                : null,
+            targetAccountId: subTargetAccEntityId,
+            payeeId: subTargetAccEntityId != null ? `Payee/Transfer:${subTargetAccEntityId}` : undefined,
+            entityType: "subTransaction",
+            entityVersion: `st-sched-v-${s.id}`,
+          };
+        })
       : [];
 
     return {
-      entityId: `sched-${r.id}`,
-      accountId: `acc-${r.accountId}`,
+      entityId: schedEntityId,
+      accountId: schedAccEntityId,
       date: r.nextDate,
       amount: Math.round(r.amount * 10),
       frequency: formatFrequency(r.frequency),
@@ -569,16 +628,21 @@ export async function exportYnab4(
     };
   });
 
-  const yReconciliations = allReconciliations.map((r) => ({
-    entityId: `rec-${r.id}`,
-    accountId: `acc-${r.accountId}`,
-    reconciledAt: r.reconciledAt,
-    statementDate: r.statementDate,
-    statementBalance: Math.round(r.statementBalance * 10),
-    adjustmentTransactionId: r.adjustmentTransactionId ? `tx-${r.adjustmentTransactionId}` : null,
-    entityType: "reconciliation",
-    entityVersion: `rec-v-${r.id}`,
-  }));
+  const yReconciliations = allReconciliations.map((r) => {
+    const recAccEntityId = getAccountEntityId(r.accountId);
+    const adjTxEntityId = r.adjustmentTransactionId ? getTransactionEntityId(r.adjustmentTransactionId) : null;
+
+    return {
+      entityId: r.entityId || `rec-${r.id}`,
+      accountId: recAccEntityId,
+      reconciledAt: r.reconciledAt,
+      statementDate: r.statementDate,
+      statementBalance: Math.round(r.statementBalance * 10),
+      adjustmentTransactionId: adjTxEntityId,
+      entityType: "reconciliation",
+      entityVersion: `rec-v-${r.id}`,
+    };
+  });
 
   const ynabData = {
     budgetMetaData,

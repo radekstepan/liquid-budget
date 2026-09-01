@@ -13,6 +13,7 @@ export const accounts = sqliteTable(
   "accounts",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     name: text("name").notNull(),
     kind: text("kind").notNull(),
     groupLabel: text("group_label").notNull(),
@@ -32,6 +33,7 @@ export const categoryGroups = sqliteTable(
   "category_groups",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     name: text("name").notNull(),
     sort: integer("sort").notNull().default(0),
     isCreditCardPayments: integer("is_credit_card_payments", { mode: "boolean" }).notNull().default(false),
@@ -46,6 +48,7 @@ export const categories = sqliteTable(
   "categories",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     groupId: integer("group_id")
       .notNull()
       .references(() => categoryGroups.id, { onDelete: "cascade" }),
@@ -84,6 +87,7 @@ export const payees = sqliteTable(
   "payees",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     name: text("name").notNull(),
     autoCategoryId: integer("auto_category_id").references(() => categories.id, {
       onDelete: "set null",
@@ -99,6 +103,8 @@ export const transactions = sqliteTable(
   "transactions",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
+    transferEntityId: text("transfer_entity_id"),
     accountId: integer("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
@@ -151,6 +157,7 @@ export const reconciliations = sqliteTable(
   "reconciliations",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     accountId: integer("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
@@ -171,6 +178,7 @@ export const recurring = sqliteTable(
   "recurring",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     accountId: integer("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
@@ -199,6 +207,7 @@ export const recurringSubTransactions = sqliteTable(
   "recurring_sub_transactions",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    entityId: text("entity_id"),
     recurringId: integer("recurring_id")
       .notNull()
       .references(() => recurring.id, { onDelete: "cascade" }),

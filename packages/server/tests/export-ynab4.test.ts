@@ -707,4 +707,260 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     expect(exportedSched).toBeDefined();
     expect(exportedSched.amount).toBe(-60000);
   });
+
+  it("preserves original YNAB4 entity UUIDs across import and export (BUG-24)", async () => {
+    const db = openMigratedDb();
+
+    const ynabInput = {
+      budgetMetaData: {
+        currencyLocale: "en_US",
+        dateLocale: "en_US",
+        strictBudget: "TRUE",
+        budgetType: "Personal",
+        entityId: "budget-metadata",
+        entityType: "budgetMetaData",
+        currencyISOSymbol: "USD",
+      },
+      accounts: [
+        {
+          entityId: "ACC-UUID-1",
+          accountName: "Checking Account",
+          accountType: "Checking",
+          onBudget: true,
+          sortableIndex: 1000,
+          hidden: false,
+          isClosed: false,
+          isTombstone: false,
+          entityType: "account",
+        },
+        {
+          entityId: "ACC-UUID-2",
+          accountName: "Savings Account",
+          accountType: "Savings",
+          onBudget: true,
+          sortableIndex: 2000,
+          hidden: false,
+          isClosed: false,
+          isTombstone: false,
+          entityType: "account",
+        },
+      ],
+      masterCategories: [
+        {
+          entityId: "MC-UUID-1",
+          name: "Everyday Expenses",
+          sortableIndex: 1000,
+          type: "OUTFLOW",
+          isCreditCardPayments: false,
+          isTombstone: false,
+          entityType: "masterCategory",
+          subCategories: [
+            {
+              entityId: "SC-UUID-1",
+              name: "Groceries",
+              sortableIndex: 1000,
+              type: "OUTFLOW",
+              isTombstone: false,
+              overspendingHandling: "Confined",
+              entityType: "subCategory",
+            },
+          ],
+        },
+      ],
+      payees: [
+        {
+          entityId: "PAYEE-UUID-1",
+          name: "Trader Joe's",
+          isTombstone: false,
+          entityType: "payee",
+        },
+      ],
+      monthlyBudgets: [
+        {
+          entityId: "MB/2026-08",
+          month: "2026-08-01",
+          isTombstone: false,
+          entityType: "monthlyBudget",
+          monthlySubCategoryBudgets: [
+            {
+              entityId: "MCB/2026-08/SC-UUID-1",
+              categoryId: "SC-UUID-1",
+              budgeted: 30000,
+              overspendingHandling: "Confined",
+              entityType: "monthlyCategoryBudget",
+            },
+          ],
+        },
+      ],
+      transactions: [
+        // 1. Regular transaction with UUID A1B2-C3D4
+        {
+          entityId: "A1B2-C3D4",
+          accountId: "ACC-UUID-1",
+          date: "2026-08-10",
+          amount: -5000,
+          cleared: "Cleared",
+          memo: "Groceries trip",
+          payeeId: "PAYEE-UUID-1",
+          categoryId: "SC-UUID-1",
+          isTombstone: false,
+          entityType: "transaction",
+        },
+        // 2. Transfer pair
+        {
+          entityId: "TRANSFER-SRC-UUID",
+          accountId: "ACC-UUID-1",
+          targetAccountId: "ACC-UUID-2",
+          date: "2026-08-12",
+          amount: -10000,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:ACC-UUID-2",
+          transferTransactionId: "TRANSFER-DEST-UUID",
+          isTombstone: false,
+          entityType: "transaction",
+        },
+        {
+          entityId: "TRANSFER-DEST-UUID",
+          accountId: "ACC-UUID-2",
+          targetAccountId: "ACC-UUID-1",
+          date: "2026-08-12",
+          amount: 10000,
+          cleared: "Cleared",
+          payeeId: "Payee/Transfer:ACC-UUID-1",
+          transferTransactionId: "TRANSFER-SRC-UUID",
+          isTombstone: false,
+          entityType: "transaction",
+        },
+        // 3. Split transaction
+        {
+          entityId: "PARENT-SPLIT-UUID",
+          accountId: "ACC-UUID-1",
+          date: "2026-08-14",
+          amount: -4000,
+          cleared: "Cleared",
+          memo: "Split shop",
+          payeeId: "PAYEE-UUID-1",
+          categoryId: "Category/__Split__",
+          isTombstone: false,
+          entityType: "transaction",
+          subTransactions: [
+            {
+              entityId: "CHILD-SPLIT-UUID",
+              amount: -4000,
+              memo: "Groceries split",
+              categoryId: "SC-UUID-1",
+              isTombstone: false,
+              entityType: "subTransaction",
+            },
+          ],
+        },
+      ],
+      scheduledTransactions: [
+        {
+          entityId: "SCHED-UUID-1",
+          accountId: "ACC-UUID-1",
+          date: "2026-09-01",
+          amount: -2500,
+          frequency: "Monthly",
+          payeeId: "PAYEE-UUID-1",
+          categoryId: "SC-UUID-1",
+          isTombstone: false,
+          entityType: "scheduledTransaction",
+          subTransactions: [],
+        },
+      ],
+      reconciliations: [
+        {
+          entityId: "REC-UUID-1",
+          accountId: "ACC-UUID-1",
+          reconciledAt: "2026-08-31",
+          statementDate: "2026-08-31",
+          statementBalance: 100000,
+          isTombstone: false,
+          entityType: "reconciliation",
+        },
+      ],
+    };
+
+    await importYnab4(db, ynabInput, "");
+
+    const { ynabData } = await exportYnab4(db);
+
+    // Assert exported accounts preserve original entityId
+    const exportedAcc1 = ynabData.accounts.find((a: any) => a.accountName === "Checking Account");
+    expect(exportedAcc1).toBeDefined();
+    expect(exportedAcc1.entityId).toBe("ACC-UUID-1");
+
+    const exportedAcc2 = ynabData.accounts.find((a: any) => a.accountName === "Savings Account");
+    expect(exportedAcc2).toBeDefined();
+    expect(exportedAcc2.entityId).toBe("ACC-UUID-2");
+
+    // Assert exported category groups & categories preserve original entityId
+    const exportedGroup = ynabData.masterCategories.find((g: any) => g.name === "Everyday Expenses");
+    expect(exportedGroup).toBeDefined();
+    expect(exportedGroup.entityId).toBe("MC-UUID-1");
+
+    const exportedCat = exportedGroup.subCategories.find((c: any) => c.name === "Groceries");
+    expect(exportedCat).toBeDefined();
+    expect(exportedCat.entityId).toBe("SC-UUID-1");
+
+    // Assert exported payees preserve original entityId
+    const exportedPayee = ynabData.payees.find((p: any) => p.name === "Trader Joe's");
+    expect(exportedPayee).toBeDefined();
+    expect(exportedPayee.entityId).toBe("PAYEE-UUID-1");
+
+    // Assert exported transfer payee uses account's original entityId
+    const transferPayee = ynabData.payees.find((p: any) => p.targetAccountId === "ACC-UUID-2");
+    expect(transferPayee).toBeDefined();
+    expect(transferPayee.entityId).toBe("Payee/Transfer:ACC-UUID-2");
+
+    // Assert exported regular transaction with UUID A1B2-C3D4 preserves entityId and foreign keys
+    const exportedRegularTx = ynabData.transactions.find((t: any) => t.entityId === "A1B2-C3D4");
+    expect(exportedRegularTx).toBeDefined();
+    expect(exportedRegularTx.entityId).toBe("A1B2-C3D4");
+    expect(exportedRegularTx.accountId).toBe("ACC-UUID-1");
+    expect(exportedRegularTx.categoryId).toBe("SC-UUID-1");
+    expect(exportedRegularTx.payeeId).toBe("PAYEE-UUID-1");
+
+    // Assert exported transfer pair preserves source and destination entityIds
+    const exportedTransferSrc = ynabData.transactions.find((t: any) => t.entityId === "TRANSFER-SRC-UUID");
+    expect(exportedTransferSrc).toBeDefined();
+    expect(exportedTransferSrc.accountId).toBe("ACC-UUID-1");
+    expect(exportedTransferSrc.targetAccountId).toBe("ACC-UUID-2");
+    expect(exportedTransferSrc.transferTransactionId).toBe("TRANSFER-DEST-UUID");
+
+    const exportedTransferDest = ynabData.transactions.find((t: any) => t.entityId === "TRANSFER-DEST-UUID");
+    expect(exportedTransferDest).toBeDefined();
+    expect(exportedTransferDest.accountId).toBe("ACC-UUID-2");
+    expect(exportedTransferDest.targetAccountId).toBe("ACC-UUID-1");
+    expect(exportedTransferDest.transferTransactionId).toBe("TRANSFER-SRC-UUID");
+
+    // Assert exported split parent and subtransaction preserve entityIds
+    const exportedSplitParent = ynabData.transactions.find((t: any) => t.entityId === "PARENT-SPLIT-UUID");
+    expect(exportedSplitParent).toBeDefined();
+    expect(exportedSplitParent.accountId).toBe("ACC-UUID-1");
+    expect(exportedSplitParent.subTransactions.length).toBe(1);
+    expect(exportedSplitParent.subTransactions[0].entityId).toBe("CHILD-SPLIT-UUID");
+    expect(exportedSplitParent.subTransactions[0].parentTransactionId).toBe("PARENT-SPLIT-UUID");
+    expect(exportedSplitParent.subTransactions[0].categoryId).toBe("SC-UUID-1");
+
+    // Assert exported scheduled transaction preserves entityId
+    const exportedSched = ynabData.scheduledTransactions.find((s: any) => s.entityId === "SCHED-UUID-1");
+    expect(exportedSched).toBeDefined();
+    expect(exportedSched.accountId).toBe("ACC-UUID-1");
+    expect(exportedSched.categoryId).toBe("SC-UUID-1");
+    expect(exportedSched.payeeId).toBe("PAYEE-UUID-1");
+
+    // Assert exported reconciliation preserves entityId
+    const exportedRec = ynabData.reconciliations.find((r: any) => r.entityId === "REC-UUID-1");
+    expect(exportedRec).toBeDefined();
+    expect(exportedRec.accountId).toBe("ACC-UUID-1");
+
+    // Assert exported monthly budget category budget references SC-UUID-1
+    const exportedBudget = ynabData.monthlyBudgets.find((mb: any) => mb.entityId === "MB/2026-08");
+    expect(exportedBudget).toBeDefined();
+    const exportedCatBudget = exportedBudget.monthlySubCategoryBudgets.find((b: any) => b.categoryId === "SC-UUID-1");
+    expect(exportedCatBudget).toBeDefined();
+    expect(exportedCatBudget.entityId).toBe("MCB/2026-08/SC-UUID-1");
+  });
 });

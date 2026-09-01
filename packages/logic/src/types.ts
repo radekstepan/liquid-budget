@@ -1,5 +1,6 @@
 export type Account = {
   id: number;
+  entityId?: string | null;
   name: string;
   kind: "liquid" | "credit" | "offbudget";
   groupLabel: string;
@@ -14,6 +15,7 @@ export type Account = {
 
 export type CategoryGroup = {
   id: number;
+  entityId?: string | null;
   name: string;
   sort: number;
   isCreditCardPayments: boolean;
@@ -22,6 +24,7 @@ export type CategoryGroup = {
 
 export type Category = {
   id: number;
+  entityId?: string | null;
   groupId: number;
   name: string;
   sort: number;
@@ -99,6 +102,8 @@ export type RenameRule = {
 
 export type Transaction = {
   id: number;
+  entityId?: string | null;
+  transferEntityId?: string | null;
   accountId: number;
   categoryId: number | null;
   date: string;
@@ -134,6 +139,8 @@ export type BulkUpdateTransactionPatch = {
 };
 
 export type SubTransaction = {
+  entityId?: string | null;
+  transferEntityId?: string | null;
   /**
    * Nullable when the subtransaction is a transfer to another account.
    */
@@ -146,6 +153,7 @@ export type SubTransaction = {
 
 export type Recurring = {
   id: number;
+  entityId?: string | null;
   accountId: number;
   categoryId: number | null;
   payee: string;
@@ -161,6 +169,7 @@ export type Recurring = {
 
 export type RecurringSubTransaction = {
   id: number;
+  entityId?: string | null;
   recurringId: number;
   /**
    * Nullable to match the DB schema: `recurring_sub_transactions.category_id`
