@@ -108,7 +108,9 @@ test("selecting a sidebar account marks the row and scopes the register; Transac
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {
   const rows = page.locator("tbody tr.y-row");
   const targetRow = rows.first();
-  const payeeText = (await targetRow.locator("td").nth(3).textContent())?.trim();
+  const hasFlag = (await page.locator("table.y-table thead th", { hasText: /^F$/ }).count()) > 0;
+  const payeeColIdx = hasFlag ? 4 : 3;
+  const payeeText = (await targetRow.locator("td").nth(payeeColIdx).textContent())?.trim();
   expect(payeeText).toBeTruthy();
 
   await targetRow.click();

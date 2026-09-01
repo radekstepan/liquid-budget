@@ -96,7 +96,7 @@ export function TransactionModal({
   const initialChildren = useMemo(() => {
     if (!initial || !allTransactions) return undefined;
     const children = getSplitChildren(allTransactions, initial.id);
-    return [...children].sort((a, b) => a.id - b.id);
+    return children.length > 0 ? [...children].sort((a, b) => a.id - b.id) : undefined;
   }, [initial, allTransactions]);
 
   const isInitialTransfer = !!initial?.transferAccountId;
@@ -251,6 +251,14 @@ export function TransactionModal({
     } else {
       setTransferAccountId("");
       setCategoryId("");
+      setSubRows((prev) =>
+        prev.length >= 2
+          ? prev
+          : [
+              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+            ]
+      );
     }
   };
 
