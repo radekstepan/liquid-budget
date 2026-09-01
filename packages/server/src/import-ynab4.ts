@@ -664,6 +664,21 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         // Split transaction parent
         let payee = payeeMap.get(t.payeeId) || "";
         const parentPayeeId = (t.payeeId && payeeDbIdMap.get(t.payeeId)) || null;
+        const nonTombstoneSubs = (t.subTransactions || []).filter((st: any) => !st.isTombstone);
+        const nonZeroSubs = nonTombstoneSubs.filter((st: any) => convertAmount(st.amount) !== 0);
+
+        if (nonZeroSubs.length === 0) {
+          skippedDuplicates.push({
+            accountName: accNameMap.get(accId) || "",
+            date: t.date,
+            payee,
+            memo: t.memo || "",
+            amount: 0,
+            reason: "Zero-amount split transaction",
+          });
+          continue;
+        }
+
         const isParentDeferred = t.categoryId === "Category/__DeferredIncome__";
         const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || isParentDeferred) && (t.amount || 0) > 0;
         const parentIncomeMonth = isParentIncome
@@ -684,6 +699,19 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           ? parentRecId != null ? "r" : "c"
           : t.cleared === "Uncleared" ? "u" : "c";
 
+        const parentSplitAmount = nonZeroSubs.reduce((sum: number, st: any) => sum + convertAmount(st.amount), 0);
+        if (parentSplitAmount === 0) {
+          skippedDuplicates.push({
+            accountName: accNameMap.get(accId) || "",
+            date: t.date,
+            payee,
+            memo: t.memo || "",
+            amount: 0,
+            reason: "Zero-sum split transaction",
+          });
+          continue;
+        }
+
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -694,7 +722,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee,
             payeeId: parentPayeeId,
             memo: t.memo || "",
-            amount: convertAmount(t.amount),
+            amount: parentSplitAmount,
             status: effectiveParentStatus,
             flagColor: ynabFlagToColor(t.flag),
             transferAccountId: null,
@@ -709,10 +737,9 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
         totalImportedTxCount++;
 
         if (insertedT) {
-          const nonTombstoneSubs = (t.subTransactions || []).filter((st: any) => !st.isTombstone);
-          let allChildrenReconciled = nonTombstoneSubs.length > 0;
+          let allChildrenReconciled = nonZeroSubs.length > 0;
 
-          for (const st of nonTombstoneSubs) {
+          for (const st of nonZeroSubs) {
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let subCatId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
             let subPayee = "";
@@ -957,6 +984,17 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             const destIsOnBudget = accOnBudgetMap.get(destAccEntityId) ?? true;
             const isCrossBoundaryTransfer = sourceIsOnBudget !== destIsOnBudget;
             const rawCents = convertAmount(rawAmount);
+            if (rawCents === 0) {
+              skippedDuplicates.push({
+                accountName: accNameMap.get(sourceAccId) || "",
+                date: t.date,
+                payee,
+                memo,
+                amount: 0,
+                reason: "Zero-amount transfer transaction",
+              });
+              continue;
+            }
             const netOnBudget = (sourceIsOnBudget ? rawCents : 0) + (destIsOnBudget ? -rawCents : 0);
             const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
             const isSpecialIncomeCat =
@@ -1019,7 +1057,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               payee,
               payeeId: null,
               memo,
-              amount: convertAmount(rawAmount),
+              amount: rawCents,
               status: effectiveSrcStatus,
               transferStatus: effectiveDestStatus,
               flagColor: ynabFlagToColor(t.flag),
@@ -1035,10 +1073,24 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           } else {
             // Partner is missing or its account is not in accountIdMap (e.g. deleted/tombstoned account).
             // Fall back to importing the resolvable side as a regular transaction on accId.
+            const fallbackAmt = convertAmount(t.amount);
             let memo = t.memo || (partner?.memo || "");
             let cleared = t.cleared;
             let catEntityId = t.categoryId || (partner?.categoryId || null);
             let payee = (t.payeeId ? payeeMap.get(t.payeeId) : "") || (partner?.payeeId ? payeeMap.get(partner.payeeId) || "" : "") || "";
+
+            if (fallbackAmt === 0) {
+              skippedDuplicates.push({
+                accountName: accNameMap.get(accId) || "",
+                date: t.date,
+                payee,
+                memo,
+                amount: 0,
+                reason: "Zero-amount fallback transfer transaction",
+              });
+              continue;
+            }
+
             const fallbackPayeeId =
               (t.payeeId ? payeeDbIdMap.get(t.payeeId) : undefined) ??
               (partner?.payeeId ? payeeDbIdMap.get(partner.payeeId) : undefined) ??
@@ -1087,7 +1139,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               payee,
               payeeId: fallbackPayeeId,
               memo,
-              amount: convertAmount(t.amount),
+              amount: fallbackAmt,
               status:
                 isTxReconciled
                   ? txRecId != null ? "r" : "c"
@@ -1106,6 +1158,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           }
         } else {
           // Plain transaction (or standalone transfer without transferTransactionId)
+          const regularAmt = convertAmount(t.amount);
           let targetAccEntityId = t.targetAccountId || (t.payeeId && t.payeeId.startsWith("Payee/Transfer:") ? t.payeeId.split(":")[1] : null);
           let destAccId = targetAccEntityId ? accountIdMap.get(targetAccEntityId) || null : null;
           let payee = "";
@@ -1114,6 +1167,19 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           } else {
             payee = payeeMap.get(t.payeeId) || "";
           }
+
+          if (regularAmt === 0) {
+            skippedDuplicates.push({
+              accountName: accNameMap.get(accId) || "",
+              date: t.date,
+              payee,
+              memo: t.memo || "",
+              amount: 0,
+              reason: "Zero-amount transaction",
+            });
+            continue;
+          }
+
           const plainPayeeId = destAccId ? null : (t.payeeId ? payeeDbIdMap.get(t.payeeId) ?? null : null);
 
           const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
@@ -1159,7 +1225,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               date: t.date,
               payee,
               memo: t.memo || "",
-              amount: convertAmount(t.amount),
+              amount: regularAmt,
             });
             if (plainFingerprints.has(fp)) {
               if (t.cleared !== "Reconciled" && flagColor === null) {
@@ -1190,7 +1256,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             payee,
             payeeId: plainPayeeId,
             memo: t.memo || "",
-            amount: convertAmount(t.amount),
+            amount: regularAmt,
             status:
               isTxReconciled
                 ? txRecId != null ? "r" : "c"
