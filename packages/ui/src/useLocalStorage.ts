@@ -43,6 +43,8 @@ export function useLocalStorage<T>(
   }, [key]);
 
   const [storedValue, setStoredValue] = useState<T>(readValue);
+  const storedValueRef = useRef<T>(storedValue);
+  storedValueRef.current = storedValue;
 
   const setValue = useCallback(
     (value: T | ((val: T) => T)) => {
@@ -50,15 +52,22 @@ export function useLocalStorage<T>(
         return;
       }
       try {
-        setStoredValue((prev) => {
-          const valueToStore = value instanceof Function ? value(prev) : value;
-          if (validateRef.current && !validateRef.current(valueToStore)) {
-            console.warn(`Attempted to set invalid value for localStorage key "${key}"`);
-            return prev;
-          }
+        const valueToStore =
+          value instanceof Function ? value(storedValueRef.current) : value;
+
+        if (validateRef.current && !validateRef.current(valueToStore)) {
+          console.warn(`Attempted to set invalid value for localStorage key "${key}"`);
+          return;
+        }
+
+        storedValueRef.current = valueToStore;
+        setStoredValue(valueToStore);
+
+        try {
           window.localStorage.setItem(key, JSON.stringify(valueToStore));
-          return valueToStore;
-        });
+        } catch (error) {
+          console.warn(`Error setting localStorage key "${key}":`, error);
+        }
       } catch (error) {
         console.warn(`Error setting localStorage key "${key}":`, error);
       }
@@ -67,7 +76,9 @@ export function useLocalStorage<T>(
   );
 
   useEffect(() => {
-    setStoredValue(readValue());
+    const val = readValue();
+    storedValueRef.current = val;
+    setStoredValue(val);
   }, [key, readValue]);
 
   return [storedValue, setValue];
