@@ -3411,18 +3411,17 @@ describe("transactions queries", () => {
             message: /reconciled and locked/i,
           });
 
-          // 2. Attempting to change status to 'u' must fail with 422
+          // 2. Attempting to change other fields (memo, payee, amount) without unreconciling must fail with 422
           await expect(
-            updateTransaction(db, t1.id, { status: "u" })
+            updateTransaction(db, t1.id, { memo: "New Memo" })
           ).rejects.toMatchObject({
             status: 422,
             name: "TransactionError",
             message: /reconciled and locked/i,
           });
 
-          // 3. Attempting to change other fields (memo, payee, amount) must fail with 422
           await expect(
-            updateTransaction(db, t1.id, { memo: "New Memo" })
+            updateTransaction(db, t1.id, { amount: -6000 })
           ).rejects.toMatchObject({
             status: 422,
             name: "TransactionError",

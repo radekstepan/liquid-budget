@@ -575,14 +575,17 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     patch.incomeMonth !== undefined ||
     patch.isIncome !== undefined;
 
-  if (existing.status === "r" && (patch.status !== undefined || touchesStructuralFields)) {
+  const isUnreconciling = patch.status === "u";
+  const isUnreconcilingTransfer = patch.transferStatus === "u";
+
+  if (existing.status === "r" && !isUnreconciling && (patch.status !== undefined || touchesStructuralFields)) {
     throw new TransactionError(
       "Transaction is reconciled and locked. Unreconcile before editing.",
       422
     );
   }
 
-  if (existing.transferStatus === "r" && (patch.transferStatus !== undefined || touchesStructuralFields)) {
+  if (existing.transferStatus === "r" && !isUnreconcilingTransfer && (patch.transferStatus !== undefined || touchesStructuralFields)) {
     throw new TransactionError(
       "Transaction is reconciled and locked. Unreconcile before editing.",
       422
@@ -591,7 +594,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
   if (existing.parentId != null) {
     const [parent] = await db.select().from(transactions).where(eq(transactions.id, existing.parentId));
-    if (parent && (parent.status === "r" || parent.transferStatus === "r") && (patch.status !== undefined || touchesStructuralFields)) {
+    if (parent && (parent.status === "r" || parent.transferStatus === "r") && !isUnreconciling && (patch.status !== undefined || touchesStructuralFields)) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile before editing.",
         422
@@ -645,14 +648,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     const [current] = await db.select().from(transactions).where(eq(transactions.id, id));
     if (!current) return null;
 
-    if (current.status === "r" && (patch.status !== undefined || touchesStructuralFields)) {
+    if (current.status === "r" && !isUnreconciling && (patch.status !== undefined || touchesStructuralFields)) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile before editing.",
         422
       );
     }
 
-    if (current.transferStatus === "r" && (patch.transferStatus !== undefined || touchesStructuralFields)) {
+    if (current.transferStatus === "r" && !isUnreconcilingTransfer && (patch.transferStatus !== undefined || touchesStructuralFields)) {
       throw new TransactionError(
         "Transaction is reconciled and locked. Unreconcile before editing.",
         422
