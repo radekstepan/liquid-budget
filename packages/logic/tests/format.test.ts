@@ -108,12 +108,13 @@ describe("format", () => {
       expect(numCents(undefined)).toBe(0);
     });
 
-    it("rejects non-integer float numbers and fractional decimal strings", () => {
+    it("rejects non-integer float numbers and fractional decimal strings (BUG-25)", () => {
       expect(() => numCents(12.34)).toThrow(TypeError);
       expect(() => numCents(100.5)).toThrow(TypeError);
       expect(() => numCents("12.34")).toThrow(TypeError);
       expect(() => numCents("100.5")).toThrow(TypeError);
       expect(() => numCents("-12.34")).toThrow(TypeError);
+      expect(() => numCents("123.")).toThrow(TypeError);
     });
 
     it("rejects NaN, unparseable strings, and infinite numbers", () => {
