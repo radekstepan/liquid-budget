@@ -280,4 +280,48 @@ describe("computeRunningBalances", () => {
     expect(byId(out, tx3.id).runningBalance).toBe(110000); // Acc 1 balance after tx3
     expect(byId(out, tx4.id).runningBalance).toBe(40000);  // Acc 2 balance after tx4
   });
+
+  it("leaves running balance unchanged before and after a self-transfer in anchor mode (BUG-18)", () => {
+    // Current balance of Account 1 is $1,000 (100000 cents).
+    // Newer transaction on June 30: -$20 expense.
+    // Self-transfer on June 25: $100 transfer from Account 1 to Account 1.
+    // Older transaction on June 20: -$50 expense.
+    const newer = t({ accountId: 1, date: "2026-06-30", amount: -2000 });
+    const selfTransfer = t({
+      accountId: 1,
+      transferAccountId: 1,
+      date: "2026-06-25",
+      amount: -10000,
+    });
+    const older = t({ accountId: 1, date: "2026-06-20", amount: -5000 });
+
+    const balances = new Map([[1, 100000]]);
+    const out = computeRunningBalances([newer, selfTransfer, older], balances, 1);
+
+    // Newer: 100000
+    // Self-transfer: 102000 (100000 - (-2000))
+    // Older: 102000 (102000 - 0)
+    expect(byId(out, newer.id).runningBalance).toBe(100000);
+    expect(byId(out, selfTransfer.id).runningBalance).toBe(102000);
+    expect(byId(out, older.id).runningBalance).toBe(102000);
+  });
+
+  it("leaves running balance unchanged before and after a self-transfer in All Transactions mode (BUG-18)", () => {
+    const newer = t({ accountId: 1, date: "2026-06-30", amount: -2000 });
+    const selfTransfer = t({
+      accountId: 1,
+      transferAccountId: 1,
+      date: "2026-06-25",
+      amount: -10000,
+    });
+    const older = t({ accountId: 1, date: "2026-06-20", amount: -5000 });
+
+    const balances = new Map([[1, 100000]]);
+    const out = computeRunningBalances([newer, selfTransfer, older], balances);
+
+    expect(byId(out, newer.id).runningBalance).toBe(100000);
+    expect(byId(out, selfTransfer.id).runningBalance).toBe(102000);
+    expect(byId(out, older.id).runningBalance).toBe(102000);
+  });
 });
+
