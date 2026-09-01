@@ -91,11 +91,11 @@ export function isIncomeTransaction(
 
     // Regular transaction
     if (!onA) return false;
-    if (accA && accA.kind === "credit") return false;
     if (num(t.amount) <= 0) return false;
     if (t.isIncome !== undefined) {
       return t.isIncome === true;
     }
+    if (accA && accA.kind === "credit") return false;
     // Uncategorized positive rows are income, including split children that
     // omit `isIncome` (matches createSplitWithChildren semantics:
     // categoryId == null && amount > 0). An explicit `isIncome` value above

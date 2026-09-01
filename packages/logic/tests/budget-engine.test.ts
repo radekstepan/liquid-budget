@@ -3720,6 +3720,92 @@ describe("computeBudget", () => {
       expect(febClothing.available).toBe(0);
     });
   });
+
+  describe("BUG-06: Credit Card Income / Cashbacks Dropped from Budget", () => {
+    const ccAccount = { id: 2, name: "Visa", kind: "credit" as const, groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 };
+    const accountMap = [ccAccount];
+
+    it("Test 1 (Cashback Income): classifies credit card transaction with isIncome: true as income and reflects in TBB", () => {
+      const ccCashbackTx = {
+        id: 1,
+        accountId: 2,
+        categoryId: null,
+        date: "2026-08-15",
+        payee: "Cashback Reward",
+        memo: "5% cashback",
+        amount: "5000",
+        status: "c" as const,
+        isIncome: true,
+      };
+
+      // 1. Assert isIncomeTransaction returns true
+      expect(isIncomeTransaction(ccCashbackTx, accountMap)).toBe(true);
+
+      // 2. Assert budget engine computes August TBB with +$50.00 income
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [ccAccount],
+        groups: [group],
+        categories: [category],
+        assignments: [],
+        transactions: [ccCashbackTx],
+        recurring: [],
+      };
+
+      const res = computeBudget(data, "2026-08");
+      expect(res.totalIncome).toBe(5000);
+      expect(res.tbb).toBe(5000);
+
+      // Verify pre-indexed mode also indexes the income
+      const index = buildBudgetIndex(data);
+      expect(index.incomeByMonth["2026-08"]).toBe(5000);
+      const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-08");
+      expect(indexedRes.totalIncome).toBe(5000);
+      expect(indexedRes.tbb).toBe(5000);
+    });
+
+    it("Test 2 (Uncategorized CC Inflow default): does not classify credit card transaction with isIncome: undefined as income", () => {
+      const ccUncategorizedTx = {
+        id: 2,
+        accountId: 2,
+        categoryId: null,
+        date: "2026-08-15",
+        payee: "Starting Balance / Uncategorized",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+        isIncome: undefined,
+      };
+
+      // 1. Assert isIncomeTransaction returns false (satisfying ee80f9f3 intent)
+      expect(isIncomeTransaction(ccUncategorizedTx, accountMap)).toBe(false);
+
+      // 2. Assert budget engine does not add to totalIncome or TBB
+      const group = makeGroup({ id: 1, name: "Everyday" });
+      const category = makeCategory({ id: 10, groupId: 1, name: "Groceries" });
+
+      const data: BudgetData = {
+        accounts: [ccAccount],
+        groups: [group],
+        categories: [category],
+        assignments: [],
+        transactions: [ccUncategorizedTx],
+        recurring: [],
+      };
+
+      const res = computeBudget(data, "2026-08");
+      expect(res.totalIncome).toBe(0);
+      expect(res.tbb).toBe(0);
+
+      const index = buildBudgetIndex(data);
+      expect(index.incomeByMonth["2026-08"]).toBeUndefined();
+      const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-08");
+      expect(indexedRes.totalIncome).toBe(0);
+      expect(indexedRes.tbb).toBe(0);
+    });
+  });
 });
 
 
