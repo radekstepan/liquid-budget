@@ -534,6 +534,12 @@ describe("format", () => {
       expect(evalAmount("(-5)")).toBe(-5);
     });
 
+    it("handles unary minus whitespace correctly without absorbing spaces between digits (BUG-08)", () => {
+      expect(evalAmount("- 50 + 20")).toBe(-30);
+      expect(evalAmount("-5 50")).toBeNull();
+      expect(evalAmount("-5.50")).toBe(-5.5);
+    });
+
     it("is left-associative for same-precedence ops", () => {
       expect(evalAmount("10 - 3 - 2")).toBe(5);
       expect(evalAmount("20 / 4 / 5")).toBe(1);
