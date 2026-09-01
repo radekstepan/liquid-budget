@@ -29,7 +29,7 @@ import { findOrCreatePayee } from "./queries/payees.js";
  * 2. Analyze all-integer amounts:
  *    - In decimal dollars, everyday purchases are small integers: 1 to 999 (e.g. $5, $15, $45, $120).
  *      In milliunits, these values would represent tiny fractions of a cent ($0.001 to $0.999).
- *    - If there are non-multiple-of-100 values < 1000 (e.g. 15, 25, 45, 12, 1, 2) or if more than
+ *    - If there are non-multiple-of-10 values < 1000 (e.g. 15, 25, 45, 12, 1, 2) or if more than
  *      5% of non-zero amounts are < 1000, it is decimal dollars.
  *    - If virtually all (>= 95%) non-zero amounts are >= 1000 (e.g. 1000, 3990, 12500, 45000, 500000),
  *      it is milliunits.
@@ -84,26 +84,26 @@ export function detectMilliunitScale(ynabData: any): boolean {
 
   // 2. All amounts are integers. Analyze distribution of magnitudes.
   let smallCount = 0;
-  let smallNonMultipleOf100Count = 0;
+  let smallNonMultipleOf10Count = 0;
 
   for (const a of amounts) {
     const abs = Math.abs(a);
     if (abs < 1000) {
       smallCount++;
-      if (abs % 100 !== 0) {
-        smallNonMultipleOf100Count++;
+      if (abs % 10 !== 0) {
+        smallNonMultipleOf10Count++;
       }
     }
   }
 
-  // If there are values like 1, 2, 5, 12, 15, 45 (< 1000 and not multiples of 100),
+  // If there are values like 1, 2, 5, 12, 15, 45 (< 1000 and not multiples of 10),
   // in milliunits those would be 0.1¢ to 4.5¢, which are everyday dollar amounts in decimal budgets.
-  if (smallNonMultipleOf100Count > 0) {
+  if (smallNonMultipleOf10Count > 0) {
     return false;
   }
 
-  // If more than 5% of amounts are < 1000 (sub-dollar in milliunits), it's decimal dollars.
-  if (smallCount / amounts.length > 0.05) {
+  // If more than 30% of amounts are < 1000 (sub-dollar in milliunits), it's decimal dollars.
+  if (smallCount / amounts.length > 0.3) {
     return false;
   }
 
