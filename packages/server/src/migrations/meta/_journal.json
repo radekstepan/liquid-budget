@@ -148,6 +148,13 @@
       "when": 1787210000000,
       "tag": "0020_add_transfer_status",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787211000000,
+      "tag": "0021_add_entity_id_columns",
+      "breakpoints": true
     }
   ]
 }

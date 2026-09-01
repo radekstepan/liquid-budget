@@ -32,17 +32,25 @@ export function getPayeeByName(db: Db, name: string): PayeeRow | null {
 export function findOrCreatePayee(
   db: Db,
   name: string,
-  autoCategoryId?: number | null
+  autoCategoryId?: number | null,
+  entityId?: string | null
 ): PayeeRow {
   const trimmed = name.trim();
   const existing = getPayeeByName(db, trimmed);
   if (existing) {
+    const patch: Partial<typeof payees.$inferInsert> = {};
     if (autoCategoryId !== undefined && autoCategoryId !== existing.autoCategoryId) {
+      patch.autoCategoryId = autoCategoryId;
+    }
+    if (entityId !== undefined && entityId && !existing.entityId) {
+      patch.entityId = entityId;
+    }
+    if (Object.keys(patch).length > 0) {
       db.update(payees)
-        .set({ autoCategoryId })
+        .set(patch)
         .where(eq(payees.id, existing.id))
         .run();
-      return { ...existing, autoCategoryId };
+      return { ...existing, ...patch };
     }
     return existing;
   }
@@ -51,6 +59,7 @@ export function findOrCreatePayee(
   const inserted = db
     .insert(payees)
     .values({
+      entityId: entityId ?? null,
       name: trimmed,
       autoCategoryId: autoCategoryId ?? null,
       createdAt: now,
