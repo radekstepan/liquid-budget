@@ -165,12 +165,23 @@ export function computeNetWorthReport(
     let assets = 0;
     let debts = 0;
     for (const a of data.accounts) {
-      const bal = runningBalances.get(a.id) ?? 0;
-      // Clamp to 0 if the account has transactions but they only begin in a future month
-      const earliest = earliestMonthByAccount.get(a.id);
-      if (earliest && m < earliest) {
+      // Determine the earliest active month for this account:
+      // - If explicit `createdAt` is present, use its "YYYY-MM" (or earlier if transactions were backdated before createdAt).
+      // - If `createdAt` is omitted, use the earliest recorded transaction month.
+      // - If neither is present (e.g. account with base balance and no transactions), retain base balance across all months.
+      const createdMonth = a.createdAt?.trim() ? a.createdAt.slice(0, 7) : undefined;
+      const earliestTxMonth = earliestMonthByAccount.get(a.id);
+      let startMonth: string | undefined;
+      if (createdMonth && earliestTxMonth) {
+        startMonth = createdMonth < earliestTxMonth ? createdMonth : earliestTxMonth;
+      } else {
+        startMonth = createdMonth ?? earliestTxMonth;
+      }
+
+      if (startMonth && m < startMonth) {
         continue;
       }
+      const bal = runningBalances.get(a.id) ?? 0;
       if (bal > 0) {
         assets = Math.round(assets + bal);
       } else if (bal < 0) {
