@@ -3463,6 +3463,263 @@ describe("computeBudget", () => {
       expect(groc.available).toBe(3000);
     });
   });
+
+  describe("BUG-02: CC Refund on Unfunded Spending Creates Phantom Money", () => {
+    function checkBudgetIntegrity(data: BudgetData, month: string) {
+      const result = computeBudget(data, month);
+      const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+      const splitParentIds = new Set<number>();
+      for (const t of data.transactions) {
+        if (t.parentId != null) splitParentIds.add(t.parentId);
+      }
+
+      const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
+      const accountBalances = new Map<number, number>();
+      for (const a of onBudgetAccounts) {
+        accountBalances.set(a.id, Number(a.balance ?? 0));
+      }
+
+      // Compute account balance delta from transactions up to `month`
+      for (const t of data.transactions) {
+        if (splitParentIds.has(t.id)) continue;
+
+        const accA = accountMap.get(t.accountId);
+        const onA = accA ? accA.onBudget : true;
+
+        const isIncome = isIncomeTransaction(t, accountMap);
+        const effectiveMonth = isIncome ? (t.incomeMonth || t.date.slice(0, 7)) : t.date.slice(0, 7);
+        if (effectiveMonth > month) continue;
+
+        const amt = Number(t.amount);
+        if (t.transferAccountId != null) {
+          const accB = accountMap.get(t.transferAccountId);
+          const onB = accB ? accB.onBudget : true;
+          if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
+          if (onB) accountBalances.set(t.transferAccountId, (accountBalances.get(t.transferAccountId) ?? 0) - amt);
+        } else {
+          if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
+        }
+      }
+
+      const totalAccountBalance = Array.from(accountBalances.values()).reduce((s, v) => s + v, 0);
+
+      const totalCategoryAvailable = result.groups.reduce(
+        (s, g) => s + g.available,
+        0
+      );
+
+      const ccAccounts = onBudgetAccounts.filter((a) => a.kind === "credit");
+      const totalCCDebt = ccAccounts.reduce(
+        (s, a) => s + Math.max(0, -(accountBalances.get(a.id) ?? 0)),
+        0
+      );
+      const negativeCategorySum = result.groups.reduce(
+        (s, g) => s + Math.max(0, -g.available),
+        0
+      );
+      const unmatchedCCDebt = Math.max(0, totalCCDebt - negativeCategorySum);
+
+      const difference = Math.round(
+        totalAccountBalance + unmatchedCCDebt - totalCategoryAvailable - result.tbb
+      );
+
+      return { difference, result, totalAccountBalance, totalCategoryAvailable };
+    }
+
+    it("multi-month: Month 1 unfunded CC spend ($100), Month 2 full CC refund ($100) -> Month 2 Clothing available is $0, CC Payment available is $0, TBB unaffected, integrity difference is 0", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "0" },
+        ],
+        transactions: [
+          // Month 1: $100 unfunded spend on Visa
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-15", payee: "Clothing Store", memo: "Jacket", amount: "-10000", status: "c" },
+          // Month 2: $100 refund on Visa
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-02-10", payee: "Clothing Store", memo: "Jacket Return", amount: "10000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      // Month 1 assertions
+      const jan = computeBudget(data, "2026-01");
+      const janClothing = jan.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const janVisa = jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(janClothing.available).toBe(-10000);
+      expect(janVisa.available).toBe(0);
+      expect(jan.tbb).toBe(0);
+
+      // Month 2 assertions
+      const feb = computeBudget(data, "2026-02");
+      const febClothing = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(febVisa.available).toBe(0);
+      expect(febVisa.ccBuffer).toBe(0);
+      expect(febClothing.available).toBe(0);
+      expect(feb.tbb).toBe(0);
+
+      // Integrity check
+      const integrityJan = checkBudgetIntegrity(data, "2026-01");
+      expect(integrityJan.difference).toBe(0);
+      const integrityFeb = checkBudgetIntegrity(data, "2026-02");
+      expect(integrityFeb.difference).toBe(0);
+    });
+
+    it("multi-month: Month 1 partially funded CC spend ($40 assigned, $100 spent), Month 2 full refund ($100) -> Month 2 Clothing available is $40, CC Payment is $0", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [
+          { id: 1, categoryId: 1, month: "2026-01", amount: "4000" },
+        ],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Opening", memo: "", amount: "4000", status: "c", isIncome: true },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-01-15", payee: "Clothing Store", memo: "Coat", amount: "-10000", status: "c" },
+          { id: 3, accountId: 2, categoryId: 1, date: "2026-02-10", payee: "Clothing Store", memo: "Coat Return", amount: "10000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const jan = computeBudget(data, "2026-01");
+      const janClothing = jan.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const janVisa = jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(janClothing.available).toBe(-6000);
+      expect(janVisa.available).toBe(4000);
+
+      const feb = computeBudget(data, "2026-02");
+      const febClothing = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(febClothing.available).toBe(4000);
+      expect(febVisa.available).toBe(0);
+      expect(feb.tbb).toBe(0);
+
+      const integrityFeb = checkBudgetIntegrity(data, "2026-02");
+      expect(integrityFeb.difference).toBe(0);
+    });
+
+    it("multi-month: Month 1 unfunded spend ($100), Month 2 partial refund ($40), Month 3 partial refund ($60)", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-15", payee: "Store", memo: "", amount: "-10000", status: "c" },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-02-10", payee: "Store", memo: "", amount: "4000", status: "c" },
+          { id: 3, accountId: 2, categoryId: 1, date: "2026-03-05", payee: "Store", memo: "", amount: "6000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const feb = computeBudget(data, "2026-02");
+      const febClothing = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(febClothing.available).toBe(0);
+      expect(febVisa.available).toBe(0);
+
+      const mar = computeBudget(data, "2026-03");
+      const marClothing = mar.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const marVisa = mar.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(marClothing.available).toBe(0);
+      expect(marVisa.available).toBe(0);
+
+      expect(checkBudgetIntegrity(data, "2026-01").difference).toBe(0);
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+      expect(checkBudgetIntegrity(data, "2026-03").difference).toBe(0);
+    });
+
+    it("multi-month: Month 1 unfunded spend ($100), Month 2 excess refund ($150) -> creates $50 available and $50 card credit", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-15", payee: "Store", memo: "", amount: "-10000", status: "c" },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-02-10", payee: "Store", memo: "", amount: "15000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const feb = computeBudget(data, "2026-02");
+      const febClothing = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!;
+      expect(febClothing.available).toBe(5000);
+      expect(febVisa.available).toBe(0);
+
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+    });
+
+    it("serializes and hydrates unfundedPaydownByMonth correctly", () => {
+      const data: BudgetData = {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+          { id: 2, name: "Visa", kind: "credit", groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 },
+        ],
+        groups: [
+          { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+          { id: 2, name: "Credit Card Payments", sort: 1, isCreditCardPayments: true },
+        ],
+        categories: [
+          { id: 1, groupId: 1, name: "Clothing", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+          { id: 2, groupId: 2, name: "Visa Payment", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: 2 },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 2, categoryId: 1, date: "2026-01-15", payee: "Store", memo: "", amount: "-10000", status: "c" },
+          { id: 2, accountId: 2, categoryId: 1, date: "2026-02-10", payee: "Store", memo: "", amount: "10000", status: "c" },
+        ],
+        recurring: [],
+      };
+
+      const index = buildBudgetIndex(data);
+      expect(index.unfundedPaydownByMonth?.["2026-02"]?.[1]).toBe(10000);
+
+      const hydratedData = { ...data, budgetIndex: index };
+      const feb = computeBudget(hydratedData, "2026-02");
+      const febClothing = feb.groups.find((g) => !g.group.isCreditCardPayments)!.rows[0]!;
+      expect(febClothing.available).toBe(0);
+    });
+  });
 });
 
 

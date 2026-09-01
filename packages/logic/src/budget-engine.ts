@@ -149,6 +149,7 @@ type IndexedBudgetData = {
   endingBalanceByMonth: Map<string, Map<number, number>>;
   overspentByMonth: Map<string, number>;
   surplusByMonth: Map<string, number>;
+  unfundedPaydownByMonth?: Map<string, Map<number, number>>;
 };
 
 export const BUDGET_INDEX_VERSION = 1;
@@ -362,6 +363,17 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
     Object.entries(idx.surplusByMonth).map(([k, v]) => [k, Number(v)])
   );
 
+  const unfundedPaydownByMonth = new Map<string, Map<number, number>>();
+  if (idx.unfundedPaydownByMonth) {
+    for (const [m, catMap] of Object.entries(idx.unfundedPaydownByMonth)) {
+      const inner = new Map<number, number>();
+      for (const [catId, val] of Object.entries(catMap)) {
+        inner.set(Number(catId), val);
+      }
+      unfundedPaydownByMonth.set(m, inner);
+    }
+  }
+
   const endingBalanceByMonth = new Map<string, Map<number, number>>();
   if (idx.endingBalanceByMonth) {
     for (const [m, catMap] of Object.entries(idx.endingBalanceByMonth)) {
@@ -393,6 +405,7 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
       const aMap = assignedByMonth.get(m) ?? new Map<number, number>();
       const oMap = outflowByMonth.get(m) ?? new Map<number, number>();
       const sMap = spendByAccountMonth.get(m) ?? new Map<number, number>();
+      const paydownMap = unfundedPaydownByMonth.get(m) ?? new Map<number, number>();
       const nextBal = new Map<number, number>();
       for (const c of normData.categories) {
         const prev = cMap.get(c.id) ?? 0;
@@ -403,10 +416,12 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
         if (linkedAcc != null) {
           ccBuffer = sMap.get(linkedAcc) ?? 0;
         }
-        const avail = Math.round(prev + assigned + rawFlow + ccBuffer);
         if (ccGroupIds.has(c.groupId)) {
+          const avail = Math.round(prev + assigned + rawFlow + ccBuffer);
           nextBal.set(c.id, avail);
         } else {
+          const paydown = paydownMap.get(c.id) ?? 0;
+          const avail = Math.round(prev + assigned + rawFlow - paydown);
           if (avail >= 0 || c.overspendCarriesOver) {
             nextBal.set(c.id, avail);
           } else {
@@ -428,6 +443,7 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
     endingBalanceByMonth,
     overspentByMonth,
     surplusByMonth,
+    unfundedPaydownByMonth,
   };
 }
 
@@ -575,11 +591,24 @@ function computeAllMonths(
   const spendByAccountMonth = new Map<string, Map<number, number>>();
   const overspentByMonth = new Map<string, number>();
   const surplusByMonth = new Map<string, number>();
+  const unfundedPaydownByMonth = new Map<string, Map<number, number>>();
 
   let currentBalance = new Map<number, number>(
     data.categories.map((c) => [c.id, num(c.carryover)])
   );
   let runningSurplus = 0;
+  const unfundedDebt = new Map<number, Map<number, number>>();
+
+  const accountToCCPayCat = new Map<number, number>();
+  for (const c of data.categories) {
+    if (
+      ccGroupIds.has(c.groupId) &&
+      c.linkedAccountId != null &&
+      !accountToCCPayCat.has(c.linkedAccountId)
+    ) {
+      accountToCCPayCat.set(c.linkedAccountId, c.id);
+    }
+  }
 
   for (const month of orderedMonths) {
     carryoverByMonth.set(month, new Map(currentBalance));
@@ -592,8 +621,14 @@ function computeAllMonths(
     const cardAdvances = rawData.cardAdvancesByAccountMonth.get(month) ?? new Map<number, number>();
 
     const monthFundedCCByAccount = new Map<number, number>();
+    const availableCCBufferByAccount = new Map<number, number>();
+    for (const [accId, catId] of accountToCCPayCat) {
+      availableCCBufferByAccount.set(accId, currentBalance.get(catId) ?? 0);
+    }
+
     let monthCashOverspent = 0;
     const nextBalance = new Map<number, number>();
+    const monthUnfundedPaydown = new Map<number, number>();
 
     // 1. First pass: Non-CC categories
     for (const c of data.categories) {
@@ -607,8 +642,16 @@ function computeAllMonths(
       const availableBeforeSpend = prev + assigned;
       let runningCashPool = availableBeforeSpend;
       const catFundedCCByAccount = new Map<number, number>();
+      const cardCreditByAccount = new Map<number, number>();
       let catFundedCC = 0;
       let netCCSpend = 0;
+
+      const priorCatDebt = unfundedDebt.get(c.id);
+      const priorDebtMap = new Map<number, number>(priorCatDebt ? priorCatDebt : []);
+      const catDebtMap = new Map<number, number>(priorDebtMap);
+      unfundedDebt.set(c.id, catDebtMap);
+
+      let catPriorUnfundedPaydown = 0;
 
       const sortedTxs = txs.slice().sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
       for (const tx of sortedTxs) {
@@ -616,7 +659,13 @@ function computeAllMonths(
           if (tx.amount < 0) {
             const spend = -tx.amount;
             netCCSpend += spend;
-            const funded = Math.max(0, Math.min(runningCashPool, spend));
+
+            const cardCredit = cardCreditByAccount.get(tx.accountId) ?? 0;
+            const creditUsed = Math.min(cardCredit, spend);
+            cardCreditByAccount.set(tx.accountId, cardCredit - creditUsed);
+            const remainingSpend = spend - creditUsed;
+
+            const funded = Math.max(0, Math.min(runningCashPool, remainingSpend));
             runningCashPool -= funded;
             catFundedCC += funded;
             catFundedCCByAccount.set(
@@ -627,20 +676,83 @@ function computeAllMonths(
               tx.accountId,
               (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
             );
+            const unfunded = remainingSpend - funded;
+            if (unfunded > 0) {
+              catDebtMap.set(
+                tx.accountId,
+                (catDebtMap.get(tx.accountId) ?? 0) + unfunded
+              );
+            }
           } else if (tx.amount > 0) {
-            netCCSpend -= tx.amount;
-            const currentFunded = catFundedCCByAccount.get(tx.accountId) ?? 0;
-            const fundedRefund = Math.max(0, Math.min(currentFunded, tx.amount));
-            catFundedCCByAccount.set(
-              tx.accountId,
-              currentFunded - fundedRefund
-            );
-            catFundedCC -= fundedRefund;
-            monthFundedCCByAccount.set(
-              tx.accountId,
-              (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefund
-            );
-            runningCashPool += fundedRefund;
+            let refund = tx.amount;
+            netCCSpend -= refund;
+
+            // 1. Pay down unfunded CC debt from prior months first
+            const priorDebtForAcc = priorDebtMap.get(tx.accountId) ?? 0;
+            const priorPaydown = Math.max(0, Math.min(priorDebtForAcc, refund));
+            if (priorPaydown > 0) {
+              priorDebtMap.set(tx.accountId, priorDebtForAcc - priorPaydown);
+              catDebtMap.set(
+                tx.accountId,
+                Math.max(0, (catDebtMap.get(tx.accountId) ?? 0) - priorPaydown)
+              );
+              refund -= priorPaydown;
+              catPriorUnfundedPaydown += priorPaydown;
+            }
+
+            // 2. Pay down unfunded CC spend from current month
+            if (refund > 0) {
+              const currentTotalDebt = catDebtMap.get(tx.accountId) ?? 0;
+              const remainingPrior = priorDebtMap.get(tx.accountId) ?? 0;
+              const currentMonthUnfunded = Math.max(0, currentTotalDebt - remainingPrior);
+              const currentMonthPaydown = Math.max(0, Math.min(currentMonthUnfunded, refund));
+              if (currentMonthPaydown > 0) {
+                catDebtMap.set(tx.accountId, currentTotalDebt - currentMonthPaydown);
+                refund -= currentMonthPaydown;
+              }
+            }
+
+            // 3. Reverse funded CC spending in the current month for this account
+            if (refund > 0) {
+              const currentFunded = catFundedCCByAccount.get(tx.accountId) ?? 0;
+              const fundedRefund = Math.max(0, Math.min(currentFunded, refund));
+              if (fundedRefund > 0) {
+                catFundedCCByAccount.set(
+                  tx.accountId,
+                  currentFunded - fundedRefund
+                );
+                catFundedCC -= fundedRefund;
+                monthFundedCCByAccount.set(
+                  tx.accountId,
+                  (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefund
+                );
+                runningCashPool += fundedRefund;
+                refund -= fundedRefund;
+              }
+            }
+
+            // 4. Reverse prior months' funded CC buffer (if any remaining refund)
+            if (refund > 0) {
+              const availInCC = availableCCBufferByAccount.get(tx.accountId) ?? 0;
+              const fundedRefundFromPrior = Math.max(0, Math.min(availInCC, refund));
+              if (fundedRefundFromPrior > 0) {
+                availableCCBufferByAccount.set(tx.accountId, availInCC - fundedRefundFromPrior);
+                monthFundedCCByAccount.set(
+                  tx.accountId,
+                  (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefundFromPrior
+                );
+                runningCashPool += fundedRefundFromPrior;
+                refund -= fundedRefundFromPrior;
+              }
+            }
+
+            // 5. Any excess refund remains as card credit balance on this card
+            if (refund > 0) {
+              cardCreditByAccount.set(
+                tx.accountId,
+                (cardCreditByAccount.get(tx.accountId) ?? 0) + refund
+              );
+            }
           }
         } else {
           // Cash account transaction
@@ -648,12 +760,18 @@ function computeAllMonths(
         }
       }
 
-      const endAvailable = Math.round(prev + assigned + rawFlow);
+      if (catPriorUnfundedPaydown > 0) {
+        monthUnfundedPaydown.set(c.id, catPriorUnfundedPaydown);
+      }
+
+      const effectiveFlow = rawFlow - catPriorUnfundedPaydown;
+      const endAvailable = Math.round(prev + assigned + effectiveFlow);
       if (endAvailable >= 0) {
         nextBalance.set(c.id, endAvailable);
       } else {
         if (c.overspendCarriesOver) {
           nextBalance.set(c.id, endAvailable);
+          catDebtMap.clear();
         } else {
           nextBalance.set(c.id, 0);
           const totalDeficit = -endAvailable;
@@ -692,6 +810,7 @@ function computeAllMonths(
     endingBalanceByMonth.set(month, new Map(nextBalance));
     spendByAccountMonth.set(month, monthSpendByAccount);
     overspentByMonth.set(month, monthCashOverspent);
+    unfundedPaydownByMonth.set(month, monthUnfundedPaydown);
 
     const income = rawData.incomeByMonth.get(month) ?? 0;
     const assignedTotal = rawData.assignedTotalByMonth.get(month) ?? 0;
@@ -711,6 +830,7 @@ function computeAllMonths(
     endingBalanceByMonth,
     overspentByMonth,
     surplusByMonth,
+    unfundedPaydownByMonth,
   };
 }
 
@@ -755,6 +875,14 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
   for (const [m, map] of index.endingBalanceByMonth) {
     serializedEnding[m] = Object.fromEntries(map);
   }
+  const serializedUnfundedPaydown: Record<string, Record<string | number, number>> = {};
+  if (index.unfundedPaydownByMonth) {
+    for (const [m, map] of index.unfundedPaydownByMonth) {
+      if (map.size > 0) {
+        serializedUnfundedPaydown[m] = Object.fromEntries(map);
+      }
+    }
+  }
 
   const result: SerializedBudgetIndex = {
     version: BUDGET_INDEX_VERSION,
@@ -767,6 +895,7 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     endingBalanceByMonth: serializedEnding,
     overspentByMonth: Object.fromEntries(index.overspentByMonth),
     surplusByMonth: Object.fromEntries(index.surplusByMonth),
+    unfundedPaydownByMonth: serializedUnfundedPaydown,
   };
 
   serializedIndexEpochs.set(result, globalCacheEpoch);
@@ -882,15 +1011,19 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   const assignMap = index.assignedByMonth.get(month) ?? new Map<number, number>();
 
   // 5. Build CatRow for every category.
+  const unfundedPaydownMap = index.unfundedPaydownByMonth?.get(month) ?? new Map<number, number>();
   const catsByGroup = new Map<number, CatRow[]>();
   for (const c of normData.categories) {
     const carryoverIn = carryoverMap.get(c.id) ?? 0;
     const assigned = assignMap.get(c.id) ?? 0;
     const rawFlow = outflowMap.get(c.id) ?? 0;
     const outflow = Math.min(0, rawFlow);
+    const paydown = unfundedPaydownMap.get(c.id) ?? 0;
 
     const ccBuffer = ccBufferMap.get(c.id) ?? 0;
-    const available = Math.round(carryoverIn + assigned + rawFlow + ccBuffer);
+    const available = ccGroupIds.has(c.groupId)
+      ? Math.round(carryoverIn + assigned + rawFlow + ccBuffer)
+      : Math.round(carryoverIn + assigned + rawFlow - paydown);
 
     const fundedPct = computeFundedPct(c.goalTarget, assigned, available);
 

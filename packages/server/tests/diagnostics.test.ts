@@ -497,5 +497,44 @@ describe("diagnostics queries", () => {
       expect(report.totalCategoryAvailable).toBe(-75000);
       expect(report.tbb).toBe(100000);
     });
+
+    it("BUG-02: verifies budget integrity holds when receiving CC refund on prior unfunded spending", async () => {
+      const db = openMigratedDb();
+      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
+      const amex = await createAccount(db, { name: "Amex", kind: "credit", onBudget: true, balance: 0 });
+
+      const [group] = await db.insert(schema.categoryGroups).values({ name: "Everyday", sort: 0 }).returning();
+      const [ccGroup] = await db.insert(schema.categoryGroups).values({ name: "Credit Card Payments", sort: 1, isCreditCardPayments: true }).returning();
+      const [groceries] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
+      const [amexPay] = await db.insert(schema.categories).values({ groupId: ccGroup.id, name: "Amex Payment", sort: 0, linkedAccountId: amex.id }).returning();
+
+      // Month 1 (2026-06): $100 unfunded spend on Amex
+      await createTransaction(db, {
+        accountId: amex.id,
+        categoryId: groceries.id,
+        date: "2026-06-15",
+        payee: "Supermarket",
+        memo: "Groceries",
+        amount: -10000,
+      });
+
+      // Month 2 (2026-07): $100 refund on Amex
+      await createTransaction(db, {
+        accountId: amex.id,
+        categoryId: groceries.id,
+        date: "2026-07-10",
+        payee: "Supermarket",
+        memo: "Groceries Return",
+        amount: 10000,
+      });
+
+      const reportJune = await verifyBudgetIntegrity(db, "2026-06");
+      expect(reportJune.difference).toBe(0);
+
+      const reportJuly = await verifyBudgetIntegrity(db, "2026-07");
+      expect(reportJuly.difference).toBe(0);
+      expect(reportJuly.totalCategoryAvailable).toBe(0);
+      expect(reportJuly.tbb).toBe(0);
+    });
   });
 });
