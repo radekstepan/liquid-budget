@@ -28,6 +28,7 @@ function applyOptimisticTransactionDeletion(
   const removedIds = new Set(ids);
   const parentNewTotals = new Map<number, number>();
   const deletedParentIds = new Set<number>();
+  const flattenedChildren = new Map<number, { payee?: string; flagColor?: any }>();
 
   for (const tx of prev.transactions) {
     if (idSet.has(tx.id) && tx.parentId == null) {
@@ -78,11 +79,16 @@ function applyOptimisticTransactionDeletion(
     const remainingChildren = allChildren.filter((c) => !idSet.has(c.id));
     if (remainingChildren.length === 1) {
       const lastChild = remainingChildren[0]!;
-      deltas.set(lastChild.accountId, (deltas.get(lastChild.accountId) ?? 0) - num(lastChild.amount));
-      if (lastChild.transferAccountId != null) {
-        deltas.set(lastChild.transferAccountId, (deltas.get(lastChild.transferAccountId) ?? 0) + num(lastChild.amount));
-      }
-      removedIds.add(lastChild.id);
+      const parentTx = prev.transactions.find((t) => t.id === parentId);
+      const childPayee =
+        lastChild.payee && lastChild.payee.trim() !== ""
+          ? lastChild.payee
+          : (parentTx?.payee ?? "");
+      const childFlagColor = lastChild.flagColor ?? (parentTx?.flagColor ?? null);
+      flattenedChildren.set(lastChild.id, {
+        payee: childPayee,
+        flagColor: childFlagColor,
+      });
       removedIds.add(parentId);
       parentNewTotals.delete(parentId);
     } else if (remainingChildren.length === 0) {
@@ -95,9 +101,24 @@ function applyOptimisticTransactionDeletion(
   }
 
   const accounts = applyAccountDeltas(prev.accounts, deltas);
-  let transactions = prev.transactions.filter(
-    (x) => !removedIds.has(x.id) && (x.parentId == null || !removedIds.has(x.parentId))
-  );
+  let transactions = prev.transactions
+    .filter(
+      (x) =>
+        !removedIds.has(x.id) &&
+        (x.parentId == null || flattenedChildren.has(x.id) || !removedIds.has(x.parentId))
+    )
+    .map((x) => {
+      const flat = flattenedChildren.get(x.id);
+      if (flat) {
+        return {
+          ...x,
+          parentId: null,
+          payee: flat.payee || x.payee,
+          flagColor: flat.flagColor !== undefined ? flat.flagColor : x.flagColor,
+        };
+      }
+      return x;
+    });
   if (parentNewTotals.size > 0) {
     transactions = transactions.map((x) => {
       const updatedTotal = parentNewTotals.get(x.id);

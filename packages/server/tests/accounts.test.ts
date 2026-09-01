@@ -630,7 +630,7 @@ describe("accounts queries", () => {
       expect(issues).toHaveLength(0);
     });
 
-    it("collapses split to 0 children (deletes parent and remaining child) when 2-child split has 1 transfer child deleted via account deletion", async () => {
+    it("flattens split to 1 child (regular transaction) when 2-child split has 1 transfer child deleted via account deletion", async () => {
       const acctA = await createAccount(db, { name: "Account A" });
       const acctB = await createAccount(db, { name: "Account B" });
 
@@ -683,21 +683,25 @@ describe("accounts queries", () => {
       // Account B is gone
       expect(await getAccount(db, acctB.id)).toBeUndefined();
 
-      // Account A balance is restored to 100000 (both child 2 and collapsed child 1 balances reversed)
-      expect((await getAccount(db, acctA.id))?.balance).toBe(100000);
+      // Account A balance is 80000 (child 2 transfer to B deleted, child 1 groceries -20000 remains)
+      expect((await getAccount(db, acctA.id))?.balance).toBe(80000);
 
-      // Split parent and all children should be deleted
+      // Split parent is deleted
       const parentRow = await db
         .select()
         .from(schema.transactions)
         .where(eq(schema.transactions.id, split.parent.id));
       expect(parentRow).toHaveLength(0);
 
-      const children = await db
+      // Remaining child is now a regular transaction
+      const remainingTx = await db
         .select()
         .from(schema.transactions)
-        .where(eq(schema.transactions.parentId, split.parent.id));
-      expect(children).toHaveLength(0);
+        .where(eq(schema.transactions.id, split.children[0]!.id));
+      expect(remainingTx).toHaveLength(1);
+      expect(remainingTx[0]?.parentId).toBeNull();
+      expect(remainingTx[0]?.amount).toBe(-20000);
+      expect(remainingTx[0]?.categoryId).toBe(cat.id);
 
       const issues = await verifyBalanceIntegrity(db);
       expect(issues).toHaveLength(0);
@@ -853,7 +857,7 @@ describe("accounts queries", () => {
       expect(await getAccount(db, acctB.id)).toBeDefined();
     });
 
-    it("refuses to delete account when remaining sibling in 1-child collapse is reconciled", async () => {
+    it("allows deleting account when remaining sibling in 1-child split is reconciled by flattening it", async () => {
       const acctA = await createAccount(db, { name: "Account A" });
       const acctB = await createAccount(db, { name: "Account B" });
 
@@ -882,10 +886,15 @@ describe("accounts queries", () => {
         .set({ status: "r" })
         .where(eq(schema.transactions.id, categoryChild.id));
 
-      await expect(deleteAccount(db, acctB.id)).rejects.toThrow(AccountError);
-      await expect(deleteAccount(db, acctB.id)).rejects.toMatchObject({ status: 422 });
+      await expect(deleteAccount(db, acctB.id)).resolves.not.toThrow();
 
-      expect(await getAccount(db, acctB.id)).toBeDefined();
+      expect(await getAccount(db, acctB.id)).toBeUndefined();
+      const [remaining] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, categoryChild.id));
+      expect(remaining?.status).toBe("r");
+      expect(remaining?.parentId).toBeNull();
     });
 
     it("BUG-08: refuses to delete account when own standalone transaction is reconciled", async () => {

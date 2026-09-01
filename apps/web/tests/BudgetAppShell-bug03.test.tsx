@@ -79,7 +79,7 @@ describe("BudgetAppShell (BUG-03)", () => {
     vi.restoreAllMocks();
   });
 
-  it("BUG-03: optimistic deleteTransaction on split child with 2 children removes parent and sibling child (1-child collapse)", async () => {
+  it("BUG-03: optimistic deleteTransaction on split child with 2 children flattens remaining child and deletes parent", async () => {
     let deleteUrl = "";
 
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -119,17 +119,20 @@ describe("BudgetAppShell (BUG-03)", () => {
 
     // In optimistic state:
     const txs = capturedProps!.data.transactions;
-    // Both Child 1 (1001), Child 2 (1002), and Split Parent (1000) must be removed!
+    // Child 1 (1001) and Split Parent (1000) must be removed, Child 2 (1002) is flattened!
     expect(txs.some((t) => t.id === 1001)).toBe(false);
-    expect(txs.some((t) => t.id === 1002)).toBe(false);
     expect(txs.some((t) => t.id === 1000)).toBe(false);
+    const flattened = txs.find((t) => t.id === 1002);
+    expect(flattened).toBeDefined();
+    expect(flattened?.parentId).toBeNull();
+    expect(flattened?.amount).toBe("-40.00");
 
-    // Account balance should have increased by +$100.00 (+10000 cents)
+    // Account balance should have increased by +$60.00 (+6000 cents)
     const updatedAccount1 = capturedProps!.data.accounts.find((a) => a.id === 1);
-    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 100);
+    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 60);
   });
 
-  it("BUG-03: optimistic bulkDeleteTransactions on split child removes parent and sibling child", async () => {
+  it("BUG-03: optimistic bulkDeleteTransactions on split child flattens remaining child and deletes parent", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
 
@@ -166,11 +169,14 @@ describe("BudgetAppShell (BUG-03)", () => {
 
     const txs = capturedProps!.data.transactions;
     expect(txs.some((t) => t.id === 1001)).toBe(false);
-    expect(txs.some((t) => t.id === 1002)).toBe(false);
     expect(txs.some((t) => t.id === 1000)).toBe(false);
+    const flattened = txs.find((t) => t.id === 1002);
+    expect(flattened).toBeDefined();
+    expect(flattened?.parentId).toBeNull();
+    expect(flattened?.amount).toBe("-40.00");
 
     const updatedAccount1 = capturedProps!.data.accounts.find((a) => a.id === 1);
-    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 100);
+    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 60);
   });
 
   it("BUG-03: optimistic deleteTransaction on a 3-child split updates parent total amount", async () => {
@@ -279,7 +285,7 @@ describe("BudgetAppShell (BUG-03)", () => {
     expect(parentTx!.amount).toBe("-50.00");
   });
 
-  it("BUG-24: optimistic bulkDeleteTransactions on 2 children of a 3-child split collapses remaining child and parent and reverses all balances", async () => {
+  it("BUG-24: optimistic bulkDeleteTransactions on 2 children of a 3-child split flattens remaining child and deletes parent", async () => {
     const splitParent: Transaction = {
       id: 3000,
       accountId: 1,
@@ -377,14 +383,17 @@ describe("BudgetAppShell (BUG-03)", () => {
     });
 
     const txs = capturedProps!.data.transactions;
-    // All 4 rows (parent and 3 children) must be removed
+    // Parent and deleted children must be removed; remaining child 3003 is flattened
     expect(txs.some((t) => t.id === 3000)).toBe(false);
     expect(txs.some((t) => t.id === 3001)).toBe(false);
     expect(txs.some((t) => t.id === 3002)).toBe(false);
-    expect(txs.some((t) => t.id === 3003)).toBe(false);
+    const flattened = txs.find((t) => t.id === 3003);
+    expect(flattened).toBeDefined();
+    expect(flattened?.parentId).toBeNull();
+    expect(flattened?.amount).toBe("-20.00");
 
-    // Account balance should have increased by full +$100.00
+    // Account balance should have increased by +$80.00 (+50 + +30)
     const updatedAccount1 = capturedProps!.data.accounts.find((a) => a.id === 1);
-    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 100);
+    expect(Number(updatedAccount1!.balance)).toBe(initialBal + 80);
   });
 });

@@ -1564,36 +1564,43 @@ describe("transactions queries", () => {
       expect(parentUpdate?.set).toMatchObject({ amount: -7000 });
     });
 
-    it("deleting a split child when only 1 child remains cleans up remaining child and parent", async () => {
+    it("deleting a split child when only 1 child remains flattens remaining child and deletes parent", async () => {
       const rowData = { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 };
       mock.respondWithNth("select:transactions", 1, [rowData]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 2, [{ id: 1, payee: "Supermarket" }]); // parent query
       mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
-      mock.respondWith("select:transactions", [
-        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null },
+      mock.respondWithNth("select:transactions", 4, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null, payee: "" },
       ]);
-      mock.respondWith("update:accounts", [{}, {}, {}]);
-      mock.respondWith("delete:transactions", [{}, {}, {}]);
+      mock.respondWithNth("select:transactions", 5, [{ id: 1, payee: "Supermarket" }]); // parent select for flatten
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}, {}]);
+      mock.respondWith("update:transactions", [{}]);
 
       await deleteTransaction(mock.db, 2);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
-      expect(deletes).toHaveLength(3);
+      expect(deletes).toHaveLength(2); // deleted child 2, deleted parent 1
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ parentId: null });
     });
 
-    it("rejects deleting a split child when the remaining sibling is reconciled with 422 error", async () => {
+    it("deleting an unreconciled split child flattens a reconciled remaining sibling without error", async () => {
       const rowData = { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" };
       mock.respondWithNth("select:transactions", 1, [rowData]);
-      mock.respondWithNth("select:transactions", 2, [{ id: 1 }]); // parent query
+      mock.respondWithNth("select:transactions", 2, [{ id: 1, payee: "Target" }]); // parent query
       mock.respondWithNth("select:transactions", 3, [rowData]); // re-read
-      mock.respondWith("select:transactions", [
-        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r" },
+      mock.respondWithNth("select:transactions", 4, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r", payee: "" },
       ]);
+      mock.respondWithNth("select:transactions", 5, [{ id: 1, payee: "Target" }]); // parent select
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}, {}]);
+      mock.respondWith("update:transactions", [{}]);
 
-      await expect(deleteTransaction(mock.db, 2)).rejects.toMatchObject({
-        status: 422,
-        name: "TransactionError",
-        message: /reconciled and locked/,
-      });
+      const result = await deleteTransaction(mock.db, 2);
+      expect(result).toMatchObject({ id: 2 });
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ parentId: null });
     });
 
     it("rolls back transaction and rethrows when an error occurs during deletion", async () => {
@@ -1658,45 +1665,53 @@ describe("transactions queries", () => {
       expect(parentUpdate?.set).toMatchObject({ amount: -7000 });
     });
 
-    it("deleting a split child when only 1 child remains collapses remaining child and parent", async () => {
+    it("bulk deleting a split child when only 1 child remains flattens remaining child and deletes parent", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10 },
       ]);
-      mock.respondWith("select:transactions", [
-        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null },
+      mock.respondWithNth("select:transactions", 2, [{ id: 1, payee: "Supermarket" }]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: 2, categoryId: null, payee: "" },
       ]);
-      mock.respondWith("update:accounts", [{}, {}, {}]);
-      mock.respondWith("delete:transactions", [{}, {}, {}]);
+      mock.respondWithNth("select:transactions", 4, [{ id: 1, payee: "Supermarket" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}, {}]);
+      mock.respondWith("update:transactions", [{}]);
 
       const res = await bulkDeleteTransactions(mock.db, [2]);
-      expect(res).toHaveLength(3);
+      expect(res).toHaveLength(1);
+      expect(res[0]).toMatchObject({ id: 2 });
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
-      expect(deletes).toHaveLength(3);
+      expect(deletes).toHaveLength(2); // child 2, parent 1
     });
 
-    it("rejects bulk deleting a split child when the remaining sibling is reconciled with 422 error", async () => {
+    it("bulk deleting an unreconciled split child flattens a reconciled remaining sibling without error", async () => {
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -6000, transferAccountId: null, categoryId: 10, status: "c" },
       ]);
-      mock.respondWith("select:transactions", [
-        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r" },
+      mock.respondWithNth("select:transactions", 2, [{ id: 1, payee: "Target" }]);
+      mock.respondWithNth("select:transactions", 3, [
+        { id: 3, parentId: 1, accountId: 1, amount: -4000, transferAccountId: null, categoryId: 11, status: "r", payee: "" },
       ]);
+      mock.respondWithNth("select:transactions", 4, [{ id: 1, payee: "Target" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("delete:transactions", [{}, {}]);
+      mock.respondWith("update:transactions", [{}]);
 
-      await expect(bulkDeleteTransactions(mock.db, [2])).rejects.toMatchObject({
-        status: 422,
-        name: "TransactionError",
-        message: /reconciled and locked/,
-      });
+      const res = await bulkDeleteTransactions(mock.db, [2]);
+      expect(res).toHaveLength(1);
+      const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
+      expect(update?.set).toMatchObject({ parentId: null });
     });
 
-    it("bulk deleting 2 children of a 3-child split re-totals then collapses", async () => {
+    it("bulk deleting 2 children of a 3-child split re-totals then flattens remaining child", async () => {
       // First id: 2
       mock.respondWithNth("select:transactions", 1, [
         { id: 2, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, categoryId: 10 },
       ]);
       // Parent check for id 2
       mock.respondWithNth("select:transactions", 2, [
-        { id: 1, status: "c", amount: -10000 },
+        { id: 1, status: "c", amount: -10000, payee: "Store" },
       ]);
       // remaining children after deleting 2: [3, 4]
       mock.respondWithNth("select:transactions", 3, [
@@ -1709,24 +1724,28 @@ describe("transactions queries", () => {
       ]);
       // Parent check for id 3
       mock.respondWithNth("select:transactions", 5, [
-        { id: 1, status: "c", amount: -7000 },
+        { id: 1, status: "c", amount: -7000, payee: "Store" },
       ]);
       // remaining children after deleting 3: [4]
       mock.respondWithNth("select:transactions", 6, [
-        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null },
+        { id: 4, parentId: 1, accountId: 1, amount: -3000, transferAccountId: null, payee: "" },
       ]);
-      mock.respondWith("update:accounts", [{}, {}, {}]);
-      mock.respondWith("delete:transactions", [{}, {}, {}, {}]);
-      mock.respondWith("update:transactions", [{}]);
+      // Parent check for flatten of 4
+      mock.respondWithNth("select:transactions", 7, [
+        { id: 1, status: "c", amount: -7000, payee: "Store" },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}, {}, {}]);
+      mock.respondWith("update:transactions", [{}, {}]);
 
       const res = await bulkDeleteTransactions(mock.db, [2, 3]);
-      expect(res).toHaveLength(4);
+      expect(res).toHaveLength(2);
       const deletes = mock.calls.filter((c) => c.op === "delete" && c.table === "transactions");
-      // 1 (id 2) + 1 (id 3) + 1 (id 4 collapsed) + 1 (parent 1 collapsed) = 4
-      expect(deletes).toHaveLength(4);
+      // id 2 deleted, id 3 deleted, parent 1 deleted = 3 deletes
+      expect(deletes).toHaveLength(3);
     });
 
-    it("BUG-24: bulkDeleteTransactions on 1 child of a 2-child split returns all 3 cascade-deleted transactions", async () => {
+    it("BUG-24: bulkDeleteTransactions on 1 child of a 2-child split returns deleted child and flattens sibling", async () => {
       const db = openMigratedDb();
       const { accountId, cat1Id, cat2Id } = await seedTestData(db);
 
@@ -1748,15 +1767,16 @@ describe("transactions queries", () => {
       const child1 = split.children[0]!;
       const deleted = await bulkDeleteTransactions(db, [child1.id]);
 
-      // Returns all 3 cascade-removed records: child1, sibling child2, and parent
-      expect(deleted).toHaveLength(3);
-      const deletedIds = deleted.map((t) => t.id);
-      expect(deletedIds).toContain(child1.id);
-      expect(deletedIds).toContain(split.children[1]!.id);
-      expect(deletedIds).toContain(split.parent.id);
+      // Returns the deleted record
+      expect(deleted).toHaveLength(1);
+      expect(deleted[0]?.id).toBe(child1.id);
 
       const remainingTx = await db.select().from(schema.transactions);
-      expect(remainingTx).toHaveLength(0);
+      expect(remainingTx).toHaveLength(1);
+      expect(remainingTx[0]?.id).toBe(split.children[1]!.id);
+      expect(remainingTx[0]?.parentId).toBeNull();
+      expect(remainingTx[0]?.amount).toBe(-2000);
+      expect(remainingTx[0]?.categoryId).toBe(cat2Id);
     });
   });
 
@@ -2001,13 +2021,54 @@ describe("transactions queries", () => {
         updateTransaction(db, childToUpdate.id, { memo: "updated coffee memo" })
       ).resolves.not.toThrow();
 
-      // Deleting another child should trigger 1-child collapse and delete remaining child + parent
+      // Deleting another child should trigger 1-child flattening: remaining child 1 becomes regular transaction
       await deleteTransaction(db, childToUpdate.id);
       const remainingTx = await db.select().from(schema.transactions);
-      expect(remainingTx).toHaveLength(0);
+      expect(remainingTx).toHaveLength(1);
+      expect(remainingTx[0]?.id).toBe(split.children[0]!.id);
+      expect(remainingTx[0]?.parentId).toBeNull();
+      expect(remainingTx[0]?.amount).toBe(-5000);
+      expect(remainingTx[0]?.categoryId).toBe(cat1Id);
 
       [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
-      expect(acct?.balance).toBe(0);
+      expect(acct?.balance).toBe(-5000);
+    });
+
+    it("BUG-07: deleting a split child flattens remaining child into regular transaction and credits only deleted child amount", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      const split = await createSplitWithChildren(
+        db,
+        {
+          accountId,
+          date: "2026-08-01",
+          payee: "Supermarket",
+          memo: "Groceries & Household",
+          amount: -10000,
+        },
+        [
+          { categoryId: cat1Id, amount: -8000, memo: "Groceries" },
+          { categoryId: cat2Id, amount: -2000, memo: "Household" },
+        ]
+      );
+
+      let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(-10000);
+
+      const householdChild = split.children[1]!;
+      await deleteTransaction(db, householdChild.id);
+
+      // Account balance is credited +2000 (not +10000)
+      [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+      expect(acct?.balance).toBe(-8000);
+
+      // Database contains 1 transaction: Groceries ($80)
+      const allTx = await db.select().from(schema.transactions);
+      expect(allTx).toHaveLength(1);
+      expect(allTx[0]!.amount).toBe(-8000);
+      expect(allTx[0]!.categoryId).toBe(cat1Id);
+      expect(allTx[0]!.parentId).toBeNull();
     });
 
     it("bulkDeleteTransactions: deleting 1 child of a 3-child split updates parent amount and allows sibling updates", async () => {
@@ -3023,7 +3084,7 @@ describe("transactions queries", () => {
     });
 
     describe("Bug 2.7: 1-child collapse reconcile lock", () => {
-      it("deleteTransaction: rejects deleting an unreconciled child when remaining sibling is reconciled (422) and rolls back", async () => {
+      it("deleteTransaction: flattens an unreconciled child's sibling into a regular transaction even when sibling is reconciled", async () => {
         const db = openMigratedDb();
         const { accountId, cat1Id, cat2Id } = await seedTestData(db);
 
@@ -3050,22 +3111,21 @@ describe("transactions queries", () => {
           .set({ status: "r" })
           .where(eq(schema.transactions.id, child2.id));
 
-        // Attempting to delete child 1 should fail because 1-child collapse would delete reconciled child 2
-        await expect(deleteTransaction(db, child1.id)).rejects.toMatchObject({
-          status: 422,
-          name: "TransactionError",
-          message: /reconciled and locked/,
-        });
+        // Deleting child 1 flattens child 2 into a regular transaction and preserves its reconciled status
+        await expect(deleteTransaction(db, child1.id)).resolves.not.toThrow();
 
-        // Verify everything was rolled back
         const allTx = await db.select().from(schema.transactions);
-        expect(allTx).toHaveLength(3);
+        expect(allTx).toHaveLength(1);
+        expect(allTx[0]?.id).toBe(child2.id);
+        expect(allTx[0]?.status).toBe("r");
+        expect(allTx[0]?.parentId).toBeNull();
+        expect(allTx[0]?.amount).toBe(-2000);
 
         const [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
-        expect(acct?.balance).toBe(-5000);
+        expect(acct?.balance).toBe(-2000);
       });
 
-      it("bulkDeleteTransactions: rejects deleting an unreconciled child when remaining sibling is reconciled (422) and rolls back", async () => {
+      it("bulkDeleteTransactions: flattens an unreconciled child's sibling into a regular transaction even when sibling is reconciled", async () => {
         const db = openMigratedDb();
         const { accountId, cat1Id, cat2Id } = await seedTestData(db);
 
@@ -3092,22 +3152,21 @@ describe("transactions queries", () => {
           .set({ status: "r" })
           .where(eq(schema.transactions.id, child2.id));
 
-        // Attempting bulk delete of child 1 should fail
-        await expect(bulkDeleteTransactions(db, [child1.id])).rejects.toMatchObject({
-          status: 422,
-          name: "TransactionError",
-          message: /reconciled and locked/,
-        });
+        // Bulk deleting child 1 flattens child 2 into a regular transaction
+        await expect(bulkDeleteTransactions(db, [child1.id])).resolves.not.toThrow();
 
-        // Verify everything was rolled back
         const allTx = await db.select().from(schema.transactions);
-        expect(allTx).toHaveLength(3);
+        expect(allTx).toHaveLength(1);
+        expect(allTx[0]?.id).toBe(child2.id);
+        expect(allTx[0]?.status).toBe("r");
+        expect(allTx[0]?.parentId).toBeNull();
+        expect(allTx[0]?.amount).toBe(-2000);
 
         const [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
-        expect(acct?.balance).toBe(-5000);
+        expect(acct?.balance).toBe(-2000);
       });
 
-      it("allows deleting a child from a 3-child split when another sibling is reconciled without collapse", async () => {
+      it("allows deleting children sequentially down to 1 child preserving reconciled sibling", async () => {
         const db = openMigratedDb();
         const { accountId, cat1Id, cat2Id, cat3Id } = await seedTestData(db);
 
@@ -3151,16 +3210,19 @@ describe("transactions queries", () => {
           .where(eq(schema.transactions.id, split.parent.id));
         expect(parent?.amount).toBe(-3000);
 
-        // Now deleting child 3 would leave only child 2 (reconciled), so it should fail with 422
-        await expect(deleteTransaction(db, child3.id)).rejects.toMatchObject({
-          status: 422,
-          name: "TransactionError",
-          message: /reconciled and locked/,
-        });
+        // Now deleting child 3 leaves only child 2 (reconciled), which flattens into a regular transaction
+        await expect(deleteTransaction(db, child3.id)).resolves.not.toThrow();
 
-        // Account balance is still -3000 and 2 children still exist
+        const allTx = await db.select().from(schema.transactions);
+        expect(allTx).toHaveLength(1);
+        expect(allTx[0]?.id).toBe(child2.id);
+        expect(allTx[0]?.status).toBe("r");
+        expect(allTx[0]?.parentId).toBeNull();
+        expect(allTx[0]?.amount).toBe(-2000);
+
+        // Account balance is now -2000
         [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
-        expect(acct?.balance).toBe(-3000);
+        expect(acct?.balance).toBe(-2000);
       });
 
       it("prevents self-transfer in createSplitWithChildren and updateSplit", async () => {
