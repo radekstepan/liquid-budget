@@ -139,7 +139,6 @@ type RawIndexData = {
   incomeDeferredToFutureByMonth: Map<string, number>;
   incomeDeferredToPastByMonth: Map<string, number>;
   cardPaymentsByAccountMonth: Map<string, Map<number, number>>;
-  cardAdvancesByAccountMonth: Map<string, Map<number, number>>;
   categoryTransactionsByMonth: Map<string, Map<number, CategoryTxEntry[]>>;
 };
 
@@ -500,7 +499,6 @@ function buildRawIndexData(
   const incomeDeferredToFutureByMonth = new Map<string, number>();
   const incomeDeferredToPastByMonth = new Map<string, number>();
   const cardPaymentsByAccountMonth = new Map<string, Map<number, number>>();
-  const cardAdvancesByAccountMonth = new Map<string, Map<number, number>>();
   const categoryTransactionsByMonth = new Map<string, Map<number, CategoryTxEntry[]>>();
 
   for (const t of data.transactions) {
@@ -603,18 +601,6 @@ function buildRawIndexData(
         );
       }
 
-      // Cash advance from a credit card to an on-budget liquid/cash account
-      if (ccAccountIds.has(sending) && !ccAccountIds.has(receiving)) {
-        let am = cardAdvancesByAccountMonth.get(mk);
-        if (!am) {
-          am = new Map();
-          cardAdvancesByAccountMonth.set(mk, am);
-        }
-        am.set(
-          sending,
-          Math.round((am.get(sending) ?? 0) + transferAmount)
-        );
-      }
     }
   }
 
@@ -628,7 +614,6 @@ function buildRawIndexData(
     incomeDeferredToFutureByMonth,
     incomeDeferredToPastByMonth,
     cardPaymentsByAccountMonth,
-    cardAdvancesByAccountMonth,
     categoryTransactionsByMonth,
   };
 }
@@ -671,7 +656,6 @@ function computeAllMonths(
     const oMap = rawData.outflowByMonth.get(month) ?? new Map<number, number>();
     const categoryTxMap = rawData.categoryTransactionsByMonth.get(month) ?? new Map<number, CategoryTxEntry[]>();
     const cardPayments = rawData.cardPaymentsByAccountMonth.get(month) ?? new Map<number, number>();
-    const cardAdvances = rawData.cardAdvancesByAccountMonth.get(month) ?? new Map<number, number>();
 
     const monthFundedCCByAccount = new Map<number, number>();
     const availableCCBufferByAccount = new Map<number, number>();
@@ -850,9 +834,8 @@ function computeAllMonths(
       if (linkedAcc != null && !seenLinkedAccounts.has(linkedAcc)) {
         seenLinkedAccounts.add(linkedAcc);
         const fundedCC = monthFundedCCByAccount.get(linkedAcc) ?? 0;
-        const cardAdvance = cardAdvances.get(linkedAcc) ?? 0;
         const cardPayment = cardPayments.get(linkedAcc) ?? 0;
-        ccBuffer = Math.round(fundedCC + cardAdvance - cardPayment);
+        ccBuffer = Math.round(fundedCC - cardPayment);
         monthSpendByAccount.set(linkedAcc, ccBuffer);
       }
 
