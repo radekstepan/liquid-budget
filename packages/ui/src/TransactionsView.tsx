@@ -344,6 +344,10 @@ export const TransactionsView = memo(function TransactionsView({
       const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
       return isIncoming ? -t.amount : t.amount;
     };
+    const effStatusOf = (t: Txn): string => {
+      const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+      return isIncoming ? (t.transferStatus ?? t.status) : t.status;
+    };
 
     let sortedTopLevel: Txn[];
     if (sort.key === "date" && sort.dir === "desc") {
@@ -392,7 +396,7 @@ export const TransactionsView = memo(function TransactionsView({
             break;
           }
           case "cleared":
-            cmp = (CLEARED_RANK[a.status] ?? 0) - (CLEARED_RANK[b.status] ?? 0);
+            cmp = (CLEARED_RANK[effStatusOf(a)] ?? 0) - (CLEARED_RANK[effStatusOf(b)] ?? 0);
             break;
           case "flag": {
             const an = a.flagColor != null ? FLAG_RANK[a.flagColor] ?? 0 : 0;
@@ -623,7 +627,11 @@ export const TransactionsView = memo(function TransactionsView({
       } else if ((e.key === "c" || e.key === "C" || e.key === " ") && selectedId != null) {
         e.preventDefault();
         const row = filtered.find((r) => r.id === selectedId);
-        if (row && row.status !== "r") onCycleStatus(row.id);
+        if (row) {
+          const isIncoming = accountFilter != null && row.transferAccountId === accountFilter;
+          const currentStatus = isIncoming ? (row.transferStatus ?? row.status) : row.status;
+          if (currentStatus !== "r") onCycleStatus(row.id);
+        }
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId != null) {
         e.preventDefault();
         onDelete(selectedId);
@@ -865,6 +873,8 @@ export const TransactionsView = memo(function TransactionsView({
                   const isChecked = selectedIds.has(t.id);
                   const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
                   const effAmt = isIncoming ? -t.amount : t.amount;
+                  const effStatus = isIncoming ? (t.transferStatus ?? t.status) : t.status;
+                  const isReconciled = effStatus === "r";
                   const outflow = effAmt < 0 ? -effAmt : 0;
                   const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
@@ -942,7 +952,7 @@ export const TransactionsView = memo(function TransactionsView({
                           <FlagCell
                             color={t.flagColor ?? null}
                             onChange={(color) => onFlag(t.id, color)}
-                            disabled={t.status === "r"}
+                            disabled={isReconciled}
                           />
                         </td>
                       )}
@@ -966,8 +976,8 @@ export const TransactionsView = memo(function TransactionsView({
                               <button
                                 type="button"
                                 onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleExpandSplit(t.id);
+                                   e.stopPropagation();
+                                   toggleExpandSplit(t.id);
                                 }}
                                 className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors align-middle"
                                 aria-label={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
@@ -1003,9 +1013,9 @@ export const TransactionsView = memo(function TransactionsView({
                       </td>
                       <td className="text-center" onClick={(e) => e.stopPropagation()}>
                         <ClearedFlag
-                          state={t.status}
+                          state={effStatus}
                           onCycle={() => onCycleStatus(t.id)}
-                          disabled={t.status === "r"}
+                          disabled={isReconciled}
                         />
                       </td>
                       <td

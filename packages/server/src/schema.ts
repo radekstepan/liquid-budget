@@ -115,10 +115,15 @@ export const transactions = sqliteTable(
     createdAt: text("created_at").notNull().default(""),
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
     transferAccountId: integer("transfer_account_id").references(() => accounts.id, { onDelete: "set null" }),
+    transferStatus: text("transfer_status", { enum: ["u", "c", "r"] }).default("c"),
     isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
     incomeMonth: text("income_month"),
     reconciledAt: text("reconciled_at"),
     reconciliationId: integer("reconciliation_id").references((): AnySQLiteColumn => reconciliations.id, {
+      onDelete: "set null",
+    }),
+    transferReconciledAt: text("transfer_reconciled_at"),
+    transferReconciliationId: integer("transfer_reconciliation_id").references((): AnySQLiteColumn => reconciliations.id, {
       onDelete: "set null",
     }),
   },
@@ -128,7 +133,12 @@ export const transactions = sqliteTable(
     dateIdx: index("transactions_date_idx").on(t.date),
     parentIdIdx: index("transactions_parent_id_idx").on(t.parentId),
     reconciliationIdIdx: index("transactions_reconciliation_id_idx").on(t.reconciliationId),
+    transferReconciliationIdIdx: index("transactions_transfer_reconciliation_id_idx").on(t.transferReconciliationId),
     statusCheck: check("transactions_status_check", sql`${t.status} IN ('u', 'c', 'r')`),
+    transferStatusCheck: check(
+      "transactions_transfer_status_check",
+      sql`${t.transferStatus} IS NULL OR ${t.transferStatus} IN ('u', 'c', 'r')`
+    ),
     amountCheck: check("transactions_amount_check", sql`${t.amount} != 0`),
     transferNotSelfCheck: check(
       "transactions_transfer_not_self_check",

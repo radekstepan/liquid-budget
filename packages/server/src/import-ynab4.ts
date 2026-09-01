@@ -794,6 +794,35 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               ? childRecId != null ? "r" : "c"
               : (t.cleared === "Uncleared" || st.cleared === "Uncleared") ? "u" : "c";
 
+            let effectiveChildDestStatus: "u" | "c" | "r" | null = null;
+            let childDestRecId: number | null = null;
+            let childDestRecDate: string | null = null;
+            if (subTransferAccountId != null) {
+              const destPartner = st.transferTransactionId ? txById.get(st.transferTransactionId) : null;
+              if (destPartner) {
+                const destAccEntId = destPartner.accountId;
+                const isDestReconciled = destPartner.cleared === "Reconciled" || Boolean(destPartner.reconciliationId);
+                const destRecEntityId = destPartner.reconciliationId;
+                childDestRecId = destRecEntityId
+                  ? reconciliationIdMap.get(destRecEntityId) ?? accountReconciliationIdMap.get(destAccEntId) ?? null
+                  : isDestReconciled
+                  ? accountReconciliationIdMap.get(destAccEntId) ?? null
+                  : null;
+                childDestRecDate = destRecEntityId
+                  ? reconciliationDateMap.get(destRecEntityId) ?? destPartner.reconciledAt ?? accountReconciliationDateMap.get(destAccEntId) ?? t.date ?? null
+                  : isDestReconciled
+                  ? accountReconciliationDateMap.get(destAccEntId) ?? t.date ?? null
+                  : null;
+                effectiveChildDestStatus = isDestReconciled
+                  ? childDestRecId != null ? "r" : "c"
+                  : destPartner.cleared === "Uncleared" ? "u" : "c";
+              } else {
+                effectiveChildDestStatus = effectiveChildStatus;
+                childDestRecId = effectiveChildStatus === "r" ? childRecId : null;
+                childDestRecDate = effectiveChildStatus === "r" ? childRecDate : null;
+              }
+            }
+
             if (effectiveChildStatus !== "r") {
               allChildrenReconciled = false;
             }
@@ -807,6 +836,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               memo: st.memo || "",
               amount: convertAmount(st.amount),
               status: effectiveChildStatus,
+              transferStatus: effectiveChildDestStatus,
               flagColor: ynabFlagToColor(st.flag),
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
@@ -814,6 +844,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               incomeMonth: childIncomeMonth,
               reconciledAt: effectiveChildStatus === "r" ? childRecDate : null,
               reconciliationId: effectiveChildStatus === "r" ? childRecId : null,
+              transferReconciledAt: effectiveChildDestStatus === "r" ? childDestRecDate : null,
+              transferReconciliationId: effectiveChildDestStatus === "r" ? childDestRecId : null,
             });
             totalImportedTxCount++;
           }
@@ -943,18 +975,40 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             const finalTransferCatId = classification.categoryId;
             const isTransferIncome = classification.isIncome;
 
-            const isTxReconciled = cleared === "Reconciled" || Boolean(t.reconciliationId) || Boolean(partner?.reconciliationId);
-            const recEntityId = t.reconciliationId || partner?.reconciliationId;
-            const txRecId = recEntityId
-              ? reconciliationIdMap.get(recEntityId) ?? accountReconciliationIdMap.get(sourceAccEntityId) ?? null
-              : isTxReconciled
+            const sourceYTx = sourceAccEntityId === t.accountId ? t : partner;
+            const destYTx = destAccEntityId === t.accountId ? t : partner;
+
+            const isSrcReconciled = sourceYTx?.cleared === "Reconciled" || Boolean(sourceYTx?.reconciliationId);
+            const srcRecEntityId = sourceYTx?.reconciliationId;
+            const srcRecId = srcRecEntityId
+              ? reconciliationIdMap.get(srcRecEntityId) ?? accountReconciliationIdMap.get(sourceAccEntityId) ?? null
+              : isSrcReconciled
               ? accountReconciliationIdMap.get(sourceAccEntityId) ?? null
               : null;
-            const txRecDate = recEntityId
-              ? reconciliationDateMap.get(recEntityId) ?? t.reconciledAt ?? partner?.reconciledAt ?? accountReconciliationDateMap.get(sourceAccEntityId) ?? t.date ?? null
-              : isTxReconciled
+            const srcRecDate = srcRecEntityId
+              ? reconciliationDateMap.get(srcRecEntityId) ?? sourceYTx?.reconciledAt ?? accountReconciliationDateMap.get(sourceAccEntityId) ?? t.date ?? null
+              : isSrcReconciled
               ? accountReconciliationDateMap.get(sourceAccEntityId) ?? t.date ?? null
               : null;
+            const effectiveSrcStatus = isSrcReconciled
+              ? srcRecId != null ? "r" : "c"
+              : (sourceYTx?.cleared === "Uncleared" ? "u" : "c");
+
+            const isDestReconciled = destYTx?.cleared === "Reconciled" || Boolean(destYTx?.reconciliationId);
+            const destRecEntityId = destYTx?.reconciliationId;
+            const destRecId = destRecEntityId
+              ? reconciliationIdMap.get(destRecEntityId) ?? accountReconciliationIdMap.get(destAccEntityId) ?? null
+              : isDestReconciled
+              ? accountReconciliationIdMap.get(destAccEntityId) ?? null
+              : null;
+            const destRecDate = destRecEntityId
+              ? reconciliationDateMap.get(destRecEntityId) ?? destYTx?.reconciledAt ?? accountReconciliationDateMap.get(destAccEntityId) ?? t.date ?? null
+              : isDestReconciled
+              ? accountReconciliationDateMap.get(destAccEntityId) ?? t.date ?? null
+              : null;
+            const effectiveDestStatus = isDestReconciled
+              ? destRecId != null ? "r" : "c"
+              : (destYTx?.cleared === "Uncleared" ? "u" : "c");
 
             await db.insert(transactions).values({
               accountId: sourceAccId,
@@ -964,18 +1018,16 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
               payeeId: null,
               memo,
               amount: convertAmount(rawAmount),
-              status:
-                isTxReconciled
-                  ? txRecId != null ? "r" : "c"
-                  : cleared === "Uncleared"
-                    ? "u"
-                    : "c",
+              status: effectiveSrcStatus,
+              transferStatus: effectiveDestStatus,
               flagColor: ynabFlagToColor(t.flag),
               transferAccountId: destAccId,
               parentId: null,
               isIncome: isTransferIncome,
-              reconciledAt: isTxReconciled ? txRecDate : null,
-              reconciliationId: isTxReconciled ? txRecId : null,
+              reconciledAt: effectiveSrcStatus === "r" ? srcRecDate : null,
+              reconciliationId: effectiveSrcStatus === "r" ? srcRecId : null,
+              transferReconciledAt: effectiveDestStatus === "r" ? destRecDate : null,
+              transferReconciliationId: effectiveDestStatus === "r" ? destRecId : null,
             });
             totalImportedTxCount++;
           } else {

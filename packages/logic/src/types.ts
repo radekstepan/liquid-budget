@@ -105,6 +105,7 @@ export type Transaction = {
   memo: string;
   amount: string;
   status: ClearedStatus;
+  transferStatus?: ClearedStatus | null;
   /** YNAB4-style flag color, "duplicate", or null when the transaction is unflagged. */
   flagColor?: TransactionFlagState;
   createdAt?: string;
@@ -113,10 +114,14 @@ export type Transaction = {
   isIncome?: boolean;
   incomeMonth?: string | null;
   reconciledAt?: string | null;
+  reconciliationId?: number | null;
+  transferReconciledAt?: string | null;
+  transferReconciliationId?: number | null;
 };
 
 export type BulkUpdateTransactionPatch = {
   status?: ClearedStatus;
+  transferStatus?: ClearedStatus;
   categoryId?: number | null;
   flagColor?: TransactionFlagColor | null;
   date?: string;
@@ -135,6 +140,7 @@ export type SubTransaction = {
   amount: number;
   memo?: string;
   transferAccountId?: number | null;
+  transferStatus?: ClearedStatus;
 };
 
 export type Recurring = {

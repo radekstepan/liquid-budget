@@ -17,6 +17,7 @@ import {
   reconcileAccount,
   RECONCILE_ADJUSTMENT_MEMO,
   unreconcileAccount,
+  updateTransaction,
   TransactionError,
 } from "../src/index.js";
 import { createMockDb, type MockDb } from "./mock-db.js";
@@ -547,6 +548,7 @@ describe("reconcile queries", () => {
           memo: "Pending savings",
           amount: -2500,
           status: "u",
+          transferStatus: "u",
         },
         destAcct.id
       );
@@ -601,20 +603,22 @@ describe("reconcile queries", () => {
         finalDiff: 0,
       });
 
-      // Verify that t1 and splitChildTransfer were flipped to status 'r' in DB
+      // Verify that t1 and splitChildTransfer had transferStatus flipped to 'r' in DB
       const [t1Db] = await db
         .select()
         .from(schema.transactions)
         .where(eq(schema.transactions.id, t1.id));
-      expect(t1Db?.status).toBe("r");
-      expect(t1Db?.reconciliationId).toBeTruthy();
+      expect(t1Db?.status).toBe("c"); // Source side untouched
+      expect(t1Db?.transferStatus).toBe("r"); // Destination side flipped
+      expect(t1Db?.transferReconciliationId).toBeTruthy();
 
       const [splitChildDb] = await db
         .select()
         .from(schema.transactions)
         .where(eq(schema.transactions.id, splitChildTransfer.id));
-      expect(splitChildDb?.status).toBe("r");
-      expect(splitChildDb?.reconciliationId).toBe(t1Db?.reconciliationId);
+      expect(splitChildDb?.status).toBe("c");
+      expect(splitChildDb?.transferStatus).toBe("r");
+      expect(splitChildDb?.transferReconciliationId).toBe(t1Db?.transferReconciliationId);
 
       // Verify uncleared transfer t2 remains 'u'
       const [t2Db] = await db
@@ -622,7 +626,8 @@ describe("reconcile queries", () => {
         .from(schema.transactions)
         .where(eq(schema.transactions.id, t2.id));
       expect(t2Db?.status).toBe("u");
-      expect(t2Db?.reconciliationId).toBeNull();
+      expect(t2Db?.transferStatus).toBe("u");
+      expect(t2Db?.transferReconciliationId).toBeNull();
 
       // State after reconcile:
       // clearedSum: 0 (count: 0)
@@ -646,15 +651,15 @@ describe("reconcile queries", () => {
         .select()
         .from(schema.transactions)
         .where(eq(schema.transactions.id, t1.id));
-      expect(t1DbRestored?.status).toBe("c");
-      expect(t1DbRestored?.reconciliationId).toBeNull();
+      expect(t1DbRestored?.transferStatus).toBe("c");
+      expect(t1DbRestored?.transferReconciliationId).toBeNull();
 
       const [splitChildDbRestored] = await db
         .select()
         .from(schema.transactions)
         .where(eq(schema.transactions.id, splitChildTransfer.id));
-      expect(splitChildDbRestored?.status).toBe("c");
-      expect(splitChildDbRestored?.reconciliationId).toBeNull();
+      expect(splitChildDbRestored?.transferStatus).toBe("c");
+      expect(splitChildDbRestored?.transferReconciliationId).toBeNull();
 
       const destStateUnrec = await getReconcileState(db, destAcct.id, "2026-06-30");
       expect(destStateUnrec).toMatchObject({
@@ -665,6 +670,118 @@ describe("reconcile queries", () => {
         unclearedTotal: 2500,
         unclearedCount: 1,
       });
+    });
+
+    it("BUG-04: maintains single-row transfer model with independent status per account side", async () => {
+      const acctA = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const acctB = await createAccount(db, { name: "Savings", kind: "liquid" });
+
+      // Create transfer from Account A to Account B:
+      // Source (Account A) is cleared ('c')
+      // Destination (Account B) is uncleared ('u')
+      const transfer = await createTransfer(
+        db,
+        {
+          accountId: acctA.id,
+          date: "2026-06-01",
+          amount: -50000, // -$500 on A, +$500 on B
+          status: "c",
+          transferStatus: "u",
+        },
+        acctB.id
+      );
+
+      // Verify initial state for Account A:
+      // Account A sees transfer as cleared ('c')
+      const stateA1 = await getReconcileState(db, acctA.id, "2026-06-30");
+      expect(stateA1.clearedCount).toBe(1);
+      expect(stateA1.unclearedCount).toBe(0);
+      expect(stateA1.workingBalance).toBe(-50000);
+
+      // Verify initial state for Account B:
+      // Account B sees transfer in unclearedTotal with status 'u'
+      const stateB1 = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB1.unclearedCount).toBe(1);
+      expect(stateB1.unclearedTotal).toBe(50000);
+      expect(stateB1.clearedCount).toBe(0);
+      expect(stateB1.reconciledCount).toBe(0);
+      expect(stateB1.workingBalance).toBe(0);
+
+      // Reconcile Account A
+      const recA = await reconcileAccount(db, {
+        accountId: acctA.id,
+        statementBalance: -50000,
+        statementDate: "2026-06-30",
+      });
+      expect(recA.reconciledCount).toBe(1);
+
+      // Assert Account A's view sees transfer as 'r'
+      const stateA2 = await getReconcileState(db, acctA.id, "2026-06-30");
+      expect(stateA2.reconciledCount).toBe(1);
+      expect(stateA2.clearedCount).toBe(0);
+
+      // Assert Account B's reconcile state returns transfer in unclearedTotal with status 'u'
+      const stateB2 = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB2.unclearedTotal).toBe(50000);
+      expect(stateB2.unclearedCount).toBe(1);
+      expect(stateB2.clearedCount).toBe(0);
+      expect(stateB2.reconciledCount).toBe(0);
+
+      // Verify DB row has status 'r' for source and transferStatus 'u' for destination
+      const [txDb1] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, transfer.id));
+      expect(txDb1?.status).toBe("r");
+      expect(txDb1?.reconciliationId).toBeTruthy();
+      expect(txDb1?.transferStatus).toBe("u");
+      expect(txDb1?.transferReconciliationId).toBeNull();
+
+      // Now clear transfer on Account B and reconcile Account B
+      await updateTransaction(db, transfer.id, { transferStatus: "c" });
+
+      const stateB3 = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB3.clearedCount).toBe(1);
+      expect(stateB3.unclearedCount).toBe(0);
+      expect(stateB3.workingBalance).toBe(50000);
+
+      const recB = await reconcileAccount(db, {
+        accountId: acctB.id,
+        statementBalance: 50000,
+        statementDate: "2026-06-30",
+      });
+      expect(recB.reconciledCount).toBe(1);
+
+      // Both sides are now reconciled
+      const [txDb2] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, transfer.id));
+      expect(txDb2?.status).toBe("r");
+      expect(txDb2?.transferStatus).toBe("r");
+      expect(txDb2?.reconciliationId).not.toBe(txDb2?.transferReconciliationId);
+
+      // Unreconcile Account A only
+      const unrecA = await unreconcileAccount(db, acctA.id);
+      expect(unrecA.flipped).toBe(1);
+
+      // Account A is restored to 'c', but Account B remains 'r'
+      const [txDb3] = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, transfer.id));
+      expect(txDb3?.status).toBe("c");
+      expect(txDb3?.reconciliationId).toBeNull();
+      expect(txDb3?.transferStatus).toBe("r");
+      expect(txDb3?.transferReconciliationId).toBeTruthy();
+
+      const stateA4 = await getReconcileState(db, acctA.id, "2026-06-30");
+      expect(stateA4.clearedCount).toBe(1);
+      expect(stateA4.reconciledCount).toBe(0);
+
+      const stateB4 = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB4.reconciledCount).toBe(1);
+      expect(stateB4.clearedCount).toBe(0);
     });
 
     it("BUG-13: excludes split parents from status flips and reconciles split children with consistent counts", async () => {

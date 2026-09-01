@@ -78,6 +78,7 @@ export async function POST(req: Request) {
           id: c.id,
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
+          transferStatus: c.transferStatus,
           amount: c.amount,
           memo: c.memo,
           payee: c.payee,
@@ -98,6 +99,7 @@ export async function POST(req: Request) {
       memo: body.memo,
       amount: body.amount,
       status: body.status,
+      transferStatus: body.transferStatus,
       flagColor: body.flagColor ?? null,
       transferAccountId: body.transferAccountId ?? null,
       incomeMonth: body.incomeMonth,
@@ -150,6 +152,7 @@ export async function PATCH(req: Request) {
           id: c.id,
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
+          transferStatus: c.transferStatus,
           amount: c.amount,
           memo: c.memo,
           payee: c.payee,
@@ -170,6 +173,7 @@ export async function PATCH(req: Request) {
     if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
     if (body.amount !== undefined) patch.amount = body.amount;
     if (body.status !== undefined) patch.status = body.status;
+    if (body.transferStatus !== undefined) patch.transferStatus = body.transferStatus;
     if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
     if (body.incomeMonth !== undefined) patch.incomeMonth = body.incomeMonth;
 

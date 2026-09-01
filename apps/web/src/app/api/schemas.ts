@@ -12,9 +12,10 @@ export const ISOMonthSchema = z.string().refine(isValidISOMonth, {
 export const TransactionFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple"]);
 
 export const SubTransactionSchema = z.object({
-  id: z.number().int().positive().optional(),
+  id: z.number().int().positive().nullable().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
   transferAccountId: z.number().int().positive().nullable().optional(),
+  transferStatus: z.enum(["u", "c"]).optional(),
   amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
   memo: z.string().max(1000).optional(),
   payee: z.string().max(255).optional(),
@@ -29,6 +30,7 @@ export const TransactionCreateSchema = z.object({
   memo: z.string().max(1000).optional().default(""),
   amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
   status: z.enum(["u", "c"]).optional().default("c"),
+  transferStatus: z.enum(["u", "c"]).optional(),
   flagColor: TransactionFlagSchema.nullable().optional(),
   incomeMonth: ISOMonthSchema.nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).min(2).optional(),
@@ -43,6 +45,7 @@ export const TransactionPatchSchema = z.object({
   memo: z.string().max(1000).nullable().optional(),
   amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
   status: z.enum(["u", "c"]).optional(),
+  transferStatus: z.enum(["u", "c"]).optional(),
   flagColor: TransactionFlagSchema.nullable().optional(),
   incomeMonth: ISOMonthSchema.nullable().optional(),
   subTransactions: z.array(SubTransactionSchema).min(2).optional(),
@@ -58,6 +61,7 @@ export const TransactionBulkUpdateSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1),
   patch: z.object({
     status: z.enum(["u", "c"]).optional(),
+    transferStatus: z.enum(["u", "c"]).optional(),
     categoryId: z.number().int().positive().nullable().optional(),
     flagColor: TransactionFlagSchema.nullable().optional(),
     date: ISODateSchema.optional(),
