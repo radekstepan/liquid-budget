@@ -343,8 +343,11 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
     }
   } else if (isMonthBasedFrequency(effectiveFreq)) {
     if (patch.nextDate !== undefined) {
-      p.anchorDay = parseInt((p.nextDate as string).slice(8, 10), 10);
-    } else if (p.frequency !== undefined) {
+      const newDay = parseInt((p.nextDate as string).slice(8, 10), 10);
+      if (existing.anchorDay == null || newDay > existing.anchorDay) {
+        p.anchorDay = newDay;
+      }
+    } else if (p.frequency !== undefined && existing.anchorDay == null) {
       const dateForAnchor = (p.nextDate as string | undefined) ?? existing.nextDate;
       p.anchorDay = parseInt(dateForAnchor.slice(8, 10), 10);
     }
