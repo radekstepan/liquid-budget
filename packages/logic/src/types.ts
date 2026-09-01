@@ -181,6 +181,10 @@ export type SerializedBudgetIndex = {
   outflowByMonth: Record<string, Record<string | number, number>>;
   spendByAccountMonth: Record<string, Record<string | number, number>>;
   incomeByMonth: Record<string, number>;
+  incomeFromFutureByMonth?: Record<string, number>;
+  incomeFromPastByMonth?: Record<string, number>;
+  incomeDeferredToFutureByMonth?: Record<string, number>;
+  incomeDeferredToPastByMonth?: Record<string, number>;
   carryoverByMonth: Record<string, Record<string | number, number>>;
   endingBalanceByMonth?: Record<string, Record<string | number, number>>;
   overspentByMonth: Record<string, number>;
@@ -263,4 +267,22 @@ export type BudgetResult = {
    * the CC payment category.
    */
   overspentPrevious: number;
+  /**
+   * Income attributed to this budget month that originated from transactions
+   * with dates in future months (e.g. late bonus or deferred back).
+   */
+  incomeFromFuture?: number;
+  /**
+   * Income attributed to this budget month that originated from transactions
+   * with dates in past months (e.g. deferred forward).
+   */
+  incomeFromPast?: number;
+  /**
+   * Income from transactions dated in this month that was deferred to future months.
+   */
+  incomeDeferredToFuture?: number;
+  /**
+   * Income from transactions dated in this month that was deferred to past months.
+   */
+  incomeDeferredToPast?: number;
 };

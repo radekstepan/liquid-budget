@@ -134,6 +134,10 @@ type RawIndexData = {
   assignedTotalByMonth: Map<string, number>;
   outflowByMonth: Map<string, Map<number, number>>;
   incomeByMonth: Map<string, number>;
+  incomeFromFutureByMonth: Map<string, number>;
+  incomeFromPastByMonth: Map<string, number>;
+  incomeDeferredToFutureByMonth: Map<string, number>;
+  incomeDeferredToPastByMonth: Map<string, number>;
   cardPaymentsByAccountMonth: Map<string, Map<number, number>>;
   cardAdvancesByAccountMonth: Map<string, Map<number, number>>;
   categoryTransactionsByMonth: Map<string, Map<number, CategoryTxEntry[]>>;
@@ -145,6 +149,10 @@ type IndexedBudgetData = {
   outflowByMonth: Map<string, Map<number, number>>;
   spendByAccountMonth: Map<string, Map<number, number>>;
   incomeByMonth: Map<string, number>;
+  incomeFromFutureByMonth?: Map<string, number>;
+  incomeFromPastByMonth?: Map<string, number>;
+  incomeDeferredToFutureByMonth?: Map<string, number>;
+  incomeDeferredToPastByMonth?: Map<string, number>;
   carryoverByMonth: Map<string, Map<number, number>>;
   endingBalanceByMonth: Map<string, Map<number, number>>;
   overspentByMonth: Map<string, number>;
@@ -348,6 +356,18 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
   const incomeByMonth = new Map<string, number>(
     Object.entries(idx.incomeByMonth).map(([k, v]) => [k, Number(v)])
   );
+  const incomeFromFutureByMonth = new Map<string, number>(
+    Object.entries(idx.incomeFromFutureByMonth ?? {}).map(([k, v]) => [k, Number(v)])
+  );
+  const incomeFromPastByMonth = new Map<string, number>(
+    Object.entries(idx.incomeFromPastByMonth ?? {}).map(([k, v]) => [k, Number(v)])
+  );
+  const incomeDeferredToFutureByMonth = new Map<string, number>(
+    Object.entries(idx.incomeDeferredToFutureByMonth ?? {}).map(([k, v]) => [k, Number(v)])
+  );
+  const incomeDeferredToPastByMonth = new Map<string, number>(
+    Object.entries(idx.incomeDeferredToPastByMonth ?? {}).map(([k, v]) => [k, Number(v)])
+  );
   const carryoverByMonth = new Map<string, Map<number, number>>();
   for (const [m, catMap] of Object.entries(idx.carryoverByMonth)) {
     const inner = new Map<number, number>();
@@ -400,8 +420,7 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
         ccPayCatToAccount.set(c.id, c.linkedAccountId);
       }
     }
-    for (const m of Object.keys(idx.carryoverByMonth)) {
-      const cMap = carryoverByMonth.get(m) ?? new Map<number, number>();
+    for (const [m, cMap] of carryoverByMonth) {
       const aMap = assignedByMonth.get(m) ?? new Map<number, number>();
       const oMap = outflowByMonth.get(m) ?? new Map<number, number>();
       const sMap = spendByAccountMonth.get(m) ?? new Map<number, number>();
@@ -439,6 +458,10 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
     outflowByMonth,
     spendByAccountMonth,
     incomeByMonth,
+    incomeFromFutureByMonth,
+    incomeFromPastByMonth,
+    incomeDeferredToFutureByMonth,
+    incomeDeferredToPastByMonth,
     carryoverByMonth,
     endingBalanceByMonth,
     overspentByMonth,
@@ -472,6 +495,10 @@ function buildRawIndexData(
 
   const outflowByMonth = new Map<string, Map<number, number>>();
   const incomeByMonth = new Map<string, number>();
+  const incomeFromFutureByMonth = new Map<string, number>();
+  const incomeFromPastByMonth = new Map<string, number>();
+  const incomeDeferredToFutureByMonth = new Map<string, number>();
+  const incomeDeferredToPastByMonth = new Map<string, number>();
   const cardPaymentsByAccountMonth = new Map<string, Map<number, number>>();
   const cardAdvancesByAccountMonth = new Map<string, Map<number, number>>();
   const categoryTransactionsByMonth = new Map<string, Map<number, CategoryTxEntry[]>>();
@@ -533,6 +560,28 @@ function buildRawIndexData(
       const incMonth = t.incomeMonth || mk;
       const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
       incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + incomeAmt));
+
+      if (t.incomeMonth && t.incomeMonth !== mk) {
+        if (mk > t.incomeMonth) {
+          incomeFromFutureByMonth.set(
+            t.incomeMonth,
+            Math.round((incomeFromFutureByMonth.get(t.incomeMonth) ?? 0) + incomeAmt)
+          );
+          incomeDeferredToPastByMonth.set(
+            mk,
+            Math.round((incomeDeferredToPastByMonth.get(mk) ?? 0) + incomeAmt)
+          );
+        } else if (mk < t.incomeMonth) {
+          incomeFromPastByMonth.set(
+            t.incomeMonth,
+            Math.round((incomeFromPastByMonth.get(t.incomeMonth) ?? 0) + incomeAmt)
+          );
+          incomeDeferredToFutureByMonth.set(
+            mk,
+            Math.round((incomeDeferredToFutureByMonth.get(mk) ?? 0) + incomeAmt)
+          );
+        }
+      }
     }
 
     // Transfers involving credit cards
@@ -574,6 +623,10 @@ function buildRawIndexData(
     assignedTotalByMonth,
     outflowByMonth,
     incomeByMonth,
+    incomeFromFutureByMonth,
+    incomeFromPastByMonth,
+    incomeDeferredToFutureByMonth,
+    incomeDeferredToPastByMonth,
     cardPaymentsByAccountMonth,
     cardAdvancesByAccountMonth,
     categoryTransactionsByMonth,
@@ -826,6 +879,10 @@ function computeAllMonths(
     outflowByMonth: rawData.outflowByMonth,
     spendByAccountMonth,
     incomeByMonth: rawData.incomeByMonth,
+    incomeFromFutureByMonth: rawData.incomeFromFutureByMonth,
+    incomeFromPastByMonth: rawData.incomeFromPastByMonth,
+    incomeDeferredToFutureByMonth: rawData.incomeDeferredToFutureByMonth,
+    incomeDeferredToPastByMonth: rawData.incomeDeferredToPastByMonth,
     carryoverByMonth,
     endingBalanceByMonth,
     overspentByMonth,
@@ -891,6 +948,10 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     outflowByMonth: serializedOutflow,
     spendByAccountMonth: serializedSpend,
     incomeByMonth: Object.fromEntries(index.incomeByMonth),
+    incomeFromFutureByMonth: Object.fromEntries(index.incomeFromFutureByMonth ?? new Map()),
+    incomeFromPastByMonth: Object.fromEntries(index.incomeFromPastByMonth ?? new Map()),
+    incomeDeferredToFutureByMonth: Object.fromEntries(index.incomeDeferredToFutureByMonth ?? new Map()),
+    incomeDeferredToPastByMonth: Object.fromEntries(index.incomeDeferredToPastByMonth ?? new Map()),
     carryoverByMonth: serializedCarryover,
     endingBalanceByMonth: serializedEnding,
     overspentByMonth: Object.fromEntries(index.overspentByMonth),
@@ -1061,6 +1122,10 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
   // Cash overspending from prior months is factored directly into priorSurplus.
   const priorSurplus = computePriorTBBSurplus(index, months, month);
   const totalIncome = index.incomeByMonth.get(month) ?? 0;
+  const incomeFromFuture = index.incomeFromFutureByMonth?.get(month) ?? 0;
+  const incomeFromPast = index.incomeFromPastByMonth?.get(month) ?? 0;
+  const incomeDeferredToFuture = index.incomeDeferredToFutureByMonth?.get(month) ?? 0;
+  const incomeDeferredToPast = index.incomeDeferredToPastByMonth?.get(month) ?? 0;
   const totalAssigned = Math.round(groups.reduce((s, g) => s + g.assigned, 0));
   const tbb = Math.round(totalIncome - totalAssigned + priorSurplus);
 
@@ -1072,6 +1137,10 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
     overBudgeted: tbb < 0,
     totalAssigned,
     overspentPrevious,
+    incomeFromFuture,
+    incomeFromPast,
+    incomeDeferredToFuture,
+    incomeDeferredToPast,
   };
 }
 

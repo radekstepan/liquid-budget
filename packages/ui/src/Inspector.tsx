@@ -25,6 +25,10 @@ export const Inspector = memo(function Inspector({
   totalIncome,
   totalAssigned,
   overspentPrevious,
+  incomeFromFuture,
+  incomeFromPast,
+  incomeDeferredToFuture,
+  incomeDeferredToPast,
   cashFlow,
   trailingNetWorth,
   insights,
@@ -45,6 +49,10 @@ export const Inspector = memo(function Inspector({
   totalIncome?: number;
   totalAssigned?: number;
   overspentPrevious?: number;
+  incomeFromFuture?: number;
+  incomeFromPast?: number;
+  incomeDeferredToFuture?: number;
+  incomeDeferredToPast?: number;
   cashFlow?: CashFlowSummary;
   trailingNetWorth?: TrailingNetWorthSummary;
   insights?: SpendingInsight[];
@@ -232,8 +240,20 @@ export const Inspector = memo(function Inspector({
           overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange"
         )}
         title={
-          overBudgeted
-            ? `Prior surplus: ${money(priorSurplus ?? 0)}\nIncome this month: ${money(totalIncome ?? 0)}\nAssigned this month: ${money(totalAssigned ?? 0)}\n─────────────────\n= TBB: ${money(tbb)}`
+          overBudgeted || (incomeFromFuture != null && incomeFromFuture > 0) || (incomeFromPast != null && incomeFromPast > 0)
+            ? [
+                `Prior surplus: ${money(priorSurplus ?? 0)}`,
+                `Income this month: ${money(totalIncome ?? 0)}`,
+                ...(incomeFromFuture != null && incomeFromFuture > 0
+                  ? [`  ↳ ${money(incomeFromFuture)} from future transaction dates`]
+                  : []),
+                ...(incomeFromPast != null && incomeFromPast > 0
+                  ? [`  ↳ ${money(incomeFromPast)} from past transaction dates`]
+                  : []),
+                `Assigned this month: ${money(totalAssigned ?? 0)}`,
+                `─────────────────`,
+                `= TBB: ${money(tbb)}`,
+              ].join("\n")
             : undefined
         }
       >
@@ -242,6 +262,34 @@ export const Inspector = memo(function Inspector({
           {overBudgeted ? "Overbudgeted" : "To Be Budgeted"}
         </div>
       </div>
+
+      {/* Visual indicator explaining deferred income originating from future/past transaction dates */}
+      {incomeFromFuture != null && incomeFromFuture > 0 && (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-[var(--y-panel-alt)] border border-[var(--y-line-soft)] text-[11px] text-[var(--y-ink-soft)] leading-snug"
+          data-testid="deferred-income-indicator"
+        >
+          <span className="shrink-0 flex items-center">
+            <Icon name="info" size={12} color="#2f7fb0" />
+          </span>
+          <span>
+            <strong className="text-[var(--y-ink)]">{money(incomeFromFuture)}</strong> of income originated from future transaction dates.
+          </span>
+        </div>
+      )}
+      {incomeFromPast != null && incomeFromPast > 0 && (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-[var(--y-panel-alt)] border border-[var(--y-line-soft)] text-[11px] text-[var(--y-ink-soft)] leading-snug"
+          data-testid="deferred-income-indicator"
+        >
+          <span className="shrink-0 flex items-center">
+            <Icon name="info" size={12} color="#2f7fb0" />
+          </span>
+          <span>
+            <strong className="text-[var(--y-ink)]">{money(incomeFromPast)}</strong> of income originated from past transaction dates.
+          </span>
+        </div>
+      )}
 
       {/* Card 1: Net Monthly (Cash Flow & Savings Rate) */}
       <Panel title="Net Monthly" bodyClass="!p-[10px] space-y-2">
