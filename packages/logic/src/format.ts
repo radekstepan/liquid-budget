@@ -179,14 +179,14 @@ export function numCents(
 
   if (str.includes(".")) {
     const parts = str.split(".");
-    if (parts.length !== 2 || !/^\d*$/.test(parts[0]!) || !/^\d*$/.test(parts[1]!)) {
+    if (parts.length !== 2 || !/^\d+$/.test(parts[0]!) || !/^\d+$/.test(parts[1]!)) {
       throw new TypeError(`Invalid integer cents value: ${s}`);
     }
     // If decimal part contains non-zero digits, reject as lossy float cents
-    if (parts[1] && !/^0+$/.test(parts[1])) {
+    if (!/^0+$/.test(parts[1]!)) {
       throw new TypeError(`Invalid integer cents value (contains decimal): ${s}`);
     }
-    str = parts[0] || "0";
+    str = parts[0]!;
   }
 
   if (!/^\d+$/.test(str)) {
