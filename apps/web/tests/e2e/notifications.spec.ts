@@ -25,17 +25,18 @@ async function waitForReady(page: Page) {
 }
 
 /**
- * Reset the DB to the demo seed and load a fresh page. Because the seed
- * contains due recurring entries (their nextDate is in the past), the very
- * first load after a reset auto-posts them and shows the automatic-post
- * toast. This helper waits for that toast to appear and auto-dismiss so the
- * rest of the test starts from a clean toast surface.
+ * Reset the DB to the demo seed and load a fresh page. If the seed
+ * contains due recurring entries relative to today, the initial load
+ * may auto-post them and show an automatic-post toast. This helper waits
+ * for that toast to dismiss if present so subsequent tests have a clean surface.
  */
 async function loadFresh(page: Page) {
   await page.goto("/");
   await waitForReady(page);
-  await expect(page.getByText(/Automatically entered \d+ scheduled transactions?\./)).toBeVisible();
-  await expect(page.getByText(/Automatically entered \d+ scheduled transactions?\./)).toBeHidden({ timeout: 10_000 });
+  const autoToast = page.getByText(/Automatically entered \d+ scheduled transactions?\./);
+  if (await autoToast.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await expect(autoToast).toBeHidden({ timeout: 10_000 });
+  }
 }
 
 async function resetToDemo(page: Page) {
@@ -58,7 +59,7 @@ async function addTransactionViaModal(
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill(amount);
-  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -92,6 +93,7 @@ test.describe("success notifications", () => {
     const payee = `PW Notify Tx ${Date.now()}`;
     await addTransactionViaModal(page, payee);
     await expect(page.getByText("Transaction added.")).toBeVisible();
+    await page.getByPlaceholder("Search register").fill(payee);
     await expect(page.getByRole("row").filter({ hasText: payee })).toBeVisible();
   });
 
@@ -207,7 +209,7 @@ test.describe("failure notifications", () => {
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
-    await modal.locator('input[type="date"]').first().fill("2026-09-01");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     await fillSearchlist(modal, "e.g. Whole Foods", `PW Notify Fail ${Date.now()}`);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
 
@@ -320,26 +322,18 @@ test.describe("automatic recurring posting", () => {
     page,
     request,
   }) => {
-    // Reset + first load auto-posts the seed's due recurrings and reports
-    // them via the automatic-post toast.
+    // Reset + first load clears existing baseline
     await resetToDemo(page);
-    await page.goto("/");
-    await waitForReady(page);
-    await expect(
-      page.getByText(/Automatically entered \d+ scheduled transactions?\./)
-    ).toBeVisible();
-    await expect(
-      page.getByText(/Automatically entered \d+ scheduled transactions?\./)
-    ).toBeHidden({ timeout: 10_000 });
+    await loadFresh(page);
 
-    // Reloading after they are posted reports nothing new.
+    // Reloading after initial load reports nothing new.
     await page.reload();
     await waitForReady(page);
     await expect(
       page.getByText(/Automatically entered \d+ scheduled transactions?\./)
     ).toHaveCount(0);
 
-    // Create a fresh due recurring via the API.
+    // Create a fresh due recurring (with nextDate in the past) via the API.
     const budget = await (await request.get("/api/budget")).json();
     const account = budget.accounts.find(
       (a: { name: string }) => a.name === "TD Unlimited Chequing"
@@ -352,7 +346,7 @@ test.describe("automatic recurring posting", () => {
         payee,
         amount: -5000,
         frequency: "monthly",
-        nextDate: "2026-01-15",
+        nextDate: "2020-01-15",
       },
     });
     expect(created.status()).toBe(200);

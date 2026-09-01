@@ -71,7 +71,7 @@ test("deleting a category with transactions prompts for reassign target", async 
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const txModal = page.locator(".y-modal").last();
   await txModal.locator('input[inputmode="decimal"]').first().fill("15.00");
-  await txModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await txModal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(txModal, "e.g. Whole Foods", `PW Tx ${stamp}`);
 
   // Select the newly created category in the searchable dropdown
