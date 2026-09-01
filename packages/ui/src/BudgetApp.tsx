@@ -515,7 +515,11 @@ export function BudgetApp({
 
   const assign = useCallback(
     async (categoryId: number, amount: number, m?: string) => {
-      await api.assign(categoryId, amount, m ?? month);
+      try {
+        await api.assign(categoryId, amount, m ?? month);
+      } catch {
+        // Handled via notifications toast and rollback in BudgetAppShell
+      }
     },
     [api, month]
   );
