@@ -80,6 +80,26 @@ describe("duplicateFingerprint", () => {
     });
     expect(a).not.toBe(b);
   });
+
+  it("differs when fitId changes (BUG-16)", () => {
+    const a = duplicateFingerprint({
+      accountId: 1,
+      date: "2026-06-01",
+      amount: -450,
+      payee: "Coffee Shop",
+      memo: "",
+      fitId: "FIT-001",
+    });
+    const b = duplicateFingerprint({
+      accountId: 1,
+      date: "2026-06-01",
+      amount: -450,
+      payee: "Coffee Shop",
+      memo: "",
+      fitId: "FIT-002",
+    });
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("findDuplicateGroups", () => {
@@ -88,6 +108,32 @@ describe("findDuplicateGroups", () => {
       row({ id: 1 }),
       row({ id: 2 }),
       row({ id: 3, payee: "Other", amount: -2000 }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.keeper.id).toBe(1);
+    expect(groups[0]!.duplicates.map((d) => d.id)).toEqual([2]);
+  });
+
+  it("distinguishes same-day, same-payee, same-amount transactions with different memos (BUG-16)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "Morning coffee" }),
+      row({ id: 2, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "Afternoon coffee" }),
+    ]);
+    expect(groups).toHaveLength(0);
+  });
+
+  it("distinguishes same-day, same-payee, same-amount transactions with different fitIds (BUG-16)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "", fitId: "FIT-001" }),
+      row({ id: 2, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "", fitId: "FIT-002" }),
+    ]);
+    expect(groups).toHaveLength(0);
+  });
+
+  it("groups same-day transactions when memo and fitId match (BUG-16)", () => {
+    const groups = findDuplicateGroups([
+      row({ id: 1, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "Coffee", fitId: "FIT-001" }),
+      row({ id: 2, date: "2026-06-01", payee: "Coffee Shop", amount: -450, memo: "Coffee", fitId: "FIT-001" }),
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0]!.keeper.id).toBe(1);
