@@ -268,6 +268,11 @@ export type BudgetResult = {
    */
   overspentPrevious: number;
   /**
+   * The month key ("YYYY-MM") of the most recent prior month from which
+   * overspentPrevious was derived, or undefined if there are no prior months.
+   */
+  overspentPreviousMonthKey?: string;
+  /**
    * Income attributed to this budget month that originated from transactions
    * with dates in future months (e.g. late bonus or deferred back).
    */

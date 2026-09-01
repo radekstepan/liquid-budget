@@ -886,6 +886,7 @@ export function BudgetApp({
           totalIncome={budget.totalIncome}
           totalAssigned={budget.totalAssigned}
           overspentPrevious={budget.overspentPrevious}
+          overspentPreviousMonthKey={budget.overspentPreviousMonthKey}
           incomeFromFuture={budget.incomeFromFuture}
           incomeFromPast={budget.incomeFromPast}
           incomeDeferredToFuture={budget.incomeDeferredToFuture}
