@@ -1177,8 +1177,8 @@ describe("transactions queries", () => {
         1,
         { payee: "Amazon.com" },
         [
-          { categoryId: 1, amount: -6000, memo: "Item A" },
-          { categoryId: 2, amount: -4000, memo: "Item B" },
+          { id: 2, categoryId: 1, amount: -6000, memo: "Item A" },
+          { id: 3, categoryId: 2, amount: -4000, memo: "Item B" },
         ]
       );
 
@@ -1217,6 +1217,68 @@ describe("transactions queries", () => {
       const inserts = mock.calls.filter((c) => c.op === "insert");
       expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -6000, payee: "New Seller A" });
       expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon" });
+    });
+
+    it("BUG-34: preserves custom child payee by client-supplied ID across reordering and duplicate amounts", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 101, accountId: 5, amount: -5000, payee: "Seller A", memo: "Same Memo", status: "c", transferAccountId: null, categoryId: 1 },
+        { id: 102, accountId: 5, amount: -5000, payee: "Seller B", memo: "Same Memo", status: "c", transferAccountId: null, categoryId: 2 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 201 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 202 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      // Reverse order: child 102 comes first, child 101 comes second
+      await updateSplit(
+        mock.db,
+        1,
+        {},
+        [
+          { id: 102, categoryId: 2, amount: -5000, memo: "Same Memo" },
+          { id: 101, categoryId: 1, amount: -5000, memo: "Same Memo" },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller A" });
+    });
+
+    it("BUG-34: new child without id inherits parent payee and does not steal old child's custom payee by position", async () => {
+      mock.respondWithNth("select:transactions", 1, [
+        { id: 1, accountId: 5, amount: -10000, payee: "Amazon", date: "2026-07-01", status: "c", categoryId: null, parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("select:transactions", 2, [
+        { id: 101, accountId: 5, amount: -5000, payee: "Seller A", memo: "Memo 1", status: "c", transferAccountId: null, categoryId: 1 },
+        { id: 102, accountId: 5, amount: -5000, payee: "Seller B", memo: "Memo 2", status: "c", transferAccountId: null, categoryId: 2 },
+      ]);
+      mock.respondWith("update:accounts", [{}, {}]);
+      mock.respondWith("delete:transactions", [{}]);
+      mock.respondWith("update:transactions", [{}]);
+      mock.respondWithNth("insert:transactions", 1, [{ id: 201 }]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 202 }]);
+      mock.respondWith("update:accounts", [{}, {}]);
+
+      // No id passed for position 0: should inherit parent's payee "Amazon", not steal "Seller A"
+      await updateSplit(
+        mock.db,
+        1,
+        {},
+        [
+          { categoryId: 1, amount: -5000, memo: "Brand New Sub Item" },
+          { id: 102, categoryId: 2, amount: -5000, memo: "Memo 2" },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Amazon" });
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
     });
 
     it("converts a single transaction that has no children into a split (BUG-02)", async () => {

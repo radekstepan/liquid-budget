@@ -894,32 +894,25 @@ export async function updateSplit(
         if (c.payee !== undefined && c.payee !== null && c.payee !== "") {
           payee = String(c.payee);
         } else {
-          // Attempt to match with an existing child to preserve custom payee
+          // Attempt to match with an existing child by client-supplied ID to preserve custom payee (BUG-34)
           let matchedOldChild: (typeof oldChildren)[0] | undefined;
           if (c.id != null) {
-            const foundIdx = oldChildren.findIndex((oc, idx) => !usedOldIndices.has(idx) && oc.id === c.id);
+            const childId = Number(c.id);
+            const foundIdx = oldChildren.findIndex(
+              (oc, idx) => !usedOldIndices.has(idx) && oc.id === childId
+            );
             if (foundIdx !== -1) {
               usedOldIndices.add(foundIdx);
               matchedOldChild = oldChildren[foundIdx];
             }
-          }
-          if (!matchedOldChild && !usedOldIndices.has(i) && oldChildren[i] && Number(oldChildren[i]!.amount) === childAmount && (oldChildren[i]!.memo || "") === (c.memo || "")) {
-            usedOldIndices.add(i);
-            matchedOldChild = oldChildren[i];
-          }
-          if (!matchedOldChild) {
-            const foundIdx = oldChildren.findIndex((oc, idx) => !usedOldIndices.has(idx) && Number(oc.amount) === childAmount && (oc.memo || "") === (c.memo || ""));
-            if (foundIdx !== -1) {
-              usedOldIndices.add(foundIdx);
-              matchedOldChild = oldChildren[foundIdx];
-            }
-          }
-          if (!matchedOldChild && !usedOldIndices.has(i) && oldChildren[i]) {
-            usedOldIndices.add(i);
-            matchedOldChild = oldChildren[i];
           }
 
-          if (matchedOldChild && matchedOldChild.transferAccountId == null && matchedOldChild.payee && matchedOldChild.payee !== parent.payee) {
+          if (
+            matchedOldChild &&
+            matchedOldChild.transferAccountId == null &&
+            matchedOldChild.payee &&
+            matchedOldChild.payee !== parent.payee
+          ) {
             payee = matchedOldChild.payee;
           } else {
             payee = newPayee;
