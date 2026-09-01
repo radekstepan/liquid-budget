@@ -1276,6 +1276,300 @@ describe("TransactionModal", () => {
       expect(saveBtn).not.toBeDisabled();
     });
   });
+
+  describe("reconciliation status and unreconcile warning (BUG-03)", () => {
+    it("preserves status 'r' when editing a reconciled transaction and saving", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-08-01",
+        payee: "Target",
+        memo: "",
+        amount: "-25.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.change(screen.getByPlaceholderText("Optional notes"), {
+        target: { value: "Weekly groceries" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave.mock.calls[0]![0]).toMatchObject({
+        id: 1,
+        status: "r",
+        memo: "Weekly groceries",
+      });
+    });
+
+    it("shows the unreconcile warning dialog when unchecking cleared on a reconciled transaction", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-08-01",
+        payee: "Target",
+        memo: "",
+        amount: "-25.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      const checkbox = screen.getByLabelText(/cleared \(bank has processed this\)/i);
+      expect(checkbox).toBeChecked();
+
+      fireEvent.click(checkbox);
+
+      expect(screen.getByText("Unreconcile Transaction?")).toBeInTheDocument();
+      expect(screen.getByText(/Past reconciliation affected/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /yes, unreconcile/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^cancel$/i })).toBeInTheDocument();
+    });
+
+    it("cancelling the unreconcile warning preserves cleared: true and status: 'r' on save", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-08-01",
+        payee: "Target",
+        memo: "",
+        amount: "-25.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText(/cleared \(bank has processed this\)/i));
+      expect(screen.getByText("Unreconcile Transaction?")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+      expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/cleared \(bank has processed this\)/i)).toBeChecked();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "r" }));
+    });
+
+    it("confirming the unreconcile warning unchecks cleared and saves with status: 'u'", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-08-01",
+        payee: "Target",
+        memo: "",
+        amount: "-25.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText(/cleared \(bank has processed this\)/i));
+      fireEvent.click(screen.getByRole("button", { name: /yes, unreconcile/i }));
+
+      expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/cleared \(bank has processed this\)/i)).not.toBeChecked();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "u" }));
+    });
+
+    it("toggles cleared directly without warning dialog for non-reconciled transactions", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-08-01",
+        payee: "Target",
+        memo: "",
+        amount: "-25.00",
+        status: "c",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      const checkbox = screen.getByLabelText(/cleared \(bank has processed this\)/i);
+      expect(checkbox).toBeChecked();
+      fireEvent.click(checkbox);
+
+      expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
+      expect(checkbox).not.toBeChecked();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "u" }));
+    });
+
+    it("preserves status 'r' for reconciled transfer transactions", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 2,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Transfer : Credit",
+        memo: "",
+        amount: "-100.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: 2,
+        parentId: null,
+        isIncome: false,
+      };
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "r", transferAccountId: 2 }));
+    });
+
+    it("preserves status 'r' for reconciled split transactions", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 3,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-08-01",
+        payee: "Split Payee",
+        memo: "",
+        amount: "-100.00",
+        status: "r",
+        flagColor: null,
+        transferAccountId: null,
+        parentId: null,
+        isIncome: false,
+      };
+      const allTxns: Transaction[] = [
+        initial,
+        {
+          id: 4,
+          accountId: 1,
+          categoryId: 10,
+          date: "2026-08-01",
+          payee: "Split Payee",
+          memo: "Groceries portion",
+          amount: "-60.00",
+          status: "r",
+          flagColor: null,
+          transferAccountId: null,
+          parentId: 3,
+          isIncome: false,
+        },
+        {
+          id: 5,
+          accountId: 1,
+          categoryId: 11,
+          date: "2026-08-01",
+          payee: "Split Payee",
+          memo: "Rent portion",
+          amount: "-40.00",
+          status: "r",
+          flagColor: null,
+          transferAccountId: null,
+          parentId: 3,
+          isIncome: false,
+        },
+      ];
+
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          initial={initial}
+          allTransactions={allTxns}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "r", id: 3 }));
+    });
+  });
 });
 
 describe("RecurringModal", () => {
