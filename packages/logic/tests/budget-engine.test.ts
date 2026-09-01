@@ -55,6 +55,67 @@ function makeGroup(overrides: Partial<CategoryGroup> = {}): CategoryGroup {
   };
 }
 
+function checkBudgetIntegrity(data: BudgetData, month: string) {
+  const result = computeBudget(data, month);
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
+  const accountBalances = new Map<number, number>();
+  for (const a of onBudgetAccounts) {
+    accountBalances.set(a.id, Number(a.balance ?? 0));
+  }
+
+  // Compute account balance delta from transactions up to `month`
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+
+    const accA = accountMap.get(t.accountId);
+    const onA = accA ? accA.onBudget : true;
+
+    const isIncome = isIncomeTransaction(t, accountMap);
+    const effectiveMonth = isIncome ? (t.incomeMonth || t.date.slice(0, 7)) : t.date.slice(0, 7);
+    if (effectiveMonth > month) continue;
+
+    const amt = Number(t.amount);
+    if (t.transferAccountId != null) {
+      const accB = accountMap.get(t.transferAccountId);
+      const onB = accB ? accB.onBudget : true;
+      if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
+      if (onB) accountBalances.set(t.transferAccountId, (accountBalances.get(t.transferAccountId) ?? 0) - amt);
+    } else {
+      if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
+    }
+  }
+
+  const totalAccountBalance = Array.from(accountBalances.values()).reduce((s, v) => s + v, 0);
+
+  const totalCategoryAvailable = result.groups.reduce(
+    (s, g) => s + g.available,
+    0
+  );
+
+  const ccAccounts = onBudgetAccounts.filter((a) => a.kind === "credit");
+  const totalCCDebt = ccAccounts.reduce(
+    (s, a) => s + Math.max(0, -(accountBalances.get(a.id) ?? 0)),
+    0
+  );
+  const negativeCategorySum = result.groups.reduce(
+    (s, g) => s + Math.max(0, -g.available),
+    0
+  );
+  const unmatchedCCDebt = Math.max(0, totalCCDebt - negativeCategorySum);
+
+  const difference = Math.round(
+    totalAccountBalance + unmatchedCCDebt - totalCategoryAvailable - result.tbb
+  );
+
+  return { difference, result, totalAccountBalance, totalCategoryAvailable };
+}
+
 // ---------------------------------------------------------------------------
 // getMonthsWithData
 // ---------------------------------------------------------------------------
@@ -3585,67 +3646,6 @@ describe("computeBudget", () => {
   });
 
   describe("BUG-02: CC Refund on Unfunded Spending Creates Phantom Money", () => {
-    function checkBudgetIntegrity(data: BudgetData, month: string) {
-      const result = computeBudget(data, month);
-      const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
-      const splitParentIds = new Set<number>();
-      for (const t of data.transactions) {
-        if (t.parentId != null) splitParentIds.add(t.parentId);
-      }
-
-      const onBudgetAccounts = data.accounts.filter((a) => a.onBudget);
-      const accountBalances = new Map<number, number>();
-      for (const a of onBudgetAccounts) {
-        accountBalances.set(a.id, Number(a.balance ?? 0));
-      }
-
-      // Compute account balance delta from transactions up to `month`
-      for (const t of data.transactions) {
-        if (splitParentIds.has(t.id)) continue;
-
-        const accA = accountMap.get(t.accountId);
-        const onA = accA ? accA.onBudget : true;
-
-        const isIncome = isIncomeTransaction(t, accountMap);
-        const effectiveMonth = isIncome ? (t.incomeMonth || t.date.slice(0, 7)) : t.date.slice(0, 7);
-        if (effectiveMonth > month) continue;
-
-        const amt = Number(t.amount);
-        if (t.transferAccountId != null) {
-          const accB = accountMap.get(t.transferAccountId);
-          const onB = accB ? accB.onBudget : true;
-          if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
-          if (onB) accountBalances.set(t.transferAccountId, (accountBalances.get(t.transferAccountId) ?? 0) - amt);
-        } else {
-          if (onA) accountBalances.set(t.accountId, (accountBalances.get(t.accountId) ?? 0) + amt);
-        }
-      }
-
-      const totalAccountBalance = Array.from(accountBalances.values()).reduce((s, v) => s + v, 0);
-
-      const totalCategoryAvailable = result.groups.reduce(
-        (s, g) => s + g.available,
-        0
-      );
-
-      const ccAccounts = onBudgetAccounts.filter((a) => a.kind === "credit");
-      const totalCCDebt = ccAccounts.reduce(
-        (s, a) => s + Math.max(0, -(accountBalances.get(a.id) ?? 0)),
-        0
-      );
-      const negativeCategorySum = result.groups.reduce(
-        (s, g) => s + Math.max(0, -g.available),
-        0
-      );
-      const unmatchedCCDebt = Math.max(0, totalCCDebt - negativeCategorySum);
-
-      const difference = Math.round(
-        totalAccountBalance + unmatchedCCDebt - totalCategoryAvailable - result.tbb
-      );
-
-      return { difference, result, totalAccountBalance, totalCategoryAvailable };
-    }
-
     it("multi-month: Month 1 unfunded CC spend ($100), Month 2 full CC refund ($100) -> Month 2 Clothing available is $0, CC Payment available is $0, TBB unaffected, integrity difference is 0", () => {
       const data: BudgetData = {
         accounts: [
@@ -3924,6 +3924,353 @@ describe("computeBudget", () => {
       const indexedRes = computeBudget({ ...data, budgetIndex: index }, "2026-08");
       expect(indexedRes.totalIncome).toBe(0);
       expect(indexedRes.tbb).toBe(0);
+    });
+  });
+
+  describe("BUG-01: Red Arrow (overspendCarriesOver) and Credit Card Debt Tracking", () => {
+    const checkingAcc = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 };
+    const ccAcc = { id: 2, name: "Visa", kind: "credit" as const, groupLabel: "Credit Cards", balance: "0", onBudget: true, sort: 1 };
+    const livingGroup = makeGroup({ id: 1, name: "Living" });
+    const ccGroup = makeGroup({ id: 2, name: "Credit Card Payments", isCreditCardPayments: true });
+    const ccPayCat = makeCategory({ id: 20, groupId: 2, name: "Visa Payment", linkedAccountId: 2 });
+
+    it("Scenario 1 (Full Paydown): assigning in Month 2 to cover Red Arrow CC deficit funds CC Payment category", () => {
+      const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Salary",
+        memo: "",
+        amount: "50000", // $500 income
+        status: "c" as const,
+        isIncome: true,
+      };
+      const ccSpendTx = {
+        id: 2,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-10000", // $100 CC spend
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [checkingAcc, ccAcc],
+        groups: [livingGroup, ccGroup],
+        categories: [cat, ccPayCat],
+        assignments: [
+          { id: 1, categoryId: 10, month: "2026-02", amount: "10000" }, // Assign $100 in Feb to cover deficit
+        ],
+        transactions: [incomeTx, ccSpendTx],
+        recurring: [],
+      };
+
+      // Month 1: Jan
+      const jan = computeBudget(data, "2026-01");
+      const janDining = jan.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const janVisa = jan.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(janDining.available).toBe(-10000);
+      expect(janVisa.available).toBe(0);
+      expect(janVisa.ccBuffer).toBe(0);
+      expect(jan.tbb).toBe(50000);
+
+      // Month 2: Feb
+      const feb = computeBudget(data, "2026-02");
+      const febDining = feb.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(febDining.carryoverIn).toBe(-10000);
+      expect(febDining.assigned).toBe(10000);
+      expect(febDining.available).toBe(0); // Brought back to 0
+      expect(febVisa.ccBuffer).toBe(10000); // $100 buffer transferred to CC Payment!
+      expect(febVisa.available).toBe(10000);
+      expect(feb.tbb).toBe(40000); // 50000 - 10000 assigned
+
+      // Integrity checks
+      expect(checkBudgetIntegrity(data, "2026-01").difference).toBe(0);
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+
+      // Pre-indexed parity
+      const index = buildBudgetIndex(data);
+      const fastFeb = computeBudget({ ...data, budgetIndex: index }, "2026-02");
+      expect(fastFeb).toEqual(feb);
+    });
+
+    it("Scenario 2 (Partial Paydown across multiple months): partial assignments incrementally fund CC Payment buffer", () => {
+      const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Salary",
+        memo: "",
+        amount: "50000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      const ccSpendTx = {
+        id: 2,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-10000", // $100 CC spend
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [checkingAcc, ccAcc],
+        groups: [livingGroup, ccGroup],
+        categories: [cat, ccPayCat],
+        assignments: [
+          { id: 1, categoryId: 10, month: "2026-02", amount: "4000" }, // Assign $40 in Feb
+          { id: 2, categoryId: 10, month: "2026-03", amount: "6000" }, // Assign $60 in Mar
+        ],
+        transactions: [incomeTx, ccSpendTx],
+        recurring: [],
+      };
+
+      // Feb: $40 assigned -> Dining available -$60, Visa gets $40 buffer
+      const feb = computeBudget(data, "2026-02");
+      const febDining = feb.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(febDining.carryoverIn).toBe(-10000);
+      expect(febDining.assigned).toBe(4000);
+      expect(febDining.available).toBe(-6000);
+      expect(febVisa.ccBuffer).toBe(4000);
+      expect(febVisa.available).toBe(4000);
+      expect(feb.tbb).toBe(46000);
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+
+      // Mar: $60 assigned -> Dining available $0, Visa gets additional $60 buffer (total $100)
+      const mar = computeBudget(data, "2026-03");
+      const marDining = mar.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const marVisa = mar.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(marDining.carryoverIn).toBe(-6000);
+      expect(marDining.assigned).toBe(6000);
+      expect(marDining.available).toBe(0);
+      expect(marVisa.carryoverIn).toBe(4000);
+      expect(marVisa.ccBuffer).toBe(6000);
+      expect(marVisa.available).toBe(10000);
+      expect(mar.tbb).toBe(40000);
+      expect(checkBudgetIntegrity(data, "2026-03").difference).toBe(0);
+
+      // Pre-indexed parity
+      const index = buildBudgetIndex(data);
+      expect(computeBudget({ ...data, budgetIndex: index }, "2026-02")).toEqual(feb);
+      expect(computeBudget({ ...data, budgetIndex: index }, "2026-03")).toEqual(mar);
+    });
+
+    it("Scenario 3 (Mixed Cash and CC Overspending): assignment in Month 2 covers cash deficit first, then CC debt", () => {
+      const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Salary",
+        memo: "",
+        amount: "50000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      const cashSpendTx = {
+        id: 2,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-01-10",
+        payee: "Cash Cafe",
+        memo: "",
+        amount: "-4000", // $40 Cash spend
+        status: "c" as const,
+      };
+      const ccSpendTx = {
+        id: 3,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-6000", // $60 CC spend
+        status: "c" as const,
+      };
+
+      const makeData = (febAssigned: string): BudgetData => ({
+        accounts: [checkingAcc, ccAcc],
+        groups: [livingGroup, ccGroup],
+        categories: [cat, ccPayCat],
+        assignments: [{ id: 1, categoryId: 10, month: "2026-02", amount: febAssigned }],
+        transactions: [incomeTx, cashSpendTx, ccSpendTx],
+        recurring: [],
+      });
+
+      // Case A: Assign $30 in Feb (less than $40 cash deficit) -> $0 CC buffer
+      const dataA = makeData("3000");
+      const febA = computeBudget(dataA, "2026-02");
+      const diningA = febA.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const visaA = febA.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(diningA.available).toBe(-7000);
+      expect(visaA.available).toBe(0);
+      expect(visaA.ccBuffer).toBe(0);
+      expect(checkBudgetIntegrity(dataA, "2026-02").difference).toBe(0);
+
+      // Case B: Assign $70 in Feb ($40 cash + $30 CC debt) -> $30 CC buffer
+      const dataB = makeData("7000");
+      const febB = computeBudget(dataB, "2026-02");
+      const diningB = febB.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const visaB = febB.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(diningB.available).toBe(-3000);
+      expect(visaB.available).toBe(3000);
+      expect(visaB.ccBuffer).toBe(3000);
+      expect(checkBudgetIntegrity(dataB, "2026-02").difference).toBe(0);
+
+      // Case C: Assign $100 in Feb ($40 cash + $60 CC debt) -> $60 CC buffer, Dining $0
+      const dataC = makeData("10000");
+      const febC = computeBudget(dataC, "2026-02");
+      const diningC = febC.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const visaC = febC.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(diningC.available).toBe(0);
+      expect(visaC.available).toBe(6000);
+      expect(visaC.ccBuffer).toBe(6000);
+      expect(checkBudgetIntegrity(dataC, "2026-02").difference).toBe(0);
+
+      // Case D: Assign $150 in Feb ($40 cash + $60 CC debt + $50 available) -> $60 CC buffer, Dining $50
+      const dataD = makeData("15000");
+      const febD = computeBudget(dataD, "2026-02");
+      const diningD = febD.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const visaD = febD.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(diningD.available).toBe(5000);
+      expect(visaD.available).toBe(6000);
+      expect(visaD.ccBuffer).toBe(6000);
+      expect(checkBudgetIntegrity(dataD, "2026-02").difference).toBe(0);
+    });
+
+    it("Scenario 4 (CC Refund in Month 2 on Red Arrow category): refund naturally clears category negative balance and CC debt", () => {
+      const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Salary",
+        memo: "",
+        amount: "50000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      const ccSpendTx = {
+        id: 2,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-10000", // $100 CC spend
+        status: "c" as const,
+      };
+      const ccRefundTx = {
+        id: 3,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-02-10",
+        payee: "Restaurant Refund",
+        memo: "",
+        amount: "10000", // $100 CC refund
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [checkingAcc, ccAcc],
+        groups: [livingGroup, ccGroup],
+        categories: [cat, ccPayCat],
+        assignments: [],
+        transactions: [incomeTx, ccSpendTx, ccRefundTx],
+        recurring: [],
+      };
+
+      const feb = computeBudget(data, "2026-02");
+      const febDining = feb.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      expect(febDining.carryoverIn).toBe(-10000);
+      expect(febDining.available).toBe(0); // -$100 + $100 refund = $0
+      expect(febVisa.available).toBe(0);
+      expect(febVisa.ccBuffer).toBe(0);
+      expect(feb.tbb).toBe(50000);
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+
+      const index = buildBudgetIndex(data);
+      expect(computeBudget({ ...data, budgetIndex: index }, "2026-02")).toEqual(feb);
+    });
+
+    it("Scenario 5 (Partial Assignment + Partial Refund in Month 2): assignment funds partial CC buffer and refund clears remainder", () => {
+      const cat = makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: true });
+
+      const incomeTx = {
+        id: 1,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-01-01",
+        payee: "Salary",
+        memo: "",
+        amount: "50000",
+        status: "c" as const,
+        isIncome: true,
+      };
+      const ccSpendTx = {
+        id: 2,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-01-15",
+        payee: "Restaurant",
+        memo: "",
+        amount: "-10000", // $100 CC spend
+        status: "c" as const,
+      };
+      const ccRefundTx = {
+        id: 3,
+        accountId: 2,
+        categoryId: 10,
+        date: "2026-02-10",
+        payee: "Restaurant Refund",
+        memo: "",
+        amount: "6000", // $60 CC refund
+        status: "c" as const,
+      };
+
+      const data: BudgetData = {
+        accounts: [checkingAcc, ccAcc],
+        groups: [livingGroup, ccGroup],
+        categories: [cat, ccPayCat],
+        assignments: [
+          { id: 1, categoryId: 10, month: "2026-02", amount: "4000" }, // Assign $40
+        ],
+        transactions: [incomeTx, ccSpendTx, ccRefundTx],
+        recurring: [],
+      };
+
+      const feb = computeBudget(data, "2026-02");
+      const febDining = feb.groups.find((g) => g.group.id === 1)!.rows[0]!;
+      const febVisa = feb.groups.find((g) => g.group.id === 2)!.rows[0]!;
+      // -$100 carryoverIn + $40 assigned + $60 refund = $0 available
+      expect(febDining.available).toBe(0);
+      // Visa Payment gets $40 buffer from the assignment
+      expect(febVisa.available).toBe(4000);
+      expect(febVisa.ccBuffer).toBe(4000);
+      expect(feb.tbb).toBe(46000); // 50000 - 4000 assigned
+
+      expect(checkBudgetIntegrity(data, "2026-02").difference).toBe(0);
+
+      const index = buildBudgetIndex(data);
+      expect(computeBudget({ ...data, budgetIndex: index }, "2026-02")).toEqual(feb);
     });
   });
 });

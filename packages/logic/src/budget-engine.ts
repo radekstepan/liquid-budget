@@ -676,8 +676,6 @@ function computeAllMonths(
       const rawFlow = oMap.get(c.id) ?? 0;
       const txs = categoryTxMap.get(c.id) ?? [];
 
-      const availableBeforeSpend = prev + assigned;
-      let runningCashPool = availableBeforeSpend;
       const catFundedCCByAccount = new Map<number, number>();
       const cardCreditByAccount = new Map<number, number>();
       let catFundedCC = 0;
@@ -687,6 +685,37 @@ function computeAllMonths(
       const priorDebtMap = new Map<number, number>(priorCatDebt ? priorCatDebt : []);
       const catDebtMap = new Map<number, number>(priorDebtMap);
       unfundedDebt.set(c.id, catDebtMap);
+
+      // If category carried over a negative balance (prev < 0) and has prior unfunded CC debt,
+      // any positive assignment in this month first covers any cash portion of the deficit,
+      // and any remaining assignment funds the prior CC debt (moving funds to CC Payment category).
+      if (prev < 0 && assigned > 0) {
+        const totalPriorCCDebt = Array.from(priorDebtMap.values()).reduce((sum, d) => sum + d, 0);
+        const priorCashDeficit = Math.max(0, -prev - totalPriorCCDebt);
+        let assignedAfterCashDeficit = Math.max(0, assigned - priorCashDeficit);
+
+        for (const [accId, debt] of priorDebtMap) {
+          if (assignedAfterCashDeficit <= 0) break;
+          if (debt > 0) {
+            const fundedAmt = Math.min(debt, assignedAfterCashDeficit);
+            catFundedCCByAccount.set(
+              accId,
+              (catFundedCCByAccount.get(accId) ?? 0) + fundedAmt
+            );
+            monthFundedCCByAccount.set(
+              accId,
+              (monthFundedCCByAccount.get(accId) ?? 0) + fundedAmt
+            );
+            catDebtMap.set(accId, debt - fundedAmt);
+            priorDebtMap.set(accId, debt - fundedAmt);
+            assignedAfterCashDeficit -= fundedAmt;
+            catFundedCC += fundedAmt;
+          }
+        }
+      }
+
+      const availableBeforeSpend = prev + assigned;
+      let runningCashPool = Math.max(0, availableBeforeSpend);
 
       let catPriorUnfundedPaydown = 0;
 
@@ -734,7 +763,9 @@ function computeAllMonths(
                 Math.max(0, (catDebtMap.get(tx.accountId) ?? 0) - priorPaydown)
               );
               refund -= priorPaydown;
-              catPriorUnfundedPaydown += priorPaydown;
+              if (!c.overspendCarriesOver || prev >= 0) {
+                catPriorUnfundedPaydown += priorPaydown;
+              }
             }
 
             // 2. Pay down unfunded CC spend from current month
@@ -808,7 +839,6 @@ function computeAllMonths(
       } else {
         if (c.overspendCarriesOver) {
           nextBalance.set(c.id, endAvailable);
-          catDebtMap.clear();
         } else {
           nextBalance.set(c.id, 0);
           const totalDeficit = -endAvailable;
