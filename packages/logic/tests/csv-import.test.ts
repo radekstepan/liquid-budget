@@ -45,6 +45,12 @@ describe("parseCsv", () => {
       "Unclosed quote in CSV on line 3"
     );
   });
+
+  it("treats unescaped mid-field quotes as literal characters (BUG-12)", () => {
+    expect(parseCsv('2023-01-01,Store "A",Groceries,50.00')).toEqual([
+      ["2023-01-01", 'Store "A"', "Groceries", "50.00"],
+    ]);
+  });
 });
 
 describe("parseCsvImport", () => {
