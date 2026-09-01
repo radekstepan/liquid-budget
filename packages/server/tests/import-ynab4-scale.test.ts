@@ -101,6 +101,18 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
       };
       expect(detectMilliunitScale(data)).toBe(true);
     });
+
+    it("detects milliunits when backup contains sub-dollar transactions like $0.99 (BUG-22)", () => {
+      const data = {
+        transactions: [
+          { amount: 990 },      // $0.99 in milliunits (< 1000 and multiple of 10)
+          { amount: 15000 },    // $15.00
+          { amount: 45250 },    // $45.25
+          { amount: 1200000 },  // $1,200.00
+        ],
+      };
+      expect(detectMilliunitScale(data)).toBe(true);
+    });
   });
 
   describe("importYnab4 integration scaling", () => {
@@ -238,6 +250,81 @@ describe("BUG-04: detectMilliunitScale and import scaling", () => {
       // Assignment amount = $25,000.00 = 2,500,000 cents
       const assign = budget.assignments.find((a) => Number(a.amount) === 2500000);
       expect(assign).toBeDefined();
+    });
+
+    it("correctly imports stock YNAB4 backup containing sub-dollar transactions like $0.99 (BUG-22)", async () => {
+      const backup = {
+        accounts: [
+          { entityId: "acc-1", accountName: "Checking", accountType: "Checking", onBudget: true },
+        ],
+        payees: [
+          { entityId: "p-1", name: "App Store" },
+          { entityId: "p-2", name: "Groceries" },
+        ],
+        masterCategories: [
+          {
+            entityId: "mc-1",
+            name: "Living",
+            type: "OUTFLOW",
+            subCategories: [
+              { entityId: "sc-1", name: "Apps" },
+              { entityId: "sc-2", name: "Food" },
+            ],
+          },
+        ],
+        transactions: [
+          {
+            entityId: "t-1",
+            accountId: "acc-1",
+            date: "2026-06-01",
+            amount: -990, // -$0.99 app purchase in milliunits
+            cleared: "Cleared",
+            payeeId: "p-1",
+            categoryId: "sc-1",
+          },
+          {
+            entityId: "t-2",
+            accountId: "acc-1",
+            date: "2026-06-02",
+            amount: -50000, // -$50.00 groceries in milliunits
+            cleared: "Cleared",
+            payeeId: "p-2",
+            categoryId: "sc-2",
+          },
+        ],
+        monthlyBudgets: [
+          {
+            month: "2026-06-01",
+            monthlySubCategoryBudgets: [
+              { categoryId: "sc-1", budgeted: 10000 },  // $10.00
+              { categoryId: "sc-2", budgeted: 100000 }, // $100.00
+            ],
+          },
+        ],
+      };
+
+      await importYnab4(db, backup);
+      const budget = await getBudgetData(db);
+
+      // App store transaction: -$0.99 = -99 cents (not -$9.90 or -990 cents)
+      const appTx = budget.transactions.find((t) => t.payee === "App Store");
+      expect(Number(appTx?.amount)).toBe(-99);
+
+      // Groceries transaction: -$50.00 = -5000 cents (not -$500.00 or -50000 cents)
+      const foodTx = budget.transactions.find((t) => t.payee === "Food" || t.payee === "Groceries");
+      expect(Number(foodTx?.amount)).toBe(-5000);
+
+      // Account balance: -$50.99 = -5099 cents
+      const checking = budget.accounts.find((a) => a.name === "Checking");
+      expect(Number(checking?.balance)).toBe(-5099);
+
+      // Budget assignments: Apps = 1000 cents ($10), Food = 10000 cents ($100)
+      const appsCat = budget.categories.find((c) => c.name === "Apps");
+      const foodCat = budget.categories.find((c) => c.name === "Food");
+      const appsAssign = budget.assignments.find((a) => a.categoryId === appsCat?.id);
+      expect(Number(appsAssign?.amount)).toBe(1000);
+      const foodAssign = budget.assignments.find((a) => a.categoryId === foodCat?.id);
+      expect(Number(foodAssign?.amount)).toBe(10000);
     });
   });
 });
