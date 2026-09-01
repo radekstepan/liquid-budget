@@ -47,9 +47,15 @@ export function computeReconcileState(
 ): ReconcileState {
   const accountId = account.id;
   const parentIds = new Set<number>();
+  const parentMap = new Map<number, Transaction>();
   for (const t of transactions) {
     if (t.parentId != null) {
       parentIds.add(t.parentId);
+    }
+  }
+  for (const t of transactions) {
+    if (parentIds.has(t.id)) {
+      parentMap.set(t.id, t);
     }
   }
 
@@ -69,13 +75,17 @@ export function computeReconcileState(
     if (!isSource && !isDest) {
       continue;
     }
-    if (t.date > statementDate) {
+    const parent = t.parentId != null ? parentMap.get(t.parentId) : undefined;
+    const date = t.date ?? parent?.date;
+    if (date != null && date > statementDate) {
       continue;
     }
 
     const amt = typeof t.amount === "number" ? Math.round(t.amount) : num(t.amount);
     const delta = isSource ? amt : -amt;
-    const effStatus = isSource ? t.status : (t.transferStatus ?? t.status ?? "c");
+    const effStatus = isSource
+      ? (parent?.status ?? t.status)
+      : (t.transferStatus ?? parent?.transferStatus ?? t.status ?? "c");
 
     if (effStatus === "u") {
       unclearedSum += delta;

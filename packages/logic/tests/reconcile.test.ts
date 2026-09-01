@@ -86,6 +86,24 @@ describe("computeReconcileState", () => {
     expect(state.unclearedCount).toBe(2);
   });
 
+  it("BUG-19: includes split parent total in clearedSum when parent is status 'c' and children have status 'u'", () => {
+    const acct = makeAccount({ id: 1, name: "Chequing" });
+    const txns: Transaction[] = [
+      // Split parent toggled to cleared in UI ('c'), but children are 'u'
+      makeTx({ id: 1, accountId: 1, amount: "-5000", status: "c", date: "2026-06-02" }),
+      makeTx({ id: 2, accountId: 1, parentId: 1, amount: "-3000", status: "u", date: "2026-06-02" }),
+      makeTx({ id: 3, accountId: 1, parentId: 1, amount: "-2000", status: "u", date: "2026-06-02" }),
+    ];
+
+    const state = computeReconcileState(acct, txns, "2026-06-30");
+    // clearedSum: -3000 + -2000 = -5000 (clearedCount: 2)
+    // unclearedTotal: 0 (unclearedCount: 0)
+    expect(state.workingBalance).toBe(-5000);
+    expect(state.clearedCount).toBe(2);
+    expect(state.unclearedTotal).toBe(0);
+    expect(state.unclearedCount).toBe(0);
+  });
+
   it("includes inbound transfers with inverted sign for the destination account", () => {
     const srcAcct = makeAccount({ id: 1, name: "Chequing" });
     const destAcct = makeAccount({ id: 2, name: "Savings" });
