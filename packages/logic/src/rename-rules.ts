@@ -119,13 +119,11 @@ function splitTrailingNumber(source: string): {
 
 /**
  * Infer a generalised pattern rule from several raw sources that all map
- * to the same target. Returns null unless every source has the same prefix
- * (e.g. `BCF`) and differs only in its trailing digits — in which case the
- * pattern is `BCF[N]` with no suffix.
+ * to the same target. Clusters existing sources that share the same prefix
+ * and suffix (e.g. `BCF`) with `newSource` and differ only in their trailing
+ * digits — in which case the pattern is `BCF[N]`.
  *
- * The `newSource` must itself carry a trailing number and the inferred
- * pattern must match *every* existing source, so a stray "WHOLE FOODS #24"
- * never gets swallowed by `BCF[N]`.
+ * Returns null if no cluster of 2 or more distinct sources is formed.
  */
 export function inferRenameRule(
   existingSources: string[],
@@ -133,27 +131,45 @@ export function inferRenameRule(
 ): { sourcePattern: string } | null {
   const parts = splitTrailingNumber(newSource);
   if (!parts) return null;
-  const sources = [...new Set([...existingSources, newSource].map((s) => s.trim()))];
-  if (sources.length < 2) return null;
 
-  const first = splitTrailingNumber(sources[0]!);
-  if (!first) return null;
-  const candidate = { prefix: first.prefix, suffix: first.suffix };
-  for (const s of sources.slice(1)) {
+  const normPrefix = normalizeRenameText(parts.prefix);
+  const normSuffix = normalizeRenameText(parts.suffix);
+
+  // Cluster existing sources sharing the same prefix and suffix
+  const matchingSources: string[] = [];
+  for (const s of existingSources) {
     const p = splitTrailingNumber(s);
     if (
-      !p ||
-      normalizeRenameText(p.prefix) !== normalizeRenameText(candidate.prefix) ||
-      normalizeRenameText(p.suffix) !== normalizeRenameText(candidate.suffix)
+      p &&
+      normalizeRenameText(p.prefix) === normPrefix &&
+      normalizeRenameText(p.suffix) === normSuffix
     ) {
-      return null;
+      matchingSources.push(s.trim());
+    }
+  }
+  matchingSources.push(newSource.trim());
+
+  // Deduplicate cluster by normalized string
+  const uniqueCluster: string[] = [];
+  const seen = new Set<string>();
+  for (const s of matchingSources) {
+    const norm = normalizeRenameText(s);
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      uniqueCluster.push(s);
     }
   }
 
+  if (uniqueCluster.length < 2) return null;
+
+  const first = splitTrailingNumber(uniqueCluster[0]!);
+  if (!first) return null;
+
+  const candidate = { prefix: first.prefix, suffix: first.suffix };
   const pattern = `${candidate.prefix}${RENAME_WILDCARD}${candidate.suffix}`;
   const re = renamePatternToRegExp(pattern);
   if (!re) return null;
-  for (const s of sources) {
+  for (const s of uniqueCluster) {
     if (!re.test(normalizeRenameText(s))) return null;
   }
   return { sourcePattern: pattern };

@@ -143,6 +143,16 @@ describe("inferRenameRule", () => {
   it("refuses to generalise a single source", () => {
     expect(inferRenameRule([], "BCF1")).toBeNull();
   });
+
+  it("infers rule for '7-Eleven Store 456' with pattern '7-Eleven Store [N]'", () => {
+    const inferred = inferRenameRule(["7-Eleven Store 123"], "7-Eleven Store 456");
+    expect(inferred).toEqual({ sourcePattern: "7-Eleven Store [N]" });
+  });
+
+  it("clusters sources by prefix when existing sources contain diverse merchants", () => {
+    const inferred = inferRenameRule(["Uber 123", "Lyft 456"], "Uber 789");
+    expect(inferred).toEqual({ sourcePattern: "Uber [N]" });
+  });
 });
 
 describe("learnRenameRule", () => {
@@ -256,5 +266,33 @@ describe("learnRenameRule", () => {
       targetPayee: "Whole Foods",
     });
     expect(applyRenameRules(second.rules, "WHOLE FOODS #31")).toBe("Whole Foods");
+  });
+
+  it("clusters sources by prefix and generalises even when target has multiple diverse merchants (BUG-20)", () => {
+    let { rules } = learnRenameRule([], "Uber 123", "Taxis");
+    ({ rules } = learnRenameRule(rules, "Lyft 456", "Taxis"));
+    const third = learnRenameRule(rules, "Uber 789", "Taxis");
+    expect(third.generalised).toBe(true);
+    expect(third.rules).toHaveLength(2);
+    expect(third.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePattern: "Lyft 456", targetPayee: "Taxis" }),
+        expect.objectContaining({ sourcePattern: "Uber [N]", targetPayee: "Taxis" }),
+      ])
+    );
+    expect(applyRenameRules(third.rules, "Uber 999")).toBe("Taxis");
+    expect(applyRenameRules(third.rules, "Lyft 456")).toBe("Taxis");
+    expect(applyRenameRules(third.rules, "Lyft 789")).toBe("Lyft 789");
+  });
+
+  it("generalises 7-Eleven Store 123 and 7-Eleven Store 456 into 7-Eleven Store [N] without over-generalizing digits in merchant name", () => {
+    let { rules } = learnRenameRule([], "7-Eleven Store 123", "7-Eleven");
+    const second = learnRenameRule(rules, "7-Eleven Store 456", "7-Eleven");
+    expect(second.generalised).toBe(true);
+    expect(second.rules).toHaveLength(1);
+    expect(second.rules[0]!.sourcePattern).toBe("7-Eleven Store [N]");
+    expect(second.rules[0]!.targetPayee).toBe("7-Eleven");
+    expect(applyRenameRules(second.rules, "7-Eleven Store 999")).toBe("7-Eleven");
+    expect(applyRenameRules(second.rules, "11-Eleven Store 123")).toBe("11-Eleven Store 123");
   });
 });
