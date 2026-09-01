@@ -552,21 +552,72 @@ describe("recurring queries", () => {
       expect(set).toEqual({ payee: "New", nextDate: "2026-08-15", anchorDay: 15 });
     });
 
-    it("BUG-16: recomputes anchorDay when nextDate changes for month-based recurring rules", async () => {
+    it("BUG-16: recomputes anchorDay when nextDate day is larger than existing anchorDay", async () => {
+      const midMonthRule = {
+        ...existingRow,
+        frequency: "monthly",
+        nextDate: "2026-01-15",
+        anchorDay: 15,
+      };
+      mock.respondWith("select:recurring", [midMonthRule]);
+      mock.respondWith("update:recurring", [{ id: 1 }]);
+      mock.respondWith("select:recurring", [midMonthRule]);
+
+      await updateRecurring(mock.db, 1, { nextDate: "2026-02-20" });
+      const updateCall = mock.calls.find((c) => c.op === "update");
+      const set = updateCall?.set as Record<string, unknown>;
+      expect(set).toMatchObject({ nextDate: "2026-02-20", anchorDay: 20 });
+    });
+
+    it("BUG-21: does not overwrite anchorDay when nextDate changes to a smaller day in short month", async () => {
       const monthEndRule = {
         ...existingRow,
         frequency: "monthly",
-        nextDate: "2026-01-31",
+        nextDate: "2025-01-31",
         anchorDay: 31,
       };
       mock.respondWith("select:recurring", [monthEndRule]);
-      mock.respondWith("update:recurring", [{ id: 1 }]);
-      mock.respondWith("select:recurring", [monthEndRule]);
+      mock.respondWith("update:recurring", [{ ...monthEndRule, nextDate: "2025-02-28", anchorDay: 31 }]);
+      mock.respondWith("select:recurring", [{ ...monthEndRule, nextDate: "2025-02-28", anchorDay: 31 }]);
 
-      await updateRecurring(mock.db, 1, { nextDate: "2026-02-15" });
+      const updated = await updateRecurring(mock.db, 1, { nextDate: "2025-02-28" });
       const updateCall = mock.calls.find((c) => c.op === "update");
       const set = updateCall?.set as Record<string, unknown>;
-      expect(set).toMatchObject({ nextDate: "2026-02-15", anchorDay: 15 });
+      expect(set).toEqual({ nextDate: "2025-02-28" });
+      expect(set.anchorDay).toBeUndefined();
+      expect(updated?.anchorDay).toBe(31);
+    });
+
+    it("BUG-21: recurring rule with anchorDay 31 updated to Feb 28 advances to March 31", async () => {
+      const monthEndRule = {
+        ...existingRow,
+        frequency: "monthly",
+        nextDate: "2025-01-31",
+        anchorDay: 31,
+      };
+      mock.respondWith("select:recurring", [monthEndRule]);
+      mock.respondWith("update:recurring", [{ ...monthEndRule, nextDate: "2025-02-28", anchorDay: 31 }]);
+      mock.respondWith("select:recurring", [{ ...monthEndRule, nextDate: "2025-02-28", anchorDay: 31 }]);
+
+      const updated = await updateRecurring(mock.db, 1, { nextDate: "2025-02-28" });
+      expect(updated?.anchorDay).toBe(31);
+
+      // Now post / advance the occurrence from Feb 28
+      const febRule = {
+        ...monthEndRule,
+        nextDate: "2025-02-28",
+        anchorDay: 31,
+      };
+      mock.respondWith("select:recurring", [febRule]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("insert:transactions", [{ id: 101 }]);
+      mock.respondWith("update:recurring", [{ ...febRule, nextDate: "2025-03-31" }]);
+
+      const postResult = await postRecurringTransaction(mock.db, 1, "2025-02-28");
+      expect(postResult.nextDate).toBe("2025-03-31");
+      const updateCalls = mock.calls.filter((c) => c.op === "update" && c.table === "recurring");
+      expect(updateCalls[0]?.set).toEqual({ nextDate: "2025-02-28" });
+      expect(updateCalls[1]?.set).toMatchObject({ nextDate: "2025-03-31" });
     });
 
     it("BUG-16: recomputes anchorDay when frequency is changed to a month-based frequency", async () => {
