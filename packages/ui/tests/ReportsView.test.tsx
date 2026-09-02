@@ -555,11 +555,16 @@ describe("ReportsView", () => {
   });
 
   it("BUG-44: recovers from invalid subTab in localStorage", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("ynab:reports:subTab", JSON.stringify("invalid-tab"));
     renderView();
     // Falls back to Overview
     expect(screen.getByText("Top Payees")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Invalid value for localStorage key "ynab:reports:subTab", removing stored entry'
+    );
+    warnSpy.mockRestore();
   });
 
   it("BUG-04: Spending by Category nets refunds against category outflows", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   computeNetWorthReport,
   computeTrailingNetWorth,
@@ -157,6 +157,7 @@ describe("computeNetWorthReport", () => {
   });
 
   it("BUG-21: does not create phantom accounts for transactions referencing deleted or unknown account IDs", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const data: BudgetData = {
       accounts: [
         { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Budget Accounts", balance: "100000", onBudget: true, sort: 0 },
@@ -184,6 +185,15 @@ describe("computeNetWorthReport", () => {
     expect(pts[1]).toEqual({ month: "2026-02", assets: 110000, debts: 0, net: 110000 });
     // 2026-03: Chequing = 100000, no phantom account 888
     expect(pts[2]).toEqual({ month: "2026-03", assets: 100000, debts: 0, net: 100000 });
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[computeNetWorthReport] Transaction 2 references unknown or deleted accountId 999"
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[computeNetWorthReport] Transaction 3 references unknown or deleted transferAccountId 888"
+    );
+    warnSpy.mockRestore();
   });
 
   it("clamps account balances to 0 for months prior to their opening activity (UNI-36 / F-17)", () => {

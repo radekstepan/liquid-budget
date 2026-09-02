@@ -8,5 +8,8 @@ export default defineConfig({
     env: {
       DATABASE_URL: ":memory:",
     },
+    onConsoleLog(log: string, type: "stdout" | "stderr"): boolean | void {
+      throw new Error(`Unexpected console output (${type}): ${log}`);
+    },
   },
 });
