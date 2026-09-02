@@ -15,6 +15,11 @@ import {
   TRANSACTION_FLAG_COLORS,
   TransactionError,
 } from "@ynab/logic";
+import {
+  assertEntityInvariants,
+  type TransactionRow,
+  type RecurringRow,
+} from "../invariants.js";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { accounts, transactions } from "../schema.js";
@@ -83,7 +88,7 @@ export type SubTransactionInput = {
   payee?: string;
 };
 
-export { TransactionError };
+export { TransactionError, assertEntityInvariants, type TransactionRow, type RecurringRow };
 
 export function assertValidISODate(date: unknown, fieldName: string = "date"): string {
   if (!isValidISODate(date)) {
@@ -235,13 +240,10 @@ function assertSplitsBalancedOr4xx(
 /**
  * Insert a single transaction row. Branches on `transferAccountId` to
  * perform a transfer (one row, mirrored balance updates) versus a plain
- * insert. For a transfer the row's `categoryId` is forced to null and
- * the `payee` is auto-set to "Transfer : <other account name>" if blank.
- *
- * Reconciled status is never set by direct insert — only the reconcile
- * flow may set `"r"`. This keeps a single source of truth for the
- * "lastReconciledAt" account metadata and prevents orphan-R rows.
- */
+   * Reconciled status is never set by direct insert — only the reconcile
+   * flow may set `"r"`. This keeps a single source of truth for the
+   * "lastReconciledAt" account metadata and prevents orphan-R rows.
+   */
 export async function createTransaction(db: Database, input: CreateTransactionInput) {
   const amount = assertValidAmount(input.amount);
   assertValidISODate(input.date, "date");
@@ -253,6 +255,13 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       "cannot directly create a reconciled transaction; use the reconcile flow"
     );
   }
+  const isSplitParent = input.parentId == null && input.skipBalance === true;
+  assertEntityInvariants({
+    accountId: input.accountId,
+    transferAccountId: input.transferAccountId,
+    parentId: input.parentId,
+    subTransactions: isSplitParent && input.transferAccountId != null ? [{ amount }] : undefined,
+  });
   if (input.transferAccountId != null) {
     if (input.transferAccountId === input.accountId) {
       throw new TransactionError("transfer account must differ from source account");
@@ -272,7 +281,6 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const srcAccount = await getAccountInfo(db, input.accountId);
     const onBudget = srcAccount?.onBudget ?? true;
     const kind = srcAccount?.kind ?? "liquid";
-    const isSplitParent = input.parentId == null && input.skipBalance === true;
     const isTransfer = input.transferAccountId != null;
 
     let categoryId: number | null = null;
@@ -369,6 +377,11 @@ export async function createTransfer(
       "cannot directly create a reconciled transaction; use the reconcile flow"
     );
   }
+  assertEntityInvariants({
+    accountId: baseInput.accountId,
+    transferAccountId: destAccountId,
+    parentId: baseInput.parentId,
+  });
   if (destAccountId === baseInput.accountId) {
     throw new TransactionError("transfer account must differ from source account");
   }
@@ -448,11 +461,23 @@ export async function createSplitWithChildren(
     );
   }
 
+  assertEntityInvariants({
+    accountId: parent.accountId,
+    transferAccountId: (parent as any).transferAccountId ?? null,
+    subTransactions: children,
+  });
+
   for (const c of children) {
     if (c.transferStatus === "r") {
       throw new TransactionError(
         "cannot directly create a reconciled transaction; use the reconcile flow"
       );
+    }
+    if (c.transferAccountId != null) {
+      assertEntityInvariants({
+        accountId: parent.accountId,
+        transferAccountId: Number(c.transferAccountId),
+      });
     }
     if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
       throw new TransactionError("transfer account must differ from source account");
@@ -616,11 +641,15 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     throw new TransactionError("cannot change account of a transfer; delete and recreate");
   }
 
-  if (
-    patch.transferAccountId != null &&
-    Number(patch.transferAccountId) === (patch.accountId != null ? Number(patch.accountId) : existing.accountId)
-  ) {
-    throw new TransactionError("transfer account must differ from source account");
+  if (patch.transferAccountId !== undefined || patch.accountId !== undefined) {
+    const candidateAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
+    const candidateTransferAccountId = patch.transferAccountId !== undefined
+      ? (patch.transferAccountId != null ? Number(patch.transferAccountId) : null)
+      : existing.transferAccountId;
+    assertEntityInvariants({
+      accountId: candidateAccountId,
+      transferAccountId: candidateTransferAccountId,
+    });
   }
 
   const p: Record<string, unknown> = {};
@@ -684,7 +713,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
     if (isSplitParent) {
       if ("transferAccountId" in p && p.transferAccountId != null) {
-        throw new TransactionError("split parent cannot be a transfer");
+        throw new TransactionError("Split transaction cannot be a transfer", 400);
       }
       const children = await getChildren(db, id);
       if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
@@ -716,9 +745,12 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       ? (p.transferAccountId as number | null)
       : current.transferAccountId;
 
-    if (newTransferAccountId != null && newTransferAccountId === newAccountId) {
-      throw new TransactionError("transfer account must differ from source account");
-    }
+    assertEntityInvariants({
+      accountId: newAccountId,
+      transferAccountId: newTransferAccountId,
+      parentId: current.parentId,
+      subTransactions: isSplitParent ? await getChildren(db, id) : undefined,
+    });
 
     if (!isSplitParent) {
       if (
@@ -918,9 +950,18 @@ export async function updateSplit(
         : assertValidAmount(parent.amount);
     assertSplitsBalancedOr4xx(parentAmount, children);
 
+    assertEntityInvariants({
+      accountId: parent.accountId,
+      transferAccountId: (parentFields as any).transferAccountId ?? null,
+      subTransactions: children,
+    });
+
     for (const c of children) {
-      if (c.transferAccountId != null && Number(c.transferAccountId) === parent.accountId) {
-        throw new TransactionError("transfer account must differ from source account");
+      if (c.transferAccountId != null) {
+        assertEntityInvariants({
+          accountId: parent.accountId,
+          transferAccountId: Number(c.transferAccountId),
+        });
       }
     }
 
@@ -1388,6 +1429,13 @@ export async function bulkUpdateTransactions(
 
       const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
       const newAmount = patch.amount != null ? assertValidAmount(patch.amount) : Number(existing.amount);
+
+      assertEntityInvariants({
+        accountId: newAccountId,
+        transferAccountId: existing.transferAccountId,
+        parentId: existing.parentId,
+        subTransactions: isSplitParent ? await getChildren(db, id) : undefined,
+      });
 
       if (patch.accountId != null || patch.amount != null) {
         if (existing.transferAccountId != null) {

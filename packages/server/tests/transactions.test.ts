@@ -823,7 +823,8 @@ describe("transactions queries", () => {
         )
       ).rejects.toMatchObject({
         name: "TransactionError",
-        message: "transfer account must differ from source account",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
       });
     });
   });
@@ -1434,7 +1435,8 @@ describe("transactions queries", () => {
         )
       ).rejects.toMatchObject({
         name: "TransactionError",
-        message: "transfer account must differ from source account",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
       });
     });
   });
@@ -2835,7 +2837,7 @@ describe("transactions queries", () => {
           updateTransaction(db, txn!.id, {
             transferAccountId: accountId,
           })
-        ).rejects.toThrow(/transfer account must differ from source account/);
+        ).rejects.toThrow(/Transfer destination cannot be the source account/);
       });
 
       it("forces categoryId to null when updating a split parent", async () => {
@@ -3462,7 +3464,8 @@ describe("transactions queries", () => {
           )
         ).rejects.toMatchObject({
           name: "TransactionError",
-          message: "transfer account must differ from source account",
+          message: "Transfer destination cannot be the source account",
+          status: 422,
         });
 
         // Create valid split
@@ -3494,7 +3497,8 @@ describe("transactions queries", () => {
           )
         ).rejects.toMatchObject({
           name: "TransactionError",
-          message: "transfer account must differ from source account",
+          message: "Transfer destination cannot be the source account",
+          status: 422,
         });
       });
     });
@@ -4993,6 +4997,134 @@ describe("transactions queries", () => {
         });
         expect(bulkNullCatRes[0]?.isIncome).toBe(true);
         expect(bulkNullCatRes[0]?.categoryId).toBeNull();
+      });
+    });
+
+    describe("DB mutation layer invariant assertions", () => {
+      it("createTransaction rejects split parent with transferAccountId (Invariant 1)", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+        const [otherAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Savings", kind: "liquid", groupLabel: "Budget Accounts", sort: 1 })
+          .returning();
+        const otherAccountId = otherAccount!.id;
+
+        await expect(
+          createTransaction(db, {
+            accountId,
+            transferAccountId: otherAccountId,
+            date: "2026-08-01",
+            amount: -5000,
+            skipBalance: true, // split parent indicator
+            parentId: null,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Split transaction cannot be a transfer",
+          status: 400,
+        });
+      });
+
+      it("createTransaction and createTransfer reject same account transfer (Invariant 2)", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+
+        await expect(
+          createTransaction(db, {
+            accountId,
+            transferAccountId: accountId,
+            date: "2026-08-01",
+            amount: -5000,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Transfer destination cannot be the source account",
+          status: 422,
+        });
+
+        await expect(
+          createTransfer(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              amount: -5000,
+            },
+            accountId
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Transfer destination cannot be the source account",
+          status: 422,
+        });
+      });
+
+      it("createSplitWithChildren rejects parent that has transferAccountId (Invariant 1)", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        const [otherAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Savings", kind: "liquid", groupLabel: "Budget Accounts", sort: 1 })
+          .returning();
+        const otherAccountId = otherAccount!.id;
+
+        await expect(
+          createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Store",
+              memo: "",
+              amount: -5000,
+              transferAccountId: otherAccountId,
+            } as any,
+            [
+              { categoryId: cat1Id, amount: -3000 },
+              { categoryId: cat2Id, amount: -2000 },
+            ]
+          )
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Split transaction cannot be a transfer",
+          status: 400,
+        });
+      });
+
+      it("updateTransaction rejects setting transferAccountId on split parent (Invariant 1)", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        const [otherAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Savings", kind: "liquid", groupLabel: "Budget Accounts", sort: 1 })
+          .returning();
+        const otherAccountId = otherAccount!.id;
+
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Supermarket",
+            memo: "Split",
+            amount: -5000,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000 },
+            { categoryId: cat2Id, amount: -2000 },
+          ]
+        );
+
+        await expect(
+          updateTransaction(db, split.parent.id, {
+            transferAccountId: otherAccountId,
+          })
+        ).rejects.toMatchObject({
+          name: "TransactionError",
+          message: "Split transaction cannot be a transfer",
+          status: 400,
+        });
       });
     });
   });

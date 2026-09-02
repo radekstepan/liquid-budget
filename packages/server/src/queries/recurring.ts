@@ -19,6 +19,7 @@ import {
   isAccountOnBudget,
   sanitizeFlagColor,
   TransactionError,
+  assertEntityInvariants,
   type SubTransactionInput as TxnSubTransactionInput,
 } from "./transactions.js";
 
@@ -122,10 +123,6 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
   const isSplit =
     input.subTransactions !== undefined && input.subTransactions !== null;
 
-  if (isTransfer && isSplit) {
-    throw new RecurringError("recurring cannot be both a transfer and a split");
-  }
-
   const effectiveTransferAccountId =
     input.transferAccountId !== undefined
       ? (input.transferAccountId != null ? Number(input.transferAccountId) : null)
@@ -135,9 +132,15 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
       ? (input.accountId != null ? Number(input.accountId) : null)
       : undefined;
 
-  if (isTransfer && effectiveAccountId != null && effectiveTransferAccountId === effectiveAccountId) {
-    throw new RecurringError("transfer account must differ from source account");
-  }
+  const subTransactions = isSplit
+    ? (input.subTransactions as TxnSubTransactionInput[])
+    : undefined;
+
+  assertEntityInvariants({
+    accountId: effectiveAccountId,
+    transferAccountId: effectiveTransferAccountId,
+    subTransactions,
+  });
 
   const explicitCategoryId = input.categoryId;
   const effectiveCategoryId =
@@ -148,10 +151,6 @@ function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
           ? Number(explicitCategoryId)
           : null
         : undefined;
-
-  const subTransactions = isSplit
-    ? (input.subTransactions as TxnSubTransactionInput[])
-    : undefined;
 
   return {
     isTransfer,
@@ -171,8 +170,11 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
   if (norm.isSplit) {
     assertSplitsBalancedOr4xx(validatedAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
-      if (c.transferAccountId != null && Number(c.transferAccountId) === Number(input.accountId)) {
-        throw new RecurringError("transfer account must differ from source account");
+      if (c.transferAccountId != null) {
+        assertEntityInvariants({
+          accountId: input.accountId,
+          transferAccountId: Number(c.transferAccountId),
+        });
       }
     }
   }
@@ -278,9 +280,11 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
 
   const isTransfer = effectiveTransferAccountId != null;
 
-  if (isTransfer && effectiveTransferAccountId === effectiveAccountId) {
-    throw new RecurringError("transfer account must differ from source account");
-  }
+  assertEntityInvariants({
+    accountId: effectiveAccountId,
+    transferAccountId: effectiveTransferAccountId,
+    subTransactions: norm.isSplit ? norm.subTransactions : undefined,
+  });
 
   // Validate split children if supplied.
   if (norm.isSplit) {
@@ -290,8 +294,11 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
         : assertValidAmount(existing.amount);
     assertSplitsBalancedOr4xx(parentAmount, norm.subTransactions!);
     for (const c of norm.subTransactions!) {
-      if (c.transferAccountId != null && Number(c.transferAccountId) === Number(effectiveAccountId)) {
-        throw new RecurringError("transfer account must differ from source account");
+      if (c.transferAccountId != null) {
+        assertEntityInvariants({
+          accountId: effectiveAccountId,
+          transferAccountId: Number(c.transferAccountId),
+        });
       }
     }
   }

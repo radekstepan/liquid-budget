@@ -170,7 +170,11 @@ describe("recurring queries", () => {
           nextDate: "2026-07-20",
           transferAccountId: 1,
         })
-      ).rejects.toBeInstanceOf(RecurringError);
+      ).rejects.toMatchObject({
+        name: "TransactionError",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
+      });
     });
 
     it("rejects an invalid frequency on create with 422", async () => {
@@ -312,8 +316,9 @@ describe("recurring queries", () => {
           ],
         })
       ).rejects.toMatchObject({
-        name: "RecurringError",
-        message: "transfer account must differ from source account",
+        name: "TransactionError",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
       });
     });
 
@@ -724,8 +729,9 @@ describe("recurring queries", () => {
           ],
         })
       ).rejects.toMatchObject({
-        name: "RecurringError",
-        message: "transfer account must differ from source account",
+        name: "TransactionError",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
       });
     });
 
@@ -837,8 +843,9 @@ describe("recurring queries", () => {
       await expect(
         updateRecurring(mock.db, 1, { transferAccountId: 1 })
       ).rejects.toMatchObject({
-        name: "RecurringError",
-        message: "transfer account must differ from source account",
+        name: "TransactionError",
+        message: "Transfer destination cannot be the source account",
+        status: 422,
       });
     });
 
