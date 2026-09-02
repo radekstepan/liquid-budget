@@ -48,7 +48,7 @@ export default defineConfig({
   webServer: {
     command: `RESET_ENABLED=true DATABASE_URL=../../budget.test.db yarn start --port ${PORT}`,
     url: `${BASE_URL}/api/health`,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",

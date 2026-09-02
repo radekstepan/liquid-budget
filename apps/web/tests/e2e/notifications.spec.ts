@@ -34,8 +34,9 @@ async function loadFresh(page: Page) {
   await page.goto("/");
   await waitForReady(page);
   const autoToast = page.getByText(/Automatically entered \d+ scheduled transactions?\./);
-  if (await autoToast.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await expect(autoToast).toBeHidden({ timeout: 10_000 });
+  if (await autoToast.isVisible({ timeout: 500 }).catch(() => false)) {
+    await autoToast.click();
+    await expect(autoToast).toBeHidden();
   }
 }
 
