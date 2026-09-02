@@ -1,9 +1,40 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent, within } from "@testing-library/react";
 import React from "react";
 import { BudgetAppShell } from "../src/components/BudgetAppShell";
 import { makeSeedBudgetData, type BudgetData } from "@ynab/logic";
+
+function openSearchableInModal(modal: HTMLElement, label: string | RegExp): HTMLInputElement {
+  const existing = within(modal).queryByRole("textbox", { name: label });
+  if (existing) {
+    act(() => {
+      existing.focus();
+    });
+    return existing;
+  }
+  const trigger = within(modal).getByRole("button", { name: label });
+  fireEvent.click(trigger);
+  const input = within(modal).getByRole("textbox", { name: label });
+  act(() => {
+    input.focus();
+  });
+  return input;
+}
+
+function findOptionByValueAcrossListboxes(value: string): HTMLButtonElement {
+  for (const list of screen.getAllByRole("listbox")) {
+    const options = within(list).getAllByRole("option") as HTMLButtonElement[];
+    const target = options.find((o) => o.getAttribute("data-value") === value);
+    if (target) return target;
+  }
+  throw new Error(`No option with value="${value}" in any open searchable dropdown`);
+}
+
+function pickFromOpenSearchableByValue(modal: HTMLElement, label: string | RegExp, value: string): void {
+  openSearchableInModal(modal, label);
+  fireEvent.click(findOptionByValueAcrossListboxes(value));
+}
 
 describe("BudgetAppShell (BUG-09)", () => {
   let initialBudget: BudgetData;
@@ -231,6 +262,95 @@ describe("BudgetAppShell (BUG-09)", () => {
     });
 
     // Resolve PATCH so test cleanly finishes
+    if (patchResolver) {
+      await act(async () => {
+        patchResolver!(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      });
+    }
+  });
+
+  it("converts a regular transaction to a transfer and updates optimistic state and counterparty account immediately", async () => {
+    let patchResolver: ((res: Response) => void) | null = null;
+    let patchBody: any = null;
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/api/budget")) {
+        return new Response(JSON.stringify(initialBudget), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/api/transactions") && init?.method === "PATCH") {
+        patchBody = JSON.parse(init.body as string);
+        return new Promise<Response>((resolve) => {
+          patchResolver = resolve;
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any;
+
+    render(<BudgetAppShell initialView="transactions" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading budget")).toBeNull();
+    });
+
+    // Navigate to TD Unlimited Chequing
+    fireEvent.click(screen.getAllByText("TD Unlimited Chequing")[0]!);
+
+    // Find "Telus" transaction in register
+    await waitFor(() => {
+      expect(screen.getAllByText("Telus").length).toBeGreaterThan(0);
+    });
+
+    const telus = screen.getAllByText("Telus")[0]!;
+    const telusRow = telus.closest("tr")!;
+    fireEvent.click(telusRow);
+
+    // Edit modal opened
+    await waitFor(() => {
+      expect(screen.getByText("Edit Transaction")).toBeDefined();
+    });
+    const modal = screen.getByText("Edit Transaction").closest(".y-modal") as HTMLElement;
+
+    // Switch to Transfer mode
+    fireEvent.click(within(modal).getByRole("button", { name: "Transfer" }));
+
+    // Select 'EQ Bank' in Transfer to select
+    const eqAccount = initialBudget.accounts.find((a) => a.name === "EQ Bank");
+    expect(eqAccount).toBeDefined();
+    pickFromOpenSearchableByValue(modal, /transfer to/i, String(eqAccount!.id));
+
+    // Click Save Changes
+    const saveBtn = within(modal).getByRole("button", { name: /save changes/i });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // Verify PATCH was called with transferAccountId and payee
+    await waitFor(() => {
+      expect(patchBody).not.toBeNull();
+      expect(patchBody.transferAccountId).toBe(eqAccount!.id);
+      expect(patchBody.payee).toBe("Transfer : EQ Bank");
+    });
+
+    // Verify optimistic state in register shows Transfer : EQ Bank
+    await waitFor(() => {
+      expect(screen.getAllByText("Transfer : EQ Bank").length).toBeGreaterThan(0);
+    });
+
     if (patchResolver) {
       await act(async () => {
         patchResolver!(

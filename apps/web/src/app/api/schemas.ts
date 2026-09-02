@@ -40,6 +40,7 @@ export const TransactionPatchSchema = z.object({
   id: z.number().int().positive(),
   accountId: z.number().int().positive().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
+  transferAccountId: z.number().int().positive().nullable().optional(),
   date: ISODateSchema.optional(),
   payee: z.string().max(255).optional(),
   memo: z.string().max(1000).nullable().optional(),
