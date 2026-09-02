@@ -23,23 +23,90 @@ export const SubTransactionSchema = z
   })
   .strict();
 
-export const TransactionCreateSchema = z
+const BaseTransactionCreateFields = {
+  accountId: z.number().int().positive(),
+  date: ISODateSchema,
+  payee: z.string().max(255).optional().default(""),
+  memo: z.string().max(1000).optional().default(""),
+  amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
+  status: z.enum(["u", "c"]).optional().default("c"),
+  flagColor: TransactionFlagSchema.nullable().optional(),
+  incomeMonth: ISOMonthSchema.nullable().optional(),
+  cleared: z.boolean().optional(),
+};
+
+export const SingleTransactionCreateSchema = z
   .object({
-    accountId: z.number().int().positive(),
+    mode: z.literal("single"),
+    ...BaseTransactionCreateFields,
     categoryId: z.number().int().positive().nullable().optional(),
-    transferAccountId: z.number().int().positive().nullable().optional(),
-    date: ISODateSchema,
-    payee: z.string().max(255).optional().default(""),
-    memo: z.string().max(1000).optional().default(""),
-    amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
-    status: z.enum(["u", "c"]).optional().default("c"),
+    transferAccountId: z.null().optional(),
+    transferStatus: z.undefined().optional(),
+    subTransactions: z.undefined().optional(),
+  })
+  .strict();
+
+export const TransferTransactionCreateSchema = z
+  .object({
+    mode: z.literal("transfer"),
+    ...BaseTransactionCreateFields,
+    transferAccountId: z.number().int().positive(),
     transferStatus: z.enum(["u", "c"]).optional(),
-    flagColor: TransactionFlagSchema.nullable().optional(),
-    incomeMonth: ISOMonthSchema.nullable().optional(),
-    subTransactions: z.array(SubTransactionSchema).min(2).optional(),
-    cleared: z.boolean().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    subTransactions: z.undefined().optional(),
   })
   .strict()
+  .refine((data) => data.accountId !== data.transferAccountId, {
+    message: "Transfer account cannot be the same as the source account",
+    path: ["transferAccountId"],
+  });
+
+export const SplitTransactionCreateSchema = z
+  .object({
+    mode: z.literal("split"),
+    ...BaseTransactionCreateFields,
+    categoryId: z.null().optional(),
+    transferAccountId: z.null().optional(),
+    transferStatus: z.undefined().optional(),
+    subTransactions: z.array(SubTransactionSchema).min(2),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      const sum = data.subTransactions.reduce((acc, c) => acc + c.amount, 0);
+      return sum === data.amount;
+    },
+    {
+      message: "Sub-transactions sum must equal total parent amount",
+      path: ["subTransactions"],
+    }
+  );
+
+export const TransactionInputSchema = z.discriminatedUnion("mode", [
+  SingleTransactionCreateSchema,
+  TransferTransactionCreateSchema,
+  SplitTransactionCreateSchema,
+]);
+
+function inferTransactionMode(input: unknown): unknown {
+  if (typeof input !== "object" || input === null) return input;
+  const obj = input as Record<string, unknown>;
+  if ("mode" in obj && typeof obj.mode === "string") return input;
+
+  if (Array.isArray(obj.subTransactions) && obj.subTransactions.length > 0) {
+    return { ...obj, mode: "split" };
+  }
+  if (
+    (obj.transferAccountId !== undefined && obj.transferAccountId !== null) ||
+    obj.transferStatus !== undefined
+  ) {
+    return { ...obj, mode: "transfer" };
+  }
+  return { ...obj, mode: "single" };
+}
+
+export const TransactionCreateSchema = z
+  .preprocess(inferTransactionMode, TransactionInputSchema)
   .transform((data) => {
     if (data.cleared !== undefined && data.status === undefined) {
       data.status = data.cleared ? "c" : "u";
@@ -47,24 +114,85 @@ export const TransactionCreateSchema = z
     return data;
   });
 
-export const TransactionPatchSchema = z
+const BaseTransactionPatchFields = {
+  id: z.number().int().positive(),
+  accountId: z.number().int().positive().optional(),
+  date: ISODateSchema.optional(),
+  payee: z.string().max(255).optional(),
+  memo: z.string().max(1000).nullable().optional(),
+  amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
+  status: z.enum(["u", "c"]).optional(),
+  flagColor: TransactionFlagSchema.nullable().optional(),
+  incomeMonth: ISOMonthSchema.nullable().optional(),
+  cleared: z.boolean().optional(),
+};
+
+export const SingleTransactionPatchSchema = z
   .object({
-    id: z.number().int().positive(),
-    accountId: z.number().int().positive().optional(),
+    mode: z.literal("single"),
+    ...BaseTransactionPatchFields,
     categoryId: z.number().int().positive().nullable().optional(),
-    transferAccountId: z.number().int().positive().nullable().optional(),
-    date: ISODateSchema.optional(),
-    payee: z.string().max(255).optional(),
-    memo: z.string().max(1000).nullable().optional(),
-    amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
-    status: z.enum(["u", "c"]).optional(),
+    transferAccountId: z.null().optional(),
+    transferStatus: z.undefined().optional(),
+    subTransactions: z.undefined().optional(),
+  })
+  .strict();
+
+export const TransferTransactionPatchSchema = z
+  .object({
+    mode: z.literal("transfer"),
+    ...BaseTransactionPatchFields,
+    transferAccountId: z.number().int().positive().optional(),
     transferStatus: z.enum(["u", "c"]).optional(),
-    flagColor: TransactionFlagSchema.nullable().optional(),
-    incomeMonth: ISOMonthSchema.nullable().optional(),
-    subTransactions: z.array(SubTransactionSchema).min(2).optional(),
-    cleared: z.boolean().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    subTransactions: z.undefined().optional(),
   })
   .strict()
+  .refine(
+    (data) => {
+      if (data.accountId !== undefined && data.transferAccountId !== undefined) {
+        return data.accountId !== data.transferAccountId;
+      }
+      return true;
+    },
+    {
+      message: "Transfer account cannot be the same as the source account",
+      path: ["transferAccountId"],
+    }
+  );
+
+export const SplitTransactionPatchSchema = z
+  .object({
+    mode: z.literal("split"),
+    ...BaseTransactionPatchFields,
+    categoryId: z.null().optional(),
+    transferAccountId: z.null().optional(),
+    transferStatus: z.undefined().optional(),
+    subTransactions: z.array(SubTransactionSchema).min(2),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      if (data.amount !== undefined) {
+        const sum = data.subTransactions.reduce((acc, c) => acc + c.amount, 0);
+        return sum === data.amount;
+      }
+      return true;
+    },
+    {
+      message: "Sub-transactions sum must equal total parent amount",
+      path: ["subTransactions"],
+    }
+  );
+
+export const TransactionPatchInputSchema = z.discriminatedUnion("mode", [
+  SingleTransactionPatchSchema,
+  TransferTransactionPatchSchema,
+  SplitTransactionPatchSchema,
+]);
+
+export const TransactionPatchSchema = z
+  .preprocess(inferTransactionMode, TransactionPatchInputSchema)
   .transform((data) => {
     if (data.cleared !== undefined && data.status === undefined) {
       data.status = data.cleared ? "c" : "u";
@@ -216,40 +344,145 @@ export const RenameRulePatchSchema = z
   })
   .strict();
 
-export const RecurringCreateSchema = z
+const BaseRecurringCreateFields = {
+  accountId: z.number().int().positive(),
+  payee: z.string().max(255).optional().default(""),
+  memo: z.string().max(1000).optional().default(""),
+  amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
+  frequency: z.string().min(1).max(50),
+  nextDate: ISODateSchema,
+  anchorDay: z.number().int().min(1).max(31).nullable().optional(),
+  active: z.boolean().optional().default(true),
+  flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
+};
+
+export const SingleRecurringCreateSchema = z
   .object({
-    accountId: z.number().int().positive(),
+    mode: z.literal("single"),
+    ...BaseRecurringCreateFields,
     categoryId: z.number().int().positive().nullable().optional(),
-    transferAccountId: z.number().int().positive().nullable().optional(),
-    payee: z.string().max(255).optional().default(""),
-    memo: z.string().max(1000).optional().default(""),
-    amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }),
-    frequency: z.string().min(1).max(50),
-    nextDate: ISODateSchema,
-    anchorDay: z.number().int().min(1).max(31).nullable().optional(),
-    active: z.boolean().optional().default(true),
-    flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
-    subTransactions: z.array(SubTransactionSchema).min(2).optional(),
+    transferAccountId: z.null().optional(),
+    subTransactions: z.undefined().optional(),
   })
   .strict();
 
-export const RecurringPatchSchema = z
+export const TransferRecurringCreateSchema = z
   .object({
-    id: z.number().int().positive(),
-    accountId: z.number().int().positive().optional(),
+    mode: z.literal("transfer"),
+    ...BaseRecurringCreateFields,
+    transferAccountId: z.number().int().positive(),
     categoryId: z.number().int().positive().nullable().optional(),
-    transferAccountId: z.number().int().positive().nullable().optional(),
-    payee: z.string().max(255).optional(),
-    memo: z.string().max(1000).nullable().optional(),
-    amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
-    frequency: z.string().min(1).max(50).optional(),
-    nextDate: ISODateSchema.optional(),
-    anchorDay: z.number().int().min(1).max(31).nullable().optional(),
-    active: z.boolean().optional(),
-    flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
-    subTransactions: z.array(SubTransactionSchema).min(2).optional(),
+    subTransactions: z.undefined().optional(),
+  })
+  .strict()
+  .refine((data) => data.accountId !== data.transferAccountId, {
+    message: "Transfer account cannot be the same as the source account",
+    path: ["transferAccountId"],
+  });
+
+export const SplitRecurringCreateSchema = z
+  .object({
+    mode: z.literal("split"),
+    ...BaseRecurringCreateFields,
+    categoryId: z.null().optional(),
+    transferAccountId: z.null().optional(),
+    subTransactions: z.array(SubTransactionSchema).min(2),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      const sum = data.subTransactions.reduce((acc, c) => acc + c.amount, 0);
+      return sum === data.amount;
+    },
+    {
+      message: "Sub-transactions sum must equal total parent amount",
+      path: ["subTransactions"],
+    }
+  );
+
+export const RecurringInputSchema = z.discriminatedUnion("mode", [
+  SingleRecurringCreateSchema,
+  TransferRecurringCreateSchema,
+  SplitRecurringCreateSchema,
+]);
+
+export const RecurringCreateSchema = z.preprocess(inferTransactionMode, RecurringInputSchema);
+
+const BaseRecurringPatchFields = {
+  id: z.number().int().positive(),
+  accountId: z.number().int().positive().optional(),
+  payee: z.string().max(255).optional(),
+  memo: z.string().max(1000).nullable().optional(),
+  amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
+  frequency: z.string().min(1).max(50).optional(),
+  nextDate: ISODateSchema.optional(),
+  anchorDay: z.number().int().min(1).max(31).nullable().optional(),
+  active: z.boolean().optional(),
+  flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
+};
+
+export const SingleRecurringPatchSchema = z
+  .object({
+    mode: z.literal("single"),
+    ...BaseRecurringPatchFields,
+    categoryId: z.number().int().positive().nullable().optional(),
+    transferAccountId: z.null().optional(),
+    subTransactions: z.undefined().optional(),
   })
   .strict();
+
+export const TransferRecurringPatchSchema = z
+  .object({
+    mode: z.literal("transfer"),
+    ...BaseRecurringPatchFields,
+    transferAccountId: z.number().int().positive().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    subTransactions: z.undefined().optional(),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      if (data.accountId !== undefined && data.transferAccountId !== undefined) {
+        return data.accountId !== data.transferAccountId;
+      }
+      return true;
+    },
+    {
+      message: "Transfer account cannot be the same as the source account",
+      path: ["transferAccountId"],
+    }
+  );
+
+export const SplitRecurringPatchSchema = z
+  .object({
+    mode: z.literal("split"),
+    ...BaseRecurringPatchFields,
+    categoryId: z.null().optional(),
+    transferAccountId: z.null().optional(),
+    subTransactions: z.array(SubTransactionSchema).min(2),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      if (data.amount !== undefined) {
+        const sum = data.subTransactions.reduce((acc, c) => acc + c.amount, 0);
+        return sum === data.amount;
+      }
+      return true;
+    },
+    {
+      message: "Sub-transactions sum must equal total parent amount",
+      path: ["subTransactions"],
+    }
+  );
+
+export const RecurringPatchInputSchema = z.discriminatedUnion("mode", [
+  SingleRecurringPatchSchema,
+  TransferRecurringPatchSchema,
+  SplitRecurringPatchSchema,
+]);
+
+export const RecurringPatchSchema = z.preprocess(inferTransactionMode, RecurringPatchInputSchema);
 
 export const RecurringPostActionSchema = z
   .object({

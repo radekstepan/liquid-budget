@@ -609,4 +609,212 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       ).toBe(false);
     });
   });
+
+  describe("Discriminated Union Entity Payloads", () => {
+    describe("TransactionCreateSchema modes", () => {
+      it("validates explicit mode: single", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "single",
+          accountId: 1,
+          categoryId: 5,
+          date: "2026-06-15",
+          amount: -5000,
+          payee: "Grocery Store",
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.mode).toBe("single");
+          expect(result.data.transferAccountId).toBeUndefined();
+        }
+      });
+
+      it("rejects transferAccountId when mode: single", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "single",
+          accountId: 1,
+          categoryId: 5,
+          transferAccountId: 2,
+          date: "2026-06-15",
+          amount: -5000,
+          payee: "Store",
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("rejects subTransactions when mode: single", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "single",
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -5000,
+          subTransactions: [
+            { categoryId: 1, amount: -3000 },
+            { categoryId: 2, amount: -2000 },
+          ],
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("validates explicit mode: transfer", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "transfer",
+          accountId: 1,
+          transferAccountId: 2,
+          date: "2026-06-15",
+          amount: -10000,
+          payee: "Transfer : Savings",
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.mode).toBe("transfer");
+          expect(result.data.transferAccountId).toBe(2);
+        }
+      });
+
+      it("rejects transfer to the same account", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "transfer",
+          accountId: 1,
+          transferAccountId: 1,
+          date: "2026-06-15",
+          amount: -10000,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("rejects subTransactions when mode: transfer", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "transfer",
+          accountId: 1,
+          transferAccountId: 2,
+          date: "2026-06-15",
+          amount: -10000,
+          subTransactions: [
+            { categoryId: 1, amount: -5000 },
+            { categoryId: 2, amount: -5000 },
+          ],
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("validates explicit mode: split with balanced sum", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "split",
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -5000,
+          payee: "Department Store",
+          subTransactions: [
+            { categoryId: 10, amount: -3000, memo: "Clothes" },
+            { categoryId: 11, amount: -2000, memo: "Kitchen" },
+          ],
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.mode).toBe("split");
+        }
+      });
+
+      it("rejects split with unbalanced subTransactions sum", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "split",
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -5000,
+          payee: "Department Store",
+          subTransactions: [
+            { categoryId: 10, amount: -3000 },
+            { categoryId: 11, amount: -1500 }, // sum is -4500, not -5000
+          ],
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("rejects root categoryId when mode: split", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "split",
+          accountId: 1,
+          categoryId: 5,
+          date: "2026-06-15",
+          amount: -5000,
+          subTransactions: [
+            { categoryId: 10, amount: -3000 },
+            { categoryId: 11, amount: -2000 },
+          ],
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("rejects root transferAccountId when mode: split", () => {
+        const result = TransactionCreateSchema.safeParse({
+          mode: "split",
+          accountId: 1,
+          transferAccountId: 2,
+          date: "2026-06-15",
+          amount: -5000,
+          subTransactions: [
+            { categoryId: 10, amount: -3000 },
+            { categoryId: 11, amount: -2000 },
+          ],
+        });
+        expect(result.success).toBe(false);
+      });
+    });
+
+    describe("RecurringCreateSchema modes", () => {
+      it("validates single recurring transaction", () => {
+        const result = RecurringCreateSchema.safeParse({
+          mode: "single",
+          accountId: 1,
+          categoryId: 5,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          amount: -8000,
+          payee: "Internet Provider",
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it("validates transfer recurring transaction", () => {
+        const result = RecurringCreateSchema.safeParse({
+          mode: "transfer",
+          accountId: 1,
+          transferAccountId: 2,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          amount: -25000,
+          payee: "Transfer : Savings",
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it("rejects transfer recurring transaction with self-transfer", () => {
+        const result = RecurringCreateSchema.safeParse({
+          mode: "transfer",
+          accountId: 1,
+          transferAccountId: 1,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          amount: -25000,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it("validates split recurring transaction with balanced sum", () => {
+        const result = RecurringCreateSchema.safeParse({
+          mode: "split",
+          accountId: 1,
+          frequency: "monthly",
+          nextDate: "2026-07-01",
+          amount: -12000,
+          payee: "Bundled Service",
+          subTransactions: [
+            { categoryId: 1, amount: -8000 },
+            { categoryId: 2, amount: -4000 },
+          ],
+        });
+        expect(result.success).toBe(true);
+      });
+    });
+  });
 });

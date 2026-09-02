@@ -11,7 +11,8 @@ export { BulkEditTransactionsModal } from "./BulkEditModal.js";
 
 const inputClass = "w-full py-[3px]";
 
-export type TransactionSavePayload = {
+export type SingleTransactionSavePayload = {
+  mode: "single";
   id?: number;
   accountId: number;
   categoryId: number | null;
@@ -20,21 +21,105 @@ export type TransactionSavePayload = {
   memo: string;
   amount: number;
   status: "u" | "c" | "r";
-  /**
-   * When omitted the server leaves the flag untouched (preserving an
-   * internal "duplicate" marker the user did not change). When present it
-   * replaces the flag; null clears it.
-   */
   flagColor?: TransactionFlagColor | null;
-  transferAccountId?: number | null;
+  transferAccountId?: null;
   incomeMonth?: string | null;
-  /**
-   * When set, the server will create a split: insert the parent with
-   * the top-level fields and these N children, atomically. Mutually
-   * exclusive with `transferAccountId` and a top-level `categoryId`.
-   */
-  subTransactions?: SubTransaction[];
+  subTransactions?: undefined;
 };
+
+export type TransferTransactionSavePayload = {
+  mode: "transfer";
+  id?: number;
+  accountId: number;
+  transferAccountId: number;
+  categoryId?: number | null;
+  date: string;
+  payee: string;
+  memo: string;
+  amount: number;
+  status: "u" | "c" | "r";
+  transferStatus?: "u" | "c" | "r";
+  flagColor?: TransactionFlagColor | null;
+  incomeMonth?: string | null;
+  subTransactions?: undefined;
+};
+
+export type SplitTransactionSavePayload = {
+  mode: "split";
+  id?: number;
+  accountId: number;
+  date: string;
+  payee: string;
+  memo: string;
+  amount: number;
+  status: "u" | "c" | "r";
+  flagColor?: TransactionFlagColor | null;
+  categoryId?: null;
+  transferAccountId?: null;
+  incomeMonth?: null;
+  subTransactions: SubTransaction[];
+};
+
+export type TransactionSavePayload =
+  | SingleTransactionSavePayload
+  | TransferTransactionSavePayload
+  | SplitTransactionSavePayload;
+
+export type SingleRecurringSavePayload = {
+  mode: "single";
+  id?: number;
+  accountId: number;
+  categoryId: number | null;
+  payee: string;
+  memo?: string;
+  amount: number;
+  frequency: string;
+  nextDate: string;
+  anchorDay?: number | null;
+  active: boolean;
+  flagColor?: TransactionFlagColor | null;
+  transferAccountId?: null;
+  subTransactions?: undefined;
+};
+
+export type TransferRecurringSavePayload = {
+  mode: "transfer";
+  id?: number;
+  accountId: number;
+  transferAccountId: number;
+  categoryId?: number | null;
+  payee: string;
+  memo?: string;
+  amount: number;
+  frequency: string;
+  nextDate: string;
+  anchorDay?: number | null;
+  active: boolean;
+  flagColor?: TransactionFlagColor | null;
+  subTransactions?: undefined;
+};
+
+export type SplitRecurringSavePayload = {
+  mode: "split";
+  id?: number;
+  accountId: number;
+  categoryId?: null;
+  transferAccountId?: null;
+  payee: string;
+  memo?: string;
+  amount: number;
+  frequency: string;
+  nextDate: string;
+  anchorDay?: number | null;
+  active: boolean;
+  flagColor?: TransactionFlagColor | null;
+  subTransactions: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
+};
+
+export type RecurringSavePayload =
+  | SingleRecurringSavePayload
+  | TransferRecurringSavePayload
+  | SplitRecurringSavePayload;
 
 export type DraftSubRow = {
   id?: number;
@@ -313,6 +398,7 @@ export function TransactionModal({
         }
       }
       onSave({
+        mode: "transfer",
         id: initial?.id,
         accountId,
         categoryId: finalCatId,
@@ -332,6 +418,7 @@ export function TransactionModal({
       if (!payee.trim()) return;
       if (subValidation) return;
       onSave({
+        mode: "split",
         id: initial?.id,
         accountId,
         categoryId: null,
@@ -342,6 +429,7 @@ export function TransactionModal({
         status: finalStatus,
         flagColor: savedFlagColor,
         transferAccountId: null,
+        incomeMonth: null,
         subTransactions: subRows.map((r) => {
           const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
           const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
@@ -373,6 +461,7 @@ export function TransactionModal({
     const incMonth = isDeferred ? (incomeMonth || nextMonthKey(date.slice(0, 7))) : null;
 
     onSave({
+      mode: "single",
       id: initial?.id,
       accountId,
       categoryId: finalCatId,
@@ -1226,20 +1315,7 @@ export function RecurringModal({
   initialMode?: "single" | "transfer" | "split";
   initial?: Recurring & { subTransactions?: RecurringSubTransaction[] };
   onClose: () => void;
-  onSave: (v: {
-    id?: number;
-    accountId: number;
-    categoryId: number | null;
-    payee: string;
-    memo?: string;
-    amount: number;
-    frequency: string;
-    nextDate: string;
-    active: boolean;
-    flagColor?: TransactionFlagColor | null;
-    transferAccountId?: number | null;
-    subTransactions?: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
-  }) => void;
+  onSave: (v: RecurringSavePayload) => void;
   onPost?: (id: number, date?: string) => Promise<void>;
 }) {
   const initialAmt = initial ? num(initial.amount) / 100 : 0;
@@ -1374,6 +1450,7 @@ export function RecurringModal({
         }
       }
       onSave({
+        mode: "transfer",
         id: initial?.id,
         accountId,
         categoryId: finalCatId,
@@ -1382,6 +1459,7 @@ export function RecurringModal({
         amount: amountCents,
         frequency,
         nextDate,
+        anchorDay: initial?.anchorDay,
         active,
         flagColor,
         transferAccountId: Number(transferAccountId),
@@ -1393,14 +1471,17 @@ export function RecurringModal({
       if (!payee.trim()) return;
       if (subValidation) return;
       onSave({
+        mode: "split",
         id: initial?.id,
         accountId,
         categoryId: null,
+        transferAccountId: null,
         payee: payee.trim(),
         memo: memo.trim(),
         amount: amountCents,
         frequency,
         nextDate,
+        anchorDay: initial?.anchorDay,
         active,
         flagColor,
         subTransactions: subRows.map((r) => {
@@ -1428,6 +1509,7 @@ export function RecurringModal({
     // single
     if (!payee.trim()) return;
     onSave({
+      mode: "single",
       id: initial?.id,
       accountId,
       categoryId: isOffBudget || categoryId === "" ? null : Number(categoryId),
@@ -1436,6 +1518,7 @@ export function RecurringModal({
       amount: amountCents,
       frequency,
       nextDate,
+      anchorDay: initial?.anchorDay,
       active,
       flagColor,
       transferAccountId: null,

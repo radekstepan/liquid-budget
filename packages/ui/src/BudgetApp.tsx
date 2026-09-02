@@ -37,12 +37,14 @@ import {
   GroupModal,
   RecurringModal,
   AccountModal,
+  type TransactionSavePayload,
+  type RecurringSavePayload,
 } from "./Modals.js";
 import { CsvImportModal } from "./CsvImportModal.js";
 import { ReconcileModal } from "./ReconcileModal.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 
-type ModalState =
+export type ModalState =
   | { kind: "none" }
   | { kind: "addTransaction"; defaultDate?: string; mode?: "single" | "transfer" }
   | { kind: "editTransaction"; transactionId: number }
@@ -61,9 +63,9 @@ type ModalState =
 export type BudgetAppApi = {
   reload: () => Promise<void>;
   assign: (categoryId: number, amount: number, month: string) => Promise<void>;
-  addTransaction: (t: {
+  addTransaction: (t: TransactionSavePayload | {
     accountId: number;
-    categoryId: number | null;
+    categoryId?: number | null;
     date: string;
     payee: string;
     amount: number;
@@ -84,7 +86,7 @@ export type BudgetAppApi = {
   }) => Promise<void>;
   updateTransaction: (
     id: number,
-    t: {
+    t: Partial<TransactionSavePayload> | {
       accountId?: number;
       categoryId?: number | null;
       date?: string;
@@ -112,14 +114,16 @@ export type BudgetAppApi = {
     ids: number[],
     patch: BulkUpdateTransactionPatch
   ) => Promise<void>;
-  addRecurring: (v: {
+  addRecurring: (v: RecurringSavePayload | {
     accountId: number;
-    categoryId: number | null;
+    categoryId?: number | null;
     payee: string;
     memo?: string;
     amount: number;
     frequency: string;
     nextDate: string;
+    anchorDay?: number | null;
+    active?: boolean;
     flagColor?: TransactionFlagColor | null;
     transferAccountId?: number | null;
     subTransactions?: {
@@ -131,7 +135,7 @@ export type BudgetAppApi = {
   }) => Promise<void>;
   updateRecurring: (
     id: number,
-    v: {
+    v: Partial<RecurringSavePayload> | {
       accountId?: number;
       categoryId?: number | null;
       payee?: string;
@@ -139,6 +143,7 @@ export type BudgetAppApi = {
       amount?: number;
       frequency?: string;
       nextDate?: string;
+      anchorDay?: number | null;
       active?: boolean;
       flagColor?: TransactionFlagColor | null;
       transferAccountId?: number | null;

@@ -147,7 +147,7 @@ export async function POST(req: Request) {
   try {
     const row = await createRecurring(db, {
       accountId: body.accountId,
-      categoryId: body.categoryId ?? null,
+      categoryId: body.mode === "split" ? null : (body.categoryId ?? null),
       payee: body.payee,
       memo: body.memo,
       amount: body.amount,
@@ -156,13 +156,13 @@ export async function POST(req: Request) {
       anchorDay: body.anchorDay,
       active: body.active,
       flagColor: body.flagColor,
-      transferAccountId: body.transferAccountId ?? null,
-      subTransactions: body.subTransactions?.map((c) => ({
+      transferAccountId: body.mode === "transfer" ? body.transferAccountId : null,
+      subTransactions: body.mode === "split" ? body.subTransactions.map((c) => ({
         categoryId: c.categoryId ?? null,
         transferAccountId: c.transferAccountId ?? null,
         amount: c.amount,
         memo: c.memo,
-      })),
+      })) : undefined,
     });
     return Response.json(row);
   } catch (e) {
@@ -214,7 +214,7 @@ export async function PATCH(req: Request) {
   try {
     const patch: Parameters<typeof updateRecurring>[2] = {};
     if (body.accountId !== undefined) patch.accountId = body.accountId;
-    if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if ("categoryId" in body && body.categoryId !== undefined) patch.categoryId = body.categoryId;
     if (body.payee !== undefined) patch.payee = body.payee;
     if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
     if (body.amount !== undefined) patch.amount = body.amount;
@@ -223,8 +223,8 @@ export async function PATCH(req: Request) {
     if (body.anchorDay !== undefined) patch.anchorDay = body.anchorDay;
     if (body.active !== undefined) patch.active = body.active;
     if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
-    if (body.transferAccountId !== undefined) patch.transferAccountId = body.transferAccountId;
-    if (body.subTransactions !== undefined) {
+    if ("transferAccountId" in body && body.transferAccountId !== undefined) patch.transferAccountId = body.transferAccountId;
+    if ("subTransactions" in body && body.subTransactions !== undefined) {
       patch.subTransactions = body.subTransactions.map((c) => ({
         categoryId: c.categoryId ?? null,
         transferAccountId: c.transferAccountId ?? null,
