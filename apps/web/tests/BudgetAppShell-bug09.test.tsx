@@ -62,8 +62,6 @@ describe("BudgetAppShell (BUG-09)", () => {
     fireEvent.click(splitBtn);
 
     // Enter payee
-    const payeeTrigger = screen.getByText("e.g. Whole Foods");
-    fireEvent.click(payeeTrigger);
     const payeeInput = screen.getByPlaceholderText("e.g. Whole Foods");
     fireEvent.change(payeeInput, { target: { value: "Optimistic Split Test" } });
 

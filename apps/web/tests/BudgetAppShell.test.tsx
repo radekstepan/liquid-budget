@@ -89,9 +89,7 @@ describe("BudgetAppShell (BUG-24)", () => {
     const addBtn = screen.getAllByRole("button", { name: /add a new transaction/i })[0]!;
     fireEvent.click(addBtn);
 
-    // Fill in Payee via SearchList trigger
-    const payeeTrigger = screen.getByText("e.g. Whole Foods");
-    fireEvent.click(payeeTrigger);
+    // Fill in Payee via SearchList input
     const payeeInput = screen.getByPlaceholderText("e.g. Whole Foods");
     fireEvent.change(payeeInput, { target: { value: "Unique Grocery Payee" } });
 
@@ -259,8 +257,6 @@ describe("BudgetAppShell (BUG-24)", () => {
     fireEvent.click(addBtn);
 
     // Fill Payee
-    const payeeTrigger = screen.getByText("e.g. Whole Foods");
-    fireEvent.click(payeeTrigger);
     const payeeInput = screen.getByPlaceholderText("e.g. Whole Foods");
     fireEvent.change(payeeInput, { target: { value: "Optimistic Coffee" } });
 

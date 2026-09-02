@@ -802,21 +802,8 @@ export const SearchList: React.FC<SearchListProps> = ({
   );
   const [mounted, setMounted] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  // When the dropdown is closed by a commit/Escape we restore focus to the
-  // trigger programmatically; that focus event must not immediately reopen
-  // the dropdown, so it is suppressed for that one tick.
-  const suppressOpenRef = useRef(false);
-
-  const refocusButton = () => {
-    suppressOpenRef.current = true;
-    requestAnimationFrame(() => {
-      buttonRef.current?.focus();
-      suppressOpenRef.current = false;
-    });
-  };
 
   useEffect(() => {
     setMounted(true);
@@ -874,23 +861,10 @@ export const SearchList: React.FC<SearchListProps> = ({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, rowCount]);
 
   useEffect(() => {
     if (open) setActiveIdx(0);
-  }, [open]);
-
-  // The input only exists while the dropdown is open; move focus into it as
-  // soon as it mounts (suppressing the one-tick reopen guard).
-  useEffect(() => {
-    if (!open) return;
-    const id = requestAnimationFrame(() => {
-      suppressOpenRef.current = true;
-      inputRef.current?.focus();
-      suppressOpenRef.current = false;
-    });
-    return () => cancelAnimationFrame(id);
   }, [open]);
 
   useEffect(() => {
@@ -900,13 +874,11 @@ export const SearchList: React.FC<SearchListProps> = ({
       if (inputRef.current?.contains(t)) return;
       if (listRef.current?.contains(t)) return;
       setOpen(false);
-      refocusButton();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         setOpen(false);
-        refocusButton();
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -922,19 +894,17 @@ export const SearchList: React.FC<SearchListProps> = ({
     if (showCreate && i === 0) {
       onChange(q);
       setOpen(false);
-      refocusButton();
       return;
     }
     const it = optionAt(i);
     if (!it) return;
     onChange(it.value ?? it.label);
     setOpen(false);
-    refocusButton();
   };
 
   const onKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open) {
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         setOpen(true);
       }
@@ -953,8 +923,12 @@ export const SearchList: React.FC<SearchListProps> = ({
       e.preventDefault();
       setActiveIdx(Math.max(0, rowCount - 1));
     } else if (e.key === "Enter") {
-      e.preventDefault();
-      commitRow(activeIdx);
+      if (rowCount > 0) {
+        e.preventDefault();
+        commitRow(activeIdx);
+      } else {
+        setOpen(false);
+      }
     } else if (e.key === "Tab") {
       // Dropdown closes without committing; focus moves naturally.
       setOpen(false);
@@ -967,52 +941,31 @@ export const SearchList: React.FC<SearchListProps> = ({
       data-open={open ? "true" : undefined}
       data-above={pos.placeAbove ? "true" : undefined}
     >
-      {open ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={() => {
-            if (suppressOpenRef.current) return;
-            if (!disabled) setOpen(true);
-          }}
-          onKeyDown={onKeyDownInput}
-          placeholder={placeholder}
-          disabled={disabled}
-          autoFocus={autoFocus}
-          autoComplete="off"
-          spellCheck={false}
-          aria-label={labelForAria}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          className="y-input w-full"
-        />
-      ) : (
-        <button
-          ref={buttonRef}
-          type="button"
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          aria-label={labelForAria}
-          disabled={disabled}
-          onClick={() => !disabled && setOpen(true)}
-          onKeyDown={(e) => {
-            if (disabled) return;
-            if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              setOpen(true);
-            }
-          }}
-          className={cx("y-input", "w-full", "y-searchlist-trigger")}
-          style={{
-            opacity: disabled ? 0.5 : 1,
-            cursor: disabled ? "default" : "pointer",
-          }}
-        >
-          {value || placeholder || ""}
-        </button>
-      )}
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        onFocus={() => {
+          if (!disabled) setOpen(true);
+        }}
+        onClick={() => {
+          if (!disabled && !open) setOpen(true);
+        }}
+        onKeyDown={onKeyDownInput}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={labelForAria}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={cx("y-input", "w-full", "y-searchlist-input", "y-searchlist-trigger")}
+      />
       {open &&
         mounted &&
         createPortal(
@@ -1045,6 +998,9 @@ export const SearchList: React.FC<SearchListProps> = ({
                     role="option"
                     aria-selected={false}
                     onMouseEnter={() => setActiveIdx(0)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                    }}
                     onClick={() => commitRow(0)}
                     className={cx(
                       "y-dropdown-item",
@@ -1075,6 +1031,9 @@ export const SearchList: React.FC<SearchListProps> = ({
                         role="option"
                         aria-selected={false}
                         onMouseEnter={() => setActiveIdx(rowIdx)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                        }}
                         onClick={() => commitRow(rowIdx)}
                         className={cx("y-dropdown-item", isActive && "is-active")}
                       >

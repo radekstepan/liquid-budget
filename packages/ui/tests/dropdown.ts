@@ -105,20 +105,26 @@ export function openSearchable(label: string | RegExp): HTMLInputElement {
 }
 
 /**
- * Open a closed <SearchList> (free-text combobox) by its placeholder text.
- * The closed field is a button showing the placeholder as its own text, so it
- * is located by text content (its accessible name may be the field label).
+ * Open a <SearchList> (free-text combobox) by its placeholder text.
  */
 export function openSearchlistByPlaceholder(
   placeholderLabel: string | RegExp
 ): HTMLInputElement {
+  const input = (screen.queryByPlaceholderText(placeholderLabel) ??
+    screen.queryByRole("textbox", { name: placeholderLabel })) as HTMLInputElement | null;
+  if (input) {
+    act(() => {
+      input.focus();
+    });
+    return input;
+  }
   const trigger = screen.getByText(placeholderLabel);
   fireEvent.click(trigger);
-  const input = screen.getByPlaceholderText(placeholderLabel) as HTMLInputElement;
+  const input2 = screen.getByPlaceholderText(placeholderLabel) as HTMLInputElement;
   act(() => {
-    input.focus();
+    input2.focus();
   });
-  return input;
+  return input2;
 }
 
 /**

@@ -386,7 +386,7 @@ describe("TransactionModal", () => {
         onSave={onSave}
       />
     );
-    expect(screen.getByText("IGA")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("IGA")).toBeInTheDocument();
     // The amount field shows the signed value.
     expect(screen.getByDisplayValue("-12.34")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -1723,7 +1723,7 @@ describe("RecurringModal", () => {
         onSave={onSave}
       />
     );
-    expect(screen.getByText("Spotify")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Spotify")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave.mock.calls[0]![0]).toMatchObject({ id: 7, payee: "Spotify", active: true });
   });

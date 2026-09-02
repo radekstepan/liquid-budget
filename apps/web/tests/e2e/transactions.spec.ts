@@ -118,11 +118,10 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
   await targetRow.click();
 
   const editModal = page.locator(".y-modal").last();
-  await expect(editModal.getByText("Edit Transaction")).toBeVisible();
-  // The payee field is closed: it shows the value on its trigger button.
+  // The payee field contains the current payee value.
   await expect(
-    editModal.locator(".y-searchlist-trigger").first()
-  ).toHaveText(cleanPayee!);
+    editModal.locator(".y-searchlist input").first()
+  ).toHaveValue(cleanPayee!);
 });
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
