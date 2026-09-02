@@ -31,34 +31,34 @@ function Harness({
 
 describe("SearchList", () => {
   function openField() {
-    const trigger = screen.getByRole("button", { name: /search/i });
-    fireEvent.click(trigger);
     const input = screen.getByRole("textbox");
-    act(() => {
-      input.focus();
-    });
+    fireEvent.focus(input);
     return input;
   }
 
-  it("is closed by default: shows the value on a trigger, no search input", () => {
+  it("renders a text input with text cursor and opens dropdown on focus", () => {
     render(<Harness options={payees} placeholder="Search payees" />);
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /search payees/i })).toBeInTheDocument();
+    const input = screen.getByRole("textbox");
+    expect(input).toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    fireEvent.focus(input);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
   });
 
-  it("opens the search input in the field position and filters on typing", () => {
+  it("filters options as user types into the input", () => {
     render(<Harness options={payees} placeholder="Search" />);
     const input = openField();
     const list = screen.getByRole("listbox");
     expect(list).not.toContainElement(input);
-    expect(input).toHaveFocus();
     expect(screen.getAllByRole("option")).toHaveLength(3);
 
     fireEvent.change(input, { target: { value: "COST" } });
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Costco"]);
   });
 
-  it("commits the picked option label on click and hides the input again", () => {
+  it("commits the picked option label on click and closes the dropdown", () => {
     const onChange = vi.fn();
     render(<Harness options={payees} onChange={onChange} placeholder="Search" />);
     const input = openField();
@@ -66,8 +66,7 @@ describe("SearchList", () => {
     fireEvent.click(screen.getByRole("option", { name: "IGA" }));
     expect(onChange).toHaveBeenLastCalledWith("IGA");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /IGA/i })).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("offers a Create row for a brand-new value when allowCreate is set", () => {
@@ -104,7 +103,7 @@ describe("SearchList", () => {
     expect(onChange).toHaveBeenLastCalledWith("IGA");
   });
 
-  it("closes on Escape without committing and restores the trigger", () => {
+  it("closes on Escape without committing and keeps the input focused", () => {
     const onChange = vi.fn();
     render(<Harness options={payees} onChange={onChange} placeholder="Search" />);
     openField();
@@ -112,7 +111,7 @@ describe("SearchList", () => {
       fireEvent.keyDown(document, { key: "Escape" });
     });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
 
