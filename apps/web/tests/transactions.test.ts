@@ -181,7 +181,7 @@ describe("PATCH /api/transactions (BUG-19)", () => {
   });
 
   describe("POST /api/transactions (BUG-25)", () => {
-    it("creates transaction when payload includes a 'patch' key instead of misrouting to bulk-update", async () => {
+    it("creates transaction without misrouting to bulk-update", async () => {
       const db = getDefaultDb();
       const account = await createAccount(db, { name: "Checking", kind: "liquid" });
 
@@ -189,7 +189,6 @@ describe("PATCH /api/transactions (BUG-19)", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patch: null,
           accountId: account!.id,
           date: "2026-08-01",
           amount: -3500,

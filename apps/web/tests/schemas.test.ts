@@ -57,7 +57,7 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(result.success).toBe(true);
     });
 
-    it("strips parentId and skipBalance from output", () => {
+    it("rejects unknown properties (e.g. parentId and skipBalance) via strict validation", () => {
       const payload = {
         accountId: 1,
         date: "2026-06-15",
@@ -66,11 +66,7 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
         skipBalance: true,
       };
       const result = TransactionCreateSchema.safeParse(payload);
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect("parentId" in result.data).toBe(false);
-        expect("skipBalance" in result.data).toBe(false);
-      }
+      expect(result.success).toBe(false);
     });
   });
 
@@ -509,6 +505,108 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
           patch: { status: "c" },
         }).success
       ).toBe(true);
+    });
+  });
+
+  describe("Strict schema validation: rejects unknown keys", () => {
+    it("rejects unknown keys in TransactionPatchSchema", () => {
+      expect(
+        TransactionPatchSchema.safeParse({
+          id: 1,
+          payee: "Test",
+          unknownKey: "value",
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects unknown keys in SubTransactionSchema", () => {
+      expect(
+        TransactionCreateSchema.safeParse({
+          accountId: 1,
+          date: "2026-06-15",
+          amount: -5000,
+          subTransactions: [
+            { categoryId: 1, amount: -3000, extra: "foo" },
+            { categoryId: 2, amount: -2000 },
+          ],
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects unknown keys in AccountCreateSchema and AccountPatchSchema", () => {
+      expect(
+        AccountCreateSchema.safeParse({
+          name: "Checking",
+          kind: "liquid",
+          groupLabel: "Budget",
+          extraField: true,
+        }).success
+      ).toBe(false);
+
+      expect(
+        AccountPatchSchema.safeParse({
+          id: 1,
+          name: "Checking",
+          balance: 1000, // balance is not patchable
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects unknown keys in CategoryCreateSchema and CategoryPatchSchema", () => {
+      expect(
+        CategoryCreateSchema.safeParse({
+          groupId: 1,
+          name: "Food",
+          extraProp: 123,
+        }).success
+      ).toBe(false);
+
+      expect(
+        CategoryPatchSchema.safeParse({
+          id: 1,
+          name: "Food",
+          unsupported: "value",
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects unknown keys in Recurring schemas", () => {
+      expect(
+        RecurringCreateSchema.safeParse({
+          accountId: 1,
+          frequency: "monthly",
+          nextDate: "2026-06-15",
+          amount: -1000,
+          unexpected: true,
+        }).success
+      ).toBe(false);
+
+      expect(
+        RecurringPatchSchema.safeParse({
+          id: 1,
+          amount: -2000,
+          unknownProp: "x",
+        }).success
+      ).toBe(false);
+    });
+
+    it("rejects unknown keys in AssignmentUpsertSchema and ReconcileAccountSchema", () => {
+      expect(
+        AssignmentUpsertSchema.safeParse({
+          categoryId: 1,
+          month: "2026-06",
+          amount: 5000,
+          extra: 1,
+        }).success
+      ).toBe(false);
+
+      expect(
+        ReconcileAccountSchema.safeParse({
+          accountId: 1,
+          statementBalance: 10000,
+          extraField: "invalid",
+        }).success
+      ).toBe(false);
     });
   });
 });
