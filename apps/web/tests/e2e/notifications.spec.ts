@@ -144,26 +144,12 @@ test.describe("success notifications", () => {
     await expect(page.getByText("Recurring transaction scheduled.")).toBeVisible();
   });
 
-  test("posting a scheduled transaction shows a success toast", async ({ page, request }) => {
+  test("posting a scheduled transaction shows a success toast", async ({ page }) => {
     await gotoAllTransactions(page);
     const payee = `PW Notify Post ${Date.now()}`;
     // Create the entry with a future date so it is not auto-posted on save.
     await addRecurringViaModal(page, payee, "-10.00", "2026-12-01");
 
-    // Make it paused and overdue via the API so it is never auto-posted,
-    // keeping its "Enter Now" button in the scheduled drawer clickable.
-    const budget = await (await request.get("/api/budget")).json();
-    const created = budget.recurring.find((r: { payee: string }) => r.payee === payee);
-    expect(created).toBeTruthy();
-    const patch = await request.patch("/api/recurring", {
-      data: { id: created.id, active: false, nextDate: "2026-08-01" },
-    });
-    expect(patch.status()).toBe(200);
-
-    // Reload so the scheduled drawer reflects the paused + overdue entry.
-    await page.reload();
-    await waitForReady(page);
-    await gotoAllTransactions(page);
     const row = page
       .locator(".y-scheduled-table")
       .getByRole("row")

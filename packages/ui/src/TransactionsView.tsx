@@ -573,17 +573,18 @@ export const TransactionsView = memo(function TransactionsView({
   const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
   const visibleRows = filtered.slice(startIndex, endIndex);
 
+  const topLevelVisibleRows = visibleRows.filter((r) => r.parentId == null);
   const allVisibleSelected =
-    visibleRows.length > 0 && visibleRows.every((r) => selectedIds.has(r.id));
+    topLevelVisibleRows.length > 0 && topLevelVisibleRows.every((r) => selectedIds.has(r.id));
 
   const toggleSelectAll = () => {
     setSelectedIds((prev) => {
-      const allSelected = visibleRows.length > 0 && visibleRows.every((r) => prev.has(r.id));
+      const allSelected = topLevelVisibleRows.length > 0 && topLevelVisibleRows.every((r) => prev.has(r.id));
       if (allSelected) {
         return new Set();
       } else {
         const next = new Set(prev);
-        for (const r of visibleRows) next.add(r.id);
+        for (const r of topLevelVisibleRows) next.add(r.id);
         return next;
       }
     });

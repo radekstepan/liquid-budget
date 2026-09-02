@@ -36,6 +36,7 @@ export async function fillSearchlist(
     await expect(input).toBeVisible();
   }
   await input.fill(value);
+  await input.press("Enter");
 }
 
 /**
@@ -58,6 +59,6 @@ export async function pickSubCategory(
   if (typeof option === "number") {
     await page.locator('.y-dropdown button[role="option"]').nth(option).click();
   } else {
-    await page.getByRole("option", { name: option }).click();
+    await page.getByRole("option", { name: option, exact: true }).click();
   }
 }

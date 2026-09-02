@@ -220,9 +220,8 @@ test("month-count control switches the budget to N side-by-side month columns", 
   const thead = page.locator("table.y-table thead");
   const monthHeader = (label: string) =>
     thead.getByRole("columnheader", { name: label, exact: true });
-  const budgetedCount = () => thead.getByText("Budgeted", { exact: true }).count();
 
-  expect(await budgetedCount()).toBe(3);
+  await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(3);
   await expect(monthHeader("May 2026")).toBeVisible();
   await expect(monthHeader("Jun 2026")).toBeVisible();
   await expect(monthHeader("Jul 2026")).toBeVisible();
@@ -232,12 +231,12 @@ test("month-count control switches the budget to N side-by-side month columns", 
   await page.getByRole("button", { name: "6 months" }).click();
   await expect(monthHeader("Apr 2026")).toBeVisible();
   await expect(monthHeader("Aug 2026")).toBeVisible();
-  expect(await budgetedCount()).toBe(6);
+  await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(6);
 
   // Switch back to 1 month — per-month labels collapse, only the classic
   // Category / Budgeted / Outflows / Balance header is shown.
   await page.getByRole("button", { name: "1 month" }).click();
   await expect(monthHeader("May 2026")).toBeHidden();
-  expect(await budgetedCount()).toBe(1);
+  await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(1);
 });
 

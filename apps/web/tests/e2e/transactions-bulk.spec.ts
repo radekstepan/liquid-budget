@@ -123,8 +123,8 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
   // Verify both rows now have the updated payee while keeping their original amounts
   const updatedRows = page.getByRole("row").filter({ hasText: commonPayee });
   await expect(updatedRows).toHaveCount(2);
-  await expect(page.getByRole("row").filter({ hasText: "20.00" })).toBeVisible();
-  await expect(page.getByRole("row").filter({ hasText: "40.00" })).toBeVisible();
+  await expect(updatedRows.filter({ hasText: "20.00" })).toBeVisible();
+  await expect(updatedRows.filter({ hasText: "40.00" })).toBeVisible();
 });
 
 test("bulk deletes selected transactions", async ({ page }) => {

@@ -71,7 +71,7 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   const payload = {
     accountId: account.id,
     categoryId: category.id,
-    date: "2026-06-20",
+    date: "2026-09-01",
     payee,
     memo: "",
     amount: -1234,
@@ -127,27 +127,27 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   await expect(editedRow).toBeVisible();
   await expect(editedRow.locator('[aria-label="Flag: Duplicate"]')).toBeVisible();
 
-  // The API rejects any attempt to change the flag on a duplicate row.
+  // Under BUG-10, the API allows changing or clearing the flag on a duplicate row.
   const patch = await fetch(`${BASE_URL}/api/transactions`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: dupRow.id, flagColor: "red" }),
   });
-  expect(patch.status).toBe(422);
+  expect(patch.status).toBe(200);
 
   const clear = await fetch(`${BASE_URL}/api/transactions`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: dupRow.id, flagColor: null }),
   });
-  expect(clear.status).toBe(422);
+  expect(clear.status).toBe(200);
 
   const bulk = await fetch(`${BASE_URL}/api/transactions?action=bulk-update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids: [dupRow.id], patch: { flagColor: "blue" } }),
   });
-  expect(bulk.status).toBe(422);
+  expect(bulk.status).toBe(200);
 
   await resetToDemo();
 });

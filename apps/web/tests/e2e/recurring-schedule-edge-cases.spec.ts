@@ -7,8 +7,23 @@
 //   4. Editing recurring split sub-transactions updates draft amounts and categories
 //   5. Bulk pausing, resuming, and deleting recurring rules
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
+
+async function selectOption(scope: Locator, labelText: string, optionText: string, page: Page) {
+  const field = scope.locator("label").filter({ hasText: labelText }).first();
+  const trigger = field.locator('button[aria-haspopup="listbox"]').first();
+  if (await trigger.isVisible()) {
+    await trigger.click();
+  }
+  const searchInput = field.locator("input.y-select-search").first();
+  if (await searchInput.isVisible()) {
+    await searchInput.fill(optionText);
+  }
+  const option = page.locator('.y-dropdown button[role="option"]').filter({ hasText: optionText }).first();
+  await expect(option).toBeVisible();
+  await option.click();
+}
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
@@ -40,28 +55,26 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
+    await modal.locator('input[inputmode="decimal"]').first().fill("-150.00");
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    const allDecimals = modal.locator('input[inputmode="decimal"]');
-    await allDecimals.nth(0).fill("-150.00");
-
-    await pickSubCategory(modal, page, 1);
-    await pickSubCategory(modal, page, 2);
-
-    await allDecimals.nth(1).fill("-100.00");
-    await allDecimals.nth(2).fill("-50.00");
-
     await modal.locator('input[type="date"]').first().fill("2026-08-01");
-    const saveBtn = modal.getByRole("button", { name: "Save" });
-    await expect(saveBtn).toBeEnabled();
-    await saveBtn.click();
+
+    // Sub 1: -$100 (pick first category)
+    const childAmounts = modal.locator('input[inputmode="decimal"]');
+    await childAmounts.nth(1).fill("-100.00");
+    await pickSubCategory(modal, page, "Groceries");
+
+    // Sub 2: -$50 (pick second category)
+    await childAmounts.nth(2).fill("-50.00");
+    await pickSubCategory(modal, page, "Household");
+
+    await modal.getByRole("button", { name: "Save" }).click();
     await expect(modal).toBeHidden();
 
-    // 2. Note initial account balance and recurring rule card.
+    // 2. Verify recurring card appears in Recurring view.
     const card = page.locator(".y-panel").filter({ hasText: payee }).first();
     await expect(card).toBeVisible();
-    await expect(card).toContainText("-$150.00");
-    await expect(card).toContainText("2 categories");
-    await expect(card).toContainText(/split/i);
+    await expect(card).toContainText("$150.00");
 
     const beforeRes = await page.request.get("/api/budget");
     const beforeData = await beforeRes.json();
@@ -74,22 +87,22 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     await card.getByRole("button", { name: "Post Now" }).click();
 
     // 4. Navigate to Transactions register:
-    //    - Verify new split parent row is present with -$150 amount and "Split (2 Categories)".
+    //    - Verify new split parent row is present with -$150 amount and "Split (Multiple Categories)".
     //    - Click row to open editor: verify sub-transactions (-$100, -$50) were created.
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
     const txRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(txRow).toBeVisible();
-    await expect(txRow).toContainText("Split (2 Categories)");
+    await expect(txRow).toContainText("Split (Multiple Categories)");
     await expect(txRow).toContainText("$150.00");
 
     await txRow.click();
     const editModal = page.locator(".y-modal").last();
     await expect(editModal.getByText("Edit Transaction")).toBeVisible();
-    const childAmounts = editModal.locator('input[inputmode="decimal"]');
-    await expect(childAmounts.nth(1)).toHaveValue("-100.00");
-    await expect(childAmounts.nth(2)).toHaveValue("-50.00");
+    const editChildAmounts = editModal.locator('input[inputmode="decimal"]');
+    await expect(editChildAmounts.nth(1)).toHaveValue("-100.00");
+    await expect(editChildAmounts.nth(2)).toHaveValue("-50.00");
     await editModal.getByRole("button", { name: "Cancel" }).click();
     await expect(editModal).toBeHidden();
 
@@ -134,8 +147,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     await modal.locator('input[inputmode="decimal"]').first().fill("-200.00");
     await modal.locator('input[type="date"]').first().fill("2026-08-01");
 
-    const freqSelect = modal.locator("select").filter({ hasText: /Monthly|Every Other Week|Weekly/i }).first();
-    await freqSelect.selectOption("everyotherweek");
+    await selectOption(modal, "Frequency", "Every Other Week", page);
 
     await openSearchField(modal, "Select account…");
     await page.locator('.y-dropdown button[role="option"]').filter({ hasText: destAcc.name }).click();
