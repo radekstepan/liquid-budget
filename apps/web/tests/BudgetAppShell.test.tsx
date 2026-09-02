@@ -19,6 +19,7 @@ describe("BudgetAppShell (BUG-24)", () => {
   });
 
   it("retains optimistic state and does not roll back when write succeeds but follow-up budget reload fails", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let budgetFetchCount = 0;
     let postTransactionCalled = false;
 
@@ -120,6 +121,13 @@ describe("BudgetAppShell (BUG-24)", () => {
     expect(screen.queryByText("Failed to add transaction. Please try again.")).toBeNull();
     // Warning toast about refresh should be shown
     expect(screen.getByText("Saved changes, but failed to refresh latest budget data.")).toBeDefined();
+
+    // Verify console.error was called with the expected reload error
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "Budget reload failed after successful mutation:",
+      expect.objectContaining({ message: "Budget reload failed", status: 500 })
+    );
+    consoleSpy.mockRestore();
   });
 
   it("BUG-07: optimistic assignment update stores an integer-cent string format matching DB format", async () => {
