@@ -938,8 +938,8 @@ export async function updateSplit(
     if (parent.status === "r") {
       throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
     }
-    if (parent.parentId != null || parent.transferAccountId != null) {
-      throw new TransactionError("target row is not a split parent");
+    if (parent.parentId != null) {
+      throw new TransactionError("target row is a split child, not a split parent");
     }
     if (parentFields.date !== undefined && parentFields.date != null) {
       assertValidISODate(parentFields.date, "date");
@@ -979,8 +979,11 @@ export async function updateSplit(
       }
       await db.delete(transactions).where(eq(transactions.parentId, parentId));
     } else {
-      // Converting a single transaction to a split: reverse the single transaction's balance
+      // Converting a single transaction or transfer to a split: reverse the old transaction's balance
       await applyBalance(db, parent.accountId, -Number(parent.amount));
+      if (parent.transferAccountId != null) {
+        await applyBalance(db, parent.transferAccountId, Number(parent.amount));
+      }
     }
 
     const pf: Record<string, unknown> = {};
@@ -995,6 +998,10 @@ export async function updateSplit(
     }
     if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
     if (oldChildren.length === 0) {
+      pf.transferAccountId = null;
+      pf.transferStatus = null;
+      pf.transferReconciledAt = null;
+      pf.transferReconciliationId = null;
       pf.categoryId = null;
       pf.isIncome = false;
       pf.incomeMonth = null;
@@ -1121,6 +1128,34 @@ export async function updateSplit(
   }
 
   return res;
+}
+
+/**
+ * Delete all children of a split transaction and reverse their balance effects.
+ * Used when converting a split transaction into a single or transfer transaction.
+ */
+export async function deleteSplitChildren(db: Database, parentId: number): Promise<void> {
+  await withTransaction(db, async () => {
+    const children = await getChildren(db, parentId);
+    if (children.length === 0) return;
+
+    if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
+      throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
+    }
+
+    const [parent] = await db.select().from(transactions).where(eq(transactions.id, parentId));
+    if (!parent) return;
+
+    for (const c of children) {
+      await applyBalance(db, c.accountId, -Number(c.amount));
+      if (c.transferAccountId != null) {
+        await applyBalance(db, c.transferAccountId, Number(c.amount));
+      }
+    }
+
+    await applyBalance(db, parent.accountId, Number(parent.amount));
+    await db.delete(transactions).where(eq(transactions.parentId, parentId));
+  });
 }
 
 /**
