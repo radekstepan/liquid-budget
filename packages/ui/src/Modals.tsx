@@ -304,7 +304,7 @@ export function TransactionModal({
         accountId,
         categoryId: finalCatId,
         date,
-        payee: payee.trim() || `Transfer : ${destName}`,
+        payee: `Transfer : ${destName || "Unknown"}`,
         memo: memo.trim(),
         amount: amountCents,
         status: finalStatus,
@@ -328,6 +328,7 @@ export function TransactionModal({
         amount: amountCents,
         status: finalStatus,
         flagColor: savedFlagColor,
+        transferAccountId: null,
         subTransactions: subRows.map((r) => {
           const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
           const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
@@ -369,6 +370,7 @@ export function TransactionModal({
       status: finalStatus,
       flagColor: savedFlagColor,
       incomeMonth: incMonth,
+      transferAccountId: null,
     });
   };
 

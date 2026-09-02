@@ -430,6 +430,46 @@ describe("TransactionModal", () => {
     });
   });
 
+  it("converts an imported transaction to a transfer and saves the transfer destination and payee", () => {
+    const onSave = vi.fn();
+    const initial: Transaction = {
+      id: 105,
+      accountId: 1,
+      categoryId: 10,
+      date: "2026-06-10",
+      payee: "Old Store",
+      memo: "Imported transaction",
+      amount: "-4500",
+      cleared: true,
+    };
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        initial={initial}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+
+    // Switch to Transfer mode
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+
+    // Select 'Credit' (account ID 2) in 'Transfer to' select dropdown
+    pickFromOpenSearchableByValue(/transfer to/i, "2");
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      id: 105,
+      accountId: 1,
+      transferAccountId: 2,
+      payee: "Transfer : Credit",
+      amount: -4500,
+    });
+  });
+
   it("BUG-14: allows changing the deferred month via month picker", () => {
     const onSave = vi.fn();
     const initial: Transaction = {

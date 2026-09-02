@@ -81,6 +81,24 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(result.success).toBe(true);
     });
 
+    it("accepts transferAccountId in patch payload", () => {
+      const payload = { id: 100, transferAccountId: 2, payee: "Transfer : Savings" };
+      const result = TransactionPatchSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.transferAccountId).toBe(2);
+      }
+    });
+
+    it("accepts null transferAccountId to clear transfer", () => {
+      const payload = { id: 100, transferAccountId: null, payee: "Store", categoryId: 5 };
+      const result = TransactionPatchSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.transferAccountId).toBeNull();
+      }
+    });
+
     it("rejects non-positive id", () => {
       const payload = { id: 0, payee: "Test" };
       const result = TransactionPatchSchema.safeParse(payload);

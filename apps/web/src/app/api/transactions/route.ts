@@ -168,6 +168,7 @@ export async function PATCH(req: Request) {
     const patch: Parameters<typeof updateTransaction>[2] = {};
     if (body.accountId !== undefined) patch.accountId = body.accountId;
     if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if (body.transferAccountId !== undefined) patch.transferAccountId = body.transferAccountId;
     if (body.date !== undefined) patch.date = body.date;
     if (body.payee !== undefined) patch.payee = body.payee;
     if (body.memo !== undefined) patch.memo = body.memo ?? undefined;

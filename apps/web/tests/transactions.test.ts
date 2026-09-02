@@ -51,6 +51,36 @@ describe("PATCH /api/transactions (BUG-19)", () => {
     expect(json.memo).toBe("Weekly shop");
   });
 
+  it("updates transaction to a transfer when transferAccountId is provided in PATCH", async () => {
+    const db = getDefaultDb();
+    const acct1 = await createAccount(db, { name: "Checking", kind: "liquid" });
+    const acct2 = await createAccount(db, { name: "Savings", kind: "liquid" });
+
+    const txn = await createTransaction(db, {
+      accountId: acct1!.id,
+      amount: -5000,
+      date: "2026-08-01",
+      payee: "Imported Txn",
+      memo: "Transfer to savings",
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/transactions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: txn!.id,
+        transferAccountId: acct2!.id,
+        payee: "Transfer : Savings",
+      }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.id).toBe(txn!.id);
+    expect(json.transferAccountId).toBe(acct2!.id);
+    expect(json.payee).toBe("Transfer : Savings");
+  });
+
   it("BUG-19: preserves categoryId when setting flagColor", async () => {
     const db = getDefaultDb();
     const account = await createAccount(db, { name: "Checking", kind: "liquid" });

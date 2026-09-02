@@ -58,6 +58,7 @@ export type CreateTransactionInput = {
 export type UpdateTransactionInput = {
   accountId?: number;
   categoryId?: number | null;
+  transferAccountId?: number | null;
   date?: string;
   payee?: string;
   memo?: string;
@@ -568,6 +569,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   const touchesStructuralFields =
     patch.accountId !== undefined ||
     patch.categoryId !== undefined ||
+    patch.transferAccountId !== undefined ||
     patch.date !== undefined ||
     patch.payee !== undefined ||
     patch.memo !== undefined ||
@@ -614,10 +616,20 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     throw new TransactionError("cannot change account of a transfer; delete and recreate");
   }
 
+  if (
+    patch.transferAccountId != null &&
+    Number(patch.transferAccountId) === (patch.accountId != null ? Number(patch.accountId) : existing.accountId)
+  ) {
+    throw new TransactionError("transfer account must differ from source account");
+  }
+
   const p: Record<string, unknown> = {};
   if (patch.accountId !== undefined && patch.accountId != null) p.accountId = Number(patch.accountId);
   if (patch.categoryId !== undefined) {
     p.categoryId = patch.categoryId ?? null;
+  }
+  if (patch.transferAccountId !== undefined) {
+    p.transferAccountId = patch.transferAccountId != null ? Number(patch.transferAccountId) : null;
   }
   if (patch.date !== undefined && patch.date != null) p.date = assertValidISODate(patch.date, "date");
   if (patch.payee !== undefined && patch.payee != null) p.payee = String(patch.payee);
@@ -671,6 +683,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     const isSplitParent = isParent && hasChildren;
 
     if (isSplitParent) {
+      if ("transferAccountId" in p && p.transferAccountId != null) {
+        throw new TransactionError("split parent cannot be a transfer");
+      }
       const children = await getChildren(db, id);
       if (children.some((c) => c.status === "r" || c.transferStatus === "r")) {
         throw new TransactionError(
@@ -697,30 +712,51 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
 
     const newAccountId = (p.accountId as number | undefined) ?? current.accountId;
     const newAmount = (p.amount as number | undefined) ?? Number(current.amount);
+    const newTransferAccountId = "transferAccountId" in p
+      ? (p.transferAccountId as number | null)
+      : current.transferAccountId;
 
-    if (current.transferAccountId != null) {
-      await applyBalance(db, current.accountId, -Number(current.amount));
-      await applyBalance(db, current.transferAccountId, Number(current.amount));
-      await applyBalance(db, newAccountId, newAmount);
-      await applyBalance(db, current.transferAccountId, -newAmount);
-    } else if (!isSplitParent) {
-      if (newAccountId !== current.accountId || newAmount !== Number(current.amount)) {
+    if (newTransferAccountId != null && newTransferAccountId === newAccountId) {
+      throw new TransactionError("transfer account must differ from source account");
+    }
+
+    if (!isSplitParent) {
+      if (
+        newAccountId !== current.accountId ||
+        newAmount !== Number(current.amount) ||
+        current.transferAccountId !== newTransferAccountId
+      ) {
+        // Reverse old balance effect
         await applyBalance(db, current.accountId, -Number(current.amount));
+        if (current.transferAccountId != null) {
+          await applyBalance(db, current.transferAccountId, Number(current.amount));
+        }
+        // Apply new balance effect
         await applyBalance(db, newAccountId, newAmount);
+        if (newTransferAccountId != null) {
+          await applyBalance(db, newTransferAccountId, -newAmount);
+        }
       }
+    }
+
+    if (newTransferAccountId != null) {
+      if (current.transferAccountId == null && !("transferStatus" in p)) {
+        p.transferStatus = (patch.transferStatus ?? patch.status ?? (p.status as ClearedStatus) ?? current.status ?? "c") as ClearedStatus;
+      }
+    } else if (current.transferAccountId != null) {
+      p.transferStatus = null;
+      p.transferReconciledAt = null;
+      p.transferReconciliationId = null;
     }
 
     const srcAccount = await getAccountInfo(db, newAccountId);
     const srcOnBudget = srcAccount?.onBudget ?? true;
     const srcKind = srcAccount?.kind ?? "liquid";
-    const destOnBudget =
-      current.transferAccountId != null
-        ? await isAccountOnBudget(db, current.transferAccountId)
-        : null;
 
-    if (current.transferAccountId != null) {
+    if (newTransferAccountId != null) {
+      const destOnBudget = await isAccountOnBudget(db, newTransferAccountId);
       if (patch.payee !== undefined && !String(patch.payee).trim()) {
-        const destName = await getAccountName(db, current.transferAccountId);
+        const destName = await getAccountName(db, newTransferAccountId);
         p.payee = `Transfer : ${destName ?? "Unknown"}`;
       }
       const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : current.categoryId;
@@ -750,7 +786,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.incomeMonth = null;
       p.isIncome = false;
     } else {
-      const finalCatId = "categoryId" in p ? p.categoryId : current.categoryId;
+      if (current.transferAccountId != null && !("categoryId" in p)) {
+        p.categoryId = null;
+      }
+      const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : current.categoryId;
       // Matches `createSplitWithChildren` / createSplit update semantics:
       // an uncategorized positive inflow is income even when it is a
       // split child (BUG-18.2).
@@ -806,6 +845,7 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       patch.payee != null &&
       String(patch.payee).trim() !== existing.payee.trim() &&
       existing.transferAccountId == null &&
+      newTransferAccountId == null &&
       existing.parentId == null &&
       !isSplitParent
     ) {

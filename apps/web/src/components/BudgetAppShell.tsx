@@ -619,17 +619,22 @@ export function BudgetAppShell({
             const oldAmount = num(currentTarget.amount);
             const newAccountId = t.accountId ?? currentTarget.accountId;
             const newAmount = t.amount !== undefined ? t.amount : oldAmount;
+            const newTransferAccountId =
+              "transferAccountId" in t ? (t.transferAccountId ?? null) : (currentTarget.transferAccountId ?? null);
 
+            deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
             if (currentTarget.transferAccountId != null) {
-              deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
-              deltas.set(currentTarget.transferAccountId, (deltas.get(currentTarget.transferAccountId) ?? 0) + oldAmount);
-              deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
-              deltas.set(currentTarget.transferAccountId, (deltas.get(currentTarget.transferAccountId) ?? 0) - newAmount);
-            } else {
-              if (newAccountId !== oldAccountId || newAmount !== oldAmount) {
-                deltas.set(oldAccountId, (deltas.get(oldAccountId) ?? 0) - oldAmount);
-                deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
-              }
+              deltas.set(
+                currentTarget.transferAccountId,
+                (deltas.get(currentTarget.transferAccountId) ?? 0) + oldAmount
+              );
+            }
+            deltas.set(newAccountId, (deltas.get(newAccountId) ?? 0) + newAmount);
+            if (newTransferAccountId != null) {
+              deltas.set(
+                newTransferAccountId,
+                (deltas.get(newTransferAccountId) ?? 0) - newAmount
+              );
             }
           }
         }
@@ -648,12 +653,14 @@ export function BudgetAppShell({
         if (currentTarget) {
           const newAccountId = t.accountId ?? currentTarget.accountId;
           const newAmount = t.amount !== undefined ? t.amount : num(currentTarget.amount);
+          const newTransferAccountId =
+            "transferAccountId" in t ? (t.transferAccountId ?? null) : (currentTarget.transferAccountId ?? null);
           const srcAccount = prev.accounts.find((a) => a.id === newAccountId);
           const srcOnBudget = srcAccount?.onBudget ?? true;
           const srcKind = srcAccount?.kind ?? "liquid";
 
-          if (currentTarget.transferAccountId != null) {
-            const destAccount = prev.accounts.find((a) => a.id === currentTarget.transferAccountId);
+          if (newTransferAccountId != null) {
+            const destAccount = prev.accounts.find((a) => a.id === newTransferAccountId);
             const rawCatId = "categoryId" in t ? (t.categoryId ?? null) : (currentTarget.categoryId ?? null);
             const rawIncMonth = "incomeMonth" in t ? (t.incomeMonth ?? null) : (currentTarget.incomeMonth ?? null);
             const classification = classifyBoundaryTransfer({
@@ -719,6 +726,7 @@ export function BudgetAppShell({
           return {
             ...x,
             ...(t.accountId !== undefined ? { accountId: t.accountId } : {}),
+            ...("transferAccountId" in t ? { transferAccountId: t.transferAccountId ?? null } : {}),
             ...(nextCategoryId !== undefined ? { categoryId: nextCategoryId } : {}),
             ...(t.date !== undefined ? { date: t.date } : {}),
             ...(t.payee !== undefined ? { payee: t.payee } : {}),
@@ -737,6 +745,7 @@ export function BudgetAppShell({
         (t.status !== undefined || t.transferStatus !== undefined || t.flagColor !== undefined) &&
         t.accountId === undefined &&
         t.categoryId === undefined &&
+        t.transferAccountId === undefined &&
         t.date === undefined &&
         t.payee === undefined &&
         t.memo === undefined &&
@@ -777,6 +786,7 @@ export function BudgetAppShell({
             skipReload: !(
               t.amount !== undefined ||
               t.accountId !== undefined ||
+              t.transferAccountId !== undefined ||
               t.subTransactions !== undefined ||
               t.date !== undefined ||
               t.categoryId !== undefined ||

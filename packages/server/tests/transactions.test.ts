@@ -2663,6 +2663,181 @@ describe("transactions queries", () => {
         expect(updatedBlankPayee?.payee).toBe("Transfer : Savings");
       });
 
+      it("converts a regular transaction to a transfer via updateTransaction", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 10000,
+            sort: 1,
+          })
+          .returning();
+
+        // Create a regular imported transaction: -3000
+        const txn = await createTransaction(db, {
+          accountId,
+          categoryId: cat1Id,
+          date: "2026-08-01",
+          payee: "Imported Store",
+          memo: "Coffee",
+          amount: -3000,
+          status: "c",
+        });
+
+        // Initial balances: accountId was 0 + (-3000) = -3000, acct2 is 10000
+        const [acct1Before] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        const [acct2Before] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id));
+        expect(acct1Before?.balance).toBe(-3000);
+        expect(acct2Before?.balance).toBe(10000);
+
+        // Convert to transfer to acct2
+        const updated = await updateTransaction(db, txn!.id, {
+          transferAccountId: acct2!.id,
+          payee: "Transfer : Savings",
+        });
+
+        expect(updated?.transferAccountId).toBe(acct2!.id);
+        expect(updated?.payee).toBe("Transfer : Savings");
+        expect(updated?.categoryId).toBeNull();
+        expect(updated?.transferStatus).toBe("c");
+
+        // After conversion:
+        // accountId: -3000 (unchanged net)
+        // acct2: 10000 - (-3000) = 10000 + 3000 = 13000
+        const [acct1After] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+        const [acct2After] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id));
+        expect(acct1After?.balance).toBe(-3000);
+        expect(acct2After?.balance).toBe(13000);
+      });
+
+      it("changes transfer destination account and adjusts balances", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 10000,
+            sort: 1,
+          })
+          .returning();
+        const [acct3] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Investments",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 50000,
+            sort: 2,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "Transfer : Savings",
+            memo: "Save money",
+            amount: -5000,
+          },
+          acct2!.id
+        );
+
+        // Initial: acct1 = -5000, acct2 = 10000 - (-5000) = 15000, acct3 = 50000
+        const [a2Before] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id));
+        const [a3Before] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct3!.id));
+        expect(a2Before?.balance).toBe(15000);
+        expect(a3Before?.balance).toBe(50000);
+
+        // Change destination from acct2 to acct3
+        const updated = await updateTransaction(db, transfer.id, {
+          transferAccountId: acct3!.id,
+          payee: "Transfer : Investments",
+        });
+
+        expect(updated?.transferAccountId).toBe(acct3!.id);
+        const [a2After] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id));
+        const [a3After] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct3!.id));
+        expect(a2After?.balance).toBe(10000); // reverted
+        expect(a3After?.balance).toBe(55000); // applied
+      });
+
+      it("converts a transfer back to a regular transaction", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const [acct2] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            onBudget: true,
+            balance: 10000,
+            sort: 1,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId,
+            categoryId: null,
+            date: "2026-08-01",
+            payee: "Transfer : Savings",
+            memo: "Save",
+            amount: -4000,
+          },
+          acct2!.id
+        );
+
+        expect((await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id)))[0]?.balance).toBe(14000);
+
+        // Convert to regular transaction
+        const updated = await updateTransaction(db, transfer.id, {
+          transferAccountId: null,
+          payee: "Store",
+          categoryId: cat1Id,
+        });
+
+        expect(updated?.transferAccountId).toBeNull();
+        expect(updated?.transferStatus).toBeNull();
+        expect(updated?.categoryId).toBe(cat1Id);
+
+        // acct2 balance should be restored to 10000
+        expect((await db.select().from(schema.accounts).where(eq(schema.accounts.id, acct2!.id)))[0]?.balance).toBe(10000);
+      });
+
+      it("rejects converting a transaction to a transfer to the same account", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+
+        const txn = await createTransaction(db, {
+          accountId,
+          categoryId: null,
+          date: "2026-08-01",
+          payee: "Store",
+          memo: "",
+          amount: -1000,
+        });
+
+        await expect(
+          updateTransaction(db, txn!.id, {
+            transferAccountId: accountId,
+          })
+        ).rejects.toThrow(/transfer account must differ from source account/);
+      });
+
       it("forces categoryId to null when updating a split parent", async () => {
         const db = openMigratedDb();
         const { accountId, cat1Id, cat2Id } = await seedTestData(db);
