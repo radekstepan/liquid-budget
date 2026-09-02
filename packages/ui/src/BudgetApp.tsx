@@ -229,7 +229,7 @@ export function BudgetApp({
       ? (initialView as View)
       : "budget"
   );
-  const [month, setMonth] = useState(initialMonth ?? todayISO().slice(0, 7));
+  const [month, setMonth] = useState(initialMonth ?? DEMO_MONTH);
   const [monthCount, setMonthCount] = useLocalStorage<number>(
     "ynab:budget:monthCount",
     3,

@@ -37,6 +37,8 @@ export type TransactionSavePayload = {
 };
 
 export type DraftSubRow = {
+  id?: number;
+  payee?: string;
   categoryId: number | null;
   transferAccountId: number | null;
   amount: string;
@@ -195,6 +197,8 @@ export function TransactionModal({
   const [subRows, setSubRows] = useState<DraftSubRow[]>(
     initialChildren
       ? initialChildren.map((c) => ({
+          id: c.id,
+          payee: c.payee,
           categoryId: c.categoryId ?? null,
           transferAccountId: c.transferAccountId ?? null,
           amount: (num(c.amount) / 100).toFixed(2),
@@ -328,6 +332,8 @@ export function TransactionModal({
             finalCatId = r.categoryId ? Number(r.categoryId) : null;
           }
           return {
+            id: r.id,
+            payee: r.payee,
             categoryId: finalCatId,
             transferAccountId: r.transferAccountId ?? null,
             amount: dollarsToCents(evalAmount(r.amount)),
