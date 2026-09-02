@@ -1404,7 +1404,10 @@ export async function bulkUpdateTransactions(
 
       if (existing.transferAccountId != null) {
         const finalCatId = "categoryId" in setFields ? (setFields.categoryId as number | null) : existing.categoryId;
-        const incMonth = "incomeMonth" in setFields ? (setFields.incomeMonth as string | null) : null;
+        const incMonth =
+          "incomeMonth" in setFields
+            ? (setFields.incomeMonth as string | null)
+            : (existing.incomeMonth ?? null);
         const classification = classifyBoundaryTransfer({
           srcOnBudget,
           destOnBudget: destOnBudget ?? true,
