@@ -2183,7 +2183,6 @@ describe("AccountModal", () => {
       name: "Chequing",
       kind: "liquid",
       groupLabel: "Liquid",
-      balance: 12500,
       onBudget: true,
     });
   });

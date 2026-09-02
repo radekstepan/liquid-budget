@@ -1917,7 +1917,7 @@ export function AccountModal({
     name: string;
     kind: "liquid" | "credit" | "offbudget";
     groupLabel: string;
-    balance: number;
+    balance?: number;
     onBudget: boolean;
   }) => void;
   /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
@@ -1944,17 +1944,22 @@ export function AccountModal({
     setUnarchiving(false);
   }, [initial?.id]);
 
+  const isEdit = !!initial;
+  const isArchived = Boolean(initial?.archived);
+  const txCount = transactionCount ?? 0;
+
   const groupLabel = kind === "liquid" ? "Liquid" : kind === "credit" ? "Credit Cards" : "Retirement";
   const save = () => {
     if (!name.trim()) return;
     const b = evalAmount(balance) ?? 0;
     const bCents = dollarsToCents(b);
     const finalBalance = kind === "credit" ? -Math.abs(bCents) : bCents;
-    onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget" });
+    if (isEdit) {
+      onSave({ name: name.trim(), kind, groupLabel, onBudget: kind !== "offbudget" });
+    } else {
+      onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget" });
+    }
   };
-  const isEdit = !!initial;
-  const isArchived = Boolean(initial?.archived);
-  const txCount = transactionCount ?? 0;
 
   const confirmDelete = async () => {
     if (!onDelete) return;
