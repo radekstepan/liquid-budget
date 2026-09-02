@@ -27,6 +27,7 @@ const accounts: Account[] = [
   { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "10000", onBudget: true, sort: 0 },
   { id: 2, name: "Credit", kind: "credit", groupLabel: "Cards", balance: "-5000", onBudget: true, sort: 1 },
   { id: 3, name: "Brokerage", kind: "offbudget", groupLabel: "Off Budget", balance: "50000", onBudget: false, sort: 2 },
+  { id: 4, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "20000", onBudget: true, sort: 3 },
 ];
 
 const categories: Category[] = [
@@ -941,7 +942,7 @@ describe("TransactionModal", () => {
       });
     });
 
-    it("disables destination account select and mode toggle when editing an existing transfer (BUG-04)", () => {
+    it("enables destination select and allows switching to single, but disables split when editing a transfer", () => {
       const initial: Transaction = {
         id: 101,
         accountId: 1,
@@ -964,14 +965,123 @@ describe("TransactionModal", () => {
         />
       );
 
-      // Destination select must be disabled to prevent silently ignored destination edits
+      // Destination select is enabled to allow re-routing
       const transferToBtn = screen.getByRole("button", { name: /transfer to/i });
-      expect(transferToBtn).toBeDisabled();
+      expect(transferToBtn).toBeEnabled();
 
-      // Mode toggle must disable Single and Split buttons
-      expect(screen.getByRole("button", { name: /^single$/i })).toBeDisabled();
-      expect(screen.getByRole("button", { name: /^split$/i })).toBeDisabled();
+      // Mode toggle enables Single and Transfer, but disables Split
+      expect(screen.getByRole("button", { name: /^single$/i })).toBeEnabled();
       expect(screen.getByRole("button", { name: /^transfer$/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /^split$/i })).toBeDisabled();
+    });
+
+    it("allows re-routing destination account on an existing transfer and emits updated transferAccountId", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 101,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Transfer : Credit",
+        memo: "",
+        amount: "-5000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      pickFromOpenSearchableByValue(/transfer to/i, "4");
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 101,
+          transferAccountId: 4,
+          payee: "Transfer : Savings",
+        })
+      );
+    });
+
+    it("allows converting an existing transfer to a single transaction and emits transferAccountId: null", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 101,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Transfer : Credit",
+        memo: "",
+        amount: "-5000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^single$/i }));
+      fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), { target: { value: "Grocery Store" } });
+      pickFromOpenSearchableByValue(/category/i, "10");
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 101,
+          transferAccountId: null,
+          categoryId: 10,
+          payee: "Grocery Store",
+        })
+      );
+    });
+
+    it("disables Single and Transfer mode buttons for an initial split transaction", () => {
+      const parent: Transaction = {
+        id: 10,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-06-10",
+        payee: "Split Store",
+        memo: "",
+        amount: "-10000",
+        cleared: true,
+      };
+      const children: Transaction[] = [
+        { id: 11, parentId: 10, accountId: 1, categoryId: 10, date: "2026-06-10", payee: "Split Store", memo: "", amount: "-6000", cleared: true },
+        { id: 12, parentId: 10, accountId: 1, categoryId: 11, date: "2026-06-10", payee: "Split Store", memo: "", amount: "-4000", cleared: true },
+      ];
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={parent}
+          allTransactions={[parent, ...children]}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+
+      expect(screen.getByRole("button", { name: /^single$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^transfer$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^split$/i })).toBeEnabled();
     });
   });
 
@@ -2060,6 +2170,48 @@ describe("RecurringModal", () => {
     };
     expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, transferAccountId: null, amount: 400000 });
     expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, transferAccountId: 3, amount: -50000 });
+  });
+
+  it("converts a recurring transfer to a single transaction and emits transferAccountId: null", () => {
+    const onSave = vi.fn();
+    const initialRecurring = {
+      id: 50,
+      accountId: 1,
+      categoryId: null,
+      transferAccountId: 2,
+      payee: "Transfer : Credit",
+      memo: "Monthly auto-transfer",
+      amount: "-25000",
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+      active: true,
+      flagColor: null,
+      subTransactions: [],
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initialRecurring as any}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^single$/i }));
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), { target: { value: "Landlord" } });
+    pickFromOpenSearchableByValue(/category/i, "10");
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 50,
+        transferAccountId: null,
+        categoryId: 10,
+        payee: "Landlord",
+      })
+    );
   });
 });
 

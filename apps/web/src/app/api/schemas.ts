@@ -37,8 +37,15 @@ export const TransactionCreateSchema = z
     flagColor: TransactionFlagSchema.nullable().optional(),
     incomeMonth: ISOMonthSchema.nullable().optional(),
     subTransactions: z.array(SubTransactionSchema).min(2).optional(),
+    cleared: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .transform((data) => {
+    if (data.cleared !== undefined && data.status === undefined) {
+      data.status = data.cleared ? "c" : "u";
+    }
+    return data;
+  });
 
 export const TransactionPatchSchema = z
   .object({
@@ -55,8 +62,15 @@ export const TransactionPatchSchema = z
     flagColor: TransactionFlagSchema.nullable().optional(),
     incomeMonth: ISOMonthSchema.nullable().optional(),
     subTransactions: z.array(SubTransactionSchema).min(2).optional(),
+    cleared: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .transform((data) => {
+    if (data.cleared !== undefined && data.status === undefined) {
+      data.status = data.cleared ? "c" : "u";
+    }
+    return data;
+  });
 
 export const TransactionBulkDeleteSchema = z
   .object({
@@ -213,6 +227,7 @@ export const RecurringCreateSchema = z
     frequency: z.string().min(1).max(50),
     nextDate: ISODateSchema,
     anchorDay: z.number().int().min(1).max(31).nullable().optional(),
+    active: z.boolean().optional().default(true),
     flagColor: z.enum(["red", "orange", "yellow", "green", "blue", "purple"]).nullable().optional(),
     subTransactions: z.array(SubTransactionSchema).min(2).optional(),
   })

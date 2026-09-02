@@ -547,8 +547,8 @@ export async function createSplitWithChildren(
  *     `accountId` (the whole split lives on one account).
  *   - Split children may not change `accountId` (the whole split lives on
  *     one account).
- *   - Transfers may not change `transferAccountId` (would require
- *     re-routing the mirrored balance). Use delete + recreate.
+ *   - Transfers may change `transferAccountId` (re-routes both source
+ *     and destination balances).
  *
  * Balance accounting:
  *   - regular: reverse old, apply new

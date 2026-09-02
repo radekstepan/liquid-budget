@@ -154,6 +154,7 @@ export async function POST(req: Request) {
       frequency: body.frequency,
       nextDate: body.nextDate,
       anchorDay: body.anchorDay,
+      active: body.active,
       flagColor: body.flagColor,
       transferAccountId: body.transferAccountId ?? null,
       subTransactions: body.subTransactions?.map((c) => ({

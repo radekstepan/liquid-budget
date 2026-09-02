@@ -319,7 +319,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
     await expect(transferToSpan).toBeVisible();
     const transferToField = transferToSpan.locator("xpath=..");
     const transferToBtn = transferToField.locator('button[aria-haspopup="listbox"]').first();
-    await expect(transferToBtn).toBeDisabled();
+    await expect(transferToBtn).toBeEnabled();
 
     const accountSpan = editModal.locator("span.y-label", { hasText: "Account" }).first();
     await expect(accountSpan).toBeVisible();
