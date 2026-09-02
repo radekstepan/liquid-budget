@@ -1,134 +1,62 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import type { Account, Category, CategoryGroup, Recurring, RecurringSubTransaction, SubTransaction, Transaction, TransactionDuplicateFlag, TransactionFlagColor } from "@ynab/logic";
-import { todayISO, num, evalAmount, getSplitChildren, assertSplitsBalanced, nextMonthKey, adjustDateShortcut, RECURRING_FREQUENCIES, dollarsToCents } from "@ynab/logic";
+import type {
+  Account,
+  Category,
+  CategoryGroup,
+  DraftSubRowInput,
+  Recurring,
+  RecurringFormData,
+  RecurringSavePayload,
+  RecurringSubTransaction,
+  SingleRecurringSavePayload,
+  SingleTransactionSavePayload,
+  SplitRecurringSavePayload,
+  SplitTransactionSavePayload,
+  SubTransaction,
+  Transaction,
+  TransactionDuplicateFlag,
+  TransactionFlagColor,
+  TransactionFormData,
+  TransactionSavePayload,
+  TransferRecurringSavePayload,
+  TransferTransactionSavePayload,
+} from "@ynab/logic";
+import {
+  adjustDateShortcut,
+  assertSplitsBalanced,
+  canBuildRecurringPayload,
+  canBuildTransactionPayload,
+  dollarsToCents,
+  evalAmount,
+  getSplitChildren,
+  nextMonthKey,
+  num,
+  RECURRING_FREQUENCIES,
+  todayISO,
+  toRecurringPayload,
+  toTransactionPayload,
+} from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
 export { BulkEditTransactionsModal } from "./BulkEditModal.js";
+export type {
+  SingleTransactionSavePayload,
+  TransferTransactionSavePayload,
+  SplitTransactionSavePayload,
+  TransactionSavePayload,
+  SingleRecurringSavePayload,
+  TransferRecurringSavePayload,
+  SplitRecurringSavePayload,
+  RecurringSavePayload,
+};
 
 const inputClass = "w-full py-[3px]";
 
-export type SingleTransactionSavePayload = {
-  mode: "single";
-  id?: number;
-  accountId: number;
-  categoryId: number | null;
-  date: string;
-  payee: string;
-  memo: string;
-  amount: number;
-  status: "u" | "c" | "r";
-  flagColor?: TransactionFlagColor | null;
-  transferAccountId?: null;
-  incomeMonth?: string | null;
-  subTransactions?: undefined;
-};
-
-export type TransferTransactionSavePayload = {
-  mode: "transfer";
-  id?: number;
-  accountId: number;
-  transferAccountId: number;
-  categoryId?: number | null;
-  date: string;
-  payee: string;
-  memo: string;
-  amount: number;
-  status: "u" | "c" | "r";
-  transferStatus?: "u" | "c" | "r";
-  flagColor?: TransactionFlagColor | null;
-  incomeMonth?: string | null;
-  subTransactions?: undefined;
-};
-
-export type SplitTransactionSavePayload = {
-  mode: "split";
-  id?: number;
-  accountId: number;
-  date: string;
-  payee: string;
-  memo: string;
-  amount: number;
-  status: "u" | "c" | "r";
-  flagColor?: TransactionFlagColor | null;
-  categoryId?: null;
-  transferAccountId?: null;
-  incomeMonth?: null;
-  subTransactions: SubTransaction[];
-};
-
-export type TransactionSavePayload =
-  | SingleTransactionSavePayload
-  | TransferTransactionSavePayload
-  | SplitTransactionSavePayload;
-
-export type SingleRecurringSavePayload = {
-  mode: "single";
-  id?: number;
-  accountId: number;
-  categoryId: number | null;
-  payee: string;
-  memo?: string;
-  amount: number;
-  frequency: string;
-  nextDate: string;
-  anchorDay?: number | null;
-  active: boolean;
-  flagColor?: TransactionFlagColor | null;
-  transferAccountId?: null;
-  subTransactions?: undefined;
-};
-
-export type TransferRecurringSavePayload = {
-  mode: "transfer";
-  id?: number;
-  accountId: number;
-  transferAccountId: number;
-  categoryId?: number | null;
-  payee: string;
-  memo?: string;
-  amount: number;
-  frequency: string;
-  nextDate: string;
-  anchorDay?: number | null;
-  active: boolean;
-  flagColor?: TransactionFlagColor | null;
-  subTransactions?: undefined;
-};
-
-export type SplitRecurringSavePayload = {
-  mode: "split";
-  id?: number;
-  accountId: number;
-  categoryId?: null;
-  transferAccountId?: null;
-  payee: string;
-  memo?: string;
-  amount: number;
-  frequency: string;
-  nextDate: string;
-  anchorDay?: number | null;
-  active: boolean;
-  flagColor?: TransactionFlagColor | null;
-  subTransactions: { categoryId: number | null; transferAccountId?: number | null; amount: number; memo?: string }[];
-};
-
-export type RecurringSavePayload =
-  | SingleRecurringSavePayload
-  | TransferRecurringSavePayload
-  | SplitRecurringSavePayload;
-
-export type DraftSubRow = {
-  id?: number;
-  payee?: string;
-  categoryId: number | null;
-  transferAccountId: number | null;
-  amount: string;
-  memo: string;
-};
+export type DraftSubRow = DraftSubRowInput;
 
 /**
  * The single transaction entry point. Supports three modes that the user
@@ -308,6 +236,8 @@ export function TransactionModal({
         parentCents,
         subRows.map((r) => ({
           ...r,
+          categoryId: r.categoryId ? Number(r.categoryId) : null,
+          transferAccountId: r.transferAccountId ? Number(r.transferAccountId) : null,
           amount: dollarsToCents(evalAmount(r.amount)),
         }))
       );
@@ -357,154 +287,34 @@ export function TransactionModal({
     }
   };
 
-  const save = () => {
-    const a = evalAmount(amount);
-    if (a == null || !accountId) return;
-    const amountCents = dollarsToCents(a);
-    const finalStatus: "u" | "c" | "r" = cleared
-      ? (initial?.status === "r" ? "r" : "c")
-      : "u";
-
-    if (mode === "transfer") {
-      if (!payee.trim() && !transferAccountId) return;
-      if (!transferAccountId) return;
-      if (Number(transferAccountId) === accountId) return;
-      if (isBoundaryOutflow && (categoryId === "" || categoryId === "__deferred__" || categoryId == null)) {
-        return;
-      }
-      const destName = otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? "";
-      const oldDestName = isInitialTransfer
-        ? otherAccounts.find((a) => a.id === Number(initial?.transferAccountId))?.name
-        : "";
-      let finalPayee: string;
-      if (!initial) {
-        finalPayee = payee.trim() || `Transfer : ${destName || "Unknown"}`;
-      } else if (!isInitialTransfer) {
-        finalPayee = `Transfer : ${destName || "Unknown"}`;
-      } else {
-        const hadStandardPayee = !payee.trim() || (oldDestName && payee.trim() === `Transfer : ${oldDestName}`);
-        finalPayee = hadStandardPayee ? `Transfer : ${destName || "Unknown"}` : payee.trim();
-      }
-
-      let finalCatId: number | null = null;
-      let incMonth: string | null = null;
-      if (isTransferBoundary) {
-        if (isBoundaryOutflow) {
-          finalCatId = Number(categoryId);
-        } else {
-          const isDeferred = categoryId === "__deferred__";
-          finalCatId = categoryId === "" || isDeferred ? null : Number(categoryId);
-          incMonth = isDeferred ? (incomeMonth || nextMonthKey(date.slice(0, 7))) : null;
-        }
-      }
-      onSave({
-        mode: "transfer",
-        id: initial?.id,
-        accountId,
-        categoryId: finalCatId,
-        date,
-        payee: finalPayee,
-        memo: memo.trim(),
-        amount: amountCents,
-        status: finalStatus,
-        flagColor: savedFlagColor,
-        transferAccountId: Number(transferAccountId),
-        incomeMonth: incMonth,
-      });
-      return;
-    }
-
-    if (mode === "split") {
-      if (!payee.trim()) return;
-      if (subValidation) return;
-      onSave({
-        mode: "split",
-        id: initial?.id,
-        accountId,
-        categoryId: null,
-        date,
-        payee: payee.trim(),
-        memo: memo.trim(),
-        amount: amountCents,
-        status: finalStatus,
-        flagColor: savedFlagColor,
-        transferAccountId: null,
-        incomeMonth: null,
-        subTransactions: subRows.map((r) => {
-          const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
-          const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
-          let finalCatId: number | null = null;
-          if (r.transferAccountId) {
-            finalCatId = isBoundary ? (r.categoryId ? Number(r.categoryId) : null) : null;
-          } else if (isOffBudget) {
-            finalCatId = null;
-          } else {
-            finalCatId = r.categoryId ? Number(r.categoryId) : null;
-          }
-          return {
-            id: r.id,
-            payee: r.payee,
-            categoryId: finalCatId,
-            transferAccountId: r.transferAccountId ?? null,
-            amount: dollarsToCents(evalAmount(r.amount)),
-            memo: r.memo,
-          };
-        }),
-      });
-      return;
-    }
-
-    // single
-    if (!payee.trim()) return;
-    const isDeferred = !isOffBudget && categoryId === "__deferred__";
-    const finalCatId = isOffBudget || categoryId === "" || isDeferred ? null : Number(categoryId);
-    const incMonth = isDeferred ? (incomeMonth || nextMonthKey(date.slice(0, 7))) : null;
-
-    onSave({
-      mode: "single",
-      id: initial?.id,
-      accountId,
-      categoryId: finalCatId,
-      date,
-      payee: payee.trim(),
-      memo: memo.trim(),
-      amount: amountCents,
-      status: finalStatus,
-      flagColor: savedFlagColor,
-      incomeMonth: incMonth,
-      transferAccountId: null,
-    });
+  const formData: TransactionFormData = {
+    mode,
+    id: initial?.id,
+    accountId,
+    categoryId,
+    date,
+    payee,
+    memo,
+    amount,
+    cleared,
+    flagColor,
+    transferAccountId,
+    incomeMonth,
+    subRows,
+  };
+  const builderOptions = {
+    accounts,
+    initial,
   };
 
-  const canSave = (() => {
-    const evaled = evalAmount(amount);
-    if (evaled == null || Number.isNaN(evaled) || dollarsToCents(evaled) === 0 || !accountId) return false;
-    if (mode === "transfer") {
-      if (!transferAccountId || Number(transferAccountId) === accountId) return false;
-      if (isBoundaryOutflow) {
-        return categoryId !== "" && categoryId !== "__deferred__" && categoryId != null;
-      }
-      return true;
+  const save = () => {
+    const payload = toTransactionPayload(formData, builderOptions);
+    if (payload) {
+      onSave(payload);
     }
-    if (mode === "split") {
-      const hasInvalidBoundaryChild = subRows.some((r) => {
-        if (!r.transferAccountId) return false;
-        const dest = otherAccounts.find((a) => a.id === r.transferAccountId);
-        if (!dest) return false;
-        const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
-        if (!isBoundary) return false;
-        const rAmount = dollarsToCents(evalAmount(r.amount));
-        const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
-        if (netDelta <= 0) {
-          return !r.categoryId;
-        }
-        return false;
-      });
-      if (hasInvalidBoundaryChild) return false;
-      return Boolean(payee.trim()) && subValidation === null;
-    }
-    return Boolean(payee.trim());
-  })();
+  };
+
+  const canSave = canBuildTransactionPayload(formData, builderOptions);
 
   return (
     <Modal
@@ -1398,6 +1208,8 @@ export function RecurringModal({
         parentCents,
         subRows.map((r) => ({
           ...r,
+          categoryId: r.categoryId ? Number(r.categoryId) : null,
+          transferAccountId: r.transferAccountId ? Number(r.transferAccountId) : null,
           amount: dollarsToCents(evalAmount(r.amount)),
         }))
       );
@@ -1429,131 +1241,35 @@ export function RecurringModal({
     }
   };
 
-  const save = () => {
-    const a = evalAmount(amount);
-    if (a == null || !accountId) return;
-    const amountCents = dollarsToCents(a);
-
-    if (mode === "transfer") {
-      if (!transferAccountId) return;
-      if (Number(transferAccountId) === accountId) return;
-      if (isBoundaryOutflow && (categoryId === "" || categoryId == null)) {
-        return;
-      }
-      const destName = otherAccounts.find((x) => x.id === Number(transferAccountId))?.name ?? "";
-      let finalCatId: number | null = null;
-      if (isTransferBoundary) {
-        if (isBoundaryOutflow) {
-          finalCatId = Number(categoryId);
-        } else {
-          finalCatId = categoryId === "" ? null : Number(categoryId);
-        }
-      }
-      onSave({
-        mode: "transfer",
-        id: initial?.id,
-        accountId,
-        categoryId: finalCatId,
-        payee: payee.trim() || `Transfer : ${destName}`,
-        memo: memo.trim(),
-        amount: amountCents,
-        frequency,
-        nextDate,
-        anchorDay: initial?.anchorDay,
-        active,
-        flagColor,
-        transferAccountId: Number(transferAccountId),
-      });
-      return;
-    }
-
-    if (mode === "split") {
-      if (!payee.trim()) return;
-      if (subValidation) return;
-      onSave({
-        mode: "split",
-        id: initial?.id,
-        accountId,
-        categoryId: null,
-        transferAccountId: null,
-        payee: payee.trim(),
-        memo: memo.trim(),
-        amount: amountCents,
-        frequency,
-        nextDate,
-        anchorDay: initial?.anchorDay,
-        active,
-        flagColor,
-        subTransactions: subRows.map((r) => {
-          const dest = r.transferAccountId ? otherAccounts.find((a) => a.id === r.transferAccountId) : null;
-          const isBoundary = dest != null && Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
-          let finalCatId: number | null = null;
-          if (r.transferAccountId) {
-            finalCatId = isBoundary ? (r.categoryId ? Number(r.categoryId) : null) : null;
-          } else if (isOffBudget) {
-            finalCatId = null;
-          } else {
-            finalCatId = r.categoryId ? Number(r.categoryId) : null;
-          }
-          return {
-            categoryId: finalCatId,
-            transferAccountId: r.transferAccountId ?? null,
-            amount: dollarsToCents(evalAmount(r.amount)),
-            memo: r.memo,
-          };
-        }),
-      });
-      return;
-    }
-
-    // single
-    if (!payee.trim()) return;
-    onSave({
-      mode: "single",
-      id: initial?.id,
-      accountId,
-      categoryId: isOffBudget || categoryId === "" ? null : Number(categoryId),
-      payee: payee.trim(),
-      memo: memo.trim(),
-      amount: amountCents,
-      frequency,
-      nextDate,
-      anchorDay: initial?.anchorDay,
-      active,
-      flagColor,
-      transferAccountId: null,
-    });
+  const formData: RecurringFormData = {
+    mode,
+    id: initial?.id,
+    accountId,
+    categoryId,
+    payee,
+    memo,
+    amount,
+    frequency,
+    nextDate,
+    anchorDay: initial?.anchorDay,
+    active,
+    flagColor,
+    transferAccountId,
+    subRows,
+  };
+  const builderOptions = {
+    accounts,
+    initial,
   };
 
-  const canSave = (() => {
-    const evaled = evalAmount(amount);
-    if (evaled == null || Number.isNaN(evaled) || dollarsToCents(evaled) === 0 || !accountId) return false;
-    if (mode === "transfer") {
-      if (!transferAccountId || Number(transferAccountId) === accountId) return false;
-      if (isBoundaryOutflow) {
-        return categoryId !== "" && categoryId != null;
-      }
-      return true;
+  const save = () => {
+    const payload = toRecurringPayload(formData, builderOptions);
+    if (payload) {
+      onSave(payload);
     }
-    if (mode === "split") {
-      const hasInvalidBoundaryChild = subRows.some((r) => {
-        if (!r.transferAccountId) return false;
-        const dest = otherAccounts.find((a) => a.id === r.transferAccountId);
-        if (!dest) return false;
-        const isBoundary = Boolean(selectedAccount?.onBudget) !== Boolean(dest.onBudget);
-        if (!isBoundary) return false;
-        const rAmount = dollarsToCents(evalAmount(r.amount));
-        const netDelta = (selectedAccount?.onBudget ? rAmount : 0) + (dest.onBudget ? -rAmount : 0);
-        if (netDelta <= 0) {
-          return !r.categoryId;
-        }
-        return false;
-      });
-      if (hasInvalidBoundaryChild) return false;
-      return Boolean(payee.trim()) && subValidation === null;
-    }
-    return Boolean(payee.trim());
-  })();
+  };
+
+  const canSave = canBuildRecurringPayload(formData, builderOptions);
 
   return (
     <Modal
