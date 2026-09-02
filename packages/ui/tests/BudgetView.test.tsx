@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { BudgetView } from "../src/BudgetView.js";
-import type { BudgetResult } from "@ynab/logic";
+import { type BudgetResult, todayISO } from "@ynab/logic";
 
 function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
   return {
@@ -144,25 +144,21 @@ describe("BudgetView", () => {
 
   it("calls onSetMonth with today when the Today button is clicked on a non-current month", () => {
     const onSetMonth = vi.fn();
-    renderView({ currentMonth: "2025-01", onSetMonth });
+    const thisMonth = todayISO().slice(0, 7);
+    const nonCurrentMonth = thisMonth === "2025-01" ? "2025-02" : "2025-01";
+    renderView({ currentMonth: nonCurrentMonth, onSetMonth });
     const todayBtn = screen.getByRole("button", { name: /today/i });
     fireEvent.click(todayBtn);
-    // The exact value depends on today's real month, but it should match the
-    // YYYY-MM prefix of todayISO() and not be 2025-01.
     expect(onSetMonth).toHaveBeenCalledTimes(1);
     const arg = onSetMonth.mock.calls[0]![0] as string;
     expect(arg).toMatch(/^\d{4}-\d{2}$/);
-    expect(arg).not.toBe("2025-01");
+    expect(arg).toBe(thisMonth);
   });
 
   it("does not render a Today button when already on the current month", () => {
-    // 2026-06 is never "today" in CI, but the demo seed uses it; verify that
-    // when currentMonth differs from today's real month, the Today button
-    // appears. (We don't have a deterministic month to test "on" with, but
-    // we can at least confirm the prior branch renders it.)
-    renderView();
-    // Either Today is present (if today != 2026-06) or absent (if today == 2026-06).
-    // Verify the surrounding toolbar still works.
+    const thisMonth = todayISO().slice(0, 7);
+    renderView({ currentMonth: thisMonth });
+    expect(screen.queryByRole("button", { name: /today/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /master category/i })).toBeInTheDocument();
   });
 

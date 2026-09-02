@@ -50,14 +50,14 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     // 1. Create a recurring split rule with total -$150:
     //    - Sub 1: -$100 (Category 1)
     //    - Sub 2: -$50 (Category 2)
-    //    - Frequency: Monthly, nextDate = 2026-08-01
+    //    - Frequency: Monthly, nextDate = 2026-06-01
     await page.getByRole("button", { name: "Add Recurring" }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await modal.locator('input[inputmode="decimal"]').first().fill("-150.00");
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-08-01");
+    await modal.locator('input[type="date"]').first().fill("2026-06-01");
 
     // Sub 1: -$100 (pick first category)
     const childAmounts = modal.locator('input[inputmode="decimal"]');
@@ -92,6 +92,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
+    await page.getByPlaceholder("Search register").fill(payee);
     const txRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(txRow).toBeVisible();
     await expect(txRow).toContainText("Split (Multiple Categories)");
@@ -126,7 +127,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     await gotoRecurring(page);
     const updatedCard = page.locator(".y-panel").filter({ hasText: payee }).first();
     await expect(updatedCard).toBeVisible();
-    await expect(updatedCard).toContainText("2026-09-01");
+    await expect(updatedCard).toContainText("2026-07-01");
   });
 
   test("posting a recurring transfer transaction updates both accounts and advances next date", async ({ page }) => {
@@ -219,7 +220,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
   });
 
   test("scheduled drawer in register displays due transactions with inline Enter Now action", async ({ page }) => {
-    // 1. Ensure a recurring transaction has nextDate <= today.
+    // 1. Ensure a recurring transaction has nextDate in the past (guaranteed due regardless of test date).
     const stamp = Date.now();
     const payee = `PW Sched Drawer ${stamp}`;
 
@@ -227,7 +228,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     const modal = page.locator(".y-modal").last();
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
     await modal.locator('input[inputmode="decimal"]').first().fill("-75.00");
-    await modal.locator('input[type="date"]').first().fill("2026-08-01");
+    await modal.locator('input[type="date"]').first().fill("2020-01-01");
     await modal.getByRole("button", { name: "Save" }).click();
     await expect(modal).toBeHidden();
 
@@ -245,7 +246,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     // 4. Verify due transaction is listed with its payee, account, and amount.
     const schedRow = page.locator(".y-scheduled-table tbody tr").filter({ hasText: payee }).first();
     await expect(schedRow).toBeVisible();
-    await expect(schedRow).toContainText("2026-08-01");
+    await expect(schedRow).toContainText("2020-01-01");
     await expect(schedRow).toContainText("$75.00");
 
     // 5. Click inline row to open modal and click "Enter Now".
@@ -258,6 +259,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     await expect(editModal).toBeHidden();
 
     // 6. Verify the row moves into the active register as a real transaction.
+    await page.getByPlaceholder("Search register").fill(payee);
     const activeTxRow = page
       .locator("table.y-table:not(.y-scheduled-table) tbody tr")
       .filter({ hasText: payee })
@@ -268,7 +270,7 @@ test.describe("Recurring & Scheduled Transaction Edge Cases", () => {
     // 7. Verify the scheduled drawer updates its due status / nextDate advances.
     const updatedSchedRow = page.locator(".y-scheduled-table tbody tr").filter({ hasText: payee }).first();
     if (await updatedSchedRow.isVisible()) {
-      await expect(updatedSchedRow).toContainText("2026-09-01");
+      await expect(updatedSchedRow).toContainText("2020-02-01");
     }
   });
 

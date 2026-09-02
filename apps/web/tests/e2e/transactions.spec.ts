@@ -38,12 +38,13 @@ test("adds a new transaction via the modal and renders the row", async ({ page }
   // we use a scoped locator to target just the dialog.
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("12.34");
-  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
 
   // Modal closes and the new row appears.
   await expect(modal).toBeHidden();
+  await page.getByPlaceholder("Search register").fill(uniquePayee);
   await expect(page.getByRole("row").filter({ hasText: uniquePayee })).toBeVisible();
 });
 
@@ -57,7 +58,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
-  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
@@ -110,8 +111,9 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
   const targetRow = rows.first();
   const hasFlag = (await page.locator("table.y-table thead th", { hasText: /^F$/ }).count()) > 0;
   const payeeColIdx = hasFlag ? 4 : 3;
-  const payeeText = (await targetRow.locator("td").nth(payeeColIdx).textContent())?.trim();
-  expect(payeeText).toBeTruthy();
+  const rawPayee = (await targetRow.locator("td").nth(payeeColIdx).textContent())?.trim();
+  const cleanPayee = rawPayee?.replace(/^[▶▼]\s*/, "");
+  expect(cleanPayee).toBeTruthy();
 
   await targetRow.click();
 
@@ -120,7 +122,7 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
   // The payee field is closed: it shows the value on its trigger button.
   await expect(
     editModal.locator(".y-searchlist-trigger").first()
-  ).toHaveText(payeeText!);
+  ).toHaveText(cleanPayee!);
 });
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
@@ -128,11 +130,12 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(addModal, "e.g. Whole Foods", uniquePayee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
+  await page.getByPlaceholder("Search register").fill(uniquePayee);
   const createdRow = page.getByRole("row").filter({ hasText: uniquePayee });
   await expect(createdRow).toBeVisible();
 
@@ -164,7 +167,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   await addModal.locator(".y-searchlist-trigger").first().click();
   await addModal.locator('input[placeholder^="Transfer"]').first().fill(transferPayee);
   await addModal.locator('input[inputmode="decimal"]').first().fill("-30.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
 
   // Pick destination account (the searchable "Transfer to" field)
   await openSearchField(addModal, "Select account…");
@@ -175,6 +178,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
+  await page.getByPlaceholder("Search register").fill(transferPayee);
   const createdRow = page.getByRole("row").filter({ hasText: transferPayee });
   await expect(createdRow.first()).toBeVisible();
 
@@ -205,7 +209,7 @@ test("deletes a split transaction via modal showing split warning notice", async
   // Switch to Split mode
   await addModal.getByRole("button", { name: /^split$/i }).click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(addModal, "e.g. Whole Foods", splitPayee);
 
   // Sub-row 1 amount

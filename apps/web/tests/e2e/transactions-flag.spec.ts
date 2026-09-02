@@ -32,12 +32,13 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("4.20");
-  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("radio", { name: "Red" }).click();
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
+  await page.getByPlaceholder("Search register").fill(payee);
   const row = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(row).toBeVisible();
   await expect(register.locator("thead th", { hasText: /^F$/ })).toHaveCount(1);
@@ -50,6 +51,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
+  await page.getByPlaceholder("Search register").fill(payee);
   const reloadedRow = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(reloadedRow.getByRole("button", { name: "Flag: Blue" })).toBeVisible();
 
@@ -71,7 +73,7 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   const payload = {
     accountId: account.id,
     categoryId: category.id,
-    date: "2026-09-01",
+    date: "2026-06-01",
     payee,
     memo: "",
     amount: -1234,
@@ -99,6 +101,7 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
+  await page.getByPlaceholder("Search register").fill(payee);
 
   const row = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(row).toBeVisible();

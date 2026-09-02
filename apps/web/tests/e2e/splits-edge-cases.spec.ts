@@ -55,7 +55,7 @@ test.describe("Split Transaction Edge Cases", () => {
 
     // Set parent details
     await fillSearchlist(addModal, "e.g. Whole Foods", payee);
-    await addModal.locator('input[type="date"]').first().fill("2026-09-15");
+    await addModal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = addModal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-100.00");
 
@@ -72,6 +72,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await expect(addModal).toBeHidden();
 
     // 2. Open edit modal by clicking the split parent row.
+    await page.getByPlaceholder("Search register").fill(payee);
     const parentRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(parentRow).toBeVisible();
     await parentRow.click();
@@ -109,7 +110,7 @@ test.describe("Split Transaction Edge Cases", () => {
     expect(childAmounts).toEqual([-7000, -5000]);
 
     // 8. Verify category activity in budget reflects -$70 for Groceries and -$50 for Household.
-    const budgetMonth = computeBudget(budgetData, "2026-09");
+    const budgetMonth = computeBudget(budgetData, "2026-06");
     const allCatRows = budgetMonth.groups.flatMap((g) => g.rows);
     const grocCat = allCatRows.find((r) => r.category.name === "Groceries");
     const houseCat = allCatRows.find((r) => r.category.name === "Household");
@@ -130,7 +131,7 @@ test.describe("Split Transaction Edge Cases", () => {
 
     // 2. Set total amount to -$100.
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-100.00");
 
@@ -186,7 +187,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("-80.00");
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
 
     const catInput = await openSearchField(modal, "Income: Available this month");
@@ -202,6 +203,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const initialCheckingBal = num(initialChecking.balance);
 
     // 3. Click row to open edit modal, switch segmented toggle from "Single" to "Split".
+    await page.getByPlaceholder("Search register").fill(payee);
     const row = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(row).toBeVisible();
     await row.click();
@@ -254,7 +256,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-60.00");
 
@@ -300,6 +302,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await page.reload();
     await waitForReady(page);
     await gotoAllTransactions(page);
+    await page.getByPlaceholder("Search register").fill(payee);
 
     const standaloneRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(standaloneRow).toBeVisible();
@@ -321,7 +324,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-100.00");
 
@@ -375,7 +378,7 @@ test.describe("Split Transaction Edge Cases", () => {
 
     const beforeData = await getBudgetData(page);
     const checkingBefore = num(beforeData.accounts.find((a) => a.id === 1)!.balance);
-    const budgetMonthBefore = computeBudget(beforeData, "2026-09");
+    const budgetMonthBefore = computeBudget(beforeData, "2026-06");
     const tbbBefore = budgetMonthBefore.tbb;
 
     // 1. Open Add Transaction modal in Split mode with parent amount = +$3,000 (Paycheck net deposit).
@@ -384,7 +387,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-01");
+    await modal.locator('input[type="date"]').first().fill("2026-06-01");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("3000.00");
 
@@ -420,7 +423,7 @@ test.describe("Split Transaction Edge Cases", () => {
     expect(checkingAfter).toBe(checkingBefore + 300000);
 
     // 8. Verify To Be Budgeted (TBB) increases by +$3,600.
-    const budgetMonthAfter = computeBudget(afterData, "2026-09");
+    const budgetMonthAfter = computeBudget(afterData, "2026-06");
     expect(budgetMonthAfter.tbb).toBeCloseTo(tbbBefore + 360000, 1);
 
     // 9. Verify category outflows reflect the split legs.
@@ -455,7 +458,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-200.00");
 
@@ -493,7 +496,11 @@ test.describe("Split Transaction Edge Cases", () => {
     await eqRow.click();
     await expect(page.locator(".y-toolbar").getByText("EQ Bank", { exact: true })).toBeVisible();
 
-    const transferRow = page.getByRole("row").filter({ hasText: "Transfer : TD Unlimited Chequing" }).first();
+    const transferRow = page
+      .getByRole("row")
+      .filter({ hasText: "Transfer : TD Unlimited Chequing" })
+      .filter({ hasText: "$80.00" })
+      .first();
     await expect(transferRow).toBeVisible();
     await expect(transferRow).toContainText("$80.00");
   });
@@ -509,7 +516,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const createRes = await page.request.post("/api/transactions", {
       data: {
         accountId: 1,
-        date: "2026-09-15",
+        date: "2026-06-15",
         payee: parentPayee,
         amount: -7000,
         subTransactions: [
@@ -534,6 +541,7 @@ test.describe("Split Transaction Edge Cases", () => {
     expect(initialPayees).toEqual([subPayee1, subPayee2].sort());
 
     // 3. Open edit modal by clicking the parent row.
+    await page.getByPlaceholder("Search register").fill(parentPayee);
     const parentRow = page.getByRole("row").filter({ hasText: parentPayee }).first();
     await expect(parentRow).toBeVisible();
     await parentRow.click();
@@ -570,7 +578,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.getByRole("button", { name: /^split$/i }).click();
 
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
-    await modal.locator('input[type="date"]').first().fill("2026-09-15");
+    await modal.locator('input[type="date"]').first().fill("2026-06-15");
     const allDecimals = modal.locator('input[inputmode="decimal"]');
     await allDecimals.nth(0).fill("-60.00");
 

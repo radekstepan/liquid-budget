@@ -76,7 +76,7 @@ test("sorts transactions by flag when the F header is clicked", async ({ page })
     [payeePurple, "purple"],
   ] as const) {
     const res = await page.request.post("/api/transactions", {
-      data: { accountId: 1, date: "2026-09-01", payee, amount: -100, status: "u", memo: "", flagColor },
+      data: { accountId: 1, date: "2026-06-01", payee, amount: -100, status: "u", memo: "", flagColor },
     });
     ids.push((await res.json()).id);
   }
@@ -122,12 +122,12 @@ test("sorts transactions by payee when the header is clicked", async ({ page }) 
 
   const a = await (
     await page.request.post("/api/transactions", {
-      data: { accountId: 1, date: "2026-09-01", payee: payeeA, amount: -100, status: "u", memo: "" },
+      data: { accountId: 1, date: "2026-06-01", payee: payeeA, amount: -100, status: "u", memo: "" },
     })
   ).json();
   const z = await (
     await page.request.post("/api/transactions", {
-      data: { accountId: 1, date: "2026-09-01", payee: payeeZ, amount: -100, status: "u", memo: "" },
+      data: { accountId: 1, date: "2026-06-01", payee: payeeZ, amount: -100, status: "u", memo: "" },
     })
   ).json();
 
@@ -135,6 +135,7 @@ test("sorts transactions by payee when the header is clicked", async ({ page }) 
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
+  await page.getByPlaceholder("Search register").fill(String(stamp));
 
   const register = page.locator("table.y-table:not(.y-scheduled-table)");
   const payeeTh = register.locator("thead th").filter({ hasText: "Payee" });

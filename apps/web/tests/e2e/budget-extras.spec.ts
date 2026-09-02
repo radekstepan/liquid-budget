@@ -17,8 +17,12 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("Today button appears when viewing other months and jumps to current month", async ({ page }) => {
-  // Since the demo budget starts on DEMO_MONTH (2026-06) which is not the current calendar month,
-  // the "Today" button is visible in the toolbar.
+  // Navigate away from today's month to ensure the Today button appears
+  const prevBtn = page.getByRole("button", { name: /previous month/i });
+  await prevBtn.click();
+
+  // If the prev button was on today's month, clicking prev moves to non-today month;
+  // if already on non-today month, Today button is visible.
   const todayBtn = page.getByRole("button", { name: /Today/i });
   await expect(todayBtn).toBeVisible();
 

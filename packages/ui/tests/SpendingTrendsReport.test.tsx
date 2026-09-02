@@ -725,5 +725,81 @@ describe("SpendingTrendsReport", () => {
       expect(cell.textContent?.trim()).toBe("—");
     });
   });
+
+  it("highlights chart bar segments for the hovered category and dims others when hovering over table row", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    // Initially, all segments are rendered without dimming
+    const barSegments = document.querySelectorAll("g[clip-path] > g");
+    expect(barSegments.length).toBeGreaterThan(0);
+    barSegments.forEach((g) => {
+      expect((g as HTMLElement).style.opacity).toBe("1");
+    });
+
+    // Hover over "Everyday Expenses" master category row in table
+    const everydayRow = screen.getByText("Everyday Expenses").closest("tr")!;
+    fireEvent.mouseEnter(everydayRow);
+
+    // Matching segments should have opacity 1 and fillOpacity 1, other segments should have opacity 0.2
+    let dimmedCount = 0;
+    let highlightedCount = 0;
+    barSegments.forEach((g) => {
+      const el = g as HTMLElement;
+      if (el.style.opacity === "0.2") {
+        dimmedCount++;
+      } else if (el.style.opacity === "1") {
+        highlightedCount++;
+        const rect = el.querySelector("rect")!;
+        expect(rect.getAttribute("fill-opacity")).toBe("1");
+      }
+    });
+    expect(highlightedCount).toBeGreaterThan(0);
+    expect(dimmedCount).toBeGreaterThan(0);
+
+    // Mouse leave table row resets all back to normal
+    fireEvent.mouseLeave(everydayRow);
+    barSegments.forEach((g) => {
+      expect((g as HTMLElement).style.opacity).toBe("1");
+      const rect = g.querySelector("rect")!;
+      expect(rect.getAttribute("fill-opacity")).toBe("0.88");
+    });
+  });
+
+  it("highlights subcategory segments when hovering over subcategory row in drilled group view", () => {
+    const data = makeTestData();
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+    // Drill into Everyday Expenses
+    fireEvent.click(screen.getByText("Everyday Expenses"));
+
+    const barSegments = document.querySelectorAll("g[clip-path] > g");
+    expect(barSegments.length).toBeGreaterThan(0);
+
+    // Hover over "Groceries" row in subcategory table
+    const groceriesRow = screen.getByText("Groceries").closest("tr")!;
+    fireEvent.mouseEnter(groceriesRow);
+
+    let dimmedCount = 0;
+    let highlightedCount = 0;
+    barSegments.forEach((g) => {
+      const el = g as HTMLElement;
+      if (el.style.opacity === "0.2") {
+        dimmedCount++;
+      } else if (el.style.opacity === "1") {
+        highlightedCount++;
+        const rect = el.querySelector("rect")!;
+        expect(rect.getAttribute("fill-opacity")).toBe("1");
+      }
+    });
+    expect(highlightedCount).toBeGreaterThan(0);
+    expect(dimmedCount).toBeGreaterThan(0);
+
+    // Mouse leave resets
+    fireEvent.mouseLeave(groceriesRow);
+    barSegments.forEach((g) => {
+      expect((g as HTMLElement).style.opacity).toBe("1");
+    });
+  });
 });
 

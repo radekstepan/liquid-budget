@@ -653,18 +653,22 @@ describe("BudgetApp", () => {
 
   it("anchors Projections view to current month even when viewing historical budget months (BUG-16)", () => {
     const { api } = makeApi();
-    // Render BudgetApp initialized to a historical month (e.g., 2024-01)
-    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialMonth="2024-01" />);
+    const currentMonth = todayISO().slice(0, 7);
+    const histMonth = currentMonth === "2024-01" ? "2023-01" : "2024-01";
+    const { year: hYear, month0: hMonth0 } = parseMonthKey(histMonth);
+    const histLabel = `${MONTHS_LONG[hMonth0]?.slice(0, 3)} ${String(hYear).slice(2)}`;
+
+    // Render BudgetApp initialized to a historical month
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialMonth={histMonth} />);
 
     // Switch to Projections view
     fireEvent.click(screen.getByRole("button", { name: /projections/i }));
 
-    // Month 0 should be labeled with current month (todayISO) rather than Jan 24
-    const currentMonth = todayISO().slice(0, 7);
+    // Month 0 should be labeled with current month (todayISO) rather than historical month
     const { year, month0 } = parseMonthKey(currentMonth);
     const expectedCurrentLabel = `${MONTHS_LONG[month0]?.slice(0, 3)} ${String(year).slice(2)}`;
 
-    expect(screen.queryByText("Jan 24")).not.toBeInTheDocument();
+    expect(screen.queryByText(histLabel)).not.toBeInTheDocument();
     expect(screen.getAllByText(expectedCurrentLabel).length).toBeGreaterThan(0);
   });
 

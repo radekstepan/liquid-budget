@@ -423,13 +423,15 @@ export const Sidebar = memo(function Sidebar({
           </div>
         )}
 
-        <Button
-          onClick={onAddAccount}
-          variant="primary"
-          className="mx-2 mt-2 mb-3 h-[24px] w-[calc(100%-1rem)]"
-        >
-          <Icon name="plus" size={11} color="#fff" /> Add Account
-        </Button>
+        <div className="flex justify-center mt-2 mb-3">
+          <Button
+            onClick={onAddAccount}
+            variant="primary"
+            className="h-[24px]"
+          >
+            <Icon name="plus" size={11} color="#fff" /> Add Account
+          </Button>
+        </div>
       </div>
 
       <div className="y-side-section-divider" />

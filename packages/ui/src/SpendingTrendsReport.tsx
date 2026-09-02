@@ -94,6 +94,7 @@ const StaticChart = memo(function StaticChart({
   selectedMonth,
   trends,
   colorMap,
+  hoveredConstituentId,
   onDrillSegment,
   onToggleMonth,
 }: {
@@ -102,6 +103,7 @@ const StaticChart = memo(function StaticChart({
   selectedMonth: string | null;
   trends: SpendingTrendsResult;
   colorMap: Map<number, string>;
+  hoveredConstituentId?: number | null;
   onDrillSegment: (id: number) => void;
   onToggleMonth: (month: string) => void;
 }) {
@@ -215,15 +217,23 @@ const StaticChart = memo(function StaticChart({
             <g clipPath={`url(#${gid}-bar-${mIdx})`}>
               {mBar.segments.map((seg, sIdx) => {
               const segTruncated = mBar.truncated && sIdx === mBar.segments.length - 1;
+              const isDimmed = hoveredConstituentId != null && seg.id !== hoveredConstituentId;
+              const isHighlight = hoveredConstituentId != null && seg.id === hoveredConstituentId;
               return (
-                <g key={seg.id}>
+                <g
+                  key={seg.id}
+                  style={{
+                    opacity: isDimmed ? 0.2 : 1,
+                    transition: "opacity 120ms ease",
+                  }}
+                >
                   <rect
                     x={seg.x}
                     y={seg.y}
                     width={seg.width}
                     height={Math.max(1, seg.height)}
                     fill={seg.color}
-                    fillOpacity={0.88}
+                    fillOpacity={isHighlight ? 1 : 0.88}
                     onClick={() => {
                       if (trends.drillLevel !== "category") {
                         onDrillSegment(seg.id);
@@ -359,14 +369,19 @@ const ConstituentTable = memo(function ConstituentTable({
   onDrill,
   drillLevel = "all",
   overallTotal = 0,
+  hoveredId = null,
+  onHoverId,
 }: {
   constituents: SpendingTrendsConstituent[];
   colorMap: Map<number, string>;
   onDrill: (id: number) => void;
   drillLevel?: "all" | "group" | "category";
   overallTotal?: number;
+  hoveredId?: number | null;
+  onHoverId?: (id: number | null) => void;
 }) {
-  const [hoverId, setHoverId] = useState<number | null>(null);
+  const [localHoverId, setLocalHoverId] = useState<number | null>(null);
+  const activeHoverId = hoveredId !== undefined ? hoveredId : localHoverId;
 
   return (
     <table className="y-table w-full min-w-full" style={{ minWidth: 450 }}>
@@ -381,15 +396,25 @@ const ConstituentTable = memo(function ConstituentTable({
       <tbody>
         {constituents.map((c, idx) => {
           const color = colorMap.get(c.id) ?? "#888";
-          const isHovered = hoverId === c.id;
+          const isHovered = activeHoverId === c.id;
 
           return (
             <tr
               key={c.id}
               className={`y-row ${idx % 2 === 1 ? "alt" : ""} ${isHovered ? "is-sel" : ""} cursor-pointer group`}
-              onMouseEnter={() => setHoverId(c.id)}
-              onMouseLeave={() => setHoverId(null)}
-              onClick={() => onDrill(c.id)}
+              onMouseEnter={() => {
+                setLocalHoverId(c.id);
+                onHoverId?.(c.id);
+              }}
+              onMouseLeave={() => {
+                setLocalHoverId(null);
+                onHoverId?.(null);
+              }}
+              onClick={() => {
+                setLocalHoverId(null);
+                onHoverId?.(null);
+                onDrill(c.id);
+              }}
               title={`Click to drill down into ${c.name}`}
             >
               <td>
@@ -569,12 +594,16 @@ export function SpendingTrendsReport({
     y: number;
   } | null>(null);
 
+  // Hovered constituent from table to highlight in chart
+  const [hoveredConstituentId, setHoveredConstituentId] = useState<number | null>(null);
+
   // Reset drilldown when resetKey changes (e.g. clicking "Reports" in sidebar)
   useEffect(() => {
     setDrillGroupId(null);
     setDrillCategoryId(null);
     setSelectedMonth(null);
     setHover(null);
+    setHoveredConstituentId(null);
   }, [resetKey]);
 
   // Category filter state — persisted in localStorage
@@ -1020,12 +1049,14 @@ export function SpendingTrendsReport({
     setDrillCategoryId(null);
     setSelectedMonth(null);
     setHover(null);
+    setHoveredConstituentId(null);
   }, []);
 
   const handleGoToGroup = useCallback(() => {
     setDrillCategoryId(null);
     setSelectedMonth(null);
     setHover(null);
+    setHoveredConstituentId(null);
   }, []);
 
   const handleClearMonth = useCallback(() => {
@@ -1033,6 +1064,7 @@ export function SpendingTrendsReport({
   }, []);
 
   const handleDrillSegment = useCallback((constituentId: number) => {
+    setHoveredConstituentId(null);
     if (trends.drillLevel === "all") {
       setDrillGroupId(constituentId);
       setDrillCategoryId(null);
@@ -1440,6 +1472,7 @@ export function SpendingTrendsReport({
               selectedMonth={selectedMonth}
               trends={trends}
               colorMap={colorMap}
+              hoveredConstituentId={hoveredConstituentId}
               onDrillSegment={handleDrillSegment}
               onToggleMonth={handleToggleMonth}
             />
@@ -1495,6 +1528,8 @@ export function SpendingTrendsReport({
                 onDrill={handleDrillSegment}
                 drillLevel={trends.drillLevel}
                 overallTotal={trends.total}
+                hoveredId={hoveredConstituentId}
+                onHoverId={setHoveredConstituentId}
               />
             )}
           </div>

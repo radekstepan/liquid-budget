@@ -39,11 +39,13 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("15.00");
-    await modal.locator('input[type="date"]').first().fill("2026-09-01");
+    await modal.locator('input[type="date"]').first().fill("2026-06-01");
     await fillSearchlist(modal, "e.g. Whole Foods", p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
+
+  await page.getByPlaceholder("Search register").fill(String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -75,8 +77,8 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
 
   // Create two distinct transactions with different amounts
   const txConfigs = [
-    { payee: payee1, amount: "20.00", date: "2026-09-01" },
-    { payee: payee2, amount: "40.00", date: "2026-09-02" },
+    { payee: payee1, amount: "20.00", date: "2026-06-01" },
+    { payee: payee2, amount: "40.00", date: "2026-06-02" },
   ];
 
   for (const cfg of txConfigs) {
@@ -88,6 +90,8 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
+
+  await page.getByPlaceholder("Search register").fill(String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -136,11 +140,13 @@ test("bulk deletes selected transactions", async ({ page }) => {
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("18.00");
-    await modal.locator('input[type="date"]').first().fill("2026-09-01");
+    await modal.locator('input[type="date"]').first().fill("2026-06-01");
     await fillSearchlist(modal, "e.g. Whole Foods", p);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
+
+  await page.getByPlaceholder("Search register").fill(String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -184,10 +190,12 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("33.00");
-  await addModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(addModal, "e.g. Whole Foods", payee);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
+
+  await page.getByPlaceholder("Search register").fill(String(stamp));
 
   const createdRow = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(createdRow).toBeVisible();
@@ -237,7 +245,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await pickSubCategory(modal, page, 2);
   await allDecimals.nth(1).fill("-60");
   await allDecimals.nth(2).fill("-40");
-  await modal.locator('input[type="date"]').first().fill("2026-09-01");
+  await modal.locator('input[type="date"]').first().fill("2026-06-01");
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -248,10 +256,12 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await page.getByRole("button", { name: /Add.*Transaction/i }).click();
   const companionModal = page.locator(".y-modal").last();
   await companionModal.locator('input[inputmode="decimal"]').first().fill("10.00");
-  await companionModal.locator('input[type="date"]').first().fill("2026-09-01");
+  await companionModal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(companionModal, "e.g. Whole Foods", companionPayee);
   await companionModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(companionModal).toBeHidden();
+
+  await page.getByPlaceholder("Search register").fill(stamp);
 
   const parentRow = page.getByRole("row").filter({ hasText: uniquePayee }).first();
   await expect(parentRow).toBeVisible();
@@ -273,7 +283,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await editModal.getByText("Cleared Status", { exact: true }).click();
   await editModal.getByRole("button", { name: "Uncleared" }).click();
   await editModal.getByText("Date", { exact: true }).click();
-  await editModal.locator('input[type="date"]').fill("2026-09-15");
+  await editModal.locator('input[type="date"]').fill("2026-06-15");
 
   await editModal.getByRole("button", { name: /Review Changes/i }).click();
   await expect(editModal.getByText("Confirm Changes (2 Transactions)")).toBeVisible();
@@ -281,7 +291,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await expect(editModal).toBeHidden();
 
   // The parent row reflects the new status and date in the register.
-  await expect(parentRow).toContainText("2026-09-15");
+  await expect(parentRow).toContainText("2026-06-15");
   await expect(parentRow.locator(".y-cleared")).toHaveText("U");
 
   // All split members (parent + children) share the new status and date.
@@ -298,6 +308,6 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   expect(family).toHaveLength(3);
   for (const row of family) {
     expect(row.status).toBe("u");
-    expect(row.date).toBe("2026-09-15");
+    expect(row.date).toBe("2026-06-15");
   }
 });

@@ -60,6 +60,23 @@ describe("Sidebar", () => {
     expect(onAddAccount).toHaveBeenCalledTimes(1);
   });
 
+  it("renders Add Account button centered and not stretched full width", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    const btn = screen.getByRole("button", { name: /add account/i });
+    expect(btn.parentElement).toHaveClass("flex");
+    expect(btn.parentElement).toHaveClass("justify-center");
+    expect(btn.className).not.toContain("w-[calc(100%-1rem)]");
+  });
+
   it("calls onSelectAccount with the account id", () => {
     const onSelectAccount = vi.fn();
     render(

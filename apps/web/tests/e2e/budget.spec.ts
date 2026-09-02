@@ -101,9 +101,9 @@ test("year dropdown range is derived from data and includes a future cap", async
   expect(optionsText).toContain("2026");
   const years = optionsText.map((t) => Number(t)).filter((n) => Number.isFinite(n));
   const maxOption = Math.max(...years);
-  // The current year is 2026 (per today's date and the seed); the
-  // future cap adds 5 more years for a max of 2031.
-  expect(maxOption).toBeGreaterThanOrEqual(2031);
+  // The future cap adds at least 5 years beyond current year and data anchor year.
+  const currentYear = new Date().getFullYear();
+  expect(maxOption).toBeGreaterThanOrEqual(currentYear + 5);
   await page.keyboard.press("Escape");
 });
 
