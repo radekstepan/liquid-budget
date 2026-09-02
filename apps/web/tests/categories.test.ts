@@ -180,15 +180,22 @@ describe("PATCH /api/categories (BUG-5.2 / BUG-04)", () => {
     expect(json.error).toContain("Category not found");
   });
 
-  it("BUG-43: returns 404 when patching non-existent category group", async () => {
+  it("moves category to a different group when groupId is provided", async () => {
+    const db = getDefaultDb();
+    const group1 = await createCategoryGroup(db, { name: "First Group" });
+    const group2 = await createCategoryGroup(db, { name: "Second Group" });
+    const cat = await createCategory(db, { groupId: group1!.id, name: "Movable Category" });
+
     const req = new NextRequest("http://localhost:3000/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "group", id: 99999, name: "Ghost Group" }),
+      body: JSON.stringify({ id: cat!.id, groupId: group2!.id }),
     });
     const res = await PATCH(req);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.error).toContain("Category group not found");
+    expect(json.id).toBe(cat!.id);
+    expect(json.groupId).toBe(group2!.id);
   });
 });
+

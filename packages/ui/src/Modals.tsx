@@ -420,7 +420,6 @@ export function TransactionModal({
                 active={mode === m}
                 onClick={() => switchingMode(m)}
                 className="flex-1 capitalize"
-                disabled={(!!isInitialSplit && m !== "split") || (!!isInitialTransfer && m === "split")}
               >
                 {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
               </Button>
@@ -476,7 +475,7 @@ export function TransactionModal({
                 onChange={(v) => setAccountId(Number(v))}
                 className="w-full"
                 searchable
-                disabled={mode === "transfer"}
+                disabled={mode === "transfer" || (isEdit && isInitialSplit)}
               >
                 {availableAccounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
@@ -871,10 +870,13 @@ export function CategoryModal({
   otherCategories?: Category[];
   groups?: CategoryGroup[];
   onClose: () => void;
-  onSave: (v: { name: string; goalTarget: number | null; carryover?: number; overspendCarriesOver?: boolean }) => void;
+  onSave: (v: { name: string; groupId?: number; goalTarget: number | null; carryover?: number; overspendCarriesOver?: boolean }) => void;
   onDelete?: (opts?: { moveToCategoryId?: number }) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  const [groupId, setGroupId] = useState<number | undefined>(
+    initial?.groupId ?? (groups && groups[0]?.id ? groups[0].id : undefined)
+  );
   const [hasGoal, setHasGoal] = useState(!!initial?.goalTarget);
   const initGoal = initial?.goalTarget ? num(initial.goalTarget) / 100 : 0;
   const [goal, setGoal] = useState(initGoal !== 0 ? initGoal.toFixed(2) : "");
@@ -951,6 +953,7 @@ export function CategoryModal({
                   name.trim() &&
                   onSave({
                     name: name.trim(),
+                    groupId: groupId ? Number(groupId) : undefined,
                     goalTarget: hasGoal && evalAmount(goal) != null ? dollarsToCents(evalAmount(goal)) : null,
                     carryover: hasCarryover && evalAmount(carryover) != null ? dollarsToCents(evalAmount(carryover)) : 0,
                     overspendCarriesOver,
@@ -1016,6 +1019,21 @@ export function CategoryModal({
           <Field label="Name">
             <TextField value={name} onChange={(e) => setName(e.target.value)} autoFocus className={inputClass} />
           </Field>
+          {groups && groups.length > 0 && (
+            <Field label="Group">
+              <Select
+                value={groupId ?? ""}
+                onChange={(v) => setGroupId(Number(v))}
+                className="w-full"
+              >
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <div className="mb-2">
             <Checkbox
               checked={hasGoal}
@@ -1309,7 +1327,6 @@ export function RecurringModal({
             active={mode === m}
             onClick={() => switchingMode(m)}
             className="flex-1 capitalize"
-            disabled={!!isInitialSplit && m === "single"}
           >
             {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
           </Button>
@@ -1362,7 +1379,7 @@ export function RecurringModal({
             onChange={(v) => setAccountId(Number(v))}
             className="w-full"
             searchable
-            disabled={mode === "transfer"}
+            disabled={mode === "transfer" || (!!initial && isInitialSplit)}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
@@ -1913,7 +1930,7 @@ export function AccountModal({
                 value={kind}
                 onChange={(v) => setKind(v as "liquid" | "credit" | "offbudget")}
                 className="w-full"
-                disabled={isEdit}
+                disabled={isEdit && txCount > 0}
               >
                 <option value="liquid">Checking / Savings / Cash</option>
                 <option value="credit">Credit Card</option>
@@ -1937,10 +1954,14 @@ export function AccountModal({
               )}
             </Field>
           </div>
-          {isEdit && (
+          {isEdit && txCount > 0 && (
             <div className="y-hint text-[11px] pt-1">
-              Account type and starting balance are locked after creation. To adjust the
-              working balance, add a transaction or use the Reconcile flow.
+              Account type is locked because this account has {txCount} transaction{txCount === 1 ? "" : "s"}.
+            </div>
+          )}
+          {isEdit && txCount === 0 && (
+            <div className="y-hint text-[11px] pt-1">
+              Starting balance is locked after creation. To adjust the working balance, add a transaction or use the Reconcile flow.
             </div>
           )}
         </>

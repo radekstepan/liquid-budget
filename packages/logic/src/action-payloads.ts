@@ -198,6 +198,7 @@ export type AccountSavePayload = {
 
 export type CategorySavePayload = {
   name: string;
+  groupId?: number;
   goalTarget: number | null;
   carryover?: number | null;
   overspendCarriesOver?: boolean;

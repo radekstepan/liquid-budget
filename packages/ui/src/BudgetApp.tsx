@@ -169,6 +169,7 @@ export type BudgetAppApi = {
     categoryId: number | null,
     v: {
       name: string;
+      groupId?: number;
       goalTarget: number | null;
       carryover?: number | null;
       overspendCarriesOver?: boolean;

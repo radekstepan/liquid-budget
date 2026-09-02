@@ -395,13 +395,20 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       await db.update(recurring).set(p).where(eq(recurring.id, id));
     }
 
-    if ((patch.transferAccountId !== undefined && norm.isTransfer) || (patch.subTransactions !== undefined)) {
+    const touchesStructure =
+      patch.transferAccountId !== undefined ||
+      patch.subTransactions !== undefined ||
+      patch.categoryId !== undefined ||
+      norm.isSplit ||
+      norm.isTransfer;
+
+    if (touchesStructure) {
       await db
         .delete(recurringSubTransactions)
         .where(eq(recurringSubTransactions.recurringId, id));
-      if (norm.isSplit) {
+      if (norm.isSplit && norm.subTransactions) {
         let sort = 0;
-        for (const c of norm.subTransactions!) {
+        for (const c of norm.subTransactions) {
           const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
           let categoryId: number | null = null;
           const childAmount = assertValidAmount(c.amount);
@@ -437,6 +444,12 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
     const [row] = await db.select().from(recurring).where(eq(recurring.id, id));
     return row ?? null;
   });
+}
+
+export async function deleteRecurringSubTransactions(db: Database, recurringId: number): Promise<void> {
+  await db
+    .delete(recurringSubTransactions)
+    .where(eq(recurringSubTransactions.recurringId, recurringId));
 }
 
 export async function deleteRecurring(db: Database, id: number): Promise<boolean> {
