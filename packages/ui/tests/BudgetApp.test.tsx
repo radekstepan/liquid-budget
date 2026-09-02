@@ -735,6 +735,7 @@ describe("BudgetApp", () => {
   });
 
   it("BUG-44: recovers from null or corrupt values in localStorage without crashing", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("ynab:transactions:sort", JSON.stringify(null));
     window.localStorage.setItem("ynab:budget:collapsed", JSON.stringify(null));
     window.localStorage.setItem("ynab:budget:monthCount", JSON.stringify("invalid"));
@@ -753,6 +754,9 @@ describe("BudgetApp", () => {
     expect(screen.getByPlaceholderText("Search register")).toBeInTheDocument();
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:transactions:sort")).toBeNull();
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("BUG-09: computes avgSpentByCategory as true 3-month average across multiple transactions per month", () => {

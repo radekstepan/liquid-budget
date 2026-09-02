@@ -42,13 +42,20 @@ describe("useLocalStorage", () => {
   });
 
   it("falls back to the initial value and removes key when stored JSON is corrupt", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("test-key", "not-json");
     const { result } = renderHook(() => useLocalStorage("test-key", "fallback"));
     expect(result.current[0]).toBe("fallback");
     expect(window.localStorage.getItem("test-key")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Error reading localStorage key "test-key":',
+      expect.any(SyntaxError)
+    );
+    warnSpy.mockRestore();
   });
 
   it("falls back to initial value and removes key when stored JSON fails validation", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("test-key", JSON.stringify(null));
     const isRecord = (v: unknown): v is Record<string, boolean> =>
       typeof v === "object" && v !== null && !Array.isArray(v);
@@ -57,6 +64,10 @@ describe("useLocalStorage", () => {
     );
     expect(result.current[0]).toEqual({ default: true });
     expect(window.localStorage.getItem("test-key")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Invalid value for localStorage key "test-key", removing stored entry'
+    );
+    warnSpy.mockRestore();
   });
 
   it("accepts valid stored value when validation succeeds", () => {
@@ -71,6 +82,7 @@ describe("useLocalStorage", () => {
   });
 
   it("rejects invalid setValue and does not persist when validation fails", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const isPositiveNumber = (v: unknown): v is number =>
       typeof v === "number" && v > 0;
     const { result } = renderHook(() =>
@@ -81,6 +93,10 @@ describe("useLocalStorage", () => {
     });
     expect(result.current[0]).toBe(10);
     expect(window.localStorage.getItem("test-key")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Attempted to set invalid value for localStorage key "test-key"'
+    );
+    warnSpy.mockRestore();
   });
 
   it("updates internal React state without throwing and logs a console warning when localStorage.setItem throws QuotaExceededError", () => {

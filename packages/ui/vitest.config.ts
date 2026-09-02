@@ -8,6 +8,9 @@ export default defineConfig({
     globals: true,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "tests/**/*.test.tsx"],
     setupFiles: ["./vitest.setup.ts"],
+    onConsoleLog(log: string, type: "stdout" | "stderr"): boolean | void {
+      throw new Error(`Unexpected console output (${type}): ${log}`);
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+    onConsoleLog(log: string, type: "stdout" | "stderr"): boolean | void {
+      throw new Error(`Unexpected console output (${type}): ${log}`);
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

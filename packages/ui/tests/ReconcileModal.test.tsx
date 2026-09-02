@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { ReconcileModal } from "../src/ReconcileModal.js";
 import type { Account, Category, CategoryGroup, Transaction } from "@ynab/logic";
 import { openSearchable } from "./dropdown.js";
@@ -119,12 +119,14 @@ describe("ReconcileModal", () => {
     expect(dateInput).toHaveValue("2026-08-28");
   });
 
-  it("shows the balanced banner and enables Reconcile when statement matches working balance", () => {
+  it("shows the balanced banner and enables Reconcile when statement matches working balance", async () => {
     const { onReconcile } = renderModal();
     expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
     const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
     expect(reconcile).toBeEnabled();
-    fireEvent.click(reconcile);
+    await act(async () => {
+      fireEvent.click(reconcile);
+    });
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 125050,
@@ -147,7 +149,7 @@ describe("ReconcileModal", () => {
     expect(onReconcile).not.toHaveBeenCalled();
   });
 
-  it("enables Reconcile with the chosen adjustment category after arming", () => {
+  it("enables Reconcile with the chosen adjustment category after arming", async () => {
     const { onReconcile } = renderModal();
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
@@ -160,7 +162,9 @@ describe("ReconcileModal", () => {
 
     const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
     expect(reconcile).toBeEnabled();
-    fireEvent.click(reconcile);
+    await act(async () => {
+      fireEvent.click(reconcile);
+    });
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 100000,
@@ -226,14 +230,16 @@ describe("ReconcileModal", () => {
     expect(screen.getByRole("button", { name: /mark for adjustment/i })).toBeDisabled();
   });
 
-  it("allows an expression in the statement balance field", () => {
+  it("allows an expression in the statement balance field", async () => {
     const { onReconcile } = renderModal();
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000 + 250.50" },
     });
     const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
     expect(reconcile).toBeEnabled();
-    fireEvent.click(reconcile);
+    await act(async () => {
+      fireEvent.click(reconcile);
+    });
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 125050,
@@ -275,14 +281,16 @@ describe("ReconcileModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("submits statementDate with a past date when the user changes it", () => {
+  it("submits statementDate with a past date when the user changes it", async () => {
     const { onReconcile } = renderModal();
     fireEvent.change(screen.getByPlaceholderText("YYYY-MM-DD"), {
       target: { value: "2026-07-31" },
     });
     const reconcile = screen.getByRole("button", { name: /^reconcile$/i });
     expect(reconcile).toBeEnabled();
-    fireEvent.click(reconcile);
+    await act(async () => {
+      fireEvent.click(reconcile);
+    });
     expect(onReconcile).toHaveBeenCalledWith({
       accountId: 7,
       statementBalance: 125050,
