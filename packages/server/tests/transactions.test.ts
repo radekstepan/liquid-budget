@@ -3081,6 +3081,46 @@ describe("transactions queries", () => {
         expect(splitInbound.children[1]?.isIncome).toBe(true);
         expect(splitInbound.children[1]?.categoryId).toBeNull();
       });
+
+      it("BUG-01: preserves incomeMonth on boundary income transfers when bulk-updating an unrelated field", async () => {
+        const db = openMigratedDb();
+        const { accountId } = await seedTestData(db);
+        const [offBudgetAcct] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Brokerage",
+            kind: "offbudget",
+            groupLabel: "Tracking Accounts",
+            onBudget: false,
+            balance: 0,
+            sort: 99,
+          })
+          .returning();
+
+        const transfer = await createTransfer(
+          db,
+          {
+            accountId: offBudgetAcct!.id,
+            categoryId: null,
+            date: "2026-01-15",
+            payee: "",
+            memo: "Deferred income",
+            amount: -5000,
+            incomeMonth: "2026-02",
+          },
+          accountId
+        );
+        expect(transfer.incomeMonth).toBe("2026-02");
+
+        await bulkUpdateTransactions(db, [transfer.id], { flagColor: "red" });
+
+        const [row] = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.id, transfer.id));
+        expect(row?.isIncome).toBe(true);
+        expect(row?.incomeMonth).toBe("2026-02");
+      });
     });
 
     describe("Bug 2.7: 1-child collapse reconcile lock", () => {
