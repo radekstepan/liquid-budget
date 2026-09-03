@@ -11,6 +11,7 @@ import {
   createSplitWithChildren,
   createTransaction,
   createTransfer,
+  deleteSplitChildren,
   deleteTransaction,
   TransactionError,
   updateSplit,
@@ -5124,6 +5125,198 @@ describe("transactions queries", () => {
           name: "TransactionError",
           message: "Split transaction cannot be a transfer",
           status: 400,
+        });
+      });
+    });
+
+    describe("Parametrized State-Transition Tests", () => {
+      const MODES = ["single", "transfer", "split"] as const;
+
+      const INITIAL_SRC_BALANCE = 100000;
+      const INITIAL_DEST_BALANCE = 50000;
+      const INITIAL_OTHER_BALANCE = 25000;
+
+      async function setupMatrixDb() {
+        const db = openMigratedDb();
+        const { cat1Id, cat2Id } = await seedTestData(db);
+        await db.delete(schema.transactions);
+
+        const [srcAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", balance: INITIAL_SRC_BALANCE, sort: 1 })
+          .returning();
+        const [destAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Savings", kind: "liquid", groupLabel: "Budget Accounts", balance: INITIAL_DEST_BALANCE, sort: 2 })
+          .returning();
+        const [otherAccount] = await db
+          .insert(schema.accounts)
+          .values({ name: "Other", kind: "liquid", groupLabel: "Budget Accounts", balance: INITIAL_OTHER_BALANCE, sort: 3 })
+          .returning();
+
+        return {
+          db,
+          srcAccount: srcAccount!,
+          destAccount: destAccount!,
+          otherAccount: otherAccount!,
+          cat1Id,
+          cat2Id,
+        };
+      }
+
+      async function createInitial(
+        ctx: Awaited<ReturnType<typeof setupMatrixDb>>,
+        fromMode: (typeof MODES)[number]
+      ) {
+        if (fromMode === "single") {
+          const row = await createTransaction(ctx.db, {
+            accountId: ctx.srcAccount.id,
+            categoryId: ctx.cat1Id,
+            amount: -5000,
+            date: "2026-08-01",
+            payee: "Store",
+            memo: "Initial single",
+          });
+          return { id: row!.id };
+        } else if (fromMode === "transfer") {
+          const row = await createTransaction(ctx.db, {
+            accountId: ctx.srcAccount.id,
+            transferAccountId: ctx.destAccount.id,
+            amount: -5000,
+            date: "2026-08-01",
+            payee: "Transfer : Savings",
+            memo: "Initial transfer",
+          });
+          return { id: row!.id };
+        } else {
+          const split = await createSplitWithChildren(
+            ctx.db,
+            {
+              accountId: ctx.srcAccount.id,
+              amount: -5000,
+              date: "2026-08-01",
+              payee: "Split Store",
+              memo: "Initial split",
+            },
+            [
+              { categoryId: ctx.cat1Id, amount: -3000, memo: "sub 1" },
+              { categoryId: ctx.cat2Id, amount: -2000, memo: "sub 2" },
+            ]
+          );
+          return { id: split.parent.id };
+        }
+      }
+
+      async function updateTo(
+        ctx: Awaited<ReturnType<typeof setupMatrixDb>>,
+        id: number,
+        toMode: (typeof MODES)[number]
+      ) {
+        if (toMode === "single") {
+          await deleteSplitChildren(ctx.db, id);
+          return await updateTransaction(ctx.db, id, {
+            accountId: ctx.srcAccount.id,
+            categoryId: ctx.cat2Id,
+            transferAccountId: null,
+            amount: -6000,
+            date: "2026-08-05",
+            payee: "Updated Store",
+            memo: "Updated single",
+          });
+        } else if (toMode === "transfer") {
+          await deleteSplitChildren(ctx.db, id);
+          return await updateTransaction(ctx.db, id, {
+            accountId: ctx.srcAccount.id,
+            transferAccountId: ctx.destAccount.id,
+            amount: -7000,
+            date: "2026-08-05",
+            payee: "Transfer : Savings",
+            memo: "Updated transfer",
+          });
+        } else {
+          return await updateSplit(
+            ctx.db,
+            id,
+            {
+              amount: -8000,
+              date: "2026-08-05",
+              payee: "Updated Split Store",
+              memo: "Updated split",
+            },
+            [
+              { categoryId: ctx.cat1Id, amount: -5000, memo: "split A" },
+              { categoryId: ctx.cat2Id, amount: -3000, memo: "split B" },
+            ]
+          );
+        }
+      }
+
+      describe.each(MODES)("Transition from %s", (fromMode) => {
+        describe.each(MODES)("to %s", (toMode) => {
+          it(`handles ${fromMode} -> ${toMode} with correct balance ledgers`, async () => {
+            const ctx = await setupMatrixDb();
+            const initial = await createInitial(ctx, fromMode);
+            const res = await updateTo(ctx, initial.id, toMode);
+
+            // 1. Fetch current balances of all accounts
+            const [curSrc] = await ctx.db.select().from(schema.accounts).where(eq(schema.accounts.id, ctx.srcAccount.id));
+            const [curDest] = await ctx.db.select().from(schema.accounts).where(eq(schema.accounts.id, ctx.destAccount.id));
+            const [curOther] = await ctx.db.select().from(schema.accounts).where(eq(schema.accounts.id, ctx.otherAccount.id));
+
+            const srcDelta = curSrc!.balance - INITIAL_SRC_BALANCE;
+            const destDelta = curDest!.balance - INITIAL_DEST_BALANCE;
+            const otherDelta = curOther!.balance - INITIAL_OTHER_BALANCE;
+
+            // Assert balance ledger sum across all accounts
+            if (toMode === "transfer") {
+              // For a transfer: delta(src) + delta(dest) == 0 (zero-sum transfer ledger sum)
+              expect(srcDelta + destDelta + otherDelta).toBe(0);
+              expect(srcDelta).toBe(-7000);
+              expect(destDelta).toBe(7000);
+              expect(otherDelta).toBe(0);
+            } else if (toMode === "single") {
+              expect(srcDelta).toBe(-6000);
+              expect(destDelta).toBe(0);
+              expect(otherDelta).toBe(0);
+              expect(srcDelta + destDelta + otherDelta - (-6000)).toBe(0);
+            } else if (toMode === "split") {
+              expect(srcDelta).toBe(-8000);
+              expect(destDelta).toBe(0);
+              expect(otherDelta).toBe(0);
+              expect(srcDelta + destDelta + otherDelta - (-8000)).toBe(0);
+            }
+
+            // 2. Assert DB row fields match toMode requirements
+            const [dbRow] = await ctx.db.select().from(schema.transactions).where(eq(schema.transactions.id, initial.id));
+            expect(dbRow).toBeDefined();
+
+            const dbChildren = await ctx.db
+              .select()
+              .from(schema.transactions)
+              .where(eq(schema.transactions.parentId, initial.id));
+
+            if (toMode === "single") {
+              expect(dbRow?.amount).toBe(-6000);
+              expect(dbRow?.categoryId).toBe(ctx.cat2Id);
+              expect(dbRow?.transferAccountId).toBeNull();
+              expect(dbRow?.parentId).toBeNull();
+              expect(dbChildren).toHaveLength(0);
+            } else if (toMode === "transfer") {
+              expect(dbRow?.amount).toBe(-7000);
+              expect(dbRow?.transferAccountId).toBe(ctx.destAccount.id);
+              expect(dbRow?.categoryId).toBeNull();
+              expect(dbRow?.parentId).toBeNull();
+              expect(dbChildren).toHaveLength(0);
+            } else if (toMode === "split") {
+              expect(dbRow?.amount).toBe(-8000);
+              expect(dbRow?.categoryId).toBeNull();
+              expect(dbRow?.transferAccountId).toBeNull();
+              expect(dbRow?.parentId).toBeNull();
+              expect(dbChildren).toHaveLength(2);
+              const childSum = dbChildren.reduce((sum, c) => sum + Number(c.amount), 0);
+              expect(childSum).toBe(-8000);
+            }
+          });
         });
       });
     });

@@ -3,6 +3,7 @@ import {
   bulkUpdateTransactions,
   createSplitWithChildren,
   createTransaction,
+  deleteSplitChildren,
   deleteTransaction,
   getDefaultDb,
   TransactionError,
@@ -165,11 +166,22 @@ export async function PATCH(req: Request) {
   }
 
   try {
+    const isExplicitSingle = typeof json === "object" && json !== null && (json as any).mode === "single";
+    const isConvertingSplit =
+      (body.mode === "single" && (body.categoryId !== undefined || body.amount !== undefined || "transferAccountId" in body)) ||
+      (body.mode === "transfer" && "transferAccountId" in body && body.transferAccountId !== undefined);
+
+    if (isConvertingSplit) {
+      await deleteSplitChildren(db, body.id);
+    }
+
     const patch: Parameters<typeof updateTransaction>[2] = {};
     if (body.accountId !== undefined) patch.accountId = body.accountId;
     if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
     if ("transferAccountId" in body && body.transferAccountId !== undefined) {
       patch.transferAccountId = body.transferAccountId;
+    } else if (isExplicitSingle) {
+      patch.transferAccountId = null;
     }
     if (body.date !== undefined) patch.date = body.date;
     if (body.payee !== undefined) patch.payee = body.payee;
