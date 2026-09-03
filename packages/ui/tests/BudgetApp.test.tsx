@@ -789,5 +789,64 @@ describe("BudgetApp", () => {
     // Verify that the view rendered the Groceries category in June 2026
     expect(screen.getAllByText(groceryCat.name).length).toBeGreaterThanOrEqual(1);
   });
+
+  it("navigates to the other account and selects the transaction when clicking the transfer icon in Category column", () => {
+    const { api } = makeApi();
+    const baseData = makeSeedBudgetData();
+    // Account 1: TD Unlimited Chequing, Account 2: EQ Bank
+    const transferTxn = {
+      id: 550,
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: null,
+      date: "2026-06-15",
+      payee: "Transfer : EQ Bank",
+      memo: "Transfer to Savings",
+      amount: "-15000",
+      status: "c" as const,
+      parentId: null,
+    };
+
+    const data: BudgetData = {
+      ...baseData,
+      transactions: [transferTxn, ...baseData.transactions],
+    };
+
+    window.history.pushState(null, "", "/transactions/1");
+    render(
+      <BudgetApp
+        data={data}
+        api={api}
+        initialView="transactions"
+        initialAccount={1}
+      />
+    );
+
+    // Verify currently in Account 1
+    const acct1Btn = screen.getByRole("button", { name: /^TD Unlimited Chequing/ });
+    expect(acct1Btn.className).toContain("is-sel");
+
+    // Find the transfer jump button in the category cell
+    const row = document.querySelector('tr[data-txn-id="550"]');
+    expect(row).not.toBeNull();
+
+    const transferBtn = row!.querySelector('button[aria-label="Go to transfer in EQ Bank"]');
+    expect(transferBtn).not.toBeNull();
+
+    // Click the transfer button
+    fireEvent.click(transferBtn!);
+
+    // Should switch to Account 2
+    const acct2Btn = screen.getByRole("button", { name: /^EQ Bank/ });
+    expect(acct2Btn.className).toContain("is-sel");
+
+    // In Account 2's register, transaction 550 should be selected and checked
+    const rowInAcct2 = document.querySelector('tr[data-txn-id="550"]');
+    expect(rowInAcct2).not.toBeNull();
+    expect(rowInAcct2!.classList.contains("is-sel")).toBe(true);
+
+    const checkbox = rowInAcct2!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
 });
 
