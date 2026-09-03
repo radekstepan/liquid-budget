@@ -139,6 +139,7 @@ export type BulkUpdateTransactionPatch = {
 };
 
 export type SubTransaction = {
+  id?: number;
   entityId?: string | null;
   transferEntityId?: string | null;
   /**
@@ -147,6 +148,7 @@ export type SubTransaction = {
   categoryId: number | null;
   amount: number;
   memo?: string;
+  payee?: string;
   transferAccountId?: number | null;
   transferStatus?: ClearedStatus;
 };
