@@ -763,6 +763,180 @@ describe("TransactionsView", () => {
       expect(screen.getByText("Inflow $40.00")).toBeInTheDocument();
       expect(screen.getByText("Net $40.00")).toBeInTheDocument();
     });
+
+    it("renders transfer icon in Category column instead of 'Transfer' text and navigates to the other account on click", () => {
+      const data = makeSeedBudgetData();
+      const onGoToTransfer = vi.fn();
+      const onEdit = vi.fn();
+
+      // Account 1: TD Unlimited Chequing, Account 2: EQ Bank
+      const transferTxn = {
+        id: 9200,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-07-25",
+        payee: "Transfer : EQ Bank",
+        memo: "Savings transfer",
+        amount: "-5000",
+        status: "c" as const,
+        parentId: null,
+      };
+
+      data.transactions = [transferTxn, ...data.transactions];
+
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={1}
+          onGoToTransfer={onGoToTransfer}
+          onAdd={() => {}}
+          onEdit={onEdit}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+          onFlag={() => {}}
+        />
+      );
+
+      // Verify the text "Transfer" is not in the Category cell for this row
+      const row = document.querySelector('tr[data-txn-id="9200"]');
+      expect(row).not.toBeNull();
+
+      // Find the transfer jump button inside the row
+      const transferBtn = row!.querySelector('button[aria-label="Go to transfer in EQ Bank"]');
+      expect(transferBtn).not.toBeNull();
+      expect(transferBtn).toBeInTheDocument();
+      expect((transferBtn as HTMLElement).style.color).toBe("var(--y-blue)");
+      expect(transferBtn!.closest("td")!.style.color).toBe("var(--y-blue)");
+
+      // Click the transfer button
+      fireEvent.click(transferBtn!);
+
+      // Should call onGoToTransfer with destination account (2) and transaction id (9200)
+      expect(onGoToTransfer).toHaveBeenCalledTimes(1);
+      expect(onGoToTransfer).toHaveBeenCalledWith(2, 9200);
+
+      // Should not trigger onEdit because stopPropagation was called
+      expect(onEdit).not.toHaveBeenCalled();
+    });
+
+    it("navigates to source account when clicking transfer icon on an incoming transfer", () => {
+      const data = makeSeedBudgetData();
+      const onGoToTransfer = vi.fn();
+
+      // Account 1 -> Account 2 transfer
+      const transferTxn = {
+        id: 9201,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-07-25",
+        payee: "Transfer : TD Unlimited Chequing",
+        memo: "Savings deposit",
+        amount: "-5000",
+        status: "c" as const,
+        parentId: null,
+      };
+
+      data.transactions = [transferTxn, ...data.transactions];
+
+      // Viewing from destination account (Account 2)
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={2}
+          onGoToTransfer={onGoToTransfer}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+          onFlag={() => {}}
+        />
+      );
+
+      const row = document.querySelector('tr[data-txn-id="9201"]');
+      expect(row).not.toBeNull();
+
+      const transferBtn = row!.querySelector('button[aria-label="Go to transfer in TD Unlimited Chequing"]');
+      expect(transferBtn).not.toBeNull();
+
+      fireEvent.click(transferBtn!);
+      expect(onGoToTransfer).toHaveBeenCalledWith(1, 9201);
+    });
+
+    it("renders transfer icon for split child transfer leg and navigates to the target account", () => {
+      const data = makeSeedBudgetData();
+      const onGoToTransfer = vi.fn();
+
+      const splitParent = {
+        id: 9300,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-20",
+        payee: "Split with Transfer",
+        memo: "Split parent",
+        amount: "-10000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      };
+      const splitChildExpense = {
+        id: 9301,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-20",
+        payee: "Split with Transfer",
+        memo: "Expense leg",
+        amount: "-6000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: 9300,
+      };
+      const splitChildTransfer = {
+        id: 9302,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-20",
+        payee: "Transfer : EQ Bank",
+        memo: "Transfer leg",
+        amount: "-4000",
+        status: "c" as const,
+        transferAccountId: 2,
+        parentId: 9300,
+      };
+
+      data.transactions = [splitParent, splitChildExpense, splitChildTransfer, ...data.transactions];
+
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={1}
+          onGoToTransfer={onGoToTransfer}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+          onFlag={() => {}}
+        />
+      );
+
+      // Expand split parent
+      const expandBtn = screen.getByRole("button", { name: "Expand split sub-transactions" });
+      fireEvent.click(expandBtn);
+
+      // Child transfer row should be visible with transfer icon
+      const childRow = document.querySelector('tr[data-txn-id="9302"]');
+      expect(childRow).not.toBeNull();
+
+      const transferBtn = childRow!.querySelector('button[aria-label="Go to transfer in EQ Bank"]');
+      expect(transferBtn).not.toBeNull();
+
+      fireEvent.click(transferBtn!);
+      expect(onGoToTransfer).toHaveBeenCalledWith(2, 9302);
+    });
   });
 });
 

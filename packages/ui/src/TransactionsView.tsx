@@ -95,6 +95,7 @@ export const TransactionsView = memo(function TransactionsView({
   data,
   accountFilter,
   focusTransaction,
+  onGoToTransfer,
   onAdd,
   onAddTransfer,
   onEdit,
@@ -118,6 +119,7 @@ export const TransactionsView = memo(function TransactionsView({
   data: BudgetData;
   accountFilter: number | null;
   focusTransaction?: { id: number; nonce: number } | null;
+  onGoToTransfer?: (accountId: number, transactionId: number) => void;
   onAdd: () => void;
   onAddTransfer?: () => void;
   onEdit: (id: number) => void;
@@ -641,18 +643,28 @@ export const TransactionsView = memo(function TransactionsView({
     [filtered, selectedId, onEdit, onCycleStatus, onDelete]
   );
 
-  // Handle focusing/selecting a transaction from external navigation (e.g. Reports)
+  // Handle focusing/selecting a transaction from external navigation (e.g. Reports, Transfer links)
   useEffect(() => {
     if (!focusTransaction || focusTransaction.nonce === lastHandledNonce.current) return;
-    lastHandledNonce.current = focusTransaction.nonce;
 
     const targetId = focusTransaction.id;
     if (search) setSearch("");
     setSelectedIds(new Set([targetId]));
     setSelectedId(targetId);
 
+    const txn = data.transactions.find((x) => x.id === targetId);
+    if (txn?.parentId != null) {
+      setExpandedSplitIds((prev) => {
+        if (prev.has(txn.parentId!)) return prev;
+        const next = new Set(prev);
+        next.add(txn.parentId!);
+        return next;
+      });
+    }
+
     const targetIndex = filtered.findIndex((r) => r.id === targetId);
     if (targetIndex !== -1) {
+      lastHandledNonce.current = focusTransaction.nonce;
       const effH = containerHeight > 0 ? containerHeight : 500;
       const targetScroll = Math.max(0, targetIndex * ROW_HEIGHT - Math.floor(effH / 2));
       if (containerRef.current) {
@@ -660,7 +672,7 @@ export const TransactionsView = memo(function TransactionsView({
       }
       setScrollTop(targetScroll);
     }
-  }, [focusTransaction, filtered, containerHeight, search]);
+  }, [focusTransaction, filtered, containerHeight, search, data.transactions]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white" onKeyDown={handleKeyDown} tabIndex={0}>
@@ -880,13 +892,16 @@ export const TransactionsView = memo(function TransactionsView({
                   const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
                   const isChildRow = t.parentId != null && !isIncoming;
+                  const isTransfer = t.transferAccountId != null && !isSplit;
+                  const otherAccountId = isTransfer
+                    ? accountFilter != null && t.transferAccountId === accountFilter
+                      ? t.accountId
+                      : t.transferAccountId
+                    : null;
+                  const otherAccount = otherAccountId != null ? accountById.get(otherAccountId) : null;
+                  const otherAccountName = otherAccount?.name ?? "Account";
                   const catName =
                     t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
-                  const displayCat = isChildRow
-                    ? (catName || (t.transferAccountId ? "Transfer" : ""))
-                    : isSplit
-                      ? "Split (Multiple Categories)"
-                      : catName || (t.transferAccountId ? "Transfer" : "");
                   const displayPayee = isIncoming
                     ? `Transfer : ${accountById.get(t.accountId)?.name ?? "Unknown"}`
                     : isChildRow && t.transferAccountId != null
@@ -994,10 +1009,29 @@ export const TransactionsView = memo(function TransactionsView({
                       <td
                         className={cx("truncate", isChildRow && "text-[11px]")}
                         style={{
-                          color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
+                          color: isSplit || isTransfer ? "var(--y-blue)" : "var(--y-ink-soft)",
                         }}
                       >
-                        {displayCat}
+                        {isSplit ? (
+                          "Split (Multiple Categories)"
+                        ) : isTransfer && otherAccountId != null ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onGoToTransfer?.(otherAccountId, t.id);
+                            }}
+                            className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-blue-50/80 transition-colors cursor-pointer align-middle"
+                            style={{ color: "var(--y-blue)" }}
+                            title={`Go to transfer in ${otherAccountName}`}
+                            aria-label={`Go to transfer in ${otherAccountName}`}
+                          >
+                            <Icon name="swap" size={11} color="currentColor" />
+                            {catName ? <span className="truncate">{catName}</span> : null}
+                          </button>
+                        ) : (
+                          catName
+                        )}
                       </td>
                       <td className={cx("truncate italic", isChildRow && "text-[11px]")} style={{ color: "var(--y-ink-faint)" }}>
                         {t.memo}
@@ -1304,7 +1338,10 @@ export const TransactionsView = memo(function TransactionsView({
                         <td
                           className="truncate text-[11px]"
                           style={{
-                            color: displayCat.startsWith("Split") ? "var(--y-blue)" : "var(--y-ink-soft)",
+                            color:
+                              displayCat.startsWith("Split") || flavour === "transfer"
+                                ? "var(--y-blue)"
+                                : "var(--y-ink-soft)",
                           }}
                         >
                           {displayCat}

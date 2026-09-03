@@ -254,11 +254,11 @@ describe("BudgetAppShell (BUG-09)", () => {
       expect(patchBody).not.toBeNull();
     });
 
-    // The register should show "Transfer" as the category for the AMEX Payment row
+    // The register should show the transfer button as the category for the AMEX Payment row
     await waitFor(() => {
       const allAmex = screen.getAllByText("AMEX Payment");
-      const row = allAmex.find((el) => el.closest("tr")?.querySelector(".y-cleared"));
-      expect(row?.closest("tr")?.textContent).toContain("Transfer");
+      const row = allAmex.find((el) => el.closest("tr")?.querySelector(".y-cleared"))?.closest("tr");
+      expect(row?.querySelector('button[aria-label*="Go to transfer"]')).not.toBeNull();
     });
 
     // Resolve PATCH so test cleanly finishes

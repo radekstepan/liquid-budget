@@ -580,6 +580,19 @@ export function BudgetApp({
     [data.transactions, updateUrl, month]
   );
 
+  const handleGoToTransfer = useCallback(
+    (targetAccountId: number, targetTxnId: number) => {
+      startTransition(() => {
+        setAccountFilter(targetAccountId);
+        setView("transactions");
+        setFocusTransaction({ id: targetTxnId, nonce: Date.now() });
+        setShowSettingsOverlay(false);
+        updateUrl("transactions", targetAccountId, month);
+      });
+    },
+    [updateUrl, month]
+  );
+
   const cycleStatus = useCallback(
     async (id: number) => {
       const t = data.transactions.find((x) => x.id === id);
@@ -775,6 +788,7 @@ export function BudgetApp({
               data={data}
               accountFilter={accountFilter}
               focusTransaction={focusTransaction}
+              onGoToTransfer={handleGoToTransfer}
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
