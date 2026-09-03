@@ -288,6 +288,19 @@ export function TransactionModal({
         return;
       }
       const destName = otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? "";
+      const oldDestName = isInitialTransfer
+        ? otherAccounts.find((a) => a.id === Number(initial?.transferAccountId))?.name
+        : "";
+      let finalPayee: string;
+      if (!initial) {
+        finalPayee = payee.trim() || `Transfer : ${destName || "Unknown"}`;
+      } else if (!isInitialTransfer) {
+        finalPayee = `Transfer : ${destName || "Unknown"}`;
+      } else {
+        const hadStandardPayee = !payee.trim() || (oldDestName && payee.trim() === `Transfer : ${oldDestName}`);
+        finalPayee = hadStandardPayee ? `Transfer : ${destName || "Unknown"}` : payee.trim();
+      }
+
       let finalCatId: number | null = null;
       let incMonth: string | null = null;
       if (isTransferBoundary) {
@@ -304,7 +317,7 @@ export function TransactionModal({
         accountId,
         categoryId: finalCatId,
         date,
-        payee: `Transfer : ${destName || "Unknown"}`,
+        payee: finalPayee,
         memo: memo.trim(),
         amount: amountCents,
         status: finalStatus,
@@ -508,7 +521,7 @@ export function TransactionModal({
                 active={mode === m}
                 onClick={() => switchingMode(m)}
                 className="flex-1 capitalize"
-                disabled={(!!isInitialSplit && m === "single") || (!!isInitialTransfer && m !== "transfer")}
+                disabled={(!!isInitialSplit && m !== "split") || (!!isInitialTransfer && m === "split")}
               >
                 {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
               </Button>
@@ -578,7 +591,6 @@ export function TransactionModal({
                   onChange={(v) => setTransferAccountId(v === "" ? "" : Number(v))}
                   className="w-full"
                   searchable
-                  disabled={isInitialTransfer}
                 >
                   <option value="" disabled>Select account…</option>
                   {otherAccounts.map((a) => (
@@ -1426,6 +1438,7 @@ export function RecurringModal({
       nextDate,
       active,
       flagColor,
+      transferAccountId: null,
     });
   };
 
