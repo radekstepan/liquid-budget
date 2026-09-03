@@ -219,6 +219,60 @@ body::after {
   top: 0;
   z-index: 12;
 }
+.y-table-th--month-label.y-table-th--month-current {
+  background: linear-gradient(#f6f9fc, #d8e6f1);
+  color: var(--y-blue);
+  font-weight: 700;
+  border-top: 3px solid var(--y-blue) !important;
+  border-left: 1px solid var(--y-blue) !important;
+  border-right: 1px solid var(--y-blue) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+.y-thead-sub th.y-thead-sub--current {
+  background: linear-gradient(#f4f8fb, #e5eef5);
+  color: var(--y-blue-dark);
+  font-weight: 700;
+}
+.y-thead tr:not(.y-thead-sub) th.y-thead-sub--current {
+  border-top: 3px solid var(--y-blue) !important;
+}
+
+/* Current month column boundary borders across the entire grid (header and body) */
+.y-table th.y-grid-col--current-first,
+.y-table td.y-grid-col--current-first {
+  border-left: 1px solid var(--y-blue) !important;
+  box-shadow: none !important;
+}
+.y-table th.y-grid-col--current-last,
+.y-table td.y-grid-col--current-last {
+  border-right: 1px solid var(--y-blue) !important;
+}
+/* Ensure adjacent cells do not draw competing grey dividers against the current month's blue border */
+.y-table th.y-grid-col--current-last + th,
+.y-table td.y-grid-col--current-last + td {
+  border-left: none !important;
+  box-shadow: none !important;
+}
+.y-table th.y-table-th--month-current + th.y-table-colgroup-divider {
+  border-left: none !important;
+  box-shadow: none !important;
+}
+.y-month-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(#4092c2, var(--y-blue));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 1px 2px rgba(0, 0, 0, 0.15);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
+  line-height: normal;
+  vertical-align: middle;
+}
 .y-table-td--sticky-cat {
   position: sticky;
   left: 0;
@@ -234,12 +288,16 @@ body::after {
 .y-table .y-row.is-empty .y-table-td--sticky-cat {
   background: var(--y-row);
 }
+.y-table .y-row.is-sel .y-table-td--sticky-cat {
+  background: var(--y-row-sel);
+}
 .y-table-thead .y-table-td--sticky-cat {
   background: linear-gradient(var(--y-chrome-top), var(--y-chrome-bot));
   z-index: 2;
 }
 .y-table-cell--readonly {
   color: var(--y-ink-faint);
+  background-color: rgba(0, 0, 0, 0.012);
 }
 /* Combined header + body divider. The specific selector (0,2,1) beats the
    existing .y-row td + td (0,1,2) and .y-master td + td (0,1,2) rules so the
@@ -961,6 +1019,14 @@ button.y-pill:hover {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
+}
+.y-table.y-table--multi {
+  width: max-content;
+  min-width: 0;
+}
+.y-table.y-table--multi th:last-child:not(.y-grid-col--current-last):not(.y-table-th--month-current),
+.y-table.y-table--multi td:last-child:not(.y-grid-col--current-last) {
+  border-right: 1px solid var(--y-border-strong);
 }
 .y-table thead th,
 .y-thead th {

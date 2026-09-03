@@ -400,6 +400,62 @@ export function BudgetAppShell({
         )
       );
     },
+    batchAssign: async (assignments) => {
+      if (!assignments.length) return;
+      const prevAssignmentsSnapshot = dataRef.current ? [...dataRef.current.assignments] : [];
+      const tempIdBase = -Date.now();
+      setData((prev) => {
+        if (!prev) return prev;
+        let nextAssignments = [...prev.assignments];
+        assignments.forEach((item, idx) => {
+          const existing = nextAssignments.find(
+            (a) => a.categoryId === item.categoryId && a.month === item.month
+          );
+          if (existing) {
+            nextAssignments = nextAssignments.map((a) =>
+              a.id === existing.id ? { ...a, amount: String(Math.round(item.amount)) } : a
+            );
+          } else {
+            nextAssignments.push({
+              id: tempIdBase - idx,
+              categoryId: item.categoryId,
+              month: item.month,
+              amount: String(Math.round(item.amount)),
+            });
+          }
+        });
+        return { ...prev, assignments: nextAssignments, budgetIndex: undefined };
+      });
+      await withSync(() =>
+        runMutation(
+          async () => {
+            const results = await Promise.all(
+              assignments.map((item) =>
+                jsonReq<Assignment>("/api/assignments", {
+                  method: "PUT",
+                  body: JSON.stringify({
+                    categoryId: item.categoryId,
+                    month: item.month,
+                    amount: item.amount,
+                  }),
+                })
+              )
+            );
+            return results;
+          },
+          { failure: "Failed to save assignments. Please try again." },
+          {
+            onRollback: () => {
+              setData((current) => {
+                if (!current) return current;
+                return { ...current, assignments: prevAssignmentsSnapshot, budgetIndex: undefined };
+              });
+              reload().catch(() => {});
+            },
+          }
+        )
+      );
+    },
     addTransaction: async (t) => {
       const successMsg = "Transaction added.";
       const tempId = -Date.now();

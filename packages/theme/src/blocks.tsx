@@ -35,7 +35,9 @@ export const MonthNav: React.FC<{
   onSetMonth?: (key: string) => void;
   minYear?: number;
   maxYear?: number;
-}> = ({ month, onPrev, onNext, onSetMonth, minYear, maxYear }) => {
+  prevDisabled?: boolean;
+  nextDisabled?: boolean;
+}> = ({ month, onPrev, onNext, onSetMonth, minYear, maxYear, prevDisabled, nextDisabled }) => {
   const { year, month0 } = parseKey(month);
   const yMin = minYear ?? year - 10;
   const yMax = maxYear ?? year + 5;
@@ -51,6 +53,7 @@ export const MonthNav: React.FC<{
         className="y-btn y-btn--sm y-monthnav-btn"
         aria-label="Previous month"
         onClick={onPrev}
+        disabled={prevDisabled}
       >
         <Icon name="left" size={11} />
       </button>
@@ -95,6 +98,7 @@ export const MonthNav: React.FC<{
         className="y-btn y-btn--sm y-monthnav-btn"
         aria-label="Next month"
         onClick={onNext}
+        disabled={nextDisabled}
       >
         <Icon name="right" size={11} />
       </button>

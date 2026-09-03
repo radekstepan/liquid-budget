@@ -82,6 +82,9 @@ export const BudgetView = memo(function BudgetView({
   avgSpentByCategory,
   avgBudgetedByCategory,
   underfundedByCategory,
+  selectedCategoryId,
+  onSelectCategory,
+  canShiftRight,
 }: {
   budget: BudgetResult;
   budgets: BudgetResult[];
@@ -111,14 +114,94 @@ export const BudgetView = memo(function BudgetView({
   avgSpentByCategory?: Map<number, number>;
   avgBudgetedByCategory?: Map<number, number>;
   underfundedByCategory?: Map<number, number>;
+  selectedCategoryId?: number | null;
+  onSelectCategory?: (id: number | null) => void;
+  canShiftRight?: boolean;
 }) {
   const showMulti = monthCount > 1;
 
-  const resolvedVisibleMonths = visibleMonths && visibleMonths.length ? visibleMonths : [currentMonth];
+  const resolvedVisibleMonths =
+    showMulti && visibleMonths && visibleMonths.length ? visibleMonths : [currentMonth];
   const resolvedBudgets = budgets && budgets.length ? budgets : [budget];
-
   const dragGroupId = useRef<number | null>(null);
   const [groupOverId, setGroupOverId] = useState<number | null>(null);
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const stickyCatThRef = useRef<HTMLTableCellElement | null>(null);
+  const currentMonthThRef = useRef<HTMLTableCellElement | null>(null);
+
+  const todayMonth = todayISO().slice(0, 7);
+  const isOnThisMonth = currentMonth === todayMonth;
+
+  const [isTodayInViewport, setIsTodayInViewport] = useState<boolean>(true);
+
+  useEffect(() => {
+    const checkVisibility = () => {
+      if (!showMulti) {
+        setIsTodayInViewport(isOnThisMonth);
+        return;
+      }
+      if (!resolvedVisibleMonths.includes(todayMonth)) {
+        setIsTodayInViewport(false);
+        return;
+      }
+      const container = scrollContainerRef.current;
+      const targetEl = currentMonthThRef.current;
+      if (!container || !targetEl) {
+        setIsTodayInViewport(resolvedVisibleMonths.includes(todayMonth));
+        return;
+      }
+      const containerRect = container.getBoundingClientRect();
+      if (containerRect.width === 0 && containerRect.height === 0) {
+        // Fallback in test/headless environments without layout geometry
+        setIsTodayInViewport(true);
+        return;
+      }
+      const stickyCatEl = stickyCatThRef.current;
+      const stickyRect = stickyCatEl?.getBoundingClientRect();
+      const viewportLeft = stickyRect ? stickyRect.right : containerRect.left;
+      const viewportRight = containerRect.right;
+      const targetRect = targetEl.getBoundingClientRect();
+
+      // At least partially visible if the month header overlaps the visible viewport window
+      const isVisible =
+        targetRect.right > viewportLeft + 1 && targetRect.left < viewportRight - 1;
+      setIsTodayInViewport(isVisible);
+    };
+
+    checkVisibility();
+
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    container.addEventListener("scroll", checkVisibility, { passive: true });
+    window.addEventListener("resize", checkVisibility);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => checkVisibility());
+      ro.observe(container);
+    }
+
+    return () => {
+      container.removeEventListener("scroll", checkVisibility);
+      window.removeEventListener("resize", checkVisibility);
+      ro?.disconnect();
+    };
+  }, [showMulti, isOnThisMonth, resolvedVisibleMonths, todayMonth]);
+
+  const hasThisMonthInView = showMulti ? isTodayInViewport : isOnThisMonth;
+
+  const { year: ty, month0: tm0 } = parseMonthKey(todayMonth);
+  const maxMonthTotal = ty * 12 + tm0 + 1;
+  const maxAllowedMonth = monthKey(Math.floor(maxMonthTotal / 12), ((maxMonthTotal % 12) + 12) % 12);
+  const rightmost = resolvedVisibleMonths[resolvedVisibleMonths.length - 1];
+  const computedCanShiftRight =
+    canShiftRight !== undefined
+      ? canShiftRight
+      : showMulti
+      ? !rightmost || rightmost < maxAllowedMonth
+      : currentMonth < maxAllowedMonth;
 
   const handleGroupDrop = (targetId: number) => {
     const srcId = dragGroupId.current;
@@ -173,25 +256,39 @@ export const BudgetView = memo(function BudgetView({
     });
   }, [resolvedBudgets]);
 
-  const todayMonth = todayISO().slice(0, 7);
-  const isOnThisMonth = currentMonth === todayMonth;
-
   return (
     <div className="flex h-full flex-col">
       <Toolbar>
         <MonthNav
           month={currentMonth}
           onPrev={() => onShiftMonth(-1)}
-          onNext={() => onShiftMonth(1)}
+          onNext={computedCanShiftRight ? () => onShiftMonth(1) : undefined}
           onSetMonth={onSetMonth}
           minYear={minYear}
           maxYear={maxYear}
+          nextDisabled={!computedCanShiftRight}
         />
-        {!isOnThisMonth && onSetMonth && (
-          <Button size="sm" variant="flat" onClick={() => onSetMonth(todayMonth)}>
-            <Icon name="calendar" size={11} /> Today
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant={!hasThisMonthInView ? "blue" : "default"}
+          onClick={() => {
+            onSetMonth?.(todayMonth);
+            if (showMulti && currentMonthThRef.current) {
+              if (typeof currentMonthThRef.current.scrollIntoView === "function") {
+                currentMonthThRef.current.scrollIntoView({
+                  behavior: "smooth",
+                  inline: "center",
+                  block: "nearest",
+                });
+              }
+            }
+          }}
+          data-testid="today-btn"
+          title={hasThisMonthInView ? "Current month is in view" : "Jump to current month"}
+          className={hasThisMonthInView ? "text-[var(--y-ink-soft)]" : ""}
+        >
+          <Icon name="calendar" size={11} color={!hasThisMonthInView ? "#fff" : "var(--y-ink-soft)"} /> Today
+        </Button>
         <ToolbarSep />
         <Button onClick={onAddGroup} size="sm">
           <Icon name="plus" size={11} /> Master Category
@@ -204,55 +301,64 @@ export const BudgetView = memo(function BudgetView({
         )}
       </Toolbar>
 
-      <div className="flex-1 overflow-auto y-scroll">
-        <table className="y-table">
+      <div className="flex-1 overflow-auto y-scroll" ref={scrollContainerRef}>
+        <table className={cx("y-table", showMulti && "y-table--multi")}>
           <thead className="y-thead y-thead--sticky">
             {showMulti ? (
               <>
                 <tr>
-                  <th rowSpan={2} className="y-table-td--sticky-cat">Category</th>
-                  {resolvedVisibleMonths.map((m, idx) => (
-                    <th
-                      key={m}
-                      colSpan={3}
-                      className={cx(
-                        "y-table-th--month-label text-center",
-                        idx > 0 && "y-table-colgroup-divider"
-                      )}
-                    >
-                      {formatMonthLong(m)}
-                    </th>
-                  ))}
-                </tr>
-                <tr className="y-thead-sub">
-                  {resolvedVisibleMonths.map((m, idx) => (
-                    <Fragment key={m}>
+                  <th rowSpan={2} className="y-table-td--sticky-cat" ref={stickyCatThRef}>Category</th>
+                  {resolvedVisibleMonths.map((m, idx) => {
+                    const isThisMonth = m === todayMonth;
+                    return (
                       <th
+                        key={m}
+                        ref={isThisMonth ? currentMonthThRef : undefined}
+                        colSpan={3}
                         className={cx(
-                          "num text-right",
-                          COL_A,
-                          idx === 0 && "y-table-cell--month-first",
-                          idx > 0 && "y-table-colgroup-divider"
+                          "y-table-th--month-label text-center",
+                          idx > 0 && "y-table-colgroup-divider",
+                          isThisMonth && "y-table-th--month-current"
                         )}
                       >
-                        Budgeted
+                        <span>{formatMonthLong(m)}</span>
                       </th>
-                      <th className={cx("num text-right", COL_O)}>
-                        Outflows
-                      </th>
-                      <th className={cx("num text-right", COL_V)}>
-                        Balance
-                      </th>
-                    </Fragment>
-                  ))}
+                    );
+                  })}
+                </tr>
+                <tr className="y-thead-sub">
+                  {resolvedVisibleMonths.map((m, idx) => {
+                    const isThisMonth = m === todayMonth;
+                    return (
+                      <Fragment key={m}>
+                        <th
+                          className={cx(
+                            "num text-right",
+                            COL_A,
+                            idx === 0 && "y-table-cell--month-first",
+                            idx > 0 && "y-table-colgroup-divider",
+                            isThisMonth && "y-thead-sub--current y-grid-col--current-first"
+                          )}
+                        >
+                          Budgeted
+                        </th>
+                        <th className={cx("num text-right", COL_O, isThisMonth && "y-thead-sub--current")}>
+                          Outflows
+                        </th>
+                        <th className={cx("num text-right", COL_V, isThisMonth && "y-thead-sub--current y-grid-col--current-last")}>
+                          Balance
+                        </th>
+                      </Fragment>
+                    );
+                  })}
                 </tr>
               </>
             ) : (
               <tr>
                 <th className="y-table-td--sticky-cat">Category</th>
-                <th className={`num ${COL_A}`}>Budgeted</th>
-                <th className={`num ${COL_O}`}>Outflows</th>
-                <th className={`num ${COL_V}`}>Balance</th>
+                <th className={cx("num", COL_A, isOnThisMonth && "y-thead-sub--current y-grid-col--current-first")}>Budgeted</th>
+                <th className={cx("num", COL_O, isOnThisMonth && "y-thead-sub--current")}>Outflows</th>
+                <th className={cx("num", COL_V, isOnThisMonth && "y-thead-sub--current y-grid-col--current-last")}>Balance</th>
               </tr>
             )}
           </thead>
@@ -282,6 +388,9 @@ export const BudgetView = memo(function BudgetView({
                 onDragLeave={() => setGroupOverId(null)}
                 onDrop={() => handleGroupDrop(g.group.id)}
                 quickFill={quickFill}
+                selectedCategoryId={selectedCategoryId}
+                onSelectCategory={onSelectCategory}
+                todayMonth={todayMonth}
               />
             ))}
             {creditGroup && (
@@ -300,6 +409,9 @@ export const BudgetView = memo(function BudgetView({
                 onEditGroup={() => onEditGroup(creditGroup.group.id)}
                 onDeleteGroup={onDeleteGroup}
                 onReorderCategory={onReorderCategory}
+                selectedCategoryId={selectedCategoryId}
+                onSelectCategory={onSelectCategory}
+                todayMonth={todayMonth}
               />
             )}
             {hiddenGroup && (
@@ -322,17 +434,23 @@ export const BudgetView = memo(function BudgetView({
                 onEditGroup={() => onEditGroup(hiddenGroup.group.id)}
                 onDeleteGroup={onDeleteGroup}
                 onReorderCategory={onReorderCategory}
+                selectedCategoryId={selectedCategoryId}
+                onSelectCategory={onSelectCategory}
+                todayMonth={todayMonth}
               />
             )}
           </tbody>
         </table>
 
-        <button
-          onClick={onAddGroup}
-          className="y-menu-item gap-2 px-3 py-2 text-[11.5px]"
-        >
-          <Icon name="plus" size={11} /> Add Category Group
-        </button>
+        <div className="p-2.5">
+          <Button
+            size="sm"
+            onClick={onAddGroup}
+            className="text-[11px] text-[var(--y-ink-soft)] font-medium"
+          >
+            <Icon name="plus" size={11} /> Add Category Group
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -412,6 +530,9 @@ function GroupBlock({
   onDragLeave,
   onDrop,
   quickFill,
+  selectedCategoryId,
+  onSelectCategory,
+  todayMonth,
 }: {
   group: GroupRow;
   collapsed: boolean;
@@ -433,12 +554,16 @@ function GroupBlock({
   onDragLeave?: () => void;
   onDrop?: () => void;
   quickFill?: CategoryMonthCellProps["quickFill"];
+  selectedCategoryId?: number | null;
+  onSelectCategory?: (id: number | null) => void;
+  todayMonth?: string;
 }) {
   const dragCatId = useRef<number | null>(null);
   const [catOverId, setCatOverId] = useState<number | null>(null);
 
   const gRow = group;
   const isSpecialGroup = group.group.isCreditCardPayments || isHiddenGroup(group.group);
+  const isToday = (m: string) => m === (todayMonth ?? todayISO().slice(0, 7));
 
   return (
     <>
@@ -515,19 +640,20 @@ function GroupBlock({
                 isOtherMonth={m !== currentMonth}
                 isFirstMonth={idx === 0}
                 isRowForGroup
+                isThisMonth={isToday(m)}
               />
             );
           })
         ) : (
           <>
-            <td className={cx("num y-num text-right", COL_A)}>{fmt(gRow.assigned)}</td>
+            <td className={cx("num y-num text-right", COL_A, isToday(currentMonth) && "y-grid-col--current-first")}>{fmt(gRow.assigned)}</td>
             <td
               className={cx("num y-num text-right", COL_O)}
               style={{ color: gRow.outflow < 0 ? "var(--y-ink)" : "var(--y-ink-soft)" }}
             >
               {fmt(gRow.outflow)}
             </td>
-            <td className={cx("num y-num text-right", COL_V)} style={{ color: balanceColor(gRow.available) }}>
+            <td className={cx("num y-num text-right", COL_V, isToday(currentMonth) && "y-grid-col--current-last")} style={{ color: balanceColor(gRow.available) }}>
               {fmt(gRow.available)}
             </td>
           </>
@@ -538,16 +664,19 @@ function GroupBlock({
         group.rows.map((r: CatRow, i: number) => {
           const empty = isEmptyRow(r);
           const isCatDropTarget = catOverId === r.category.id;
+          const isSelected = selectedCategoryId === r.category.id;
           return (
             <tr
               key={r.category.id}
               data-cat-row
               className={cx(
-                "y-row",
+                "y-row cursor-pointer",
                 i % 2 === 1 && "alt",
                 empty && "is-empty",
-                isCatDropTarget && "is-drop-target"
+                isCatDropTarget && "is-drop-target",
+                isSelected && "is-sel"
               )}
+              onClick={() => onSelectCategory?.(isSelected ? null : r.category.id)}
               draggable={Boolean(onReorderCategory)}
               onDragStart={(e) => {
                 e.stopPropagation();
@@ -587,7 +716,10 @@ function GroupBlock({
                   <span className="truncate">{r.category.name}</span>
                   <span className="y-cat-actions">
                     <button
-                      onClick={() => onEditCategory(r.category.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditCategory(r.category.id);
+                      }}
                       className="y-cat-edit-btn"
                       aria-label={`Edit ${r.category.name}`}
                       title="Edit category"
@@ -610,12 +742,13 @@ function GroupBlock({
                         onAssign={(val) => onAssign(r.category.id, val, m)}
                         quickFill={quickFill}
                         categoryId={r.category.id}
+                        isThisMonth={isToday(m)}
                       />
                     );
                   })
                 : (
                   <>
-                    <td className={cx("num", COL_A)}>
+                    <td className={cx("num", COL_A, isToday(currentMonth) && "y-grid-col--current-first")}>
                       <CategoryMonthCell
                         value={r.assigned}
                         onAssign={(val) => onAssign(r.category.id, val, currentMonth)}
@@ -632,7 +765,7 @@ function GroupBlock({
                     >
                       {fmt(r.outflow)}
                     </td>
-                    <td className={cx("num y-num", COL_V)} style={{ color: balanceColor(r.available) }}>
+                    <td className={cx("num y-num", COL_V, isToday(currentMonth) && "y-grid-col--current-last")} style={{ color: balanceColor(r.available) }}>
                       {fmt(r.available)}
                       {r.available < 0 && r.category.overspendCarriesOver && (
                         <span
@@ -685,6 +818,7 @@ function MonthCells({
   onAssign,
   quickFill,
   categoryId,
+  isThisMonth,
 }: {
   group?: GroupRow;
   row?: CatRow;
@@ -694,14 +828,17 @@ function MonthCells({
   onAssign?: (val: number) => void;
   quickFill?: CategoryMonthCellProps["quickFill"];
   categoryId?: number;
+  isThisMonth?: boolean;
 }) {
   const divCls = isFirstMonth ? "" : "y-table-colgroup-divider";
   const readOnlyCls = isOtherMonth ? "y-table-cell--readonly" : "";
+  const firstCls = isThisMonth ? "y-grid-col--current-first" : "";
+  const lastCls = isThisMonth ? "y-grid-col--current-last" : "";
 
   if (isRowForGroup && group) {
     return (
       <>
-        <td className={cx("num y-num text-right", COL_A, divCls, readOnlyCls)}>
+        <td className={cx("num y-num text-right", COL_A, divCls, readOnlyCls, firstCls)}>
           {fmt(group.assigned)}
         </td>
         <td
@@ -712,7 +849,7 @@ function MonthCells({
         >
           {fmt(group.outflow)}
         </td>
-        <td className={cx("num y-num text-right", COL_V)} style={{ color: balanceColor(group.available) }}>
+        <td className={cx("num y-num text-right", COL_V, lastCls)} style={{ color: balanceColor(group.available) }}>
           {fmt(group.available)}
         </td>
       </>
@@ -723,7 +860,7 @@ function MonthCells({
 
   return (
     <>
-      <td className={cx("num", COL_A, divCls)}>
+      <td className={cx("num", COL_A, divCls, firstCls)}>
         {onAssign ? (
           <CategoryMonthCell
             value={row.assigned}
@@ -744,7 +881,7 @@ function MonthCells({
       >
         {fmt(row.outflow)}
       </td>
-      <td className={cx("num y-num", COL_V)} style={{ color: balanceColor(row.available) }}>
+      <td className={cx("num y-num", COL_V, lastCls)} style={{ color: balanceColor(row.available) }}>
         {fmt(row.available)}
         {row.available < 0 && row.category.overspendCarriesOver && (
           <span
@@ -779,6 +916,8 @@ type CategoryMonthCellProps = {
 function CategoryMonthCell({
   value,
   onAssign,
+  quickFill,
+  categoryId,
 }: CategoryMonthCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -797,6 +936,9 @@ function CategoryMonthCell({
     setEditing(false);
   };
 
+  const lastMonthVal =
+    categoryId != null ? quickFill?.lastMonthAssignments?.get(categoryId) : undefined;
+
   if (editing) {
     return (
       <input
@@ -809,6 +951,7 @@ function CategoryMonthCell({
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setEditing(false);
         }}
+        onClick={(e) => e.stopPropagation()}
         title={(() => {
           const n = evalAmount(draft);
           if (n == null || !Number.isFinite(n)) return undefined;
@@ -823,12 +966,14 @@ function CategoryMonthCell({
   return (
     <button
       type="button"
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         setDraft((value / 100).toFixed(2));
         setEditing(true);
       }}
       className="y-inline-amt cursor-text"
       style={{ color: "var(--y-ink)" }}
+      title={lastMonthVal != null ? `Last month: ${fmt(lastMonthVal)}` : undefined}
     >
       {fmt(value)}
     </button>

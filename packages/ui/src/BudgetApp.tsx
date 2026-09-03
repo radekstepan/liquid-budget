@@ -23,7 +23,7 @@ import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
 import { Icon } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
-import { BudgetView } from "./BudgetView.js";
+import { BudgetView, isInternalGroup } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
 import { RecurringView } from "./RecurringView.js";
 import { ReportsView } from "./ReportsView.js";
@@ -63,6 +63,7 @@ export type ModalState =
 export type BudgetAppApi = {
   reload: () => Promise<void>;
   assign: (categoryId: number, amount: number, month: string) => Promise<void>;
+  batchAssign?: (assignments: { categoryId: number; amount: number; month: string }[]) => Promise<void>;
   addTransaction: (t: TransactionSavePayload | {
     accountId: number;
     categoryId?: number | null;
@@ -257,6 +258,7 @@ export function BudgetApp({
       typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "boolean")
   );
   const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
@@ -328,6 +330,12 @@ export function BudgetApp({
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
 
+  const today = todayISO().slice(0, 7);
+  const { year: ty, month0: tm0 } = parseMonthKey(today);
+  const todayMonthTotal = ty * 12 + tm0;
+  const maxMonthTotal = todayMonthTotal + 1;
+  const maxAllowedMonth = monthKey(Math.floor(maxMonthTotal / 12), ((maxMonthTotal % 12) + 12) % 12);
+
   const visibleMonths = useMemo(() => {
     if (!isBudgetView) return [month];
     const { year: y, month0 } = parseMonthKey(month);
@@ -337,12 +345,13 @@ export function BudgetApp({
     const keys: string[] = [];
     for (let i = 0; i < monthCount; i++) {
       const t = start + i;
+      if (t > maxMonthTotal) break;
       const yy = Math.floor(t / 12);
       const mm = ((t % 12) + 12) % 12;
       keys.push(monthKey(yy, mm));
     }
-    return keys;
-  }, [month, monthCount, isBudgetView]);
+    return keys.length > 0 ? keys : [month];
+  }, [month, monthCount, isBudgetView, maxMonthTotal]);
 
   const budgets = useMemo(
     () => (isBudgetView ? visibleMonths.map((m) => computeBudget(data, m)) : [budget]),
@@ -530,6 +539,94 @@ export function BudgetApp({
     [api, month]
   );
 
+  const selectedCategory = useMemo(
+    () =>
+      selectedCategoryId != null
+        ? data.categories.find((c) => c.id === selectedCategoryId) ?? null
+        : null,
+    [data.categories, selectedCategoryId]
+  );
+
+  const quickFill = useMemo(
+    () => ({
+      lastMonthAssignments,
+      spentLastMonthByCategory,
+      avgSpentByCategory,
+      avgBudgetedByCategory,
+      underfundedByCategory,
+    }),
+    [
+      lastMonthAssignments,
+      spentLastMonthByCategory,
+      avgSpentByCategory,
+      avgBudgetedByCategory,
+      underfundedByCategory,
+    ]
+  );
+
+  const handleQuickBudget = useCallback(
+    async (type: "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear", catId?: number) => {
+      const getAmount = (categoryId: number): number => {
+        switch (type) {
+          case "lastMonth":
+            return lastMonthAssignments.get(categoryId) ?? 0;
+          case "spentLastMonth":
+            return spentLastMonthByCategory.get(categoryId) ?? 0;
+          case "avgBudgeted":
+            return avgBudgetedByCategory.get(categoryId) ?? 0;
+          case "clear":
+            return 0;
+        }
+      };
+
+      if (catId != null) {
+        await assign(catId, getAmount(catId));
+        return;
+      }
+
+      // Apply to all categories in visible structure groups
+      const allBudgetCats: number[] = [];
+      for (const g of budget.groups) {
+        if (g.group.isCreditCardPayments || isInternalGroup(g.group)) continue;
+        for (const r of g.rows) {
+          allBudgetCats.push(r.category.id);
+        }
+      }
+
+      const itemsToAssign: { categoryId: number; amount: number; month: string }[] = [];
+      for (const cId of allBudgetCats) {
+        const amt = getAmount(cId);
+        // Apply if there's an amount or if resetting to zero
+        if (amt > 0 || type === "clear") {
+          itemsToAssign.push({ categoryId: cId, amount: amt, month });
+        }
+      }
+
+      if (itemsToAssign.length === 0) return;
+
+      if (api.batchAssign) {
+        try {
+          await api.batchAssign(itemsToAssign);
+        } catch {
+          // Handled via notifications toast and rollback in BudgetAppShell
+        }
+      } else {
+        for (const item of itemsToAssign) {
+          await assign(item.categoryId, item.amount, item.month);
+        }
+      }
+    },
+    [
+      assign,
+      api.batchAssign,
+      budget.groups,
+      lastMonthAssignments,
+      spentLastMonthByCategory,
+      avgBudgetedByCategory,
+      month,
+    ]
+  );
+
   const openReconcile = useCallback(
     (accountId: number) => setModal({ kind: "reconcile", accountId }),
     []
@@ -621,6 +718,24 @@ export function BudgetApp({
     setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   }, []);
 
+  const canShiftRight = useMemo(() => {
+    if (monthCount === 1) {
+      return month < maxAllowedMonth;
+    }
+    const rightmost = visibleMonths[visibleMonths.length - 1];
+    if (rightmost && rightmost >= maxAllowedMonth) {
+      return false;
+    }
+    const { year: y, month0 } = parseMonthKey(month);
+    const candidateTotal = y * 12 + month0 + 1;
+    const offset = Math.floor((monthCount - 1) / 2);
+    const candidateStart = candidateTotal - offset;
+    if (candidateStart > todayMonthTotal) {
+      return false;
+    }
+    return true;
+  }, [month, monthCount, visibleMonths, maxAllowedMonth, todayMonthTotal]);
+
   const collapseAll = useCallback(() => {
     setCollapsed(Object.fromEntries(data.groups.map((g) => [g.id, true])));
   }, [data.groups]);
@@ -629,6 +744,7 @@ export function BudgetApp({
 
   const shiftMonth = useCallback(
     (delta: number) => {
+      if (delta > 0 && !canShiftRight) return;
       const { year: y, month0 } = parseMonthKey(month);
       const total = y * 12 + month0 + delta;
       const nextMonth = monthKey(Math.floor(total / 12), ((total % 12) + 12) % 12);
@@ -637,17 +753,31 @@ export function BudgetApp({
         updateUrl(view, accountFilter, nextMonth);
       }
     },
-    [month, view, accountFilter, updateUrl]
+    [month, view, accountFilter, updateUrl, canShiftRight]
   );
 
   const handleSetMonth = useCallback(
     (m: string) => {
-      setMonth(m);
+      const clamped = m > maxAllowedMonth ? maxAllowedMonth : m;
+      setMonth(clamped);
       if (view === "budget") {
-        updateUrl(view, accountFilter, m);
+        updateUrl(view, accountFilter, clamped);
       }
     },
-    [view, accountFilter, updateUrl]
+    [view, accountFilter, updateUrl, maxAllowedMonth]
+  );
+
+  const handleSetMonthCount = useCallback(
+    (count: number) => {
+      setMonthCount(count);
+      if (count > 1 && month > today) {
+        setMonth(today);
+        if (view === "budget") {
+          updateUrl(view, accountFilter, today);
+        }
+      }
+    },
+    [setMonthCount, month, today, view, accountFilter, updateUrl]
   );
 
   const { minYear, maxYear } = useMemo(() => {
@@ -757,13 +887,14 @@ export function BudgetApp({
               budgets={budgets}
               visibleMonths={visibleMonths}
               monthCount={monthCount}
-              onSetMonthCount={setMonthCount}
+              onSetMonthCount={handleSetMonthCount}
               currentMonth={month}
               collapsed={collapsed}
               onToggleGroup={toggleGroup}
               onAssign={assign}
               onShiftMonth={shiftMonth}
               onSetMonth={handleSetMonth}
+              canShiftRight={canShiftRight}
               minYear={minYear}
               maxYear={maxYear}
               onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
@@ -781,6 +912,8 @@ export function BudgetApp({
               avgSpentByCategory={avgSpentByCategory}
               avgBudgetedByCategory={avgBudgetedByCategory}
               underfundedByCategory={underfundedByCategory}
+              selectedCategoryId={selectedCategoryId}
+              onSelectCategory={setSelectedCategoryId}
             />
           )}
           {view === "transactions" && (
@@ -914,6 +1047,11 @@ export function BudgetApp({
           cashFlow={cashFlow}
           trailingNetWorth={trailingNetWorth}
           insights={insights}
+          selectedCategory={selectedCategory}
+          onClearSelectedCategory={() => setSelectedCategoryId(null)}
+          quickFill={quickFill}
+          onQuickBudget={handleQuickBudget}
+          isBudgetView={isBudgetView}
           onSelectMonth={handleSetMonth}
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
