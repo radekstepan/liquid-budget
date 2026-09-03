@@ -1814,3 +1814,105 @@ input.y-inline-amt {
   border-top: 1px solid #b6b6b1;
 }
 
+
+/* ---------- per-month quick budget (hover dropdown in month header) ---------- */
+.y-month-head--single {
+  position: relative;
+}
+.y-month-head .y-month-head-label {
+  vertical-align: middle;
+}
+.y-month-head--single {
+  white-space: nowrap;
+}
+.y-month-qb {
+  position: relative;
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.y-month-head:hover .y-month-qb,
+.y-month-head:focus-within .y-month-qb,
+.y-month-qb.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.y-month-qb-btn {
+  display: grid;
+  height: 18px;
+  width: 18px;
+  place-items: center;
+  border-radius: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--y-ink-soft);
+  cursor: pointer;
+  opacity: 0.75;
+}
+.y-month-qb-btn:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.08);
+}
+.y-table-th--month-current .y-month-qb-btn:hover {
+  background: rgba(47, 127, 176, 0.15);
+}
+.y-month-qb-menu {
+  position: absolute;
+  top: 5px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  padding: 3px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.y-month-qb-menu.is-right {
+  left: calc(100% + 6px);
+  right: auto;
+}
+.y-month-qb-menu.is-left {
+  right: calc(100% + 6px);
+  left: auto;
+}
+/* The open month header lifts above sibling sticky headers (z 10-12) so the
+   sideways menu paints over neighboring month columns instead of sliding
+   under them. Stays below modal scrims (z-50), portaled dropdowns (z-60)
+   and toasts. */
+.y-table thead.y-thead--sticky th.y-month-head--open,
+.y-thead.y-thead--sticky th.y-month-head--open {
+  z-index: 40;
+}
+.y-month-qb-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.y-month-qb-scope-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.y-month-qb-scope-clear {
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--y-blue);
+  cursor: pointer;
+}
+.y-month-qb-scope-clear:hover {
+  text-decoration: underline;
+}
+.y-month-qb-item .y-num {
+  color: var(--y-ink-soft);
+  white-space: nowrap;
+}

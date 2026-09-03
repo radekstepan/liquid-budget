@@ -218,6 +218,70 @@ export type BudgetAppApi = {
   deleteRenameRule?: (id: number) => Promise<void>;
 };
 
+export type QuickBudgetType = "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear";
+
+function lastMonthMapFor(
+  assignments: BudgetData["assignments"],
+  targetMonth: string
+): Map<number, number> {
+  const prevMonth = previousMonthKey(targetMonth);
+  const map = new Map<number, number>();
+  for (const a of assignments) {
+    if (a.month === prevMonth) {
+      map.set(a.categoryId, num(a.amount));
+    }
+  }
+  return map;
+}
+
+function spentLastMonthMapFor(
+  transactions: BudgetData["transactions"],
+  targetMonth: string
+): Map<number, number> {
+  const prevMonth = previousMonthKey(targetMonth);
+  const map = new Map<number, number>();
+  const parentSet = new Set<number>();
+  for (const t of transactions) {
+    if (t.parentId != null) parentSet.add(t.parentId);
+  }
+  for (const t of transactions) {
+    if (t.date.slice(0, 7) !== prevMonth) continue;
+    if (t.categoryId == null) continue;
+    if (parentSet.has(t.id)) continue;
+    const amt = num(t.amount);
+    if (amt < 0) {
+      map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
+    }
+  }
+  return map;
+}
+
+function avgBudgetedMapFor(
+  assignments: BudgetData["assignments"],
+  targetMonth: string
+): Map<number, number> {
+  const { year: y, month0 } = parseMonthKey(targetMonth);
+  const map = new Map<number, { sum: number; count: number }>();
+  for (let i = 1; i <= 3; i++) {
+    const mm = ((month0 - i) % 12 + 12) % 12;
+    const yy = y + Math.floor((month0 - i) / 12);
+    const key = monthKey(yy, mm);
+    for (const a of assignments) {
+      if (a.month !== key) continue;
+      const amt = num(a.amount);
+      const entry = map.get(a.categoryId) ?? { sum: 0, count: 0 };
+      entry.sum += amt;
+      entry.count++;
+      map.set(a.categoryId, entry);
+    }
+  }
+  const result = new Map<number, number>();
+  for (const [catId, { sum, count }] of map) {
+    if (count > 0) result.set(catId, Math.round(sum / count));
+  }
+  return result;
+}
+
 export function BudgetApp({
   data,
   api,
@@ -547,40 +611,73 @@ export function BudgetApp({
     [data.categories, selectedCategoryId]
   );
 
-  const quickFill = useMemo(
-    () => ({
-      lastMonthAssignments,
-      spentLastMonthByCategory,
-      avgSpentByCategory,
-      avgBudgetedByCategory,
-      underfundedByCategory,
-    }),
-    [
-      lastMonthAssignments,
-      spentLastMonthByCategory,
-      avgSpentByCategory,
-      avgBudgetedByCategory,
-      underfundedByCategory,
-    ]
-  );
+  // Per-month quick-budget source maps, keyed by target month. Each month's
+  // "last month" / "spent last month" / "average budgeted" figures are
+  // relative to that column, not to the anchor month.
+  const quickMapsByMonth = useMemo(() => {
+    if (!isBudgetView) return {} as Record<string, { lastMonth: Map<number, number>; spentLastMonth: Map<number, number>; avgBudgeted: Map<number, number> }>;
+    const out: Record<string, { lastMonth: Map<number, number>; spentLastMonth: Map<number, number>; avgBudgeted: Map<number, number> }> = {};
+    for (const m of visibleMonths) {
+      out[m] = {
+        lastMonth: lastMonthMapFor(data.assignments, m),
+        spentLastMonth: spentLastMonthMapFor(data.transactions, m),
+        avgBudgeted: avgBudgetedMapFor(data.assignments, m),
+      };
+    }
+    return out;
+  }, [data.assignments, data.transactions, visibleMonths, isBudgetView]);
+
+  // Display totals per visible month for the header dropdowns. When a
+  // category is selected the figures cover just that category, otherwise
+  // they cover the entire budget (same scope the action applies to).
+  const quickBudgetByMonth = useMemo(() => {
+    const out: Record<string, { lastMonth: number; spentLastMonth: number; avgBudgeted: number }> = {};
+    for (const m of visibleMonths) {
+      const maps = quickMapsByMonth[m];
+      if (!maps) continue;
+      if (selectedCategoryId != null) {
+        out[m] = {
+          lastMonth: maps.lastMonth.get(selectedCategoryId) ?? 0,
+          spentLastMonth: maps.spentLastMonth.get(selectedCategoryId) ?? 0,
+          avgBudgeted: maps.avgBudgeted.get(selectedCategoryId) ?? 0,
+        };
+      } else {
+        let lastMonth = 0;
+        for (const v of maps.lastMonth.values()) lastMonth += v;
+        let spentLastMonth = 0;
+        for (const v of maps.spentLastMonth.values()) spentLastMonth += v;
+        let avgBudgeted = 0;
+        for (const v of maps.avgBudgeted.values()) avgBudgeted += v;
+        out[m] = { lastMonth, spentLastMonth, avgBudgeted };
+      }
+    }
+    return out;
+  }, [quickMapsByMonth, visibleMonths, selectedCategoryId]);
 
   const handleQuickBudget = useCallback(
-    async (type: "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear", catId?: number) => {
+    async (type: QuickBudgetType, catId?: number, targetMonth?: string) => {
+      const target = targetMonth ?? month;
+      const cached = quickMapsByMonth[target];
+      const lastMonthMap = cached?.lastMonth ?? lastMonthMapFor(data.assignments, target);
+      const spentLastMonthMap =
+        cached?.spentLastMonth ?? spentLastMonthMapFor(data.transactions, target);
+      const avgBudgetedMap =
+        cached?.avgBudgeted ?? avgBudgetedMapFor(data.assignments, target);
       const getAmount = (categoryId: number): number => {
         switch (type) {
           case "lastMonth":
-            return lastMonthAssignments.get(categoryId) ?? 0;
+            return lastMonthMap.get(categoryId) ?? 0;
           case "spentLastMonth":
-            return spentLastMonthByCategory.get(categoryId) ?? 0;
+            return spentLastMonthMap.get(categoryId) ?? 0;
           case "avgBudgeted":
-            return avgBudgetedByCategory.get(categoryId) ?? 0;
+            return avgBudgetedMap.get(categoryId) ?? 0;
           case "clear":
             return 0;
         }
       };
 
       if (catId != null) {
-        await assign(catId, getAmount(catId));
+        await assign(catId, getAmount(catId), target);
         return;
       }
 
@@ -598,7 +695,7 @@ export function BudgetApp({
         const amt = getAmount(cId);
         // Apply if there's an amount or if resetting to zero
         if (amt > 0 || type === "clear") {
-          itemsToAssign.push({ categoryId: cId, amount: amt, month });
+          itemsToAssign.push({ categoryId: cId, amount: amt, month: target });
         }
       }
 
@@ -620,9 +717,9 @@ export function BudgetApp({
       assign,
       api.batchAssign,
       budget.groups,
-      lastMonthAssignments,
-      spentLastMonthByCategory,
-      avgBudgetedByCategory,
+      data.assignments,
+      data.transactions,
+      quickMapsByMonth,
       month,
     ]
   );
@@ -914,6 +1011,10 @@ export function BudgetApp({
               underfundedByCategory={underfundedByCategory}
               selectedCategoryId={selectedCategoryId}
               onSelectCategory={setSelectedCategoryId}
+              quickBudgetByMonth={quickBudgetByMonth}
+              onQuickBudget={handleQuickBudget}
+              selectedCategory={selectedCategory}
+              onClearSelectedCategory={() => setSelectedCategoryId(null)}
             />
           )}
           {view === "transactions" && (
@@ -1047,11 +1148,6 @@ export function BudgetApp({
           cashFlow={cashFlow}
           trailingNetWorth={trailingNetWorth}
           insights={insights}
-          selectedCategory={selectedCategory}
-          onClearSelectedCategory={() => setSelectedCategoryId(null)}
-          quickFill={quickFill}
-          onQuickBudget={handleQuickBudget}
-          isBudgetView={isBudgetView}
           onSelectMonth={handleSetMonth}
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}

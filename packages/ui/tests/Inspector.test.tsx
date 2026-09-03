@@ -347,75 +347,10 @@ describe("Inspector", () => {
   });
 
   describe("Quick Budget", () => {
-    const quickFill = {
-      lastMonthAssignments: new Map([[1, 25000], [2, 15000]]),
-      spentLastMonthByCategory: new Map([[1, 23000], [2, 10000]]),
-      avgSpentByCategory: new Map([[1, 20000], [2, 12000]]),
-      avgBudgetedByCategory: new Map([[1, 24000], [2, 14000]]),
-      underfundedByCategory: new Map([[1, 0], [2, 5000]]),
-    };
-
-    it("renders Quick Budget panel with all options and totals for entire budget", () => {
-      const onQuickBudget = vi.fn();
-      render(
-        <Inspector
-          {...baseProps}
-          quickFill={quickFill}
-          onQuickBudget={onQuickBudget}
-          isBudgetView={true}
-        />
-      );
-
-      expect(screen.getByTestId("quick-budget-panel")).toBeInTheDocument();
-      expect(screen.getByText("Entire Budget")).toBeInTheDocument();
-
-      // Total last month is 25000 + 15000 = $400.00
-      expect(screen.getByText("$400.00")).toBeInTheDocument();
-
-      const lastMonthBtn = screen.getByTestId("quick-budget-last-month");
-      fireEvent.click(lastMonthBtn);
-      expect(onQuickBudget).toHaveBeenCalledWith("lastMonth", undefined);
-    });
-
-    it("renders category-specific Quick Budget values when category is selected", () => {
-      const onQuickBudget = vi.fn();
-      const onClearSelectedCategory = vi.fn();
-      render(
-        <Inspector
-          {...baseProps}
-          quickFill={quickFill}
-          selectedCategory={{ id: 1, name: "Groceries" }}
-          onClearSelectedCategory={onClearSelectedCategory}
-          onQuickBudget={onQuickBudget}
-          isBudgetView={true}
-        />
-      );
-
-      const qbPanel = screen.getByTestId("quick-budget-panel");
-      expect(within(qbPanel).getByText("Groceries")).toBeInTheDocument();
-      // Groceries last month is $250.00
-      expect(within(qbPanel).getByText("$250.00")).toBeInTheDocument();
-
-      const lastMonthBtn = screen.getByTestId("quick-budget-last-month");
-      fireEvent.click(lastMonthBtn);
-      expect(onQuickBudget).toHaveBeenCalledWith("lastMonth", 1);
-
-      // Deselect button clears category selection
-      const deselectBtn = screen.getByTestId("quick-budget-deselect");
-      fireEvent.click(deselectBtn);
-      expect(onClearSelectedCategory).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not render Quick Budget panel when isBudgetView is false", () => {
-      render(
-        <Inspector
-          {...baseProps}
-          quickFill={quickFill}
-          isBudgetView={false}
-        />
-      );
-
+    it("is no longer rendered in the Inspector (moved to the month header)", () => {
+      render(<Inspector {...baseProps} />);
       expect(screen.queryByTestId("quick-budget-panel")).not.toBeInTheDocument();
+      expect(screen.queryByText("Quick Budget")).not.toBeInTheDocument();
     });
   });
 });

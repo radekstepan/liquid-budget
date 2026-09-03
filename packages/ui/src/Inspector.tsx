@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import type {
   GroupRow,
   CashFlowSummary,
@@ -33,11 +33,6 @@ export const Inspector = memo(function Inspector({
   cashFlow,
   trailingNetWorth,
   insights,
-  selectedCategory,
-  onClearSelectedCategory,
-  quickFill,
-  onQuickBudget,
-  isBudgetView,
   onSelectMonth,
   onImportYnab4,
   onImportCsv,
@@ -63,17 +58,6 @@ export const Inspector = memo(function Inspector({
   cashFlow?: CashFlowSummary;
   trailingNetWorth?: TrailingNetWorthSummary;
   insights?: SpendingInsight[];
-  selectedCategory?: { id: number; name: string } | null;
-  onClearSelectedCategory?: () => void;
-  quickFill?: {
-    lastMonthAssignments?: Map<number, number>;
-    spentLastMonthByCategory?: Map<number, number>;
-    avgSpentByCategory?: Map<number, number>;
-    avgBudgetedByCategory?: Map<number, number>;
-    underfundedByCategory?: Map<number, number>;
-  };
-  onQuickBudget?: (type: "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear", categoryId?: number) => void;
-  isBudgetView?: boolean;
   onSelectMonth: (key: string) => void;
   onImportYnab4?: (file: File) => Promise<ImportSummary | void>;
   onImportCsv?: (file: File) => void;
@@ -125,35 +109,6 @@ export const Inspector = memo(function Inspector({
   const effectiveInsights: SpendingInsight[] = insights ?? [
     { id: "clean", type: "clean", message: "Spending is steady within 3-month baseline" },
   ];
-
-  // Quick Budget figures
-  const quickBudgetValues = useMemo(() => {
-    if (!quickFill) {
-      return { lastMonth: 0, spentLastMonth: 0, avgBudgeted: 0 };
-    }
-    if (selectedCategory) {
-      const catId = selectedCategory.id;
-      return {
-        lastMonth: quickFill.lastMonthAssignments?.get(catId) ?? 0,
-        spentLastMonth: quickFill.spentLastMonthByCategory?.get(catId) ?? 0,
-        avgBudgeted: quickFill.avgBudgetedByCategory?.get(catId) ?? 0,
-      };
-    }
-    // All categories sum
-    let lastMonth = 0;
-    if (quickFill.lastMonthAssignments) {
-      for (const val of quickFill.lastMonthAssignments.values()) lastMonth += val;
-    }
-    let spentLastMonth = 0;
-    if (quickFill.spentLastMonthByCategory) {
-      for (const val of quickFill.spentLastMonthByCategory.values()) spentLastMonth += val;
-    }
-    let avgBudgeted = 0;
-    if (quickFill.avgBudgetedByCategory) {
-      for (const val of quickFill.avgBudgetedByCategory.values()) avgBudgeted += val;
-    }
-    return { lastMonth, spentLastMonth, avgBudgeted };
-  }, [quickFill, selectedCategory]);
 
   return (
     <aside className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto">
@@ -336,87 +291,6 @@ export const Inspector = memo(function Inspector({
             <strong className="text-[var(--y-ink)]">{money(incomeFromPast)}</strong> of income originated from past transaction dates.
           </span>
         </div>
-      )}
-
-      {/* Quick Budget Panel */}
-      {isBudgetView !== false && quickFill && (
-        <Panel title="Quick Budget" bodyClass="!p-[10px] space-y-1.5">
-          <div data-testid="quick-budget-panel" className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10.5px] text-[var(--y-ink-soft)] pb-0.5 border-b border-[var(--y-line-soft)]">
-              {selectedCategory ? (
-                <>
-                  <span className="truncate font-semibold text-[var(--y-ink)]">
-                    {selectedCategory.name}
-                  </span>
-                  {onClearSelectedCategory && (
-                    <button
-                      type="button"
-                      onClick={onClearSelectedCategory}
-                      className="text-[10px] text-[var(--y-blue)] hover:underline cursor-pointer ml-2 shrink-0"
-                      data-testid="quick-budget-deselect"
-                    >
-                      Entire Budget
-                    </button>
-                  )}
-                </>
-              ) : (
-                <span className="font-semibold text-[var(--y-ink)]">Entire Budget</span>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onQuickBudget?.("lastMonth", selectedCategory?.id)}
-              className="y-btn y-btn--sm w-full flex items-center justify-between px-2.5 py-1.5 cursor-pointer text-left"
-              title="Set budgeted amounts to last month's values"
-              data-testid="quick-budget-last-month"
-            >
-              <span className="font-semibold text-[11px] text-[var(--y-ink)]">Budgeted Last Month</span>
-              <span className="y-num font-bold text-[var(--y-ink)]">
-                {money(quickBudgetValues.lastMonth)}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onQuickBudget?.("spentLastMonth", selectedCategory?.id)}
-              className="y-btn y-btn--sm w-full flex items-center justify-between px-2.5 py-1.5 cursor-pointer text-left"
-              title="Set budgeted amounts to what was spent last month"
-              data-testid="quick-budget-spent-last-month"
-            >
-              <span className="text-[11px] text-[var(--y-ink)]">Spent Last Month</span>
-              <span className="y-num text-[var(--y-ink-soft)]">
-                {money(quickBudgetValues.spentLastMonth)}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onQuickBudget?.("avgBudgeted", selectedCategory?.id)}
-              className="y-btn y-btn--sm w-full flex items-center justify-between px-2.5 py-1.5 cursor-pointer text-left"
-              title="Set budgeted amounts to average budgeted over last 3 months"
-              data-testid="quick-budget-avg-budgeted"
-            >
-              <span className="text-[11px] text-[var(--y-ink)]">Average Budgeted</span>
-              <span className="y-num text-[var(--y-ink-soft)]">
-                {money(quickBudgetValues.avgBudgeted)}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onQuickBudget?.("clear", selectedCategory?.id)}
-              className="y-btn y-btn--sm w-full flex items-center justify-between px-2.5 py-1.5 cursor-pointer text-left"
-              title="Clear budgeted amounts to $0.00"
-              data-testid="quick-budget-clear"
-            >
-              <span className="text-[11px] text-[var(--y-ink-soft)]">Set to Zero</span>
-              <span className="y-num text-[var(--y-ink-soft)]">
-                $0.00
-              </span>
-            </button>
-          </div>
-        </Panel>
       )}
 
       {/* Card 1: Net Monthly (Cash Flow & Savings Rate) */}
