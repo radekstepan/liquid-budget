@@ -1794,6 +1794,38 @@ describe("recurring queries", () => {
       });
     });
   });
+
+  describe("transition split to single recurring", () => {
+    it("deletes sub-transactions when converted from split to single", async () => {
+      const splitRow = {
+        id: 200,
+        accountId: 1,
+        categoryId: null,
+        payee: "Split Payee",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-08-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWith("select:recurring", [splitRow]);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("update:recurring", [{ id: 200 }]);
+      mock.respondWith("delete:recurring_sub_transactions", [{}]);
+      mock.respondWith("select:recurring", [{ ...splitRow, categoryId: 10, payee: "Single Payee" }]);
+
+      const result = await updateRecurring(mock.db, 200, {
+        categoryId: 10,
+        payee: "Single Payee",
+        transferAccountId: null,
+      });
+
+      expect(result).toMatchObject({ id: 200, categoryId: 10, payee: "Single Payee" });
+      const deleteCall = mock.calls.find((c) => c.op === "delete" && c.table === "recurring_sub_transactions");
+      expect(deleteCall).toBeDefined();
+    });
+  });
 });
+
 
 

@@ -161,6 +161,13 @@ describe("categories queries", () => {
       expect(set).toEqual({ carryover: 0 });
     });
 
+    it("updates groupId to move category to a different group", async () => {
+      mock.respondWith("update:categories", [{ id: 1, groupId: 3 }]);
+      await updateCategory(mock.db, 1, { groupId: 3 });
+      const set = mock.calls.find((c) => c.op === "update")?.set as Record<string, unknown>;
+      expect(set).toEqual({ groupId: 3 });
+    });
+
     it("BUG-04: returns existing row if patch is empty", async () => {
       mock.respondWith("select:categories", [{ id: 1, name: "Groceries", sort: 2 }]);
       const row = await updateCategory(mock.db, 1, {});

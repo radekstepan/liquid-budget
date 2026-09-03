@@ -1241,6 +1241,7 @@ export function BudgetAppShell({
         ? dataRef.current?.categories.find((c) => c.id === categoryId)
         : null;
       const prevCategorySnapshot = prevCategory ? { ...prevCategory } : null;
+      const targetGroupId = v.groupId ?? (groupId != null ? groupId : undefined);
       if (categoryId) {
         setData((prev) => {
           if (!prev) return prev;
@@ -1248,6 +1249,7 @@ export function BudgetAppShell({
             c.id === categoryId
               ? {
                   ...c,
+                  groupId: targetGroupId ?? c.groupId,
                   name: v.name,
                   goalTarget: v.goalTarget != null ? v.goalTarget.toFixed(2) : null,
                   carryover: v.carryover != null ? v.carryover.toFixed(2) : c.carryover,
@@ -1266,6 +1268,7 @@ export function BudgetAppShell({
                 method: "PATCH",
                 body: JSON.stringify({
                   id: categoryId,
+                  groupId: v.groupId,
                   name: v.name,
                   goalTarget: v.goalTarget,
                   carryover: v.carryover,
@@ -1276,7 +1279,7 @@ export function BudgetAppShell({
               return await jsonReq("/api/categories", {
                 method: "POST",
                 body: JSON.stringify({
-                  groupId,
+                  groupId: targetGroupId ?? groupId,
                   name: v.name,
                   goalTarget: v.goalTarget,
                   carryover: v.carryover,

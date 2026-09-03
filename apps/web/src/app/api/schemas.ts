@@ -313,6 +313,7 @@ export const CategoryPatchSchema = z
   .object({
     id: z.number().int().positive(),
     type: z.undefined().optional(),
+    groupId: z.number().int().positive().optional(),
     name: z.string().min(1).max(255).optional(),
     goalTarget: z.number().int().nonnegative().nullable().optional(),
     carryover: z.number().int().nullable().optional(),

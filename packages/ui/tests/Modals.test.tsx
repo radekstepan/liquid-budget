@@ -91,7 +91,7 @@ describe("CategoryModal", () => {
     fireEvent.click(checkbox);
     expect(checkbox).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({ name: "Buffer", goalTarget: null, carryover: 0, overspendCarriesOver: false });
+    expect(onSave).toHaveBeenCalledWith({ name: "Buffer", groupId: 1, goalTarget: null, carryover: 0, overspendCarriesOver: false });
   });
 
   it("UNI-20 / F-16: toggles overspendCarriesOver (Red Arrow)", () => {
@@ -114,6 +114,32 @@ describe("CategoryModal", () => {
     );
     expect(screen.getByDisplayValue("Rent")).toBeInTheDocument();
     expect(screen.getByDisplayValue("1500.00")).toBeInTheDocument();
+  });
+
+  it("supports changing category group when groups are provided", () => {
+    const onSave = vi.fn();
+    const groups = [
+      { id: 1, name: "Immediate Obligations", sort: 0, isHidden: false },
+      { id: 2, name: "True Expenses", sort: 1, isHidden: false },
+    ];
+    render(
+      <CategoryModal
+        initial={categories[0]!}
+        groups={groups}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    expect(screen.getByText("Group")).toBeInTheDocument();
+    pickFromOpenDropdownByValue(/group/i, "2");
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Groceries",
+      groupId: 2,
+      goalTarget: null,
+      carryover: 0,
+      overspendCarriesOver: false,
+    });
   });
 
   it("UNI-03 / F-03: renders Delete button when initial and onDelete provided, requires reassignment when transactionCount > 0", async () => {
@@ -969,10 +995,10 @@ describe("TransactionModal", () => {
       const transferToBtn = screen.getByRole("button", { name: /transfer to/i });
       expect(transferToBtn).toBeEnabled();
 
-      // Mode toggle enables Single and Transfer, but disables Split
+      // Mode toggle enables Single, Transfer, and Split
       expect(screen.getByRole("button", { name: /^single$/i })).toBeEnabled();
       expect(screen.getByRole("button", { name: /^transfer$/i })).toBeEnabled();
-      expect(screen.getByRole("button", { name: /^split$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^split$/i })).toBeEnabled();
     });
 
     it("allows re-routing destination account on an existing transfer and emits updated transferAccountId", () => {
@@ -1052,7 +1078,7 @@ describe("TransactionModal", () => {
       );
     });
 
-    it("disables Single and Transfer mode buttons for an initial split transaction", () => {
+    it("enables mode buttons for an initial split transaction and disables Account selector", () => {
       const parent: Transaction = {
         id: 10,
         accountId: 1,
@@ -1079,9 +1105,13 @@ describe("TransactionModal", () => {
         />
       );
 
-      expect(screen.getByRole("button", { name: /^single$/i })).toBeDisabled();
-      expect(screen.getByRole("button", { name: /^transfer$/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^single$/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /^transfer$/i })).toBeEnabled();
       expect(screen.getByRole("button", { name: /^split$/i })).toBeEnabled();
+
+      // Account selector is disabled for split transactions
+      const accountBtn = screen.getByRole("button", { name: /account/i });
+      expect(accountBtn).toBeDisabled();
     });
   });
 
@@ -2033,9 +2063,13 @@ describe("RecurringModal", () => {
     );
     const splitBtn = screen.getByRole("button", { name: /^split$/i });
     expect(splitBtn.className).toMatch(/primary|active/);
-    // Single is disabled when the initial is a split.
+    // Single is enabled when the initial is a split.
     const singleBtn = screen.getByRole("button", { name: /^single$/i });
-    expect(singleBtn).toBeDisabled();
+    expect(singleBtn).toBeEnabled();
+
+    // Account selector is disabled for split recurring rule
+    const accountBtn = screen.getByRole("button", { name: /account/i });
+    expect(accountBtn).toBeDisabled();
   });
 
   it("emits a mixed-sign split (Paycheck + tax deduction)", () => {
@@ -2382,4 +2416,37 @@ describe("AccountModal", () => {
     });
     expect(onUnarchive).toHaveBeenCalledTimes(1);
   });
+
+  it("enables Account Type dropdown in edit mode when transactionCount is 0", () => {
+    const onSave = vi.fn();
+    render(
+      <AccountModal
+        initial={{ id: 5, name: "Empty Account", kind: "liquid", balance: "0", onBudget: true, sort: 0 }}
+        transactionCount={0}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    pickFromOpenDropdownByValue(/type/i, "offbudget");
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Empty Account",
+      kind: "offbudget",
+      groupLabel: "Retirement",
+      onBudget: false,
+    });
+  });
+
+  it("disables Account Type dropdown in edit mode when transactionCount > 0", () => {
+    render(
+      <AccountModal
+        initial={{ id: 6, name: "Active Account", kind: "liquid", balance: "1000", onBudget: true, sort: 0 }}
+        transactionCount={5}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    expect(screen.getByText(/account type is locked because this account has 5 transactions/i)).toBeInTheDocument();
+  });
 });
+

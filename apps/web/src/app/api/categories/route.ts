@@ -100,6 +100,7 @@ export async function PATCH(req: Request) {
   }
   const body = parseResult.data;
   const patch: Parameters<typeof updateCategory>[2] = {};
+  if (body.groupId !== undefined) patch.groupId = body.groupId;
   if (body.name !== undefined) patch.name = body.name;
   if (body.goalTarget !== undefined) patch.goalTarget = body.goalTarget;
   if (body.carryover !== undefined) patch.carryover = body.carryover;

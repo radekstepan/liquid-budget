@@ -323,5 +323,54 @@ describe("Recurring API routes (BUG-19, BUG-41, BUG-42)", () => {
       const remaining = await db.select().from(recurring).where(eq(recurring.accountId, account!.id));
       expect(remaining).toHaveLength(0);
     });
+
+    it("converts a split recurring rule to single and clears sub-transactions", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const group = await createCategoryGroup(db, { name: "Living" });
+      const cat1 = await createCategory(db, { groupId: group!.id, name: "Groceries" });
+      const cat2 = await createCategory(db, { groupId: group!.id, name: "Household" });
+
+      const splitRec = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        payee: "Target",
+        amount: -10000,
+        frequency: "monthly",
+        nextDate: "2026-09-01",
+        subTransactions: [
+          { categoryId: cat1!.id, amount: -6000 },
+          { categoryId: cat2!.id, amount: -4000 },
+        ],
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/recurring", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: splitRec!.id,
+          mode: "single",
+          categoryId: cat1!.id,
+          transferAccountId: null,
+          payee: "Target (All Groceries)",
+        }),
+      });
+      const res = await PATCH(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.id).toBe(splitRec!.id);
+      expect(json.categoryId).toBe(cat1!.id);
+
+      // Post the converted recurring transaction and verify it materializes as a single transaction
+      const postReq = new NextRequest(`http://localhost:3000/api/recurring?action=post&id=${splitRec!.id}`, {
+        method: "POST",
+      });
+      const postRes = await POST(postReq);
+      expect(postRes.status).toBe(200);
+      const postJson = await postRes.json();
+      expect(postJson.transaction.categoryId).toBe(cat1!.id);
+      expect(postJson.transaction.parentId).toBeNull();
+    });
   });
 });
+

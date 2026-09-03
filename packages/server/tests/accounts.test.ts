@@ -1315,5 +1315,36 @@ describe("accounts queries", () => {
       expect(tx?.amount).toBe(10000);
       expect(tx?.isIncome).toBe(false);
     });
+
+    it("converts 0-transaction credit account to liquid and cleans up linked category", async () => {
+      const db = openMigratedDb();
+      const acct = await createAccount(db, {
+        name: "Zero Balance CC",
+        kind: "credit",
+        balance: 0,
+      });
+
+      // Initially 0 transactions
+      const txs = await db
+        .select()
+        .from(schema.transactions)
+        .where(eq(schema.transactions.accountId, acct.id));
+      expect(txs).toHaveLength(0);
+
+      // Convert to liquid
+      const updated = await updateAccount(db, acct.id, {
+        kind: "liquid",
+        onBudget: true,
+      });
+      expect(updated).toMatchObject({ id: acct.id, kind: "liquid", onBudget: true });
+
+      // Verify no linked category exists
+      const linked = await db
+        .select()
+        .from(schema.categories)
+        .where(eq(schema.categories.linkedAccountId, acct.id));
+      expect(linked).toHaveLength(0);
+    });
   });
 });
+

@@ -199,6 +199,33 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
           throw new AccountError("Liquid/credit accounts cannot have onBudget set to false", 400);
         }
 
+        if (existing.kind === "credit" && nextKind !== "credit") {
+          const linkedCats = await db
+            .select({ id: categories.id })
+            .from(categories)
+            .where(eq(categories.linkedAccountId, id));
+          for (const cat of linkedCats) {
+            const [hasAssign] = await db
+              .select({ id: assignments.id })
+              .from(assignments)
+              .where(eq(assignments.categoryId, cat.id))
+              .limit(1);
+            const [hasTxn] = await db
+              .select({ id: transactions.id })
+              .from(transactions)
+              .where(eq(transactions.categoryId, cat.id))
+              .limit(1);
+            if (hasAssign || hasTxn) {
+              await db
+                .update(categories)
+                .set({ linkedAccountId: null })
+                .where(eq(categories.id, cat.id));
+            } else {
+              await db.delete(categories).where(eq(categories.id, cat.id));
+            }
+          }
+        }
+
         p.kind = nextKind;
         p.onBudget = nextOnBudget;
       } else {

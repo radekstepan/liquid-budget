@@ -104,6 +104,7 @@ export async function updateCategory(
   id: number,
   patch: {
     name?: string;
+    groupId?: number;
     goalTarget?: number | null;
     carryover?: number | null;
     sort?: number;
@@ -111,6 +112,7 @@ export async function updateCategory(
   }
 ) {
   const p: Record<string, unknown> = {};
+  if (patch.groupId !== undefined && patch.groupId != null) p.groupId = Number(patch.groupId);
   if (patch.name !== undefined && patch.name != null) p.name = String(patch.name);
   if (patch.goalTarget !== undefined) {
     p.goalTarget = patch.goalTarget == null ? null : assertValidAmount(patch.goalTarget, { allowZero: true });
