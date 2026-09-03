@@ -285,13 +285,14 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
   });
 
   test("assigning funds to Credit Card Payment category allocates debt paydown and updates available for payment", async ({ page }) => {
-    // 1. In Budget view, expand Credit Card Payments group
-    const ccToggle = page.getByRole("button", { name: /Toggle Credit Card Payments/i });
-    if (await ccToggle.isVisible()) {
-      await ccToggle.click();
-    }
-
+    // 1. In Budget view, ensure Credit Card Payments group is expanded
     const ccRow = page.locator("tr[data-cat-row]").filter({ hasText: "AMEX Cobalt" });
+    if (!(await ccRow.isVisible())) {
+      const ccToggle = page.getByRole("button", { name: /Toggle Credit Card Payments/i });
+      if (await ccToggle.isVisible()) {
+        await ccToggle.click();
+      }
+    }
     await expect(ccRow).toBeVisible();
 
     // 2. Note initial TBB

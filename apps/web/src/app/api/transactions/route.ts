@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   }
   const body = parseResult.data;
 
-  if (body.subTransactions && body.subTransactions.length > 0) {
+  if (body.mode === "split") {
     try {
       const result = await createSplitWithChildren(
         db,
@@ -99,9 +99,9 @@ export async function POST(req: Request) {
       memo: body.memo,
       amount: body.amount,
       status: body.status,
-      transferStatus: body.transferStatus,
+      transferStatus: body.mode === "transfer" ? body.transferStatus : undefined,
       flagColor: body.flagColor ?? null,
-      transferAccountId: body.transferAccountId ?? null,
+      transferAccountId: body.mode === "transfer" ? body.transferAccountId : null,
       incomeMonth: body.incomeMonth,
     });
     return Response.json(row);
@@ -134,7 +134,7 @@ export async function PATCH(req: Request) {
   }
   const body = parseResult.data;
 
-  if (body.subTransactions && body.subTransactions.length > 0) {
+  if (body.mode === "split") {
     try {
       const parentFields: Parameters<typeof updateSplit>[2] = {};
       if (body.amount !== undefined) parentFields.amount = body.amount;
@@ -168,7 +168,9 @@ export async function PATCH(req: Request) {
     const patch: Parameters<typeof updateTransaction>[2] = {};
     if (body.accountId !== undefined) patch.accountId = body.accountId;
     if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
-    if (body.transferAccountId !== undefined) patch.transferAccountId = body.transferAccountId;
+    if ("transferAccountId" in body && body.transferAccountId !== undefined) {
+      patch.transferAccountId = body.transferAccountId;
+    }
     if (body.date !== undefined) patch.date = body.date;
     if (body.payee !== undefined) patch.payee = body.payee;
     if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
