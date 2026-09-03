@@ -886,5 +886,72 @@ describe("BudgetApp", () => {
     );
     expect(picker.getByRole("button", { name: "Year" })).toHaveTextContent(String(year));
   });
+
+  it("opens the Page Visibility page from the Inspector gear menu", () => {
+    window.localStorage.removeItem("ynab:nav:visible");
+    try {
+      const { api } = makeApi();
+      render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByText("Page Visibility"));
+      expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
+      for (const name of ["Budget", "Reports", "Calendar", "Projections", "Recurring", "Transactions"]) {
+        expect(screen.getByRole("checkbox", { name })).toBeInTheDocument();
+      }
+    } finally {
+      window.localStorage.removeItem("ynab:nav:visible");
+    }
+  });
+
+  it("hides a menu page from the sidebar and moves to the next page when the current one is hidden", () => {
+    window.localStorage.removeItem("ynab:nav:visible");
+    try {
+      const { api } = makeApi();
+      render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+      // Starts on the Budget view.
+      expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByText("Page Visibility"));
+
+      // Hide Budget while on Budget.
+      fireEvent.click(screen.getByRole("checkbox", { name: "Budget" }));
+
+      // Budget disappears from the sidebar, but the page stays open.
+      expect(screen.queryByRole("button", { name: /^budget$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
+
+      // Closing reveals the next available page (Reports).
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByText("Spending by Category")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^budget$/i })).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.removeItem("ynab:nav:visible");
+    }
+  });
+
+  it("keeps at least one menu page enabled", () => {
+    window.localStorage.removeItem("ynab:nav:visible");
+    try {
+      const { api } = makeApi();
+      render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByText("Page Visibility"));
+
+      // Hide everything except Transactions: each hide moves to the next page.
+      for (const name of ["Budget", "Reports", "Calendar", "Projections", "Recurring"]) {
+        fireEvent.click(screen.getByRole("checkbox", { name }));
+      }
+      // The last remaining page is greyed out and cannot be hidden.
+      expect(screen.getByRole("checkbox", { name: "Transactions" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("checkbox", { name: "Transactions" }));
+      expect(screen.getByRole("checkbox", { name: "Transactions" })).toBeChecked();
+      expect(
+        screen.getByRole("button", { name: /^transactions/i })
+      ).toBeInTheDocument();
+    } finally {
+      window.localStorage.removeItem("ynab:nav:visible");
+    }
+  });
 });
 

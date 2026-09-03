@@ -8,6 +8,17 @@ export { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 export { CalendarView } from "./CalendarView.js";
 export { ProjectionsView } from "./ProjectionsView.js";
 export { SettingsView } from "./SettingsView.js";
+export { MenuSettingsView } from "./MenuSettingsView.js";
+export {
+  NAV_ITEMS,
+  NAV_ORDER,
+  DEFAULT_NAV_VISIBILITY,
+  NAV_VISIBILITY_STORAGE_KEY,
+  firstAvailableView,
+  isNavVisibility,
+  visibleViewCount,
+  type NavItemMeta,
+} from "./navVisibility.js";
 export {
   TransactionModal,
   BulkEditTransactionsModal,

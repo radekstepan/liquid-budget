@@ -38,6 +38,7 @@ export const Sidebar = memo(function Sidebar({
   onReorderAccount,
   dueBadgeCount = 0,
   dueByAccount,
+  visibleViews,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -49,7 +50,10 @@ export const Sidebar = memo(function Sidebar({
   onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
   dueBadgeCount?: number;
   dueByAccount?: Record<number, number>;
+  /** Per-view menu visibility. Omitted views (or an omitted map) stay visible. */
+  visibleViews?: Partial<Record<View, boolean>>;
 }) {
+  const isNavVisible = (key: View) => visibleViews?.[key] ?? true;
   const activeAccounts = accounts.filter((a) => !a.archived);
   const archivedAccounts = accounts.filter((a) => !!a.archived);
 
@@ -210,7 +214,7 @@ export const Sidebar = memo(function Sidebar({
       <div className="y-side-section-divider" style={{ marginTop: "1px" }} />
 
       <nav className="px-0 pt-1">
-        {NAV_TOP.map(({ key, label, icon }) => {
+        {NAV_TOP.filter(({ key }) => isNavVisible(key)).map(({ key, label, icon }) => {
           const active = view === key;
           return (
             <button
@@ -226,6 +230,7 @@ export const Sidebar = memo(function Sidebar({
       </nav>
 
       {/* Transactions row — highlighted when transactions view with no account filter */}
+      {isNavVisible("transactions") && (
       <button
         onClick={() => setView("transactions")}
         className={cx(
@@ -254,6 +259,7 @@ export const Sidebar = memo(function Sidebar({
           {fmt(liquidTotal + creditTotal)}
         </span>
       </button>
+      )}
 
       <div className="y-side-section-divider" />
 

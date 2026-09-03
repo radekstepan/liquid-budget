@@ -124,6 +124,17 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
     ),
     split: <path d="M2 8h4l3-4h5M9 12h5M6 8l3 4" strokeWidth="1.4" strokeLinejoin="round" fill="none" />,
     flag: <path d="M4 14V2.6l8 2.2-8 2.2" strokeWidth="1.4" strokeLinejoin="round" />,
+    eyeOff: (
+      <>
+        <path
+          d="M2.4 8C4.3 5.2 6.2 4.6 8 4.6c1.8 0 3.7.6 5.6 3.4C11.7 10.8 9.8 11.4 8 11.4c-1.8 0-3.7-.6-5.6-3.4Z"
+          strokeWidth="1.4"
+          strokeLinejoin="round"
+        />
+        <circle cx="8" cy="8" r="1.6" strokeWidth="1.4" />
+        <path d="M3.2 3.2l9.6 9.6" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
     lock: (
       <>
         <rect x="3.5" y="7" width="9" height="6.5" rx="1" strokeWidth="1.4" />
@@ -1056,11 +1067,18 @@ export const Checkbox: React.FC<{
   onChange?: (v: boolean) => void;
   label?: string;
   radio?: boolean;
-}> = ({ checked = false, onChange, label, radio }) => (
-  <label className="inline-flex items-center gap-[6px] cursor-pointer select-none leading-none align-middle">
+  disabled?: boolean;
+}> = ({ checked = false, onChange, label, radio, disabled = false }) => (
+  <label
+    className={cx(
+      "inline-flex items-center gap-[6px] select-none leading-none align-middle",
+      disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+    )}
+  >
     <input
       type={radio ? "radio" : "checkbox"}
       checked={checked}
+      disabled={disabled}
       onChange={(e) => onChange?.(e.target.checked)}
       className="sr-only"
     />

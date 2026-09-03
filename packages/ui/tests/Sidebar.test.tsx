@@ -28,6 +28,50 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
   });
 
+  it("hides nav items disabled via visibleViews", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        visibleViews={{
+          budget: true,
+          reports: false,
+          calendar: false,
+          projections: true,
+          recurring: true,
+          transactions: false,
+        }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /recurring/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reports$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^calendar$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^transactions/i })).not.toBeInTheDocument();
+  });
+
+  it("shows every nav item when visibleViews is omitted", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^reports$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^calendar$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^transactions/i })).toBeInTheDocument();
+  });
+
   it("calls setView when a nav button is clicked", () => {
     const setView = vi.fn();
     render(
