@@ -8,12 +8,18 @@
 //     (CalendarView.tsx:133-147)
 import { test, expect, type Page } from "@playwright/test";
 
+const MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  // Anchor on the seed's data month: app init defaults to today's month.
+  await page.goto("/budget/2026-06");
   await waitForReady(page);
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(page.getByText("Calendar", { exact: true }).first()).toBeVisible();
@@ -27,18 +33,24 @@ test("toolbar reflects the active month", async ({ page }) => {
   await expect(picker.getByRole("button", { name: "Year" })).toHaveText("2026");
 });
 
-test("year dropdown jumps to the same month in the chosen year", async ({ page }) => {
+test("year dropdown beyond the future cap clamps to the latest allowed month", async ({ page }) => {
   // Same MonthNav as the Budget view, so the picker is wired through
   // CalendarView.tsx:60-72 and shares the year+month selects.
+  // MonthNav clamps navigation to one month past today (BudgetApp
+  // handleSetMonth), so jumping two years out lands on that cap.
+  const now = new Date();
+  const maxTotal = now.getFullYear() * 12 + now.getMonth() + 1;
+  const maxMonth = MONTHS_LONG[((maxTotal % 12) + 12) % 12];
+  const maxYear = String(Math.floor(maxTotal / 12));
   const picker = page.getByTestId("month-nav-picker");
   const yearSelect = picker.getByRole("button", { name: "Year" });
   await expect(yearSelect).toHaveText("2026");
 
   await yearSelect.click();
-  await page.locator('.y-dropdown [data-value="2028"]').click();
+  await page.locator(`.y-dropdown [data-value="${now.getFullYear() + 2}"]`).click();
 
-  await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
-  await expect(yearSelect).toHaveText("2028");
+  await expect(picker.getByRole("button", { name: "Month" })).toHaveText(maxMonth!);
+  await expect(yearSelect).toHaveText(maxYear);
 });
 
 test("clicking an empty day opens the Add Transaction modal pre-dated to that day", async ({ page }) => {

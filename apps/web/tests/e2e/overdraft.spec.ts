@@ -27,7 +27,8 @@ async function waitForReady(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await resetToDemo(page);
-  await page.goto("/");
+  // Anchor on the seed's data month: app init defaults to today's month.
+  await page.goto("/budget/2026-06");
   await waitForReady(page);
 });
 

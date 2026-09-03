@@ -28,7 +28,8 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("ynab:budget:monthCount", "1");
   });
-  await page.goto("/");
+  // Anchor on the seed's data month: app init defaults to today's month.
+  await page.goto("/budget/2026-06");
   await waitForReady(page);
   // Switch to 1 month view for clean, deterministic single-month assertions
   const oneMonthBtn = page.getByRole("button", { name: "1 month" });

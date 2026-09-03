@@ -203,6 +203,37 @@ export const BudgetView = memo(function BudgetView({
     };
   }, [showMulti, isOnThisMonth, resolvedVisibleMonths, todayMonth]);
 
+  // On init, ensure today's month column is actually visible inside the
+  // horizontal scroller — not stuck behind the scrollbar/fold at scrollLeft 0.
+  const didInitScrollRef = useRef(false);
+  useEffect(() => {
+    if (didInitScrollRef.current) return;
+    if (!showMulti) return;
+    if (!resolvedVisibleMonths.includes(todayMonth)) return;
+    const targetEl = currentMonthThRef.current;
+    const container = scrollContainerRef.current;
+    if (!targetEl || !container) return;
+    didInitScrollRef.current = true;
+    if (typeof targetEl.scrollIntoView === "function") {
+      try {
+        targetEl.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" as ScrollBehavior });
+        return;
+      } catch {
+        // fall through to manual centering
+      }
+    }
+    try {
+      const targetLeft = (targetEl as HTMLElement).offsetLeft;
+      const targetWidth = (targetEl as HTMLElement).offsetWidth;
+      container.scrollLeft = Math.max(
+        0,
+        targetLeft - container.clientWidth / 2 + targetWidth / 2
+      );
+    } catch {
+      // scroll is best-effort; layout stays usable without it
+    }
+  }, [showMulti, resolvedVisibleMonths, todayMonth]);
+
   const hasThisMonthInView = showMulti ? isTodayInViewport : isOnThisMonth;
 
   const { year: ty, month0: tm0 } = parseMonthKey(todayMonth);
