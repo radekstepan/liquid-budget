@@ -16,6 +16,7 @@ export { seedDatabase, resetDatabase, resetAndSeedDatabase, DEMO_MONTH } from ".
 export { importYnab4, extractYnab4DataFromZip, parseYnab4SettingsXml, type ExtractedYnab4Data, type Ynab4Settings } from "./import-ynab4.js";
 export { exportYnab4, exportYnab4Zip, type ExportYnab4Options } from "./export-ynab4.js";
 export { importCsvTransactions, type ImportCsvInput } from "./import-csv.js";
+export * from "./invariants.js";
 // Re-export ClearedStatus from logic so API routes and the web app
 // can use a single canonical tri-state type without reaching into
 // @ynab/logic directly.
