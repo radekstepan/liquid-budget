@@ -1174,7 +1174,6 @@ export function RecurringModal({
   const [amount, setAmount] = useState(initial ? initialAmt.toFixed(2) : "");
   const [frequency, setFrequency] = useState(initial?.frequency ?? "monthly");
   const [nextDate, setNextDate] = useState(initial?.nextDate ?? todayISO());
-  const [active, setActive] = useState(initial?.active ?? true);
 
   // Transfer destination
   const [transferAccountId, setTransferAccountId] = useState<number | "">(
@@ -1270,7 +1269,9 @@ export function RecurringModal({
     frequency,
     nextDate,
     anchorDay: initial?.anchorDay,
-    active,
+    // New schedules are always active; edits preserve the rule's
+    // current state (pause/resume lives on the list card instead).
+    active: initial?.active ?? true,
     flagColor,
     transferAccountId,
     subRows,
@@ -1718,13 +1719,6 @@ export function RecurringModal({
         />
       </div>
 
-      <div className="pt-1">
-        <Checkbox
-          checked={active}
-          onChange={setActive}
-          label="Active"
-        />
-      </div>
     </Modal>
   );
 }

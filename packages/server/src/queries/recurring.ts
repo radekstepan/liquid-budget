@@ -494,7 +494,9 @@ export async function postRecurringTransaction(
         payee: r.payee,
         memo: r.memo || "",
         amount: Number(r.amount),
-        status: "c",
+        // Scheduled occurrences enter as Uncleared so they stand out
+        // in the register until the bank has seen them.
+        status: "u",
         transferAccountId: r.transferAccountId,
         flagColor: sanitizeFlagColor(r.flagColor),
       });
@@ -507,7 +509,7 @@ export async function postRecurringTransaction(
           payee: r.payee,
           memo: r.memo || "",
           amount: Number(r.amount),
-          status: "c",
+          status: "u",
           flagColor: sanitizeFlagColor(r.flagColor),
         },
         children.map((c) => ({
@@ -525,7 +527,7 @@ export async function postRecurringTransaction(
         payee: r.payee,
         memo: r.memo || "",
         amount: Number(r.amount),
-        status: "c",
+        status: "u",
         transferAccountId: null,
         flagColor: sanitizeFlagColor(r.flagColor),
       });
