@@ -30,10 +30,6 @@ function balanceColor(n: number): string {
   return "var(--y-ink-faint)";
 }
 
-function isEmptyRow(r: CatRow): boolean {
-  return r.assigned === 0 && r.outflow === 0 && r.available === 0;
-}
-
 export function isInternalGroup(group: CategoryGroup | string): boolean {
   const name = typeof group === "string" ? group : group.name;
   return name === "__Internal__" || name.toLowerCase() === "__internal__";
@@ -206,14 +202,26 @@ export const BudgetView = memo(function BudgetView({
 
   // Track horizontal scroll so the sticky Category column can cast a
   // subtle shadow on its right edge only once content slides under it.
+  // Also track whether more grid sits to the right of the viewport so the
+  // Next-month arrow stays enabled until fully scrolled right.
+  const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const update = () => setIsHScrolled(container.scrollLeft > 1);
+    const update = () => {
+      setIsHScrolled(container.scrollLeft > 1);
+      setCanScrollRight(
+        container.scrollWidth - container.scrollLeft - container.clientWidth > 1
+      );
+    };
     update();
     container.addEventListener("scroll", update, { passive: true });
-    return () => container.removeEventListener("scroll", update);
-  }, []);
+    window.addEventListener("resize", update);
+    return () => {
+      container.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [showMulti, resolvedVisibleMonths]);
 
   // On init, ensure today's month column is actually visible inside the
   // horizontal scroller — not stuck behind the scrollbar/fold at scrollLeft 0.
@@ -258,6 +266,30 @@ export const BudgetView = memo(function BudgetView({
       : showMulti
       ? !rightmost || rightmost < maxAllowedMonth
       : currentMonth < maxAllowedMonth;
+
+  // The Next arrow stays enabled while there is anything to the right —
+  // newer months to shift into, or unscrolled grid already rendered.
+  const canGoRight = computedCanShiftRight || canScrollRight;
+  const handleNext = () => {
+    if (computedCanShiftRight) {
+      onShiftMonth(1);
+      return;
+    }
+    // At the newest months but not yet scrolled fully right: reveal the
+    // remaining grid instead of shifting (which is clamped).
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const step = container.clientWidth > 0 ? container.clientWidth * 0.8 : 360;
+    if (typeof container.scrollBy === "function") {
+      try {
+        container.scrollBy({ left: step, behavior: "smooth" });
+        return;
+      } catch {
+        // fall through to direct assignment
+      }
+    }
+    container.scrollLeft += step;
+  };
 
   const handleGroupDrop = (targetId: number) => {
     const srcId = dragGroupId.current;
@@ -312,17 +344,43 @@ export const BudgetView = memo(function BudgetView({
     });
   }, [resolvedBudgets]);
 
+  // Continuous zebra striping: subcategory rows alternate across the whole
+  // list (not restarting at each group), so compute each group's starting
+  // offset from the visible rows above it.
+  const isGroupCollapsed = (id: number, fallback = false) =>
+    collapsed[id] !== undefined ? Boolean(collapsed[id]) : fallback;
+  const structureOffsets: number[] = [];
+  {
+    let offset = 0;
+    for (const g of structureGroups) {
+      structureOffsets.push(offset);
+      if (!isGroupCollapsed(g.group.id)) offset += g.rows.length;
+    }
+  }
+  const creditOffset = structureOffsets.length
+    ? structureOffsets[structureOffsets.length - 1]! +
+      (isGroupCollapsed(structureGroups[structureGroups.length - 1]!.group.id)
+        ? 0
+        : structureGroups[structureGroups.length - 1]!.rows.length)
+    : 0;
+  const hiddenOffset =
+    creditOffset +
+    (creditGroup && !isGroupCollapsed(creditGroup.group.id) ? creditGroup.rows.length : 0);
+  const isHiddenCollapsed = hiddenGroup
+    ? isGroupCollapsed(hiddenGroup.group.id, true)
+    : true;
+
   return (
     <div className="flex h-full flex-col">
       <Toolbar>
         <MonthNav
           month={currentMonth}
           onPrev={() => onShiftMonth(-1)}
-          onNext={computedCanShiftRight ? () => onShiftMonth(1) : undefined}
+          onNext={canGoRight ? handleNext : undefined}
           onSetMonth={onSetMonth}
           minYear={minYear}
           maxYear={maxYear}
-          nextDisabled={!computedCanShiftRight}
+          nextDisabled={!canGoRight}
         />
         <Button
           size="sm"
@@ -450,10 +508,11 @@ export const BudgetView = memo(function BudgetView({
             )}
           </thead>
           <tbody>
-            {structureGroups.map((g) => (
+            {structureGroups.map((g, gi) => (
               <GroupBlock
                 key={g.group.id}
                 group={g}
+                rowOffset={structureOffsets[gi] ?? 0}
                 collapsed={!!collapsed[g.group.id]}
                 onToggle={() => onToggleGroup(g.group.id)}
                 onAssign={onAssign}
@@ -483,6 +542,7 @@ export const BudgetView = memo(function BudgetView({
             {creditGroup && (
               <GroupBlock
                 group={creditGroup}
+                rowOffset={creditOffset}
                 collapsed={!!collapsed[creditGroup.group.id]}
                 onToggle={() => onToggleGroup(creditGroup.group.id)}
                 onAssign={onAssign}
@@ -504,11 +564,8 @@ export const BudgetView = memo(function BudgetView({
             {hiddenGroup && (
               <GroupBlock
                 group={hiddenGroup}
-                collapsed={
-                  collapsed[hiddenGroup.group.id] !== undefined
-                    ? Boolean(collapsed[hiddenGroup.group.id])
-                    : true
-                }
+                rowOffset={hiddenOffset}
+                collapsed={isHiddenCollapsed}
                 onToggle={() => onToggleGroup(hiddenGroup.group.id)}
                 onAssign={onAssign}
                 currentMonth={currentMonth}
@@ -534,10 +591,11 @@ export const BudgetView = memo(function BudgetView({
       </div>
 
       <div
-        className="shrink-0 border-t px-2.5 pt-2.5 pb-4"
+        className="shrink-0 border-t px-2.5 pt-2.5"
         style={{
           borderColor: "var(--y-border-strong)",
           background: "var(--y-panel-alt)",
+          paddingBottom: "7.5px",
         }}
       >
         <Button
@@ -788,6 +846,7 @@ function MonthQuickBudget({
 
 function GroupBlock({
   group,
+  rowOffset,
   collapsed,
   onToggle,
   onAssign,
@@ -812,6 +871,7 @@ function GroupBlock({
   todayMonth,
 }: {
   group: GroupRow;
+  rowOffset?: number;
   collapsed: boolean;
   onToggle: () => void;
   onAssign: (catId: number, amount: number, month: string) => void;
@@ -939,7 +999,6 @@ function GroupBlock({
 
       {!collapsed &&
         group.rows.map((r: CatRow, i: number) => {
-          const empty = isEmptyRow(r);
           const isCatDropTarget = catOverId === r.category.id;
           const isSelected = selectedCategoryId === r.category.id;
           return (
@@ -948,8 +1007,7 @@ function GroupBlock({
               data-cat-row
               className={cx(
                 "y-row cursor-pointer",
-                i % 2 === 1 && "alt",
-                empty && "is-empty",
+                ((rowOffset ?? 0) + i) % 2 === 1 && "alt",
                 isCatDropTarget && "is-drop-target",
                 isSelected && "is-sel"
               )}
