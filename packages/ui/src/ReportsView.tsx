@@ -3,26 +3,23 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import {
-  fmt,
   num,
   monthKey,
   parseMonthKey,
   todayISO,
   MONTHS_LONG,
   computeNetWorthReport,
-  computeCashFlowRange,
   type NetWorthPoint,
 } from "@ynab/logic";
-import { Icon, Toolbar, Select, Panel, MathCell, Tabs } from "@ynab/theme";
+import { Icon, Toolbar, Select, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 import { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
-type SubTab = "overview" | "trends" | "spending" | "networth";
+type SubTab = "trends" | "spending" | "networth";
 
 const SUB_TABS: { key: SubTab; label: string }[] = [
-  { key: "overview", label: "Overview" },
   { key: "trends", label: "Spending Trends" },
   { key: "spending", label: "Spending by Category" },
   { key: "networth", label: "Net Worth" },
@@ -67,7 +64,7 @@ export const ReportsView = memo(function ReportsView({
   const [endMonth, setEndMonth] = useState<string>(defaultEnd);
   const [sub, setSub] = useLocalStorage<SubTab>(
     "ynab:reports:subTab",
-    "overview",
+    "trends",
     (v): v is SubTab => typeof v === "string" && SUB_TABS.some((t) => t.key === v)
   );
 
@@ -154,11 +151,6 @@ export const ReportsView = memo(function ReportsView({
     [data.transactions, splitParentIds, actualStart, actualEnd]
   );
 
-  const { income, outflow, net } = useMemo(
-    () => computeCashFlowRange(data, actualStart, actualEnd),
-    [data, actualStart, actualEnd]
-  );
-
   const spending: SpendingItem[] = useMemo(() => {
     const byCat = new Map<number, number>();
     for (const t of rangeTxns) {
@@ -173,19 +165,6 @@ export const ReportsView = memo(function ReportsView({
   }, [rangeTxns, catMap]);
 
   const totalSpend = useMemo(() => spending.reduce((s, x) => s + x.value, 0), [spending]);
-
-  const payees = useMemo(() => {
-    const byPayee = new Map<string, number>();
-    for (const t of rangeTxns) {
-      if (t.transferAccountId != null && t.categoryId == null) continue;
-      const a = num(t.amount);
-      if (a < 0 && t.payee && t.payee !== "Starting Balance") byPayee.set(t.payee, (byPayee.get(t.payee) ?? 0) + -a);
-    }
-    return [...byPayee.entries()]
-      .map(([n, v]) => ({ n, v }))
-      .sort((a, b) => b.v - a.v)
-      .slice(0, 6);
-  }, [rangeTxns]);
 
   const netWorthData: NetWorthPoint[] = useMemo(() => {
     return computeNetWorthReport(data, actualStart, actualEnd);
@@ -274,54 +253,6 @@ export const ReportsView = memo(function ReportsView({
       />
 
       <div className="min-h-0 flex-1">
-        {sub === "overview" && (
-          <div className="h-full overflow-y-auto p-4 y-scroll">
-            <div className="mb-3 flex flex-wrap gap-2">
-              <MathCell
-                label="Income"
-                value={fmt(income)}
-                tone="green"
-                className="flex-1"
-                style={{ minWidth: 140 }}
-              />
-              <MathCell
-                label="Expenses"
-                value={fmt(-outflow)}
-                tone="red"
-                className="flex-1"
-                style={{ minWidth: 140 }}
-              />
-              <MathCell
-                label="Net"
-                value={fmt(net)}
-                tone={net >= 0 ? "green" : "red"}
-                className="flex-1"
-                style={{ minWidth: 140 }}
-              />
-            </div>
-
-            <Panel title="Top Payees" bodyClass="p-3">
-              {payees.length === 0 ? (
-                <div className="py-4 text-center y-hint">No data for this timeframe.</div>
-              ) : (
-                <div className="space-y-[6px]">
-                  {payees.map((p) => (
-                    <div
-                      key={p.n}
-                      className="flex items-center justify-between text-[12px]"
-                    >
-                      <span style={{ color: "var(--y-ink-soft)" }}>{p.n}</span>
-                      <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-                        {fmt(p.v)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Panel>
-          </div>
-        )}
-
         {sub === "trends" && (
           <div className="h-full p-4">
             <SpendingTrendsReport

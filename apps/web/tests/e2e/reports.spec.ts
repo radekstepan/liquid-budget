@@ -1,10 +1,9 @@
 // apps/web/tests/e2e/reports.spec.ts
 //
 // Covers ReportsView (packages/ui/src/ReportsView.tsx):
-//   - Overview tab shows the math strip (Income / Expenses / Net) and the
-//     Top Payees panel (ReportsView.tsx:198-218).
-//   - The From / To selectors narrow the range and re-totals
-//     (ReportsView.tsx:161-183).
+//   - Spending Trends is the default tab; only the three tabs
+//     (Spending Trends, Spending by Category, Net Worth) exist.
+//   - The From / To selectors narrow the range and re-total.
 //   - The chart subpages (Net Worth, Spending by Category) each render
 //     their full-screen chart via the matching tab.
 import { test, expect, type Page } from "@playwright/test";
@@ -20,25 +19,22 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByText("Reports", { exact: true }).first()).toBeVisible();
 });
 
-test("Overview renders the math strip, Top Payees panel, and all chart tabs", async ({ page }) => {
-  await expect(page.getByText("Income", { exact: true })).toBeVisible();
-  await expect(page.getByText("Expenses", { exact: true })).toBeVisible();
-  await expect(page.getByText("Net", { exact: true }).first()).toBeVisible();
-
-  // Top Payees panel only — the charts moved to tabs.
-  await expect(
-    page.locator(".y-panel-head").filter({ hasText: "Top Payees" })
-  ).toBeVisible();
+test("Spending Trends is the default tab and only three tabs exist", async ({ page }) => {
+  // Spending Trends renders by default without clicking any tab.
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+  await expect(panel.locator("svg.overflow-visible")).toBeVisible();
 
   for (const tab of ["Net Worth", "Spending Trends", "Spending by Category"]) {
     await expect(page.getByRole("button", { name: tab, exact: true })).toBeVisible();
   }
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveCount(0);
 });
 
-test("changing the To selector narrows the range and re-totals Income", async ({ page }) => {
-  const incomeCell = page.locator(".y-mathbox").filter({ has: page.getByText("Income", { exact: true }) });
-  const fullIncome = (await incomeCell.locator(".y-math-val").textContent())?.trim();
-  expect(fullIncome).toBeTruthy();
+test("changing the selectors narrows the range and re-totals Spending Trends", async ({ page }) => {
+  const panel = page.locator(".y-panel-head").filter({ hasText: "Spending Trends" }).locator("..");
+  const totalValue = panel.locator("span").filter({ hasText: /^Total:/ }).locator(".y-num");
+  const fullTotal = (await totalValue.textContent())?.trim();
+  expect(fullTotal).toBeTruthy();
 
   // Select is a custom button-based dropdown (not a native <select>); drive it
   // by opening the trigger and clicking the option with the matching data-value.
@@ -49,33 +45,9 @@ test("changing the To selector narrows the range and re-totals Income", async ({
   await pickMonth(/from month/i, "5");
   await pickMonth(/to month/i, "5");
 
-  const narrowIncome = (await incomeCell.locator(".y-math-val").textContent())?.trim();
-  expect(narrowIncome).toBeTruthy();
-  expect(narrowIncome).not.toBe(fullIncome);
-});
-
-test("math strip totals are internally consistent", async ({ page }) => {
-  const cell = (label: string) =>
-    page.locator(".y-mathbox").filter({ has: page.getByText(label, { exact: true }) });
-  const read = async (label: string) => {
-    const text = await cell(label).locator(".y-math-val").textContent();
-    return Number((text ?? "").replace(/[$,]/g, ""));
-  };
-  const income = await read("Income");
-  const expenses = await read("Expenses");
-  const net = await read("Net");
-  expect(income).toBeGreaterThan(0);
-  expect(expenses).toBeLessThan(0);
-  expect(net).toBeCloseTo(income + expenses, 2);
-});
-
-test("Top Payees lists the six biggest payees with totals", async ({ page }) => {
-  const panel = page.locator(".y-panel-head").filter({ hasText: "Top Payees" }).locator("..");
-  await expect(panel.getByText("TD Bank")).toBeVisible();
-  await expect(panel.getByText("Air Canada")).toBeVisible();
-  await expect(panel.locator(".flex.items-center.justify-between")).toHaveCount(6);
-  const firstRow = panel.locator(".flex.items-center.justify-between").first();
-  await expect(firstRow.getByText("TD Bank")).toBeVisible();
+  const narrowTotal = (await totalValue.textContent())?.trim();
+  expect(narrowTotal).toBeTruthy();
+  expect(narrowTotal).not.toBe(fullTotal);
 });
 
 test("Spending by Category tab renders the top spender with a percent bar and toggles Bars/Donut view", async ({ page }) => {
