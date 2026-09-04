@@ -171,25 +171,6 @@ describe("BudgetView", () => {
     expect(onAddGroup).toHaveBeenCalled();
   });
 
-  it("calls onAddGroup from the Add Category Group list button", () => {
-    const onAddGroup = vi.fn();
-    renderView({ onAddGroup });
-    fireEvent.click(screen.getByRole("button", { name: /add category group/i }));
-    expect(onAddGroup).toHaveBeenCalled();
-  });
-
-  it("keeps the Add Category Group button outside the scroll container so it stays fixed", () => {
-    renderView();
-    const btn = screen.getByRole("button", { name: /add category group/i });
-    expect(btn.closest(".overflow-auto")).toBeNull();
-  });
-
-  it("gives the Add Category Group footer 7.5px bottom padding", () => {
-    renderView();
-    const btn = screen.getByRole("button", { name: /add category group/i });
-    expect(btn.parentElement?.style.paddingBottom).toBe("7.5px");
-  });
-
   it("marks the scroll container as h-scrolled only after scrolling right", () => {
     const { container } = renderView();
     const scroller = container.querySelector(".y-scroll") as HTMLElement;

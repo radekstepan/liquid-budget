@@ -2,7 +2,7 @@
 //
 // Extends the existing `categories.spec.ts` (which only covers
 // name-only add/edit/rename) with the rest of the CategoryModal
-// surface and the "Add Category Group" shortcut button:
+// surface:
 //
 //   - creating a category with a funding goal (Modals.tsx:483-500)
 //     — the funding-goal checkbox is a sr-only input wrapped in a
@@ -11,8 +11,6 @@
 //     carryover can only be set via the API: the create flow
 //     drops it, see apps/web/src/components/BudgetAppShell.tsx:189-193,
 //     so the supported user path is create-then-edit via PATCH)
-//   - the "Add Category Group" button at the bottom of the
-//     BudgetView list (BudgetView.tsx:269-277)
 //
 // Note: the UI flow for setting a carryover on a *new* category
 // does not work today — the BudgetAppShell saveCategory POST
@@ -130,27 +128,4 @@ test("PATCH /api/categories persists a carryover change", async ({ page }) => {
   // The persisted row reflects the carryover.
   const stored = await getCategory(page, name);
   expect(Number(stored.carryover)).toBe(-5000);
-});
-
-test("Add Category Group shortcut button at the bottom of the budget list", async ({ page }) => {
-  // BudgetView.tsx:269-277 renders a full-width button under the
-  // table. Clicking it opens the same GroupModal as the toolbar's
-  // "Master Category" button.
-  const stamp = Date.now();
-  const name = `PW Bottom Group ${stamp}`;
-
-  const shortcut = page.getByRole("button", { name: /Add Category Group/i });
-  await expect(shortcut).toBeVisible();
-  await shortcut.click();
-
-  const modal = page.locator(".y-modal").last();
-  await expect(modal.locator(".y-modal-head")).toHaveText("New Category Group");
-  await modal.locator("input").first().fill(name);
-  await modal.locator(".y-modal-foot").getByRole("button", { name: "Save" }).click();
-  await expect(modal).toBeHidden();
-
-  // The new group renders as a master row at the end of the list.
-  await expect(
-    page.getByRole("button", { name, exact: true }).first()
-  ).toBeVisible();
 });

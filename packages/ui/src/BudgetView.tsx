@@ -589,23 +589,6 @@ export const BudgetView = memo(function BudgetView({
           </tbody>
         </table>
       </div>
-
-      <div
-        className="shrink-0 border-t px-2.5 pt-2.5"
-        style={{
-          borderColor: "var(--y-border-strong)",
-          background: "var(--y-panel-alt)",
-          paddingBottom: "7.5px",
-        }}
-      >
-        <Button
-          size="sm"
-          onClick={onAddGroup}
-          className="text-[11px] text-[var(--y-ink-soft)] font-medium"
-        >
-          <Icon name="plus" size={11} /> Add Category Group
-        </Button>
-      </div>
     </div>
   );
 });
