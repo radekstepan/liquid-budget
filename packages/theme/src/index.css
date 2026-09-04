@@ -1921,6 +1921,30 @@ input.y-inline-amt {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
+/* The hover trigger must not inflate the 27px month-label row (table
+   cells treat height as a minimum, so the in-flow 18px button stretches
+   the row and breaks the sticky sub-header seam at top:27px). Lift it
+   out of flow; the open menu stays anchored since abspos is positioned. */
+.y-table-th--month-label .y-month-qb {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+}
+/* Pin the label row to exactly 27px regardless of font metrics: explicit
+   numeric line-height + padding sum to 27 with the 1px bottom border
+   (0,3,2 beats the generic thead rule). The blue current month keeps its
+   3px top edge by trading 3px of top padding, so the whole row — current
+   month included — stays 27 and the sub-header at top:27px stays flush. */
+.y-table thead th.y-table-th--month-label {
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 5px 6px;
+}
+.y-table thead th.y-table-th--month-label.y-table-th--month-current {
+  padding-top: 2px;
+}
 .y-month-head:hover .y-month-qb,
 .y-month-head:focus-within .y-month-qb,
 .y-month-qb.is-open {

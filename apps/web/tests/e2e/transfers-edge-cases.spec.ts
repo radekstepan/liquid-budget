@@ -30,11 +30,38 @@ async function gotoBudget(page: Page) {
   await expect(page.getByTestId("month-nav-picker")).toBeVisible();
 }
 
+const MONTH_NUM: Record<string, string> = {
+  January: "01",
+  February: "02",
+  March: "03",
+  April: "04",
+  May: "05",
+  June: "06",
+  July: "07",
+  August: "08",
+  September: "09",
+  October: "10",
+  November: "11",
+  December: "12",
+};
+
 async function getTbb(page: Page): Promise<number> {
-  const text = await page.locator(".y-atb .y-num").first().textContent();
-  expect(text, "ATB value should be visible").toBeTruthy();
-  const cleaned = text!.replace(/[$,]/g, "").replace(/[−–]/g, "-");
-  return Number(cleaned);
+  // The sidebar banner that used to display TBB was removed; read it from
+  // the budget-integrity diagnostics API for the currently displayed month
+  // (the Month/Year picker reflects it). The API reports cents — convert
+  // to dollars to match the old banner text.
+  const picker = page.getByTestId("month-nav-picker");
+  const monthName = ((await picker.getByRole("button", { name: "Month" }).textContent()) ?? "").trim();
+  const year = ((await picker.getByRole("button", { name: "Year" }).textContent()) ?? "").trim();
+  const monthNum = MONTH_NUM[monthName];
+  expect(monthNum, `unknown month in picker: ${monthName}`).toBeTruthy();
+  const res = await page.request.get("/api/diagnostics/budget-integrity", {
+    params: { month: `${year}-${monthNum}` },
+  });
+  expect(res.ok(), "GET /api/diagnostics/budget-integrity").toBe(true);
+  const body = await res.json();
+  expect(typeof body.tbb, "diagnostics response should include tbb").toBe("number");
+  return Number(body.tbb) / 100;
 }
 
 async function fillPayee(scope: Locator, value: string) {

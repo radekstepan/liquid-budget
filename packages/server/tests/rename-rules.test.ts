@@ -7,12 +7,18 @@ import { fileURLToPath } from "url";
 import type { CsvImportRow } from "@ynab/logic";
 import { importCsvTransactions } from "../src/import-csv.js";
 import { getBudgetData } from "../src/queries/budget.js";
-import { updateTransaction } from "../src/queries/transactions.js";
+import {
+  bulkUpdateTransactions,
+  createTransfer,
+  updateSplit,
+  updateTransaction,
+} from "../src/queries/transactions.js";
 import {
   createRenameRule,
   deleteRenameRule,
   getRenameRules,
   learnRenameRuleFromPayees,
+  RenameRuleError,
   updateRenameRule,
 } from "../src/queries/rename-rules.js";
 import * as schema from "../src/schema.js";
@@ -257,5 +263,115 @@ describe("CSV import applies rename rules", () => {
     const after = await getBudgetData(db);
     const bcf3 = after.transactions.find((t) => t.amount === "-3000");
     expect(bcf3?.payee).toBe("New");
+  });
+});
+
+describe("transfer guards", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openMigratedDb();
+  });
+
+  async function seedTwoAccounts() {
+    const mk = (name: string, sort: number) =>
+      db
+        .insert(schema.accounts)
+        .values({ name, kind: "liquid", groupLabel: "Budget Accounts", balance: 0, onBudget: true, sort })
+        .returning();
+    const [src] = await mk("Chequing", 0);
+    const [dst] = await mk("Savings", 1);
+    return { srcId: src!.id, dstId: dst!.id };
+  }
+
+  it("learnRenameRuleFromPayees ignores a transfer source", async () => {
+    const { generalised, rules } = await learnRenameRuleFromPayees(db, "Transfer : Savings", "Foobar");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(0);
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("learnRenameRuleFromPayees ignores a transfer target", async () => {
+    const { generalised, rules } = await learnRenameRuleFromPayees(db, "BCF1", "Transfer : Savings");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(0);
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("createRenameRule rejects transfer-like sources and targets", async () => {
+    await expect(
+      createRenameRule(db, { sourcePattern: "Transfer : Savings", targetPayee: "Foobar" })
+    ).rejects.toBeInstanceOf(RenameRuleError);
+    await expect(
+      createRenameRule(db, { sourcePattern: "BCF1", targetPayee: "Transfer : Savings" })
+    ).rejects.toBeInstanceOf(RenameRuleError);
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("updateRenameRule rejects patching a rule into the transfer domain", async () => {
+    const r = await createRenameRule(db, { sourcePattern: "BCF1", targetPayee: "BC Ferries" });
+    await expect(updateRenameRule(db, r.id, { targetPayee: "Transfer : Savings" })).rejects.toBeInstanceOf(
+      RenameRuleError
+    );
+    await expect(updateRenameRule(db, r.id, { sourcePattern: "Transfer : Savings" })).rejects.toBeInstanceOf(
+      RenameRuleError
+    );
+    expect(getRenameRules(db)[0]).toMatchObject({
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+  });
+
+  it("editing a transfer payee does not learn a rule", async () => {
+    const { srcId, dstId } = await seedTwoAccounts();
+    const t = await createTransfer(
+      db,
+      { accountId: srcId, date: "2026-08-13", payee: "", memo: "", amount: -5000 },
+      dstId
+    );
+    expect(t.payee).toBe("Transfer : Savings");
+
+    await updateTransaction(db, t.id, { payee: "Foobar" });
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("bulk editing a transfer payee does not learn a rule", async () => {
+    const { srcId, dstId } = await seedTwoAccounts();
+    const t = await createTransfer(
+      db,
+      { accountId: srcId, date: "2026-08-13", payee: "", memo: "", amount: -5000 },
+      dstId
+    );
+
+    await bulkUpdateTransactions(db, [t.id], { payee: "Foobar" });
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("converting a transfer to a split does not learn a rule", async () => {
+    const { srcId, dstId } = await seedTwoAccounts();
+    const [group] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Living", sort: 0 })
+      .returning();
+    const [cat] = await db
+      .insert(schema.categories)
+      .values({ groupId: group!.id, name: "Groceries", sort: 0 })
+      .returning();
+    const t = await createTransfer(
+      db,
+      { accountId: srcId, date: "2026-08-13", payee: "", memo: "", amount: -5000 },
+      dstId
+    );
+
+    const res = await updateSplit(
+      db,
+      t.id,
+      { payee: "Foobar" },
+      [
+        { categoryId: cat!.id, amount: -3000, memo: "a" },
+        { categoryId: cat!.id, amount: -2000, memo: "b" },
+      ]
+    );
+    expect(res.children).toHaveLength(2);
+    expect(getRenameRules(db)).toHaveLength(0);
   });
 });

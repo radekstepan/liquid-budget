@@ -534,7 +534,7 @@ export const BudgetView = memo(function BudgetView({
       </div>
 
       <div
-        className="shrink-0 border-t px-2.5 py-1.5"
+        className="shrink-0 border-t px-2.5 pt-2.5 pb-4"
         style={{
           borderColor: "var(--y-border-strong)",
           background: "var(--y-panel-alt)",

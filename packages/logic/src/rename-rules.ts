@@ -41,6 +41,20 @@ export type RenameRuleDraft = RenameRuleInput & {
 
 export const RENAME_WILDCARD = "[N]";
 
+/**
+ * System-generated transfer payees look like `Transfer : <account>`.
+ * Rename rules map raw bank payees to display payees for future CSV
+ * imports; transfers are a different domain (no category, destination
+ * derived from the linked account), so a transfer-looking string must
+ * never become a rule source or target.
+ */
+const TRANSFER_PAYEE_RE = /^transfer\s*:/i;
+
+/** True when a payee or rule pattern is a system transfer string. */
+export function isTransferPayee(value: string): boolean {
+  return TRANSFER_PAYEE_RE.test(value.trim());
+}
+
 /** Lowercase + collapse repeated whitespace so matching is forgiving. */
 export function normalizeRenameText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -129,6 +143,7 @@ export function inferRenameRule(
   existingSources: string[],
   newSource: string
 ): { sourcePattern: string } | null {
+  if (isTransferPayee(newSource)) return null;
   const parts = splitTrailingNumber(newSource);
   if (!parts) return null;
 
@@ -189,6 +204,12 @@ export function learnRenameRule(
   const target = newPayee.trim();
   const source = oldPayee.trim();
   if (!source || !target || normalizeRenameText(source) === normalizeRenameText(target)) {
+    return { rules, generalised: false };
+  }
+  // Transfers live outside the rename-rule domain: their payees are
+  // system-generated (`Transfer : <account>`) and carry no category.
+  // Never learn a rule from or to one in either direction.
+  if (isTransferPayee(source) || isTransferPayee(target)) {
     return { rules, generalised: false };
   }
 
