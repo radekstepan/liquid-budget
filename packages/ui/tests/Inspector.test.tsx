@@ -134,7 +134,7 @@ describe("Inspector", () => {
       expect(screen.getByText("-$3,500.00")).toBeInTheDocument();
     });
 
-    it("renders positive formatted outflow with plus sign when net category refunds result in negative outflow (BUG-11)", () => {
+    it("labels negative outflow as categorized inflow instead of expenses (BUG-11)", () => {
       render(
         <Inspector
           {...baseProps}
@@ -147,9 +147,31 @@ describe("Inspector", () => {
           }}
         />
       );
+      expect(screen.getByText("Categorized inflow (net)")).toBeInTheDocument();
+      expect(screen.queryByText("Expenses (Outflow)")).not.toBeInTheDocument();
       expect(screen.getByText("+$100.00")).toBeInTheDocument();
       expect(screen.getByText("+$600.00")).toBeInTheDocument();
       expect(screen.queryByText(/--\$100\.00/)).not.toBeInTheDocument();
+    });
+
+    it("shows 'No income' instead of a savings rate when income is zero", () => {
+      render(
+        <Inspector
+          {...baseProps}
+          cashFlow={{
+            month: "2026-09",
+            income: 0,
+            outflow: -194967,
+            net: 194967,
+            savingsRate: 100,
+          }}
+        />
+      );
+      expect(screen.getByText("No income")).toBeInTheDocument();
+      expect(screen.queryByText(/% saved/)).not.toBeInTheDocument();
+      expect(screen.getByText("Categorized inflow (net)")).toBeInTheDocument();
+      // Net cash flow and categorized inflow are the same value this month
+      expect(screen.getAllByText("+$1,949.67")).toHaveLength(2);
     });
   });
 
