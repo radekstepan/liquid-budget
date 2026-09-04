@@ -2,6 +2,7 @@ import {
   AccountError,
   CategoryError,
   RecurringError,
+  RenameRuleError,
   TransactionError,
 } from "@ynab/server";
 
@@ -10,6 +11,7 @@ export function apiErrorResponse(e: unknown): Response {
     e instanceof AccountError ||
     e instanceof CategoryError ||
     e instanceof RecurringError ||
+    e instanceof RenameRuleError ||
     e instanceof TransactionError
   ) {
     return Response.json({ error: e.message }, { status: e.status });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRenameRules,
   inferRenameRule,
+  isTransferPayee,
   learnRenameRule,
   matchesRenameRule,
   normalizeRenameText,
@@ -294,5 +295,52 @@ describe("learnRenameRule", () => {
     expect(second.rules[0]!.targetPayee).toBe("7-Eleven");
     expect(applyRenameRules(second.rules, "7-Eleven Store 999")).toBe("7-Eleven");
     expect(applyRenameRules(second.rules, "11-Eleven Store 123")).toBe("11-Eleven Store 123");
+  });
+});
+
+describe("isTransferPayee", () => {
+  it("detects system transfer payees", () => {
+    expect(isTransferPayee("Transfer : AMEX Cobalt")).toBe(true);
+    expect(isTransferPayee("  transfer : savings ")).toBe(true);
+    expect(isTransferPayee("TRANSFER: X")).toBe(true);
+  });
+
+  it("does not flag ordinary merchant payees", () => {
+    expect(isTransferPayee("BCF1")).toBe(false);
+    expect(isTransferPayee("TransferWise")).toBe(false);
+    expect(isTransferPayee("Transfer")).toBe(false);
+    expect(isTransferPayee("")).toBe(false);
+  });
+});
+
+describe("learnRenameRule transfer guards", () => {
+  it("ignores a rename from a transfer payee", () => {
+    const { rules, generalised } = learnRenameRule([], "Transfer : AMEX Cobalt", "Foobar");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(0);
+  });
+
+  it("ignores a rename to a transfer payee", () => {
+    const { rules, generalised } = learnRenameRule([], "BCF1", "Transfer : AMEX Cobalt");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(0);
+  });
+
+  it("ignores transfer renames case-insensitively", () => {
+    const { rules, generalised } = learnRenameRule([], "  TRANSFER : Savings ", "Groceries");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(0);
+  });
+
+  it("leaves existing rules untouched when a transfer rename is attempted", () => {
+    const existing = [rule(1, "BCF[N]", "BC Ferries")];
+    const { rules, generalised } = learnRenameRule(existing, "Transfer : AMEX Cobalt", "BC Ferries");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ sourcePattern: "BCF[N]", targetPayee: "BC Ferries" });
+  });
+
+  it("refuses to infer a pattern from a transfer source", () => {
+    expect(inferRenameRule(["Transfer : A1"], "Transfer : A2")).toBeNull();
   });
 });

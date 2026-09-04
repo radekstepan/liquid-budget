@@ -74,7 +74,7 @@ describe("Inspector", () => {
   });
 
   describe("ATB banner", () => {
-    it("renders breakdown tooltip without duplicate overspent line when overbudgeted", () => {
+    it("is no longer rendered in the Inspector", () => {
       const { container } = render(
         <Inspector
           {...baseProps}
@@ -85,17 +85,12 @@ describe("Inspector", () => {
           totalAssigned={350000}
         />
       );
-      const atbCard = container.querySelector(".y-atb--red");
-      expect(atbCard).toBeInTheDocument();
-      const title = atbCard?.getAttribute("title");
-      expect(title).toBe(
-        "Prior surplus: $1,000.00\nIncome this month: $2,000.00\nAssigned this month: $3,500.00\n─────────────────\n= TBB: -$500.00"
-      );
-      expect(title).not.toContain("Overspent");
+      expect(container.querySelector(".y-atb")).toBeNull();
+      expect(screen.queryByText(/To Be Budgeted|Overbudgeted/i)).toBeNull();
     });
 
-    it("renders deferred income indicator and tooltip breakdown when income originates from future transaction dates (BUG-13)", () => {
-      const { container } = render(
+    it("renders deferred income indicator when income originates from future transaction dates (BUG-13)", () => {
+      render(
         <Inspector
           {...baseProps}
           tbb={100000}
@@ -109,17 +104,10 @@ describe("Inspector", () => {
       const indicator = screen.getByTestId("deferred-income-indicator");
       expect(indicator).toBeInTheDocument();
       expect(indicator).toHaveTextContent("$1,000.00 of income originated from future transaction dates.");
-
-      const atbCard = container.querySelector(".y-atb--green");
-      expect(atbCard).toBeInTheDocument();
-      const title = atbCard?.getAttribute("title");
-      expect(title).toBe(
-        "Prior surplus: $0.00\nIncome this month: $1,000.00\n  ↳ $1,000.00 from future transaction dates\nAssigned this month: $0.00\n─────────────────\n= TBB: $1,000.00"
-      );
     });
 
-    it("renders deferred income indicator and tooltip breakdown when income originates from past transaction dates (BUG-13)", () => {
-      const { container } = render(
+    it("renders deferred income indicator when income originates from past transaction dates (BUG-13)", () => {
+      render(
         <Inspector
           {...baseProps}
           tbb={150000}
@@ -133,13 +121,6 @@ describe("Inspector", () => {
       const indicator = screen.getByTestId("deferred-income-indicator");
       expect(indicator).toBeInTheDocument();
       expect(indicator).toHaveTextContent("$1,500.00 of income originated from past transaction dates.");
-
-      const atbCard = container.querySelector(".y-atb--green");
-      expect(atbCard).toBeInTheDocument();
-      const title = atbCard?.getAttribute("title");
-      expect(title).toBe(
-        "Prior surplus: $0.00\nIncome this month: $1,500.00\n  ↳ $1,500.00 from past transaction dates\nAssigned this month: $0.00\n─────────────────\n= TBB: $1,500.00"
-      );
     });
   });
 

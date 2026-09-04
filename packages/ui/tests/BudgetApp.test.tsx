@@ -76,7 +76,7 @@ describe("BudgetApp", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     expect(screen.getByRole("button", { name: /^transactions/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/To Be Budgeted|Overbudgeted/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/To Be Budgeted|Overbudgeted/i)).toBeNull();
     // The single-month budget view has a MonthNav with prev/next buttons
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /next month/i })).toBeInTheDocument();

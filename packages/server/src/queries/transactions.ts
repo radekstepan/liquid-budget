@@ -9,6 +9,7 @@ import type {
 import {
   assertSplitsBalanced,
   classifyBoundaryTransfer,
+  isTransferPayee,
   isValidISODate,
   isValidISOMonth,
   TRANSACTION_DUPLICATE_FLAG,
@@ -1108,9 +1109,15 @@ export async function updateSplit(
     }
 
     // Learn a rename rule when a split's display payee is changed.
+    // Never for transfers: the parent may be a transfer being converted
+    // to a split, and system payees (`Transfer : <account>`) must not
+    // seed rename rules in either direction.
     if (
       parentFields.payee != null &&
-      String(parentFields.payee).trim() !== parent.payee.trim()
+      String(parentFields.payee).trim() !== parent.payee.trim() &&
+      parent.transferAccountId == null &&
+      !isTransferPayee(parent.payee) &&
+      !isTransferPayee(String(parentFields.payee))
     ) {
       shouldLearnRenameRule = true;
       learnedOldPayee = parent.payee;

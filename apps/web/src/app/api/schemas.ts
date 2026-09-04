@@ -330,18 +330,29 @@ export const AssignmentUpsertSchema = z
   })
   .strict();
 
+const TRANSFER_PAYEE_RE = /^transfer\s*:/i;
+const notTransferPayee = (val: string) => !TRANSFER_PAYEE_RE.test(val.trim());
+
 export const RenameRuleCreateSchema = z
   .object({
-    sourcePattern: z.string().min(1).max(255),
-    targetPayee: z.string().min(1).max(255),
+    sourcePattern: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }),
+    targetPayee: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }),
   })
   .strict();
 
 export const RenameRulePatchSchema = z
   .object({
     id: z.number().int().positive(),
-    sourcePattern: z.string().min(1).max(255).optional(),
-    targetPayee: z.string().min(1).max(255).optional(),
+    sourcePattern: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }).optional(),
+    targetPayee: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }).optional(),
   })
   .strict();
 

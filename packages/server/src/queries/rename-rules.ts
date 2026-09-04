@@ -1,6 +1,6 @@
 import { eq, asc } from "drizzle-orm";
 import type { RenameRule as RenameRuleView } from "@ynab/logic";
-import { learnRenameRule as pureLearn } from "@ynab/logic";
+import { isTransferPayee, learnRenameRule as pureLearn } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { renameRules } from "../schema.js";
@@ -10,6 +10,23 @@ export type RenameRuleInput = {
   sourcePattern: string;
   targetPayee: string;
 };
+
+export class RenameRuleError extends Error {
+  constructor(message: string, public readonly status = 400) {
+    super(message);
+    this.name = "RenameRuleError";
+  }
+}
+
+const TRANSFER_RULE_MESSAGE =
+  'Rename rules do not apply to transfers (payees like "Transfer : <account>").';
+
+/** Transfers are categorised by account linkage, never by payee rename. */
+function assertNotTransferRule(sourcePattern: string, targetPayee: string): void {
+  if (isTransferPayee(sourcePattern) || isTransferPayee(targetPayee)) {
+    throw new RenameRuleError(TRANSFER_RULE_MESSAGE, 400);
+  }
+}
 
 function toView(row: RenameRuleRow): RenameRuleView {
   return {
@@ -36,12 +53,15 @@ export function getRenameRuleById(db: Db, id: number): RenameRuleView | null {
 }
 
 export async function createRenameRule(db: Db, input: RenameRuleInput): Promise<RenameRuleView> {
+  const sourcePattern = input.sourcePattern.trim();
+  const targetPayee = input.targetPayee.trim();
+  assertNotTransferRule(sourcePattern, targetPayee);
   const now = new Date().toISOString();
   const [inserted] = await db
     .insert(renameRules)
     .values({
-      sourcePattern: input.sourcePattern.trim(),
-      targetPayee: input.targetPayee.trim(),
+      sourcePattern,
+      targetPayee,
       createdAt: now,
     })
     .returning();
@@ -63,6 +83,10 @@ export async function updateRenameRule(
     values.targetPayee = patch.targetPayee.trim();
   }
   if (Object.keys(values).length === 0) return current;
+  assertNotTransferRule(
+    values.sourcePattern ?? current.sourcePattern,
+    values.targetPayee ?? current.targetPayee
+  );
   values.updatedAt = new Date().toISOString();
   const [updated] = await db
     .update(renameRules)
@@ -91,6 +115,11 @@ export async function learnRenameRuleFromPayees(
   newPayee: string
 ): Promise<{ generalised: boolean; rules: RenameRuleView[] }> {
   const all = getRenameRules(db);
+  // No-op for transfers in either direction: system payees
+  // (`Transfer : <account>`) must never seed rename rules.
+  if (isTransferPayee(oldPayee) || isTransferPayee(newPayee)) {
+    return { generalised: false, rules: all };
+  }
   const { rules: next, generalised } = pureLearn(all, oldPayee, newPayee);
 
   const keepIds = new Set(next.filter((r) => r.id != null).map((r) => r.id));

@@ -3,7 +3,7 @@
 // Smoke E2E for the YNAB4-alternative web app. Verifies that:
 //   - the Next.js dev server boots and serves `/`
 //   - BudgetAppShell finishes its /api/budget fetch and mounts BudgetApp
-//   - the Sidebar nav + Inspector "To Be Budgeted" card are present
+//   - the Sidebar nav + Inspector sidebar are present
 //
 // This is intentionally minimal. Add more specs as the UI surface
 // grows. The webServer (playwright.config.ts) starts `next dev` on
@@ -35,13 +35,11 @@ test("home page loads and renders the budget app", async ({ page }) => {
     page.getByRole("button", { name: "Budget", exact: true })
   ).toBeVisible();
 
-  // Inspector card (Inspector.tsx:111-116) shows "To Be Budgeted"
-  // (or "Overbudgeted" if the demo data is negative). Either is a
-  // valid mount signal. The same text also appears in the Summary
-  // panel (Inspector.tsx:136) so we use `.first()` to satisfy
-  // strict-mode — both renders are equally valid mount signals.
+  // Inspector sidebar (Inspector.tsx) mounts — the "To Be Budgeted" /
+  // "Overbudgeted" banner was removed, so the Net Monthly panel is the
+  // mount signal instead.
   await expect(
-    page.getByText(/^(To Be Budgeted|Overbudgeted)$/).first()
+    page.locator(".y-inspector").getByText("Net Monthly")
   ).toBeVisible();
 
   // Settings cog lives in the Inspector header (Inspector.tsx:57-64).

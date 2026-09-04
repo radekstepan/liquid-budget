@@ -19,11 +19,6 @@ export const Inspector = memo(function Inspector({
   month,
   history,
   avg,
-  tbb,
-  overBudgeted,
-  priorSurplus,
-  totalIncome,
-  totalAssigned,
   overspentPrevious,
   overspentPreviousMonthKey,
   incomeFromFuture,
@@ -245,36 +240,6 @@ export const Inspector = memo(function Inspector({
               }}
             />
           )}
-        </div>
-      </div>
-
-      {/* Primary To Be Budgeted / Overbudgeted Banner */}
-      <div
-        className={cx(
-          "y-atb",
-          overBudgeted ? "y-atb--red" : tbb > 0 ? "y-atb--green" : "y-atb--orange"
-        )}
-        title={
-          overBudgeted || (incomeFromFuture != null && incomeFromFuture > 0) || (incomeFromPast != null && incomeFromPast > 0)
-            ? [
-                `Prior surplus: ${money(priorSurplus ?? 0)}`,
-                `Income this month: ${money(totalIncome ?? 0)}`,
-                ...(incomeFromFuture != null && incomeFromFuture > 0
-                  ? [`  ↳ ${money(incomeFromFuture)} from future transaction dates`]
-                  : []),
-                ...(incomeFromPast != null && incomeFromPast > 0
-                  ? [`  ↳ ${money(incomeFromPast)} from past transaction dates`]
-                  : []),
-                `Assigned this month: ${money(totalAssigned ?? 0)}`,
-                `─────────────────`,
-                `= TBB: ${money(tbb)}`,
-              ].join("\n")
-            : undefined
-        }
-      >
-        <div className="text-[20px] font-bold leading-[1.1] y-num">{money(tbb)}</div>
-        <div className="text-[9px] font-bold tracking-[.09em] uppercase opacity-90">
-          {overBudgeted ? "Overbudgeted" : "To Be Budgeted"}
         </div>
       </div>
 
