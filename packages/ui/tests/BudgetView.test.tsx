@@ -155,10 +155,12 @@ describe("BudgetView", () => {
     expect(arg).toBe(thisMonth);
   });
 
-  it("does not render a Today button when already on the current month", () => {
+  it("renders a mute grey Today button when already on the current month", () => {
     const thisMonth = todayISO().slice(0, 7);
     renderView({ currentMonth: thisMonth });
-    expect(screen.queryByRole("button", { name: /today/i })).not.toBeInTheDocument();
+    const todayBtn = screen.getByRole("button", { name: /today/i });
+    expect(todayBtn).toBeInTheDocument();
+    expect(todayBtn.classList.contains("y-btn--blue")).toBe(false);
     expect(screen.getByRole("button", { name: /master category/i })).toBeInTheDocument();
   });
 
@@ -521,6 +523,273 @@ describe("BudgetView", () => {
       // And it must NOT also be flagged as a chrome divider (that's the
       // inter-month separator reserved for month 2+).
       expect(firstRow2Cell!.classList.contains("y-table-colgroup-divider")).toBe(false);
+    });
+
+    it("highlights calendar current month header with .y-table-th--month-current and does not render Current badge", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      renderView({
+        monthCount: 3,
+        currentMonth: "2020-01",
+        visibleMonths: ["2020-01", "2020-02", todayMonth],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+      });
+
+      const currentHeader = document.querySelector(".y-table-th--month-current");
+      expect(currentHeader).not.toBeNull();
+
+      // No Current badge in the header
+      expect(screen.queryByTestId("today-month-badge")).not.toBeInTheDocument();
+
+      const subCurrentHeaders = document.querySelectorAll(".y-thead-sub--current");
+      // 3 subheaders (Budgeted, Outflows, Balance) for current month
+      expect(subCurrentHeaders.length).toBe(3);
+    });
+  });
+
+  describe("Toolbar Today button", () => {
+    it("renders mute grey Today button when current month is in view", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      renderView({
+        currentMonth: todayMonth,
+        visibleMonths: [todayMonth],
+      });
+
+      const todayBtn = screen.getByTestId("today-btn");
+      expect(todayBtn).toBeInTheDocument();
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(false);
+      expect(screen.queryByTestId("current-month-badge")).not.toBeInTheDocument();
+    });
+
+    it("renders blue Today button when current month is NOT in view", () => {
+      const onSetMonth = vi.fn();
+      renderView({
+        currentMonth: "2020-01",
+        visibleMonths: ["2020-01"],
+        onSetMonth,
+      });
+
+      const todayBtn = screen.getByTestId("today-btn");
+      expect(todayBtn).toBeInTheDocument();
+      // Should be blue when not in view
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(true);
+
+      fireEvent.click(todayBtn);
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      expect(onSetMonth).toHaveBeenCalledWith(todayMonth);
+    });
+
+    it("renders blue Today button when current month is in DOM but scrolled off to the right behind scrollbar", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      renderView({
+        monthCount: 6,
+        currentMonth: todayMonth,
+        visibleMonths: ["2020-01", "2020-02", "2020-03", "2020-04", "2020-05", todayMonth],
+        budgets: [makeBudget(), makeBudget(), makeBudget(), makeBudget(), makeBudget(), makeBudget()],
+      });
+
+      const container = document.querySelector(".overflow-auto.y-scroll") as HTMLElement;
+      const stickyCat = document.querySelector("th.y-table-td--sticky-cat") as HTMLElement;
+      const currentMonthTh = document.querySelector(".y-table-th--month-current") as HTMLElement;
+
+      expect(container).not.toBeNull();
+      expect(stickyCat).not.toBeNull();
+      expect(currentMonthTh).not.toBeNull();
+
+      // Mock container viewport: 800px wide (from 0 to 800)
+      vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        right: 800,
+        width: 800,
+        top: 0,
+        bottom: 600,
+        height: 600,
+      } as DOMRect);
+
+      // Mock sticky category: 200px wide (from 0 to 200)
+      vi.spyOn(stickyCat, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        right: 200,
+        width: 200,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      // Mock current month header: scrolled off to the right (starts at 900px, ends at 1260px)
+      vi.spyOn(currentMonthTh, "getBoundingClientRect").mockReturnValue({
+        left: 900,
+        right: 1260,
+        width: 360,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      // Fire scroll event on the container
+      fireEvent.scroll(container);
+
+      const todayBtn = screen.getByTestId("today-btn");
+      // Since current month is scrolled off to the right behind the scrollbar, Today button must be blue!
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(true);
+
+      // Now simulate user scrolling so current month enters the viewport (e.g. left: 300, right: 660)
+      vi.spyOn(currentMonthTh, "getBoundingClientRect").mockReturnValue({
+        left: 300,
+        right: 660,
+        width: 360,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      fireEvent.scroll(container);
+
+      // Now current month is visible in the viewport, Today button should be mute grey!
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(false);
+    });
+
+    it("renders blue Today button when current month is scrolled under the sticky Category column", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      renderView({
+        monthCount: 6,
+        currentMonth: todayMonth,
+        visibleMonths: [todayMonth, "2099-01", "2099-02", "2099-03", "2099-04", "2099-05"],
+        budgets: [makeBudget(), makeBudget(), makeBudget(), makeBudget(), makeBudget(), makeBudget()],
+      });
+
+      const container = document.querySelector(".overflow-auto.y-scroll") as HTMLElement;
+      const stickyCat = document.querySelector("th.y-table-td--sticky-cat") as HTMLElement;
+      const currentMonthTh = document.querySelector(".y-table-th--month-current") as HTMLElement;
+
+      vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        right: 800,
+        width: 800,
+        top: 0,
+        bottom: 600,
+        height: 600,
+      } as DOMRect);
+
+      vi.spyOn(stickyCat, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        right: 200,
+        width: 200,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      // Current month header is scrolled under sticky category (e.g. ends at 190px <= 200px)
+      vi.spyOn(currentMonthTh, "getBoundingClientRect").mockReturnValue({
+        left: -170,
+        right: 190,
+        width: 360,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      fireEvent.scroll(container);
+
+      const todayBtn = screen.getByTestId("today-btn");
+      // Current month is completely obscured by the sticky column, so Today button is blue!
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(true);
+
+      // If partially visible (e.g. ends at 250px > 200px), it is partially visible!
+      vi.spyOn(currentMonthTh, "getBoundingClientRect").mockReturnValue({
+        left: -110,
+        right: 250,
+        width: 360,
+        top: 0,
+        bottom: 40,
+        height: 40,
+      } as DOMRect);
+
+      fireEvent.scroll(container);
+
+      // Partially visible in viewport: button becomes mute grey
+      expect(todayBtn.classList.contains("y-btn--blue")).toBe(false);
+    });
+  });
+
+  describe("Grid current month side borders and width", () => {
+    it("applies .y-grid-col--current-first and .y-grid-col--current-last to the side boundaries of the current month in both thead and tbody", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      renderView({
+        monthCount: 3,
+        currentMonth: todayMonth,
+        visibleMonths: ["2020-01", todayMonth, "2099-01"],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+      });
+
+      // Thead subheaders have the border classes
+      const firstColHeaders = document.querySelectorAll("th.y-grid-col--current-first");
+      const lastColHeaders = document.querySelectorAll("th.y-grid-col--current-last");
+      expect(firstColHeaders.length).toBeGreaterThanOrEqual(1);
+      expect(lastColHeaders.length).toBeGreaterThanOrEqual(1);
+
+      // Body cells have the border classes
+      const firstColCells = document.querySelectorAll("td.y-grid-col--current-first");
+      const lastColCells = document.querySelectorAll("td.y-grid-col--current-last");
+      expect(firstColCells.length).toBeGreaterThan(0);
+      expect(lastColCells.length).toBeGreaterThan(0);
+
+      // Multi-month table receives y-table--multi
+      const table = document.querySelector(".y-table");
+      expect(table?.classList.contains("y-table--multi")).toBe(true);
+    });
+
+    it("disables the next month button when at or beyond the right limit (max 1 month ahead)", () => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      const onShiftMonth = vi.fn();
+      renderView({
+        monthCount: 3,
+        currentMonth: todayMonth,
+        visibleMonths: ["2020-01", todayMonth, "2099-12"],
+        canShiftRight: false,
+        onShiftMonth,
+      });
+
+      const nextBtn = screen.getByRole("button", { name: /next month/i });
+      expect(nextBtn).toBeDisabled();
+      fireEvent.click(nextBtn);
+      expect(onShiftMonth).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Category selection", () => {
+    it("applies is-sel class to the selected category row and handles row clicks", () => {
+      const onSelectCategory = vi.fn();
+      renderView({
+        selectedCategoryId: 10,
+        onSelectCategory,
+      });
+
+      const catRows = document.querySelectorAll("tr[data-cat-row]");
+      expect(catRows.length).toBeGreaterThan(0);
+
+      const groceriesRow = Array.from(catRows).find((r) => r.textContent?.includes("Groceries"));
+      expect(groceriesRow).not.toBeUndefined();
+      expect(groceriesRow!.classList.contains("is-sel")).toBe(true);
+
+      fireEvent.click(groceriesRow!);
+      // Clicking the already selected category toggles it off (null)
+      expect(onSelectCategory).toHaveBeenCalledWith(null);
+    });
+
+    it("calls onSelectCategory with category id when unselected category row is clicked", () => {
+      const onSelectCategory = vi.fn();
+      renderView({
+        selectedCategoryId: null,
+        onSelectCategory,
+      });
+
+      const catRows = document.querySelectorAll("tr[data-cat-row]");
+      const groceriesRow = Array.from(catRows).find((r) => r.textContent?.includes("Groceries"));
+      expect(groceriesRow!.classList.contains("is-sel")).toBe(false);
+
+      fireEvent.click(groceriesRow!);
+      expect(onSelectCategory).toHaveBeenCalledWith(10);
     });
   });
 
