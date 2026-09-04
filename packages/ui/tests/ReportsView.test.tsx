@@ -78,7 +78,9 @@ function makeData(): BudgetData {
     accounts: [
       { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
     ],
-    groups: [],
+    groups: [
+      { id: 1, name: "Everyday", sort: 0, isCreditCardPayments: false },
+    ],
     categories: [
       { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
       { id: 11, groupId: 1, name: "Rent", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
@@ -110,20 +112,20 @@ function renderView(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ReportsView", () => {
-  it("renders the toolbar, tabs, math strip, and Top Payees on Overview", () => {
+  it("renders the toolbar, three tabs, and Spending Trends by default", () => {
     renderView();
     expect(screen.getByText("Reports")).toBeInTheDocument();
-    // Tabs include the four report pages.
-    for (const tab of ["Overview", "Spending Trends", "Spending by Category", "Net Worth"]) {
+    // Only the three remaining report pages — Overview is gone.
+    for (const tab of ["Spending Trends", "Spending by Category", "Net Worth"]) {
       expect(screen.getByRole("button", { name: tab })).toBeInTheDocument();
     }
-    // Math strip cells.
-    expect(screen.getByText("Income")).toBeInTheDocument();
-    expect(screen.getByText("Expenses")).toBeInTheDocument();
-    expect(screen.getByText("Net")).toBeInTheDocument();
-    // Overview panel — Top Payees only.
-    const topPanel = findPanel("Top Payees")!;
-    expect(topPanel).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
+    // Spending Trends is the default page, totaling all categorized spend ($650.00).
+    const panel = findPanel("Spending Trends")!;
+    expect(panel).toBeTruthy();
+    expectPanelBodyIsFlexColumn(panel);
+    expect(panel.querySelector("svg")).not.toBeNull();
+    expect(screen.getAllByText("$650.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("Net Worth", { selector: ".y-panel-head" })).not.toBeInTheDocument();
   });
 
@@ -137,58 +139,20 @@ describe("ReportsView", () => {
     expect(panel.querySelector("svg")).not.toBeNull();
   });
 
-  it("totals income and expenses across the default range", () => {
+  it("re-totals Spending Trends when the From month is narrowed", () => {
     renderView();
-    expect(screen.getByText("$9,000.00")).toBeInTheDocument();
-    expect(screen.getByText("-$800.00")).toBeInTheDocument();
-    expect(screen.getByText("$8,200.00")).toBeInTheDocument();
-  });
-
-  it("excludes off-budget account activity from Overview income and expense totals (BUG-28)", () => {
-    const dataWithOffbudget: BudgetData = {
-      accounts: [
-        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
-        { id: 2, name: "Brokerage", kind: "offbudget", groupLabel: "Tracking", balance: "0", onBudget: false, sort: 1 },
-      ],
-      groups: [],
-      categories: [
-        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
-      ],
-      assignments: [],
-      transactions: [
-        { id: 1, accountId: 1, categoryId: null, date: "2026-06-01", payee: "Payroll", memo: "", amount: "300000", status: "c", isIncome: true },
-        { id: 2, accountId: 1, categoryId: 10, date: "2026-06-05", payee: "Groceries", memo: "", amount: "-5000", status: "c" },
-        // Off-budget dividend: +$1,000.00
-        { id: 3, accountId: 2, categoryId: null, date: "2026-06-10", payee: "Dividend", memo: "", amount: "100000", status: "c", isIncome: true },
-        // Off-budget fee: -$200.00
-        { id: 4, accountId: 2, categoryId: null, date: "2026-06-15", payee: "Advisor Fee", memo: "", amount: "-20000", status: "c" },
-      ],
-      recurring: [],
-    };
-
-    renderView({ data: dataWithOffbudget });
-    // Income must be $3,000.00, not $4,000.00
-    expect(screen.getByText("$3,000.00")).toBeInTheDocument();
-    // Expense must be -$50.00, not -$250.00
-    expect(screen.getByText("-$50.00")).toBeInTheDocument();
-    // Net must be $2,950.00, not $3,750.00
-    expect(screen.getByText("$2,950.00")).toBeInTheDocument();
-  });
-
-  it("re-totals when the From month is narrowed", () => {
-    renderView();
+    // June only: $50.00 of categorized spend (uncategorized Shop B is excluded).
     pickFromOpenDropdownByValue(/from month/i, "5");
-    expect(screen.getByText("$3,000.00")).toBeInTheDocument();
-    expect(screen.getByText("-$50.00")).toBeInTheDocument();
-    expect(screen.getByText("$2,950.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$50.00").length).toBeGreaterThan(0);
+    expect(screen.queryByText("$650.00")).not.toBeInTheDocument();
   });
 
   it("swaps From/To when From is after To", () => {
     renderView();
     pickFromOpenDropdownByValue(/from month/i, "5");
     pickFromOpenDropdownByValue(/to month/i, "3");
-    // The swap keeps the full range, so totals are unchanged.
-    expect(screen.getByText("$9,000.00")).toBeInTheDocument();
+    // The swap keeps the full range, so the trends total is unchanged.
+    expect(screen.getAllByText("$650.00").length).toBeGreaterThan(0);
   });
 
   it("provides 2-field selectors for month and year on both From and To", () => {
@@ -197,30 +161,6 @@ describe("ReportsView", () => {
     expect(screen.getByRole("button", { name: /from year/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /to month/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /to year/i })).toBeInTheDocument();
-  });
-
-  it("shows top payees sorted by spend on Overview", () => {
-    renderView();
-    const scope = within(findPanel("Top Payees")!);
-    expect(scope.getByText("Groceries")).toBeInTheDocument();
-    expect(scope.getByText("$350.00")).toBeInTheDocument();
-    expect(scope.getByText("Shop A")).toBeInTheDocument();
-    expect(scope.getByText("Shop B")).toBeInTheDocument();
-    expect(scope.getByText("$150.00")).toBeInTheDocument();
-  });
-
-  it("excludes Starting Balance from Top Payees on Overview", () => {
-    const data: BudgetData = {
-      ...makeData(),
-      transactions: [
-        txn("2026-04", 1, "Starting Balance", -50000),
-        txn("2026-04", 5, "Groceries", -350, 10),
-      ],
-    };
-    renderView({ data });
-    const scope = within(findPanel("Top Payees")!);
-    expect(scope.getByText("Groceries")).toBeInTheDocument();
-    expect(scope.queryByText("Starting Balance")).not.toBeInTheDocument();
   });
 
   it("Spending tab shows sorted bars with percents", () => {
@@ -444,7 +384,9 @@ describe("ReportsView", () => {
 
   it("shows the empty state when there are no transactions", () => {
     renderView({ data: { ...makeData(), transactions: [] } });
-    expect(screen.getAllByText("No data for this timeframe.").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("No spending data for this timeframe and filter selection.")
+    ).toBeInTheDocument();
   });
 
   it("does not include future years beyond the dataset/current year in the year selector", () => {
@@ -466,7 +408,7 @@ describe("ReportsView", () => {
     expect(screen.queryByText("2031")).not.toBeInTheDocument();
   });
 
-  it("includes categorized transfers in spending and expenses", () => {
+  it("includes categorized transfers in spending", () => {
     const data: BudgetData = {
       ...makeData(),
       accounts: [
@@ -492,9 +434,6 @@ describe("ReportsView", () => {
     };
     renderView({ data });
 
-    // Overview expenses must reflect the $500 transfer to RRSP
-    expect(screen.getAllByText("-$500.00").length).toBeGreaterThanOrEqual(1);
-
     // Spending tab must show Retirement category
     clickTab("Spending by Category");
     expect(screen.getByText("Retirement")).toBeInTheDocument();
@@ -502,11 +441,12 @@ describe("ReportsView", () => {
   });
 
   it("BUG-45: updates automatic date range when older transactions are imported if untouched", () => {
-    const initialData = makeData(); // transactions from 2026-04 to 2026-06 (Income = $9000, 3 x 3000)
+    const initialData = makeData(); // transactions from 2026-04 to 2026-06
     const { rerender } = render(<ReportsView data={initialData} month="2026-06" />);
 
-    // Default range is 2026-04 to 2026-06 -> Income is $9,000.00
-    expect(screen.getByText("$9,000.00")).toBeInTheDocument();
+    // Default range starts 2026-04
+    expect(screen.getByRole("button", { name: /from month/i })).toHaveTextContent("April");
+    expect(screen.getByRole("button", { name: /from year/i })).toHaveTextContent("2026");
 
     // Now older transaction from 2025-01 ($5000 income) is imported
     const updatedData: BudgetData = {
@@ -519,19 +459,20 @@ describe("ReportsView", () => {
 
     rerender(<ReportsView data={updatedData} month="2026-06" />);
 
-    // Income should now automatically include the 2025-01 transaction ($9000 + $5000 = $14000)
-    expect(screen.getByText("$14,000.00")).toBeInTheDocument();
+    // Automatic range now starts 2025-01
+    expect(screen.getByRole("button", { name: /from month/i })).toHaveTextContent("January");
+    expect(screen.getByRole("button", { name: /from year/i })).toHaveTextContent("2025");
   });
 
   it("BUG-45: retains user customized date range when data updates", () => {
     const initialData = makeData();
     const { rerender } = render(<ReportsView data={initialData} month="2026-06" />);
 
-    // Manually customize the From month using Select
+    // Manually customize the From month using Select (May)
     pickFromOpenDropdownByValue(/from month/i, "4");
 
-    // Income for May + June is $6000
-    expect(screen.getByText("$6,000.00")).toBeInTheDocument();
+    // From selector shows the customized May start
+    expect(screen.getByRole("button", { name: /from month/i })).toHaveTextContent("May");
 
     // Now older transaction from 2025-01 is imported
     const updatedData: BudgetData = {
@@ -544,26 +485,37 @@ describe("ReportsView", () => {
 
     rerender(<ReportsView data={updatedData} month="2026-06" />);
 
-    // Customized range remains May to June -> still $6000
-    expect(screen.getByText("$6,000.00")).toBeInTheDocument();
+    // Customized range is retained — still May
+    expect(screen.getByRole("button", { name: /from month/i })).toHaveTextContent("May");
 
     // Now resetKey changes (user clicks Reports in sidebar)
     rerender(<ReportsView data={updatedData} month="2026-06" resetKey={1} />);
 
-    // Reset should revert to automatic full range ($14000)
-    expect(screen.getByText("$14,000.00")).toBeInTheDocument();
+    // Reset reverts to the automatic full range starting 2025-01
+    expect(screen.getByRole("button", { name: /from month/i })).toHaveTextContent("January");
+    expect(screen.getByRole("button", { name: /from year/i })).toHaveTextContent("2025");
   });
 
   it("BUG-44: recovers from invalid subTab in localStorage", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("ynab:reports:subTab", JSON.stringify("invalid-tab"));
     renderView();
-    // Falls back to Overview
-    expect(screen.getByText("Top Payees")).toBeInTheDocument();
+    // Falls back to Spending Trends
+    expect(findPanel("Spending Trends")).toBeTruthy();
     expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
     expect(warnSpy).toHaveBeenCalledWith(
       'Invalid value for localStorage key "ynab:reports:subTab", removing stored entry'
     );
+    warnSpy.mockRestore();
+  });
+
+  it("migrates a stored legacy Overview tab to Spending Trends", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    window.localStorage.setItem("ynab:reports:subTab", JSON.stringify("overview"));
+    renderView();
+    expect(findPanel("Spending Trends")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
     warnSpy.mockRestore();
   });
 
