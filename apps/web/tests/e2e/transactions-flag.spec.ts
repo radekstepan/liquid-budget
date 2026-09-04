@@ -4,7 +4,7 @@ import { fillSearchlist } from "./helpers";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
 }
 
 async function gotoAllTransactions(page: Page) {

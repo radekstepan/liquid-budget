@@ -18,7 +18,7 @@ import { fillSearchlist } from "./helpers";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   // Wait for the initial data fetch to complete (the sidebar renders once
   // the shell has loaded the budget) before interacting with the app.
   await expect(page.getByText("TD Unlimited Chequing").first()).toBeVisible();

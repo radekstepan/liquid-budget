@@ -118,7 +118,7 @@ test("importing through the Settings menu previews, swaps Payee/Memo, and import
   await resetToDemo(request);
 
   await page.goto("/");
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByText("TD Unlimited Chequing")).toBeVisible();
 
   await page.getByTitle("Settings").click();

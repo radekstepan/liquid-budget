@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseBudgetDataResponse } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseTransactionMutationResult } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -280,11 +280,9 @@ export function BudgetAppShell({
       try {
         // Auto-post due scheduled transactions on mount (keeping GET /api/budget pure, BUG-20)
         try {
-          const autoPostRes = await jsonReq<{
-            postedCount?: number;
-            failures?: { id: number; payee?: string; error: string }[];
-            capped?: { id: number; payee?: string; remainingDue: number }[];
-          }>("/api/recurring?action=autopost", { method: "POST" });
+          const autoPostRes = parseRecurringAutoPostResponse(
+            await jsonReq<unknown>("/api/recurring?action=autopost", { method: "POST" })
+          );
           if (mounted && autoPostRes) {
             const count = autoPostRes.postedCount ?? 0;
             if (count > 0) {
@@ -353,10 +351,12 @@ export function BudgetAppShell({
       await withSync(() =>
         runMutation(
           async () => {
-            const res = await jsonReq<Assignment>("/api/assignments", {
-              method: "PUT",
-              body: JSON.stringify({ categoryId, month, amount }),
-            });
+            const res = parseAssignmentResponse(
+              await jsonReq<unknown>("/api/assignments", {
+                method: "PUT",
+                body: JSON.stringify({ categoryId, month, amount }),
+              })
+            );
             if (res && typeof res.id === "number") {
               setData((prev) => {
                 if (!prev) return prev;
@@ -433,15 +433,17 @@ export function BudgetAppShell({
         runMutation(
           async () => {
             const results = await Promise.all(
-              assignments.map((item) =>
-                jsonReq<Assignment>("/api/assignments", {
-                  method: "PUT",
-                  body: JSON.stringify({
-                    categoryId: item.categoryId,
-                    month: item.month,
-                    amount: item.amount,
-                  }),
-                })
+              assignments.map(async (item) =>
+                parseAssignmentResponse(
+                  await jsonReq<unknown>("/api/assignments", {
+                    method: "PUT",
+                    body: JSON.stringify({
+                      categoryId: item.categoryId,
+                      month: item.month,
+                      amount: item.amount,
+                    }),
+                  })
+                )
               )
             );
             return results;
@@ -581,10 +583,12 @@ export function BudgetAppShell({
       return withSync(async () => {
         await runMutation(
           async () => {
-            const res = await jsonReq<Transaction | { parent: Transaction; children: Transaction[] }>("/api/transactions", {
-              method: "POST",
-              body: JSON.stringify(t),
-            });
+            const res = parseTransactionMutationResult(
+              await jsonReq<unknown>("/api/transactions", {
+                method: "POST",
+                body: JSON.stringify(t),
+              })
+            );
             if (res && "id" in res && typeof res.id === "number") {
               setData((prev) => {
                 if (!prev) return prev;
@@ -1577,7 +1581,9 @@ export function BudgetAppShell({
     getReconcileState: async (accountId: number, statementDate?: string) => {
       const qs = new URLSearchParams({ accountId: String(accountId) });
       if (statementDate) qs.set("statementDate", statementDate);
-      return await jsonReq<ReconcileState>(`/api/reconcile?${qs.toString()}`);
+      return parseReconcileStateResponse(
+        await jsonReq<unknown>(`/api/reconcile?${qs.toString()}`)
+      );
     },
     reconcileAccount: async ({
       accountId,
@@ -1687,9 +1693,11 @@ export function BudgetAppShell({
       return withSync(() =>
         runMutation(
           async () => {
-            return await jsonReq<DuplicateAnalysisResult>("/api/duplicates", {
-              method: "POST",
-            });
+            return parseDuplicateAnalysisResponse(
+              await jsonReq<unknown>("/api/duplicates", {
+                method: "POST",
+              })
+            );
           },
           { failure: "Failed to analyze duplicates." }
         )

@@ -8,6 +8,7 @@ import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
   ReconcileAccountSchema,
+  ReconcileStateQuerySchema,
   UnreconcileAccountSchema,
 } from "../schemas";
 
@@ -15,20 +16,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const accountIdParam = url.searchParams.get("accountId");
-  const statementDateParam = url.searchParams.get("statementDate") ?? undefined;
-
-  if (!accountIdParam) {
-    return Response.json({ error: "accountId is required" }, { status: 400 });
-  }
-  const accountId = Number(accountIdParam);
-  if (isNaN(accountId) || accountId <= 0) {
-    return Response.json({ error: "invalid accountId" }, { status: 400 });
+  const parsed = ReconcileStateQuerySchema.safeParse({
+    accountId: url.searchParams.get("accountId"),
+    statementDate: url.searchParams.get("statementDate") ?? undefined,
+  });
+  if (!parsed.success) {
+    return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
 
   const db = getDefaultDb();
   try {
-    const state = await getReconcileState(db, accountId, statementDateParam);
+    const state = await getReconcileState(db, parsed.data.accountId, parsed.data.statementDate);
     return Response.json(state);
   } catch (e) {
     return apiErrorResponse(e);

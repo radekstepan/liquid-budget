@@ -160,6 +160,14 @@ describe("PATCH /api/transactions (BUG-19)", () => {
       expect(res.status).toBe(400);
     });
 
+    it("returns 400 for a garbage ids list instead of a silent no-op success", async () => {
+      const req = new NextRequest("http://localhost:3000/api/transactions?ids=abc,,", {
+        method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(400);
+    });
+
     it("returns 200 and deletes the transaction for valid id", async () => {
       const db = getDefaultDb();
       const account = await createAccount(db, { name: "Checking", kind: "liquid" });

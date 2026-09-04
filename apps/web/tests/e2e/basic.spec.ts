@@ -23,7 +23,7 @@ test("home page loads and renders the budget app", async ({ page }) => {
   // happens in a useEffect; the role-based assertions below cover the
   // real success path.
   await expect(
-    page.getByText("Loading budget…")
+    page.getByText("Loading budget")
   ).toBeHidden({ timeout: 15_000 });
 
   // Sidebar nav (Sidebar.tsx:17-24, 80-94) renders a button per view.
