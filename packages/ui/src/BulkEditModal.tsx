@@ -6,7 +6,6 @@ import type {
   BulkUpdateTransactionPatch,
   Category,
   CategoryGroup,
-  ClearedStatus,
   Transaction,
   TransactionFlagColor,
 } from "@ynab/logic";
@@ -83,7 +82,7 @@ export function BulkEditTransactionsModal({
     availableAccounts[0]?.id ?? accounts[0]?.id ?? 0
   );
   const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState<ClearedStatus>("c");
+  const [status, setStatus] = useState<"u" | "c">("c");
   const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(null);
 
   const editableTransactions = useMemo(() => {

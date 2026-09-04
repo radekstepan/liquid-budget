@@ -126,8 +126,13 @@ export type Transaction = {
 };
 
 export type BulkUpdateTransactionPatch = {
-  status?: ClearedStatus;
-  transferStatus?: ClearedStatus;
+  /**
+   * "r" is excluded on purpose: only the reconcile flow may set reconciled
+   * status. Mirrors TransactionBulkUpdateSchema (see ./contracts.js) and the
+   * server-side guard in bulkUpdateTransactions, which throws on "r".
+   */
+  status?: Exclude<ClearedStatus, "r">;
+  transferStatus?: Exclude<ClearedStatus, "r">;
   categoryId?: number | null;
   flagColor?: TransactionFlagColor | null;
   date?: string;

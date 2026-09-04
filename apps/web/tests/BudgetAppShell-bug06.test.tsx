@@ -70,6 +70,10 @@ describe("BudgetAppShell (BUG-06: optimistic transaction income reclassification
               ? {
                   ...tx,
                   ...patchBody,
+                  // The real server String()s money on the wire; mirror that
+                  // so the re-served /api/budget satisfies the response contract.
+                  amount:
+                    patchBody.amount !== undefined ? String(patchBody.amount) : tx.amount,
                   isIncome: patchBody.categoryId == null,
                 }
               : tx
@@ -172,6 +176,10 @@ describe("BudgetAppShell (BUG-06: optimistic transaction income reclassification
               ? {
                   ...tx,
                   ...patchBody,
+                  // The real server String()s money on the wire; mirror that
+                  // so the re-served /api/budget satisfies the response contract.
+                  amount:
+                    patchBody.amount !== undefined ? String(patchBody.amount) : tx.amount,
                   isIncome: patchBody.categoryId == null,
                 }
               : tx

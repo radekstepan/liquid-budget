@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseBudgetDataResponse } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -215,7 +215,10 @@ export function BudgetAppShell({
   const reload = useCallback(async () => {
     const seq = ++reloadSeqRef.current;
     const currentMutationSeq = mutationSeqRef.current;
-    const budget = await jsonReq<BudgetData>("/api/budget");
+    const budgetRaw: unknown = await jsonReq<unknown>("/api/budget");
+    // Fail fast if the server response drifts from the BudgetData contract
+    // instead of flowing bad shapes silently into budget calculations.
+    const budget = parseBudgetDataResponse(budgetRaw);
 
     // Drop stale responses if a newer reload has completed or if a newer mutation started
     if (seq <= latestCompletedReloadSeqRef.current || currentMutationSeq < mutationSeqRef.current) {

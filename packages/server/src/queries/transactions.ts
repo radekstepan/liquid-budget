@@ -1387,7 +1387,11 @@ export async function bulkUpdateTransactions(
   if (patch.incomeMonth !== undefined && patch.incomeMonth != null) {
     assertValidISOMonth(patch.incomeMonth, "incomeMonth");
   }
-  if (patch.status === "r" || patch.transferStatus === "r") {
+  // Defense-in-depth: the BulkUpdateTransactionPatch type and the route
+  // schema both exclude "r", but this still throws for any caller that
+  // bypasses types (plain JS, future callers) — hence the unknown widening.
+  const untrustedPatch = patch as { status?: unknown; transferStatus?: unknown };
+  if (untrustedPatch.status === "r" || untrustedPatch.transferStatus === "r") {
     throw new TransactionError(
       "cannot set status to 'r'; only the reconcile flow may set 'r'"
     );
