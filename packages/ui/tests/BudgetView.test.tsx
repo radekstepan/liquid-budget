@@ -178,6 +178,36 @@ describe("BudgetView", () => {
     expect(onAddGroup).toHaveBeenCalled();
   });
 
+  it("keeps the Add Category Group button outside the scroll container so it stays fixed", () => {
+    renderView();
+    const btn = screen.getByRole("button", { name: /add category group/i });
+    expect(btn.closest(".overflow-auto")).toBeNull();
+  });
+
+  it("marks the scroll container as h-scrolled only after scrolling right", () => {
+    const { container } = renderView();
+    const scroller = container.querySelector(".y-scroll") as HTMLElement;
+    expect(scroller.classList.contains("is-hscrolled")).toBe(false);
+    scroller.scrollLeft = 120;
+    fireEvent.scroll(scroller);
+    expect(scroller.classList.contains("is-hscrolled")).toBe(true);
+    scroller.scrollLeft = 0;
+    fireEvent.scroll(scroller);
+    expect(scroller.classList.contains("is-hscrolled")).toBe(false);
+  });
+
+  it("renders a filler row that spans the full grid width", () => {
+    const { container } = renderView({
+      monthCount: 3,
+      visibleMonths: ["2026-05", "2026-06", "2026-07"],
+      budgets: [makeBudget(), makeBudget(), makeBudget()],
+    });
+    const filler = container.querySelector("tbody tr.y-table-filler");
+    expect(filler).not.toBeNull();
+    // Category column + 3 months x 3 numeric columns.
+    expect(filler!.querySelector("td")!.getAttribute("colspan")).toBe("10");
+  });
+
   it("calls onAddCategory with the group id", () => {
     const onAddCategory = vi.fn();
     renderView({ onAddCategory });

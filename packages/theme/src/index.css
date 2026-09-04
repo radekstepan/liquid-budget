@@ -291,9 +291,41 @@ body::after {
 .y-table .y-row.is-sel .y-table-td--sticky-cat {
   background: var(--y-row-sel);
 }
-.y-table-thead .y-table-td--sticky-cat {
+.y-table thead.y-thead--sticky th.y-table-td--sticky-cat,
+.y-thead.y-thead--sticky th.y-table-td--sticky-cat {
   background: linear-gradient(var(--y-chrome-top), var(--y-chrome-bot));
-  z-index: 2;
+  /* Corner cell sits above the month-name / Budgeted-Outflows-Balance
+     headers it overlaps during horizontal scroll (same z-index would let
+     the later-DOM month headers paint over it). */
+  z-index: 20;
+}
+/* Scroll-aware fade on the sticky Category column's right edge, so it
+   reads as floating "over" the months sliding underneath. Gated on
+   .is-hscrolled (scrollLeft > 0) so there is nothing when parked fully
+   left and the column edge meets content flush. A real linear-gradient
+   (not a blurred shadow): it varies only along x, so every row paints
+   an identical slice and they tile into one seamless vertical fade —
+   a blur would bleed vertically and get clipped per-cell by each next
+   row's opaque background. The strip is pointer-transparent so the
+   amount buttons underneath stay clickable. */
+.is-hscrolled .y-table-td--sticky-cat {
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.08);
+}
+.is-hscrolled .y-table thead.y-thead--sticky th.y-table-td--sticky-cat,
+.is-hscrolled .y-thead.y-thead--sticky th.y-table-td--sticky-cat {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    inset -1px 0 0 rgba(0, 0, 0, 0.08);
+}
+.is-hscrolled .y-table-td--sticky-cat::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 5px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.1), transparent);
+  pointer-events: none;
 }
 .y-table-cell--readonly {
   color: var(--y-ink-faint);
@@ -1022,7 +1054,24 @@ button.y-pill:hover {
 }
 .y-table.y-table--multi {
   width: max-content;
-  min-width: 0;
+  min-width: 100%;
+}
+/* Budget grid fills its scroll container: the table stretches to the
+   container height and a filler row absorbs any leftover space, so the
+   grid background runs straight into the scrollbar/footer instead of
+   leaving a detached whitespace band. Content rows keep a 1px height
+   (acts as a minimum — content still sizes them) so only the filler
+   grows. */
+.y-table.y-budget-grid {
+  height: 100%;
+}
+.y-table.y-budget-grid > tbody > tr:not(.y-table-filler) {
+  height: 1px;
+}
+.y-table-filler td {
+  background: var(--y-row);
+  border-bottom: 0;
+  padding: 0;
 }
 .y-table.y-table--multi th:last-child:not(.y-grid-col--current-last):not(.y-table-th--month-current),
 .y-table.y-table--multi td:last-child:not(.y-grid-col--current-last) {

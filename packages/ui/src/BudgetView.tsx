@@ -147,6 +147,7 @@ export const BudgetView = memo(function BudgetView({
 
   const [isTodayInViewport, setIsTodayInViewport] = useState<boolean>(true);
   const [quickBudgetOpenMonth, setQuickBudgetOpenMonth] = useState<string | null>(null);
+  const [isHScrolled, setIsHScrolled] = useState<boolean>(false);
 
   useEffect(() => {
     const checkVisibility = () => {
@@ -202,6 +203,17 @@ export const BudgetView = memo(function BudgetView({
       ro?.disconnect();
     };
   }, [showMulti, isOnThisMonth, resolvedVisibleMonths, todayMonth]);
+
+  // Track horizontal scroll so the sticky Category column can cast a
+  // subtle shadow on its right edge only once content slides under it.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const update = () => setIsHScrolled(container.scrollLeft > 1);
+    update();
+    container.addEventListener("scroll", update, { passive: true });
+    return () => container.removeEventListener("scroll", update);
+  }, []);
 
   // On init, ensure today's month column is actually visible inside the
   // horizontal scroller — not stuck behind the scrollbar/fold at scrollLeft 0.
@@ -345,8 +357,8 @@ export const BudgetView = memo(function BudgetView({
         )}
       </Toolbar>
 
-      <div className="flex-1 overflow-auto y-scroll" ref={scrollContainerRef}>
-        <table className={cx("y-table", showMulti && "y-table--multi")}>
+      <div className={cx("min-h-0 flex-1 overflow-auto y-scroll", isHScrolled && "is-hscrolled")} ref={scrollContainerRef}>
+        <table className={cx("y-table", showMulti && "y-table--multi", "y-budget-grid")}>
           <thead className="y-thead y-thead--sticky">
             {showMulti ? (
               <>
@@ -514,18 +526,27 @@ export const BudgetView = memo(function BudgetView({
                 todayMonth={todayMonth}
               />
             )}
+            <tr className="y-table-filler" aria-hidden="true">
+              <td colSpan={showMulti ? 1 + resolvedVisibleMonths.length * 3 : 4} />
+            </tr>
           </tbody>
         </table>
+      </div>
 
-        <div className="p-2.5">
-          <Button
-            size="sm"
-            onClick={onAddGroup}
-            className="text-[11px] text-[var(--y-ink-soft)] font-medium"
-          >
-            <Icon name="plus" size={11} /> Add Category Group
-          </Button>
-        </div>
+      <div
+        className="shrink-0 border-t px-2.5 py-1.5"
+        style={{
+          borderColor: "var(--y-border-strong)",
+          background: "var(--y-panel-alt)",
+        }}
+      >
+        <Button
+          size="sm"
+          onClick={onAddGroup}
+          className="text-[11px] text-[var(--y-ink-soft)] font-medium"
+        >
+          <Icon name="plus" size={11} /> Add Category Group
+        </Button>
       </div>
     </div>
   );
