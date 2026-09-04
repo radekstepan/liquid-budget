@@ -967,3 +967,190 @@ describe("BudgetView", () => {
     });
   });
 });
+
+describe("Quick Budget month header dropdown", () => {
+  const qbValues = {
+    "2026-06": { lastMonth: 40000, spentLastMonth: 33000, avgBudgeted: 38000 },
+    "2026-07": { lastMonth: 41000, spentLastMonth: 1000, avgBudgeted: 39000 },
+  };
+
+  it("opens the single-month Budgeted header menu and applies to that month", () => {
+    const onQuickBudget = vi.fn();
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06"],
+      monthCount: 1,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget,
+    });
+
+    const trigger = screen.getByTestId("quick-budget-trigger-2026-06");
+    expect(trigger).toHaveAttribute("aria-label", expect.stringContaining("Jun 2026"));
+    expect(screen.queryByTestId("quick-budget-menu-2026-06")).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    const menu = screen.getByTestId("quick-budget-menu-2026-06");
+    expect(menu).toBeInTheDocument();
+    expect(within(menu).getByText("Entire Budget")).toBeInTheDocument();
+    expect(within(menu).getByText("$400.00")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("quick-budget-last-month-2026-06"));
+    expect(onQuickBudget).toHaveBeenCalledWith("lastMonth", undefined, "2026-06");
+  });
+
+  it("renders one trigger per visible month and applies to the chosen month", () => {
+    const onQuickBudget = vi.fn();
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06", "2026-07"],
+      budgets: [makeBudget(), makeBudget()],
+      monthCount: 3,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget,
+    });
+
+    fireEvent.click(screen.getByTestId("quick-budget-trigger-2026-07"));
+    expect(screen.getByTestId("quick-budget-menu-2026-07")).toBeInTheDocument();
+    expect(screen.queryByTestId("quick-budget-menu-2026-06")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("quick-budget-spent-last-month-2026-07"));
+    expect(onQuickBudget).toHaveBeenCalledWith("spentLastMonth", undefined, "2026-07");
+  });
+
+  it("scopes the action to the selected category when one is selected", () => {
+    const onQuickBudget = vi.fn();
+    const onClearSelectedCategory = vi.fn();
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06"],
+      monthCount: 1,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget,
+      selectedCategory: { id: 10, name: "Groceries" },
+      onClearSelectedCategory,
+    });
+
+    fireEvent.click(screen.getByTestId("quick-budget-trigger-2026-06"));
+    const menu = screen.getByTestId("quick-budget-menu-2026-06");
+    expect(within(menu).getByText("Groceries")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("quick-budget-avg-budgeted-2026-06"));
+    expect(onQuickBudget).toHaveBeenCalledWith("avgBudgeted", 10, "2026-06");
+
+    fireEvent.click(screen.getByTestId("quick-budget-trigger-2026-06"));
+    fireEvent.click(screen.getByTestId("quick-budget-deselect-2026-06"));
+    expect(onClearSelectedCategory).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports Set to Zero from the header menu", () => {
+    const onQuickBudget = vi.fn();
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06"],
+      monthCount: 1,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget,
+    });
+
+    fireEvent.click(screen.getByTestId("quick-budget-trigger-2026-06"));
+    fireEvent.click(screen.getByTestId("quick-budget-clear-2026-06"));
+    expect(onQuickBudget).toHaveBeenCalledWith("clear", undefined, "2026-06");
+  });
+});
+
+describe("Quick Budget menu placement", () => {
+  const qbValues = {
+    "2026-06": { lastMonth: 40000, spentLastMonth: 33000, avgBudgeted: 38000 },
+  };
+  const singleProps = {
+    currentMonth: "2026-06",
+    visibleMonths: ["2026-06"],
+    monthCount: 1,
+    quickBudgetByMonth: qbValues,
+    onQuickBudget: vi.fn(),
+  };
+
+  it("opens to the right by default", () => {
+    renderView({ ...singleProps });
+    fireEvent.click(screen.getByTestId("quick-budget-trigger-2026-06"));
+    const menu = screen.getByTestId("quick-budget-menu-2026-06");
+    expect(menu).toHaveClass("is-right");
+    expect(menu).not.toHaveClass("is-left");
+  });
+
+  it("opens to the left when there is no room on the right", () => {
+    renderView({ ...singleProps });
+    const trigger = screen.getByTestId("quick-budget-trigger-2026-06");
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 1000, y: 10, width: 18, height: 18,
+      top: 10, right: 1018, bottom: 28, left: 1000,
+      toJSON: () => {},
+    } as DOMRect);
+    fireEvent.click(trigger);
+    const menu = screen.getByTestId("quick-budget-menu-2026-06");
+    expect(menu).toHaveClass("is-left");
+    expect(menu).not.toHaveClass("is-right");
+  });
+});
+
+describe("Quick Budget open header stacking", () => {
+  const qbValues = {
+    "2026-06": { lastMonth: 40000, spentLastMonth: 33000, avgBudgeted: 38000 },
+    "2026-07": { lastMonth: 41000, spentLastMonth: 1000, avgBudgeted: 39000 },
+  };
+
+  it("marks only the open month header so it paints above sibling headers", () => {
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06", "2026-07"],
+      budgets: [makeBudget(), makeBudget()],
+      monthCount: 3,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget: vi.fn(),
+    });
+
+    const triggerJune = screen.getByTestId("quick-budget-trigger-2026-06");
+    const triggerJuly = screen.getByTestId("quick-budget-trigger-2026-07");
+    expect(triggerJune.closest("th")).not.toHaveClass("y-month-head--open");
+
+    fireEvent.click(triggerJuly);
+    expect(triggerJuly.closest("th")).toHaveClass("y-month-head--open");
+    expect(triggerJune.closest("th")).not.toHaveClass("y-month-head--open");
+  });
+});
+
+describe("Quick Budget menu container-aware placement", () => {
+  const qbValues = {
+    "2026-06": { lastMonth: 40000, spentLastMonth: 33000, avgBudgeted: 38000 },
+  };
+
+  it("opens left when the scroll container ends even though the window has room", () => {
+    renderView({
+      currentMonth: "2026-06",
+      visibleMonths: ["2026-06"],
+      monthCount: 1,
+      quickBudgetByMonth: qbValues,
+      onQuickBudget: vi.fn(),
+    });
+    const trigger = screen.getByTestId("quick-budget-trigger-2026-06");
+    // Window (1024) has room to the right of the trigger, but the table's
+    // scroll container does not — the menu must respect the container.
+    const scroller = trigger.closest(".overflow-auto") as HTMLElement;
+    scroller.style.overflowX = "auto";
+    Object.defineProperty(scroller, "clientWidth", { value: 585, configurable: true });
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, width: 600, height: 800,
+      top: 0, right: 600, bottom: 800, left: 0,
+      toJSON: () => {},
+    } as DOMRect);
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 572, y: 10, width: 18, height: 18,
+      top: 10, right: 590, bottom: 28, left: 572,
+      toJSON: () => {},
+    } as DOMRect);
+    fireEvent.click(trigger);
+    const menu = screen.getByTestId("quick-budget-menu-2026-06");
+    expect(menu).toHaveClass("is-left");
+    expect(menu).not.toHaveClass("is-right");
+  });
+});

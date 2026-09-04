@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo, Fragment } from "react";
+import { memo, useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
 import type { GroupRow, CatRow, BudgetResult, CategoryGroup } from "@ynab/logic";
 import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents } from "@ynab/logic";
 import {
@@ -85,6 +85,10 @@ export const BudgetView = memo(function BudgetView({
   selectedCategoryId,
   onSelectCategory,
   canShiftRight,
+  quickBudgetByMonth,
+  onQuickBudget,
+  selectedCategory,
+  onClearSelectedCategory,
 }: {
   budget: BudgetResult;
   budgets: BudgetResult[];
@@ -117,6 +121,14 @@ export const BudgetView = memo(function BudgetView({
   selectedCategoryId?: number | null;
   onSelectCategory?: (id: number | null) => void;
   canShiftRight?: boolean;
+  quickBudgetByMonth?: Record<string, { lastMonth: number; spentLastMonth: number; avgBudgeted: number }>;
+  onQuickBudget?: (
+    type: "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear",
+    categoryId?: number,
+    month?: string
+  ) => void;
+  selectedCategory?: { id: number; name: string } | null;
+  onClearSelectedCategory?: () => void;
 }) {
   const showMulti = monthCount > 1;
 
@@ -134,6 +146,7 @@ export const BudgetView = memo(function BudgetView({
   const isOnThisMonth = currentMonth === todayMonth;
 
   const [isTodayInViewport, setIsTodayInViewport] = useState<boolean>(true);
+  const [quickBudgetOpenMonth, setQuickBudgetOpenMonth] = useState<string | null>(null);
 
   useEffect(() => {
     const checkVisibility = () => {
@@ -316,12 +329,27 @@ export const BudgetView = memo(function BudgetView({
                         ref={isThisMonth ? currentMonthThRef : undefined}
                         colSpan={3}
                         className={cx(
-                          "y-table-th--month-label text-center",
+                          "y-table-th--month-label text-center y-month-head",
                           idx > 0 && "y-table-colgroup-divider",
-                          isThisMonth && "y-table-th--month-current"
+                          isThisMonth && "y-table-th--month-current",
+                          quickBudgetOpenMonth === m && "y-month-head--open"
                         )}
                       >
-                        <span>{formatMonthLong(m)}</span>
+                        <span className="y-month-head-label">{formatMonthLong(m)}</span>
+                        {onQuickBudget && (
+                          <MonthQuickBudget
+                            month={m}
+                            values={quickBudgetByMonth?.[m]}
+                            selectedCategory={selectedCategory}
+                            onClearSelectedCategory={onClearSelectedCategory}
+                            onQuickBudget={onQuickBudget}
+                            open={quickBudgetOpenMonth === m}
+                            onOpen={() => setQuickBudgetOpenMonth(m)}
+                            onClose={() =>
+                              setQuickBudgetOpenMonth((cur) => (cur === m ? null : cur))
+                            }
+                          />
+                        )}
                       </th>
                     );
                   })}
@@ -356,7 +384,23 @@ export const BudgetView = memo(function BudgetView({
             ) : (
               <tr>
                 <th className="y-table-td--sticky-cat">Category</th>
-                <th className={cx("num", COL_A, isOnThisMonth && "y-thead-sub--current y-grid-col--current-first")}>Budgeted</th>
+                <th className={cx("num", COL_A, isOnThisMonth && "y-thead-sub--current y-grid-col--current-first", "y-month-head y-month-head--single", quickBudgetOpenMonth === currentMonth && "y-month-head--open")}>
+                  <span className="y-month-head-label">Budgeted</span>
+                  {onQuickBudget && (
+                    <MonthQuickBudget
+                      month={currentMonth}
+                      values={quickBudgetByMonth?.[currentMonth]}
+                      selectedCategory={selectedCategory}
+                      onClearSelectedCategory={onClearSelectedCategory}
+                      onQuickBudget={onQuickBudget}
+                      open={quickBudgetOpenMonth === currentMonth}
+                      onOpen={() => setQuickBudgetOpenMonth(currentMonth)}
+                      onClose={() =>
+                        setQuickBudgetOpenMonth((cur) => (cur === currentMonth ? null : cur))
+                      }
+                    />
+                  )}
+                </th>
                 <th className={cx("num", COL_O, isOnThisMonth && "y-thead-sub--current")}>Outflows</th>
                 <th className={cx("num", COL_V, isOnThisMonth && "y-thead-sub--current y-grid-col--current-last")}>Balance</th>
               </tr>
@@ -504,6 +548,187 @@ function MonthCountControl({
         );
       })}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------ quick budget per-month menu */
+
+type QuickBudgetType = "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear";
+
+function MonthQuickBudget({
+  month,
+  values,
+  selectedCategory,
+  onClearSelectedCategory,
+  onQuickBudget,
+  open,
+  onOpen,
+  onClose,
+}: {
+  month: string;
+  values?: { lastMonth: number; spentLastMonth: number; avgBudgeted: number };
+  selectedCategory?: { id: number; name: string } | null;
+  onClearSelectedCategory?: () => void;
+  onQuickBudget: (type: QuickBudgetType, categoryId?: number, month?: string) => void;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [place, setPlace] = useState<"left" | "right">("right");
+
+  // Pick the side with room: the 240px menu opens beside the month header,
+  // flipping left when there is no room on the right. Room is measured
+  // inside the nearest scrolling ancestor (the budget table's scroll
+  // container, minus its scrollbar) — not the window — since that is what
+  // actually clips the menu.
+  const resolvePlace = useCallback(() => {
+    const el = btnRef.current;
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
+    let clipLeft = 0;
+    let clipRight = window.innerWidth;
+    let node: HTMLElement | null = el.parentElement;
+    while (node) {
+      const style = window.getComputedStyle(node);
+      if (/(auto|scroll)/.test(style.overflowX || "") || /(auto|scroll)/.test(style.overflow || "")) {
+        const r = node.getBoundingClientRect();
+        const scrollbar = Math.max(0, r.width - node.clientWidth);
+        clipLeft = r.left;
+        clipRight = r.right - scrollbar;
+        break;
+      }
+      node = node.parentElement;
+    }
+    const need = 248; // 240px menu + 6px gap + margin
+    const spaceRight = clipRight - rect.right;
+    const spaceLeft = rect.left - clipLeft;
+    setPlace(spaceRight >= need || spaceRight >= spaceLeft ? "right" : "left");
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", resolvePlace);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", resolvePlace);
+    };
+  }, [open, onClose, resolvePlace]);
+
+  const label = formatMonthLong(month);
+  const lastMonth = values?.lastMonth ?? 0;
+  const spentLastMonth = values?.spentLastMonth ?? 0;
+  const avgBudgeted = values?.avgBudgeted ?? 0;
+
+  const choose = (type: QuickBudgetType) => {
+    onQuickBudget(type, selectedCategory?.id, month);
+    onClose();
+  };
+
+  return (
+    <span ref={wrapRef} className={cx("y-month-qb", open && "is-open")}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (open) onClose();
+          else {
+            resolvePlace();
+            onOpen();
+          }
+        }}
+        aria-label={`Quick budget options for ${label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Quick Budget — ${label}`}
+        data-testid={`quick-budget-trigger-${month}`}
+        className="y-month-qb-btn"
+      >
+        <Icon name="dots" size={12} />
+      </button>
+      {open && (
+        <span
+          role="menu"
+          aria-label={`Quick Budget for ${label}`}
+          data-testid={`quick-budget-menu-${month}`}
+          className={`y-dropdown y-month-qb-menu ${place === "left" ? "is-left" : "is-right"}`}
+        >
+          <span className="y-dropdown-group y-month-qb-scope">
+            <span className="y-month-qb-scope-name">
+              {selectedCategory ? selectedCategory.name : "Entire Budget"}
+            </span>
+            {selectedCategory && onClearSelectedCategory && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearSelectedCategory();
+                }}
+                className="y-month-qb-scope-clear"
+                data-testid={`quick-budget-deselect-${month}`}
+              >
+                Entire Budget
+              </button>
+            )}
+          </span>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("lastMonth")}
+            className="y-dropdown-item y-month-qb-item"
+            title="Set budgeted amounts to last month's values"
+            data-testid={`quick-budget-last-month-${month}`}
+          >
+            <span className="y-dropdown-item-label">Budgeted Last Month</span>
+            <span className="y-num">{fmt(lastMonth)}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("spentLastMonth")}
+            className="y-dropdown-item y-month-qb-item"
+            title="Set budgeted amounts to what was spent last month"
+            data-testid={`quick-budget-spent-last-month-${month}`}
+          >
+            <span className="y-dropdown-item-label">Spent Last Month</span>
+            <span className="y-num">{fmt(spentLastMonth)}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("avgBudgeted")}
+            className="y-dropdown-item y-month-qb-item"
+            title="Set budgeted amounts to average budgeted over last 3 months"
+            data-testid={`quick-budget-avg-budgeted-${month}`}
+          >
+            <span className="y-dropdown-item-label">Average Budgeted</span>
+            <span className="y-num">{fmt(avgBudgeted)}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("clear")}
+            className="y-dropdown-item y-month-qb-item"
+            title="Clear budgeted amounts to $0.00"
+            data-testid={`quick-budget-clear-${month}`}
+          >
+            <span className="y-dropdown-item-label">Set to Zero</span>
+            <span className="y-num">$0.00</span>
+          </button>
+        </span>
+      )}
+    </span>
   );
 }
 
