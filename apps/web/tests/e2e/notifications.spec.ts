@@ -204,22 +204,31 @@ test.describe("failure notifications", () => {
 
     await gotoAllTransactions(page);
 
-    // Count rows before the failed attempt
-    const rowCountBefore = await page.locator("tbody tr.y-row").count();
+    // Data-level baseline: rendered row counts are NOT asserted because the
+    // register is virtualized — the visible window depends on measured
+    // container height (ResizeObserver), not data length.
+    const txCountBefore = (
+      (await (await page.request.get("/api/budget")).json()) as { transactions: unknown[] }
+    ).transactions.length;
 
+    const payee = `PW Notify Fail ${Date.now()}`;
     await page.getByRole("button", { name: /Add.*Transaction/i }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-15");
-    await fillSearchlist(modal, "e.g. Whole Foods", `PW Notify Fail ${Date.now()}`);
+    await fillSearchlist(modal, "e.g. Whole Foods", payee);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
 
     await expect(page.getByText("Failed to add transaction. Please try again.")).toBeVisible();
     await expect(page.getByText("Add Transaction", { exact: true }).first()).toBeVisible();
 
-    // Assert optimistic row was rolled back — row count unchanged
-    const rowCountAfter = await page.locator("tbody tr.y-row").count();
-    expect(rowCountAfter).toBe(rowCountBefore);
+    // Assert optimistic row was rolled back: server state unchanged and the
+    // failed payee appears nowhere in the register.
+    const txCountAfter = (
+      (await (await page.request.get("/api/budget")).json()) as { transactions: unknown[] }
+    ).transactions.length;
+    expect(txCountAfter).toBe(txCountBefore);
+    await expect(page.locator("tbody tr.y-row").filter({ hasText: payee })).toHaveCount(0);
   });
 
   test("failing to reconcile shows a danger toast and keeps the modal open", async ({

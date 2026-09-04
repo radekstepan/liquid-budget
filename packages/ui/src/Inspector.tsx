@@ -289,14 +289,23 @@ export const Inspector = memo(function Inspector({
           <span
             className={cx(
               "px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide",
-              effectiveCashFlow.net >= 0
-                ? "bg-[#e4f1d4] text-[#427a1b]"
-                : "bg-[#f7dedb] text-[#97341f]"
+              effectiveCashFlow.income <= 0
+                ? "bg-[var(--y-panel-alt)] text-[var(--y-ink-soft)]"
+                : effectiveCashFlow.net >= 0
+                  ? "bg-[#e4f1d4] text-[#427a1b]"
+                  : "bg-[#f7dedb] text-[#97341f]"
             )}
+            title={
+              effectiveCashFlow.income <= 0
+                ? "No uncategorized income this month, so a savings rate can't be computed"
+                : undefined
+            }
           >
-            {effectiveCashFlow.net >= 0
-              ? `${effectiveCashFlow.savingsRate}% saved`
-              : "Deficit"}
+            {effectiveCashFlow.income <= 0
+              ? "No income"
+              : effectiveCashFlow.net >= 0
+                ? `${effectiveCashFlow.savingsRate}% saved`
+                : "Deficit"}
           </span>
         </div>
 
@@ -307,14 +316,21 @@ export const Inspector = memo(function Inspector({
               +{money(effectiveCashFlow.income)}
             </span>
           </div>
-          <div className="flex justify-between">
-            <span style={{ color: "var(--y-ink-soft)" }}>Expenses (Outflow)</span>
-            <span className="y-num font-medium" style={{ color: "var(--y-ink)" }}>
-              {effectiveCashFlow.outflow >= 0
-                ? `-${money(effectiveCashFlow.outflow)}`
-                : `+${money(Math.abs(effectiveCashFlow.outflow))}`}
-            </span>
-          </div>
+          {effectiveCashFlow.outflow >= 0 ? (
+            <div className="flex justify-between">
+              <span style={{ color: "var(--y-ink-soft)" }}>Expenses (Outflow)</span>
+              <span className="y-num font-medium" style={{ color: "var(--y-ink)" }}>
+                -{money(effectiveCashFlow.outflow)}
+              </span>
+            </div>
+          ) : (
+            <div className="flex justify-between">
+              <span style={{ color: "var(--y-ink-soft)" }}>Categorized inflow (net)</span>
+              <span className="y-num font-medium text-[#2e7d32]">
+                +{money(Math.abs(effectiveCashFlow.outflow))}
+              </span>
+            </div>
+          )}
         </div>
       </Panel>
 
