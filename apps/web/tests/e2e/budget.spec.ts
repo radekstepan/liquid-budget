@@ -11,6 +11,31 @@
 // `reuseExistingServer` on, the suite runs against the existing dev DB.
 import { test, expect, type Page } from "@playwright/test";
 
+const MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// App init defaults to today's month (BudgetApp useState fallback), so
+// expectations anchor on the real current date, not the seed data month.
+function currentMonthParts() {
+  const now = new Date();
+  return { monthIdx: now.getMonth(), year: now.getFullYear() };
+}
+
+function shiftMonthParts(monthIdx: number, year: number, delta: number) {
+  const total = year * 12 + monthIdx + delta;
+  return { monthIdx: ((total % 12) + 12) % 12, year: Math.floor(total / 12) };
+}
+
+function shortLabel(monthIdx: number, year: number) {
+  return `${MONTHS_SHORT[monthIdx]} ${year}`;
+}
+
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
 }
@@ -42,52 +67,63 @@ test("inline-edits a category assigned amount and updates To Be Budgeted", async
 
 test("MonthNav prev/next shifts the active month", async ({ page }) => {
   // The MonthNav picker reflects the active month/year and stays in
-  // sync as the month shifts (blocks.tsx:57-86).
+  // sync as the month shifts (blocks.tsx:57-86). Init anchors on
+  // today's month, where Next is capped — so go back first, then forward.
+  const { monthIdx, year } = currentMonthParts();
+  const prev = shiftMonthParts(monthIdx, year, -1);
   const picker = page.getByTestId("month-nav-picker");
   const monthBtn = picker.getByRole("button", { name: "Month" });
   const yearBtn = picker.getByRole("button", { name: "Year" });
-  await expect(monthBtn).toHaveText("June");
-  await expect(yearBtn).toHaveText("2026");
-
-  await page.getByRole("button", { name: "Next month" }).click();
-  await expect(monthBtn).toHaveText("July");
+  await expect(monthBtn).toHaveText(MONTHS_LONG[monthIdx]!);
+  await expect(yearBtn).toHaveText(String(year));
 
   await page.getByRole("button", { name: "Previous month" }).click();
-  await expect(monthBtn).toHaveText("June");
+  await expect(monthBtn).toHaveText(MONTHS_LONG[prev.monthIdx]!);
+  await expect(yearBtn).toHaveText(String(prev.year));
+
+  await page.getByRole("button", { name: "Next month" }).click();
+  await expect(monthBtn).toHaveText(MONTHS_LONG[monthIdx]!);
+  await expect(yearBtn).toHaveText(String(year));
 });
 
-test("year dropdown jumps to the same month in the chosen year", async ({ page }) => {
+test("year dropdown beyond the future cap clamps to the latest allowed month", async ({ page }) => {
   // The MonthNav year select (blocks.tsx:74-85) is keyed off
   // `aria-label="Year"` and is scoped to the picker container
   // (data-testid="month-nav-picker") so the surrounding prev/next
-  // buttons don't match.
+  // buttons don't match. Navigation clamps to one month past today
+  // (BudgetApp handleSetMonth), so jumping two years out lands on the cap.
+  const now = new Date();
+  const maxTotal = now.getFullYear() * 12 + now.getMonth() + 1;
+  const maxMonth = MONTHS_LONG[((maxTotal % 12) + 12) % 12]!;
+  const maxYear = String(Math.floor(maxTotal / 12));
   const picker = page.getByTestId("month-nav-picker");
   const yearSelect = picker.getByRole("button", { name: "Year" });
-  await expect(yearSelect).toHaveText("2026");
+  await expect(yearSelect).toHaveText(String(now.getFullYear()));
 
   // One click jumps to a different year — replaces the multi-click
   // prev-arrow flow for any in-range year.
   await yearSelect.click();
-  await page.locator('.y-dropdown [data-value="2028"]').click();
+  await page.locator(`.y-dropdown [data-value="${now.getFullYear() + 2}"]`).click();
 
-  // The MonthNav picker stays in sync (month preserved, year updated).
-  await expect(yearSelect).toHaveText("2028");
-  await expect(picker.getByRole("button", { name: "Month" })).toHaveText("June");
+  // The MonthNav picker stays in sync, clamped to the latest allowed month.
+  await expect(yearSelect).toHaveText(maxYear);
+  await expect(picker.getByRole("button", { name: "Month" })).toHaveText(maxMonth);
 });
 
 test("month dropdown jumps to the chosen month in the current year", async ({ page }) => {
+  const { monthIdx, year } = currentMonthParts();
   const picker = page.getByTestId("month-nav-picker");
   const monthSelect = picker.getByRole("button", { name: "Month" });
   const yearSelect = picker.getByRole("button", { name: "Year" });
 
-  await expect(monthSelect).toHaveText("June"); // June is index 5
-  await expect(yearSelect).toHaveText("2026");
+  await expect(monthSelect).toHaveText(MONTHS_LONG[monthIdx]!);
+  await expect(yearSelect).toHaveText(String(year));
 
   await monthSelect.click();
-  await page.locator('.y-dropdown [data-value="2"]').click(); // March is index 2
+  await page.locator('.y-dropdown [data-value="0"]').click(); // January is index 0
 
-  await expect(monthSelect).toHaveText("March");
-  await expect(yearSelect).toHaveText("2026");
+  await expect(monthSelect).toHaveText("January");
+  await expect(yearSelect).toHaveText(String(year));
 });
 
 test("year dropdown range is derived from data and includes a future cap", async ({ page }) => {
@@ -123,27 +159,33 @@ test("Toggling a group collapses and expands its category rows", async ({ page }
 });
 
 test("clicking a real history bar in the Inspector jumps to that month", async ({ page }) => {
-  // June 2026 is the only "real" history bar (the only month with
-  // assignments in the seed). Shift one month forward so the jump
-  // produces a visible change.
-  await page.getByRole("button", { name: "Next month" }).click();
+  // June 2026 is a "real" history bar (a month with assignments in the
+  // seed). Shift one month back so the jump produces a visible change.
+  const { monthIdx, year } = currentMonthParts();
+  const prev = shiftMonthParts(monthIdx, year, -1);
+  await page.getByRole("button", { name: "Previous month" }).click();
   const picker = page.getByTestId("month-nav-picker");
   const monthBtn = picker.getByRole("button", { name: "Month" });
-  await expect(monthBtn).toHaveText("July");
+  await expect(monthBtn).toHaveText(MONTHS_LONG[prev.monthIdx]!);
 
   // Inspector history bar (Inspector.tsx) uses aria-label
   // "Jump to <MonthShort> <Year>" — MONTHS is the 3-letter array
   // (Inspector.tsx:5, format.ts:1-14), so it's "Jun 2026", not "June 2026".
   await page.getByRole("button", { name: "Jump to Jun 2026" }).click();
   await expect(monthBtn).toHaveText("June");
+  await expect(picker.getByRole("button", { name: "Year" })).toHaveText("2026");
 });
 
 test("month column group divider has a visible 2px left border in both header and body", async ({ page }) => {
   // Each month group is separated by a 2px border-strong delimiter
   // (.y-table-colgroup-divider). The first month group is not a divider
   // (it's the leftmost), so we look at the second group — both in the
-  // header and in a body row.
-  await expect(page.getByRole("columnheader", { name: "Jun 2026", exact: true })).toBeVisible();
+  // header and in a body row. Init centers today's column in the
+  // scroller, so it is on-screen, not behind the scrollbar.
+  const { monthIdx: curIdx, year: curYear } = currentMonthParts();
+  await expect(
+    page.getByRole("columnheader", { name: shortLabel(curIdx, curYear), exact: true })
+  ).toBeVisible();
 
   const headerDivider = page
     .locator("th.y-table-th--month-label.y-table-colgroup-divider")
@@ -214,29 +256,59 @@ test("multi-month header has no seam: month labels are 27px and the sub-header s
   expect(catBottom - firstSub).toBe(0);
 });
 
+test("today's month column is scrolled into view on init", async ({ page }) => {
+  // Regression: on init today's month must be visible in the UI, not
+  // stuck behind the horizontal scrollbar/fold at scrollLeft 0.
+  // BudgetView centers today's header in the scroller on mount.
+  const scrolled = await page.evaluate(() => {
+    const container = document.querySelector(".overflow-auto.y-scroll") as HTMLElement | null;
+    if (!container) return { ok: false, reason: "no scroller" };
+    // No overflow → everything is visible by construction.
+    if (container.scrollWidth <= container.clientWidth + 1) return { ok: true, reason: "fits" };
+    // Overflow → today's column must have been scrolled into view.
+    const target = document.querySelector("th.y-table-th--month-current") as HTMLElement | null;
+    if (!target) return { ok: false, reason: "no today column" };
+    const c = container.getBoundingClientRect();
+    const t = target.getBoundingClientRect();
+    const fullyVisible = t.left >= c.left - 1 && t.right <= c.right + 1;
+    return { ok: fullyVisible, reason: fullyVisible ? "visible" : "behind fold" };
+  });
+  expect(scrolled.reason, "today's month column must be visible on init").toBeTruthy();
+  expect(scrolled.ok).toBe(true);
+});
+
 test("month-count control switches the budget to N side-by-side month columns", async ({ page }) => {
-  // Default is 3 months. The header shows three "Budgeted" sub-headers,
-  // one per visible month, plus per-month labels (May/Jun/Jul 2026).
+  // Default is 3 months anchored on today's month. The header shows three
+  // "Budgeted" sub-headers, one per visible month, plus per-month labels.
+  const { monthIdx, year } = currentMonthParts();
+  const prev = shiftMonthParts(monthIdx, year, -1);
+  const next = shiftMonthParts(monthIdx, year, 1);
   const thead = page.locator("table.y-table thead");
   const monthHeader = (label: string) =>
     thead.getByRole("columnheader", { name: label, exact: true });
 
   await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(3);
-  await expect(monthHeader("May 2026")).toBeVisible();
-  await expect(monthHeader("Jun 2026")).toBeVisible();
-  await expect(monthHeader("Jul 2026")).toBeVisible();
+  await expect(monthHeader(shortLabel(prev.monthIdx, prev.year))).toBeVisible();
+  await expect(monthHeader(shortLabel(monthIdx, year))).toBeVisible();
+  await expect(monthHeader(shortLabel(next.monthIdx, next.year))).toBeVisible();
 
-  // Switch to 6 months — the window spans 4 months before to 1 month after
-  // the anchor (Jun 2026).
+  // Switch to 6 months. The 6-month window is capped at one month past
+  // today, so first shift back 4 months to give it headroom: the window
+  // then spans 6 full columns ending at last month.
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole("button", { name: "Previous month" }).click();
+  }
+  const start = shiftMonthParts(monthIdx, year, -6);
+  const end = shiftMonthParts(monthIdx, year, -1);
   await page.getByRole("button", { name: "6 months" }).click();
-  await expect(monthHeader("Apr 2026")).toBeVisible();
-  await expect(monthHeader("Aug 2026")).toBeVisible();
+  await expect(monthHeader(shortLabel(start.monthIdx, start.year))).toBeVisible();
+  await expect(monthHeader(shortLabel(end.monthIdx, end.year))).toBeVisible();
   await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(6);
 
   // Switch back to 1 month — per-month labels collapse, only the classic
   // Category / Budgeted / Outflows / Balance header is shown.
   await page.getByRole("button", { name: "1 month" }).click();
-  await expect(monthHeader("May 2026")).toBeHidden();
+  await expect(monthHeader(shortLabel(start.monthIdx, start.year))).toBeHidden();
   await expect(thead.getByText("Budgeted", { exact: true })).toHaveCount(1);
 });
 

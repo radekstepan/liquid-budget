@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { BudgetView } from "../src/BudgetView.js";
-import { type BudgetResult, todayISO } from "@ynab/logic";
+import { type BudgetResult, todayISO, previousMonthKey } from "@ynab/logic";
 
 function makeBudget(overrides: Partial<BudgetResult> = {}): BudgetResult {
   return {
@@ -646,6 +646,54 @@ describe("BudgetView", () => {
 
       // Now current month is visible in the viewport, Today button should be mute grey!
       expect(todayBtn.classList.contains("y-btn--blue")).toBe(false);
+    });
+
+    it("scrolls today's month column into view on init so it is not stuck behind the scrollbar", () => {
+      const scrollSpy = vi.fn();
+      const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+      const prevImpl = proto["scrollIntoView"];
+      proto["scrollIntoView"] = scrollSpy;
+      try {
+        const todayMonth = todayISO().slice(0, 7);
+        const prevMonth = previousMonthKey(todayMonth);
+        renderView({
+          monthCount: 3,
+          currentMonth: todayMonth,
+          visibleMonths: [prevMonth, todayMonth],
+          budgets: [makeBudget(), makeBudget()],
+        });
+        expect(scrollSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ inline: "center", block: "nearest" })
+        );
+      } finally {
+        if (prevImpl === undefined) {
+          delete proto["scrollIntoView"];
+        } else {
+          proto["scrollIntoView"] = prevImpl;
+        }
+      }
+    });
+
+    it("does not attempt init scroll in single-month mode", () => {
+      const scrollSpy = vi.fn();
+      const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+      const prevImpl = proto["scrollIntoView"];
+      proto["scrollIntoView"] = scrollSpy;
+      try {
+        const todayMonth = todayISO().slice(0, 7);
+        renderView({
+          monthCount: 1,
+          currentMonth: todayMonth,
+          visibleMonths: [todayMonth],
+        });
+        expect(scrollSpy).not.toHaveBeenCalled();
+      } finally {
+        if (prevImpl === undefined) {
+          delete proto["scrollIntoView"];
+        } else {
+          proto["scrollIntoView"] = prevImpl;
+        }
+      }
     });
 
     it("renders blue Today button when current month is scrolled under the sticky Category column", () => {

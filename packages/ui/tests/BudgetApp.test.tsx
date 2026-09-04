@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { BudgetApp, type BudgetAppApi } from "../src/BudgetApp.js";
 import type { BudgetData } from "@ynab/logic";
 import { makeSeedBudgetData, todayISO, parseMonthKey, MONTHS_LONG } from "@ynab/logic";
@@ -847,6 +847,44 @@ describe("BudgetApp", () => {
 
     const checkbox = rowInAcct2!.querySelector('input[type="checkbox"]') as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
+  });
+
+  it("defaults to today's month on init so the current month is visible", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    const today = todayISO().slice(0, 7);
+    const year = Number(today.slice(0, 4));
+    const month0 = Number(today.slice(5, 7)) - 1;
+    const picker = within(screen.getByTestId("month-nav-picker"));
+    expect(picker.getByRole("button", { name: "Month" })).toHaveTextContent(
+      MONTHS_LONG[month0]!
+    );
+    expect(picker.getByRole("button", { name: "Year" })).toHaveTextContent(String(year));
+  });
+
+  it("respects an explicit initialMonth instead of defaulting to today", () => {
+    const { api } = makeApi();
+    render(
+      <BudgetApp data={makeSeedBudgetData()} api={api} initialMonth="2026-06" />
+    );
+    const picker = within(screen.getByTestId("month-nav-picker"));
+    expect(picker.getByRole("button", { name: "Month" })).toHaveTextContent("June");
+    expect(picker.getByRole("button", { name: "Year" })).toHaveTextContent("2026");
+  });
+
+  it("falls back to today's month when initialMonth is invalid", () => {
+    const { api } = makeApi();
+    render(
+      <BudgetApp data={makeSeedBudgetData()} api={api} initialMonth="not-a-month" />
+    );
+    const today = todayISO().slice(0, 7);
+    const year = Number(today.slice(0, 4));
+    const month0 = Number(today.slice(5, 7)) - 1;
+    const picker = within(screen.getByTestId("month-nav-picker"));
+    expect(picker.getByRole("button", { name: "Month" })).toHaveTextContent(
+      MONTHS_LONG[month0]!
+    );
+    expect(picker.getByRole("button", { name: "Year" })).toHaveTextContent(String(year));
   });
 });
 
