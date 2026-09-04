@@ -13,14 +13,17 @@ export type View =
   | "transactions"
   | "recurring";
 
-type NavItem = { key: View; label: string; icon: string };
+type NavItem = { key: View; label: string; icon: string; color: string };
+// YNAB4-style nav palette: bright friendly hues, lifted to pastel tints so
+// they stay legible on the dark cyan-blue sidebar.
 const NAV_TOP: NavItem[] = [
-  { key: "budget", label: "Budget", icon: "budget" },
-  { key: "reports", label: "Reports", icon: "chart" },
-  { key: "calendar", label: "Calendar", icon: "calendar" },
-  { key: "projections", label: "Projections", icon: "projections" },
-  { key: "recurring", label: "Recurring", icon: "clock" },
+  { key: "budget", label: "Budget", icon: "budget", color: "#a5d6a7" },
+  { key: "reports", label: "Reports", icon: "chart", color: "#ffcc80" },
+  { key: "calendar", label: "Calendar", icon: "calendar", color: "#90caf9" },
+  { key: "projections", label: "Projections", icon: "projections", color: "#ce93d8" },
+  { key: "recurring", label: "Recurring", icon: "clock", color: "#80cbc4" },
 ];
+const TRANSACTIONS_ICON_COLOR = "#f48fb1";
 
 const DEFAULT_WIDTH = 214;
 const MIN_WIDTH = 170;
@@ -214,7 +217,7 @@ export const Sidebar = memo(function Sidebar({
       <div className="y-side-section-divider" style={{ marginTop: "1px" }} />
 
       <nav className="px-0 pt-1">
-        {NAV_TOP.filter(({ key }) => isNavVisible(key)).map(({ key, label, icon }) => {
+        {NAV_TOP.filter(({ key }) => isNavVisible(key)).map(({ key, label, icon, color }) => {
           const active = view === key;
           return (
             <button
@@ -222,7 +225,7 @@ export const Sidebar = memo(function Sidebar({
               onClick={() => setView(key)}
               className={cx("y-side-item y-side-nav", active && "is-sel")}
             >
-              <Icon name={icon} size={14} />
+              <Icon name={icon} size={14} color={color} />
               <span className="truncate flex-1">{label}</span>
             </button>
           );
@@ -238,7 +241,7 @@ export const Sidebar = memo(function Sidebar({
           view === "transactions" && selectedAccountId == null && "is-sel"
         )}
       >
-        <Icon name="swap" size={14} />
+        <Icon name="swap" size={14} color={TRANSACTIONS_ICON_COLOR} />
         <span className="truncate flex-1">Transactions</span>
         {dueBadgeCount > 0 && (
           <span
