@@ -30,6 +30,14 @@ import { ReportsView } from "./ReportsView.js";
 import { CalendarView } from "./CalendarView.js";
 import { ProjectionsView } from "./ProjectionsView.js";
 import { SettingsView } from "./SettingsView.js";
+import { MenuSettingsView } from "./MenuSettingsView.js";
+import {
+  DEFAULT_NAV_VISIBILITY,
+  NAV_VISIBILITY_STORAGE_KEY,
+  firstAvailableView,
+  isNavVisibility,
+  visibleViewCount,
+} from "./navVisibility.js";
 import {
   TransactionModal,
   BulkEditTransactionsModal,
@@ -328,6 +336,12 @@ export function BudgetApp({
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<"rename" | "menu">("rename");
+  const [navVisible, setNavVisible] = useLocalStorage<Record<View, boolean>>(
+    NAV_VISIBILITY_STORAGE_KEY,
+    DEFAULT_NAV_VISIBILITY,
+    isNavVisibility
+  );
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [isPending, startTransition] = useTransition();
 
@@ -746,6 +760,38 @@ export function BudgetApp({
     [updateUrl, month]
   );
 
+  const openSettings = useCallback((page: "rename" | "menu") => {
+    setSettingsPage(page);
+    setShowSettingsOverlay(true);
+  }, []);
+
+  const handleToggleNav = useCallback(
+    (v: View, next: boolean) => {
+      if (!next && visibleViewCount(navVisible) <= 1 && navVisible[v]) {
+        // At least one menu page must stay enabled.
+        return;
+      }
+      const updated = { ...navVisible, [v]: next };
+      setNavVisible(updated);
+      if (!next && v === view) {
+        // We just hid the page we are on — move to the next available page.
+        // The settings overlay stays open; navigation happens behind it.
+        const fallback = firstAvailableView(updated);
+        if (fallback) {
+          startTransition(() => {
+            setAccountFilter(null);
+            setView(fallback);
+            if (fallback === "reports") {
+              setReportsResetKey((k) => k + 1);
+            }
+            updateUrl(fallback, null, month);
+          });
+        }
+      }
+    },
+    [navVisible, setNavVisible, view, updateUrl, month]
+  );
+
   const handleSelectAccount = useCallback(
     (id: number) => {
       startTransition(() => {
@@ -968,6 +1014,7 @@ export function BudgetApp({
       <Sidebar
         view={view}
         setView={navigateView}
+        visibleViews={navVisible}
         accounts={data.accounts}
         selectedAccountId={accountFilter}
         onSelectAccount={handleSelectAccount}
@@ -1092,37 +1139,38 @@ export function BudgetApp({
               onClick={(e) => e.stopPropagation()}
             >
               <div
-                className="flex items-center justify-between px-5 py-3"
+                className="flex items-center justify-end px-5 py-3"
                 style={{
                   borderBottom: "1px solid var(--y-line)",
                   background: "var(--y-chrome-top)",
                 }}
               >
-                <h1 className="text-[16px] font-bold" style={{ color: "var(--y-ink)" }}>
-                  Settings
-                </h1>
                 <button
                   className="y-icon-btn"
                   onClick={() => setShowSettingsOverlay(false)}
-                  aria-label="Close settings"
+                  aria-label="Close"
                   title="Close"
                 >
                   <Icon name="x" size={13} />
                 </button>
               </div>
               <div className="flex-1 overflow-hidden">
-                <SettingsView
-                  rules={data.renameRules ?? []}
-                  onAdd={async (sourcePattern, targetPayee) => {
-                    await api.addRenameRule?.(sourcePattern, targetPayee);
-                  }}
-                  onUpdate={async (id, sourcePattern, targetPayee) => {
-                    await api.updateRenameRule?.(id, sourcePattern, targetPayee);
-                  }}
-                  onDelete={async (id) => {
-                    await api.deleteRenameRule?.(id);
-                  }}
-                />
+                {settingsPage === "menu" ? (
+                  <MenuSettingsView visible={navVisible} onToggle={handleToggleNav} />
+                ) : (
+                  <SettingsView
+                    rules={data.renameRules ?? []}
+                    onAdd={async (sourcePattern, targetPayee) => {
+                      await api.addRenameRule?.(sourcePattern, targetPayee);
+                    }}
+                    onUpdate={async (id, sourcePattern, targetPayee) => {
+                      await api.updateRenameRule?.(id, sourcePattern, targetPayee);
+                    }}
+                    onDelete={async (id) => {
+                      await api.deleteRenameRule?.(id);
+                    }}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -1154,7 +1202,8 @@ export function BudgetApp({
           onImportYnab4={api.importYnab4}
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
-          onOpenRenameRules={() => setShowSettingsOverlay(true)}
+          onOpenRenameRules={() => openSettings("rename")}
+          onOpenPageVisibility={() => openSettings("menu")}
         />
       </ErrorBoundary>
 

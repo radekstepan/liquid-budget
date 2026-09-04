@@ -346,6 +346,24 @@ describe("Inspector", () => {
     });
   });
 
+  describe("Page Visibility shortcut", () => {
+    it("opens the page when the menu item is clicked", () => {
+      const onOpenPageVisibility = vi.fn();
+      render(<Inspector {...baseProps} onOpenPageVisibility={onOpenPageVisibility} />);
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      const item = screen.getByRole("button", { name: /page visibility/i });
+      expect(item.querySelector("svg path")).not.toBeNull();
+      fireEvent.click(item);
+      expect(onOpenPageVisibility).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides the menu item when the callback is not provided", () => {
+      render(<Inspector {...baseProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+      expect(screen.queryByText("Page Visibility")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Quick Budget", () => {
     it("is no longer rendered in the Inspector (moved to the month header)", () => {
       render(<Inspector {...baseProps} />);
