@@ -184,6 +184,12 @@ describe("BudgetView", () => {
     expect(btn.closest(".overflow-auto")).toBeNull();
   });
 
+  it("gives the Add Category Group footer 7.5px bottom padding", () => {
+    renderView();
+    const btn = screen.getByRole("button", { name: /add category group/i });
+    expect(btn.parentElement?.style.paddingBottom).toBe("7.5px");
+  });
+
   it("marks the scroll container as h-scrolled only after scrolling right", () => {
     const { container } = renderView();
     const scroller = container.querySelector(".y-scroll") as HTMLElement;
@@ -404,19 +410,20 @@ describe("BudgetView", () => {
     });
   });
 
-  describe("empty-row dimming", () => {
-    it("applies the is-empty class to rows with no assigned, outflow, or available", () => {
+  describe("subcategory striping", () => {
+    it("does not dim zero-activity rows and alternates across the whole list", () => {
       renderView();
-      // Internet is the seed row with all-zero values (id 20).
-      const internetRow = screen
-        .getAllByRole("row")
-        .find((r) => within(r).queryByText("Internet"))!;
-      expect(internetRow.classList.contains("is-empty")).toBe(true);
-      // Groceries (id 10) is not empty.
-      const groceriesRow = screen
-        .getAllByRole("row")
-        .find((r) => within(r).queryByText("Groceries"))!;
+      const rows = screen.getAllByRole("row");
+      const internetRow = rows.find((r) => within(r).queryByText("Internet"))!;
+      const groceriesRow = rows.find((r) => within(r).queryByText("Groceries"))!;
+      const rentRow = rows.find((r) => within(r).queryByText("Rent"))!;
+      // No greyed-out empty rows.
+      expect(internetRow.classList.contains("is-empty")).toBe(false);
       expect(groceriesRow.classList.contains("is-empty")).toBe(false);
+      // Continuous zebra: Groceries (0), Rent (1 → alt), Internet (2).
+      expect(groceriesRow.classList.contains("alt")).toBe(false);
+      expect(rentRow.classList.contains("alt")).toBe(true);
+      expect(internetRow.classList.contains("alt")).toBe(false);
     });
   });
 
@@ -832,6 +839,65 @@ describe("BudgetView", () => {
       expect(nextBtn).toBeDisabled();
       fireEvent.click(nextBtn);
       expect(onShiftMonth).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Next-month arrow scroll awareness", () => {
+    const renderCappedMulti = (onShiftMonth: ReturnType<typeof vi.fn>) => {
+      const todayMonth = new Date().toISOString().slice(0, 7);
+      return renderView({
+        monthCount: 3,
+        currentMonth: todayMonth,
+        visibleMonths: ["2020-01", todayMonth, "2099-12"],
+        budgets: [makeBudget(), makeBudget(), makeBudget()],
+        canShiftRight: false,
+        onShiftMonth,
+      });
+    };
+
+    const mockScrollable = (
+      scroller: HTMLElement,
+      opts: { scrollWidth: number; clientWidth: number; scrollLeft?: number }
+    ) => {
+      Object.defineProperty(scroller, "scrollWidth", {
+        value: opts.scrollWidth,
+        configurable: true,
+      });
+      Object.defineProperty(scroller, "clientWidth", {
+        value: opts.clientWidth,
+        configurable: true,
+      });
+      scroller.scrollLeft = opts.scrollLeft ?? 0;
+    };
+
+    it("stays enabled while grid can scroll right at the month cap and scrolls on click", () => {
+      const onShiftMonth = vi.fn();
+      const { container } = renderCappedMulti(onShiftMonth);
+      const scroller = container.querySelector(".y-scroll") as HTMLElement;
+      mockScrollable(scroller, { scrollWidth: 1000, clientWidth: 400 });
+      (scroller as unknown as { scrollBy: (opts: { left: number }) => void }).scrollBy = (
+        opts
+      ) => {
+        scroller.scrollLeft += opts.left;
+      };
+      fireEvent.scroll(scroller);
+
+      const nextBtn = screen.getByRole("button", { name: /next month/i });
+      expect(nextBtn).toBeEnabled();
+      fireEvent.click(nextBtn);
+      // At the cap there is nowhere to shift, so it reveals grid instead.
+      expect(onShiftMonth).not.toHaveBeenCalled();
+      expect(scroller.scrollLeft).toBeGreaterThan(0);
+    });
+
+    it("disables only once scrolled all the way right at the month cap", () => {
+      const onShiftMonth = vi.fn();
+      const { container } = renderCappedMulti(onShiftMonth);
+      const scroller = container.querySelector(".y-scroll") as HTMLElement;
+      mockScrollable(scroller, { scrollWidth: 1000, clientWidth: 400, scrollLeft: 600 });
+      fireEvent.scroll(scroller);
+
+      expect(screen.getByRole("button", { name: /next month/i })).toBeDisabled();
     });
   });
 

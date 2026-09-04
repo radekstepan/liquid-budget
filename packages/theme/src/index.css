@@ -293,9 +293,6 @@ body::after {
 .y-table .y-row.alt .y-table-td--sticky-cat {
   background: var(--y-row-alt);
 }
-.y-table .y-row.is-empty .y-table-td--sticky-cat {
-  background: var(--y-row);
-}
 .y-table .y-row.is-sel .y-table-td--sticky-cat {
   background: var(--y-row-sel);
 }
@@ -1182,26 +1179,6 @@ button.y-pill:hover {
 }
 .y-row--warn:hover td {
   background: #f8e8c4;
-}
-/* Zero-activity rows read as dimmed text, but their cells keep full
-   opacity — fading the whole <tr> would fade its borders too, making
-   empty rows' grid lines (grey, or the current month's blue) render
-   lighter than every other row's. */
-.y-row.is-empty td {
-  color: var(--y-ink-faint);
-}
-.y-row.is-empty td .y-inline-amt,
-.y-row.is-empty td .y-num {
-  /* !important: the assigned-amount button carries an inline color that
-     would otherwise stay full-ink on otherwise-dimmed rows. */
-  color: var(--y-ink-faint) !important;
-}
-.y-row.is-empty:hover td {
-  color: var(--y-ink-soft);
-}
-.y-row.is-empty:hover td .y-inline-amt,
-.y-row.is-empty:hover td .y-num {
-  color: var(--y-ink-soft) !important;
 }
 .y-row.is-sel td,
 .y-row.is-sel:hover td {
