@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { isValidISODate, isValidISOMonth } from "./format.js";
-import type { BudgetData } from "./types.js";
+import type { Assignment, BudgetData } from "./types.js";
+import type { ReconcileState } from "./reconcile.js";
+import type { DuplicateAnalysisResult } from "./duplicates.js";
 
 export const ISODateSchema = z.string().refine(isValidISODate, {
   message: "Invalid calendar date (expected YYYY-MM-DD)",
@@ -564,6 +566,179 @@ export function formatZodError(error: z.ZodError): string {
   return error.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ");
 }
 
+// Shared read-side enums (server -> UI may carry the internal "duplicate"
+// marker and reconciled "r" status, unlike create/update inputs).
+const ResponseFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple", "duplicate"]);
+const ResponseClearedStatus = z.enum(["u", "c", "r"]);
+
+// ---------------------------------------------------------------------------
+// Query-string contracts (URL search params).
+//
+// Hand-rolled Number()/split()/filter() parsing silently drops malformed
+// input (e.g. DELETE ?ids=abc became a no-op success). These schemas make
+// malformed params a 400 instead.
+// ---------------------------------------------------------------------------
+
+/** Comma-separated positive integer id list, e.g. ?ids=1,2,3. */
+export const IdListQuerySchema = z.string().min(1).transform((s, ctx) => {
+  const ids = s
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) {
+    ctx.addIssue({ code: "custom", message: "No valid positive integer ids" });
+    return z.NEVER;
+  }
+  return ids;
+});
+
+/** Single positive integer param, e.g. ?id=7. */
+export const PositiveIntQuerySchema = z
+  .string()
+  .regex(/^[1-9]\d*$/, "Expected a positive integer")
+  .transform(Number);
+
+export const ReconcileStateQuerySchema = z.object({
+  accountId: PositiveIntQuerySchema,
+  statementDate: ISODateSchema.optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Focused mutation/read response contracts for the fetch sites whose fields
+// the client actually reads (assignments PUT, recurring autopost, reconcile
+// state, duplicate analysis, transaction create). Unlike BudgetData (always
+// String()ed money), some mutation routes return raw drizzle rows with
+// numeric money — FlexibleMoneyString normalizes those to the string
+// convention instead of rejecting real responses.
+// ---------------------------------------------------------------------------
+
+const FlexibleMoneyString = z.union([z.string(), z.number()]).transform((v) => String(v));
+
+export const AssignmentMutationResponseSchema = z.looseObject({
+  id: z.number().int(),
+  categoryId: z.number().int(),
+  month: z.string(),
+  amount: FlexibleMoneyString,
+});
+
+export function parseAssignmentResponse(data: unknown): Assignment {
+  const result = AssignmentMutationResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid assignment response: ${formatZodError(result.error)}`);
+  }
+  return result.data as Assignment;
+}
+
+export const RecurringAutoPostResponseSchema = z.looseObject({
+  postedCount: z.number().int().nonnegative().optional(),
+  failures: z
+    .array(z.looseObject({ id: z.number().int(), payee: z.string().optional(), error: z.string() }))
+    .optional(),
+  capped: z
+    .array(
+      z.looseObject({
+        id: z.number().int(),
+        payee: z.string().optional(),
+        remainingDue: z.number().int(),
+      })
+    )
+    .optional(),
+});
+
+export type RecurringAutoPostResponse = z.output<typeof RecurringAutoPostResponseSchema>;
+
+export function parseRecurringAutoPostResponse(data: unknown): RecurringAutoPostResponse {
+  const result = RecurringAutoPostResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid autopost response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
+export const ReconcileStateResponseSchema = z.looseObject({
+  accountId: z.number().int(),
+  accountName: z.string(),
+  workingBalance: z.number().int(),
+  unclearedTotal: z.number().int(),
+  unclearedCount: z.number().int(),
+  clearedCount: z.number().int(),
+  reconciledCount: z.number().int(),
+  lastReconciledAt: z.string().nullable(),
+  lastReconciledBalance: z.number().nullable(),
+});
+
+export function parseReconcileStateResponse(data: unknown): ReconcileState {
+  const result = ReconcileStateResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid reconcile response: ${formatZodError(result.error)}`);
+  }
+  return result.data as ReconcileState;
+}
+
+export const DuplicateEntryResponseSchema = z.looseObject({
+  id: z.number().int().optional(),
+  rowNumber: z.number().int().optional(),
+  accountId: z.number().int(),
+  accountName: z.string().optional(),
+  date: z.string(),
+  payee: z.string(),
+  memo: z.string(),
+  amount: z.number().int(),
+  flagColor: ResponseFlagSchema.nullable().optional(),
+  status: ResponseClearedStatus.optional(),
+  parentId: z.number().int().nullable().optional(),
+  transferAccountId: z.number().int().nullable().optional(),
+  fitId: z.string().nullable().optional(),
+});
+
+export const DuplicateAnalysisResultResponseSchema = z.looseObject({
+  groups: z.array(
+    z.looseObject({
+      fingerprint: z.string(),
+      keeper: DuplicateEntryResponseSchema,
+      duplicates: z.array(DuplicateEntryResponseSchema),
+    })
+  ),
+  duplicateCount: z.number().int().nonnegative(),
+  flaggedCount: z.number().int().nonnegative(),
+  alreadyFlaggedCount: z.number().int().nonnegative(),
+  lockedCount: z.number().int().nonnegative(),
+  clearedCount: z.number().int().nonnegative(),
+});
+
+export function parseDuplicateAnalysisResponse(data: unknown): DuplicateAnalysisResult {
+  const result = DuplicateAnalysisResultResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid duplicates response: ${formatZodError(result.error)}`);
+  }
+  return result.data as DuplicateAnalysisResult;
+}
+
+const CreatedTransactionResponseSchema = z.looseObject({
+  id: z.number().int(),
+  amount: FlexibleMoneyString.optional(),
+});
+
+const CreatedSplitResponseSchema = z.looseObject({
+  parent: CreatedTransactionResponseSchema,
+  children: z.array(CreatedTransactionResponseSchema).min(1),
+});
+
+export const TransactionMutationResultSchema = z.union([
+  CreatedTransactionResponseSchema,
+  CreatedSplitResponseSchema,
+]);
+
+export type TransactionMutationResult = z.output<typeof TransactionMutationResultSchema>;
+
+export function parseTransactionMutationResult(data: unknown): TransactionMutationResult {
+  const result = TransactionMutationResultSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid transaction response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
 // ---------------------------------------------------------------------------
 // Response contracts (server -> UI).
 //
@@ -621,8 +796,6 @@ export const AssignmentResponseSchema = z.looseObject({
   month: z.string(),
   amount: z.string(),
 });
-
-const ResponseFlagSchema = z.enum(["red", "orange", "yellow", "green", "blue", "purple", "duplicate"]);
 
 export const TransactionResponseSchema = z.looseObject({
   ...LooseIdEntity,

@@ -10,7 +10,7 @@ import { test, expect, request as apiRequest, type Page } from "@playwright/test
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
 }
 
 test("Inspector Settings cog reveals Backup YNAB4 option and no CSV/JSON/SQLite options", async ({ page }) => {

@@ -131,7 +131,7 @@ test("the Settings page lists rename rules and explains [N]", async ({ page, req
   expect(created.status()).toBe(200);
 
   await page.goto("/");
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   await page.getByRole("button", { name: /^settings$/i }).first().click();
   await page.getByText("Rename rules").click();
   await expect(page.getByText("Payee Rename Rules")).toBeVisible();

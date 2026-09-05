@@ -10,7 +10,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { fillSearchlist, openSearchField } from "./helpers";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
 }
 
 test.beforeEach(async ({ page }) => {

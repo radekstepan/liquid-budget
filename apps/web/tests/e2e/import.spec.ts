@@ -201,7 +201,7 @@ test("uploading a backup through the Settings menu reloads the app with imported
   await resetToDemo(base);
 
   await page.goto("/");
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByText("TD Unlimited Chequing")).toBeVisible();
 
   await page.getByTitle("Settings").click();
@@ -216,7 +216,7 @@ test("uploading a backup through the Settings menu reloads the app with imported
   });
 
   // The app reloads after a successful import.
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByText(IMPORTED_ACCOUNT)).toBeVisible();
   await expect(page.getByText("TD Unlimited Chequing")).toHaveCount(0);
 

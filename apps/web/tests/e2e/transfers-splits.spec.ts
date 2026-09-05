@@ -7,7 +7,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
 }
 
 async function gotoAllTransactions(page: Page) {

@@ -15,7 +15,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 
 async function waitForReady(page: Page) {
-  await expect(page.getByText("Loading budget…")).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
 }
 
 async function gotoAllTransactions(page: Page) {

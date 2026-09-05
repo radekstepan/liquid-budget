@@ -17,6 +17,8 @@ export const dynamic = "force-dynamic";
 import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
+  IdListQuerySchema,
+  PositiveIntQuerySchema,
   TransactionBulkDeleteSchema,
   TransactionBulkUpdateSchema,
   TransactionCreateSchema,
@@ -203,18 +205,22 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const idsParam = searchParams.get("ids");
-  if (idsParam) {
-    const ids = idsParam.split(",").map(Number).filter(Boolean);
+  if (idsParam !== null) {
+    const parsedIds = IdListQuerySchema.safeParse(idsParam);
+    if (!parsedIds.success) {
+      return Response.json({ error: formatZodError(parsedIds.error) }, { status: 400 });
+    }
     try {
-      const deleted = await bulkDeleteTransactions(getDefaultDb(), ids);
+      const deleted = await bulkDeleteTransactions(getDefaultDb(), parsedIds.data);
       return Response.json({ ok: true, count: deleted.length, deleted });
     } catch (e) {
       return apiErrorResponse(e);
     }
   }
 
-  const id = Number(searchParams.get("id"));
-  if (!id) return Response.json({ error: "invalid" }, { status: 400 });
+  const parsedId = PositiveIntQuerySchema.safeParse(searchParams.get("id") ?? "");
+  if (!parsedId.success) return Response.json({ error: "invalid" }, { status: 400 });
+  const id = parsedId.data;
   try {
     const deleted = await deleteTransaction(getDefaultDb(), id);
     if (!deleted) return Response.json({ error: "not found" }, { status: 404 });

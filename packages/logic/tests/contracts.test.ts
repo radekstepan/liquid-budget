@@ -1,12 +1,20 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  IdListQuerySchema,
+  PositiveIntQuerySchema,
   RecurringCreateSchema,
   RecurringPatchSchema,
+  ReconcileStateQuerySchema,
   TransactionBulkUpdateSchema,
   TransactionCreateSchema,
   TransactionPatchSchema,
   makeSeedBudgetData,
+  parseAssignmentResponse,
   parseBudgetDataResponse,
+  parseDuplicateAnalysisResponse,
+  parseReconcileStateResponse,
+  parseRecurringAutoPostResponse,
+  parseTransactionMutationResult,
   toRecurringPayload,
   toTransactionPayload,
   type BulkUpdateTransactionPatch,
@@ -170,5 +178,122 @@ describe("response contract: GET /api/budget", () => {
   it("rejects garbage payloads with a descriptive error", () => {
     expect(() => parseBudgetDataResponse(null)).toThrow(/Invalid budget response/);
     expect(() => parseBudgetDataResponse({ accounts: [] })).toThrow(/Invalid budget response/);
+  });
+});
+
+describe("mutation/read response contracts", () => {
+  it("assignment response normalizes numeric money to strings", () => {
+    // Raw drizzle row (what PUT /api/assignments actually returns).
+    expect(parseAssignmentResponse({ id: 1, categoryId: 2, month: "2026-06", amount: 1500 }))
+      .toEqual({ id: 1, categoryId: 2, month: "2026-06", amount: "1500" });
+    expect(
+      parseAssignmentResponse({ id: 1, categoryId: 2, month: "2026-06", amount: "1500" }).amount
+    ).toBe("1500");
+    expect(() =>
+      parseAssignmentResponse({ id: 1, categoryId: 2, month: "2026-06" })
+    ).toThrow(/Invalid assignment response/);
+  });
+
+  it("autopost response accepts full and empty payloads", () => {
+    const full = parseRecurringAutoPostResponse({
+      postedCount: 2,
+      posted: [{ id: 9 }],
+      failures: [{ id: 3, payee: "Gym", error: "boom" }],
+      capped: [{ id: 4, payee: "Rent", remainingDue: 6 }],
+    });
+    expect(full.postedCount).toBe(2);
+    expect(full.failures).toHaveLength(1);
+    expect(parseRecurringAutoPostResponse({}).postedCount).toBeUndefined();
+    expect(() => parseRecurringAutoPostResponse({ postedCount: "many" })).toThrow(
+      /Invalid autopost response/
+    );
+  });
+
+  it("reconcile state response mirrors ReconcileState", () => {
+    const state = {
+      accountId: 1,
+      accountName: "Checking",
+      workingBalance: 1000,
+      unclearedTotal: 200,
+      unclearedCount: 1,
+      clearedCount: 2,
+      reconciledCount: 3,
+      lastReconciledAt: null,
+      lastReconciledBalance: null,
+    };
+    expect(parseReconcileStateResponse(state)).toEqual(state);
+    expect(() => parseReconcileStateResponse({ ...state, workingBalance: "1000" })).toThrow(
+      /Invalid reconcile response/
+    );
+  });
+
+  it("duplicates response accepts reports with cent-amount entries", () => {
+    const entry = {
+      id: 7,
+      accountId: 1,
+      date: "2026-06-01",
+      payee: "Shop",
+      memo: "",
+      amount: -4500,
+    };
+    const report = {
+      groups: [{ fingerprint: "f", keeper: entry, duplicates: [entry] }],
+      duplicateCount: 1,
+      flaggedCount: 1,
+      alreadyFlaggedCount: 0,
+      lockedCount: 0,
+      clearedCount: 0,
+    };
+    expect(parseDuplicateAnalysisResponse(report).duplicateCount).toBe(1);
+    expect(() => parseDuplicateAnalysisResponse({ groups: [] })).toThrow(
+      /Invalid duplicates response/
+    );
+  });
+
+  it("transaction create response accepts single and split results", () => {
+    // Raw single row carries numeric money; only the id is pinned.
+    const single = parseTransactionMutationResult({ id: 5, amount: -100 });
+    expect(single).toMatchObject({ id: 5 });
+    const split = parseTransactionMutationResult({
+      parent: { id: 6, amount: -5000 },
+      children: [
+        { id: 7, amount: -3000 },
+        { id: 8, amount: -2000 },
+      ],
+    });
+    if ("parent" in split) {
+      expect(split.children).toHaveLength(2);
+    } else {
+      throw new Error("expected split result");
+    }
+    expect(() => parseTransactionMutationResult({ ok: true })).toThrow(
+      /Invalid transaction response/
+    );
+  });
+});
+
+describe("query-string contracts", () => {
+  it("parses comma-separated id lists, rejecting garbage", () => {
+    expect(IdListQuerySchema.safeParse("1,2,3")).toMatchObject({ success: true, data: [1, 2, 3] });
+    expect(IdListQuerySchema.safeParse("1, abc, 2").success).toBe(true);
+    expect(IdListQuerySchema.safeParse("abc").success).toBe(false);
+    expect(IdListQuerySchema.safeParse("").success).toBe(false);
+    expect(IdListQuerySchema.safeParse("0,-1").success).toBe(false);
+  });
+
+  it("parses single positive ints, rejecting zero/negative/junk", () => {
+    expect(PositiveIntQuerySchema.safeParse("7")).toMatchObject({ success: true, data: 7 });
+    for (const bad of ["0", "-3", "abc", "", "1.5"]) {
+      expect(PositiveIntQuerySchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("validates reconcile state query params", () => {
+    const ok = ReconcileStateQuerySchema.safeParse({ accountId: "3", statementDate: "2026-08-01" });
+    expect(ok).toMatchObject({ success: true, data: { accountId: 3 } });
+    expect(ReconcileStateQuerySchema.safeParse({ accountId: null }).success).toBe(false);
+    expect(
+      ReconcileStateQuerySchema.safeParse({ accountId: "3", statementDate: "08/01/2026" }).success
+    ).toBe(false);
   });
 });
