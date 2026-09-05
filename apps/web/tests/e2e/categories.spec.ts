@@ -8,8 +8,6 @@
 //     (the funding-goal checkbox inside CategoryModal uses a sr-only
 //     input that Playwright struggles to click reliably across
 //     invocations, so the goal toggle is not exercised here)
-//   - the bottom-of-list "Add Category Group" shortcut
-//     (BudgetView.tsx:260-268)
 import { test, expect, type Page } from "@playwright/test";
 
 async function waitForReady(page: Page) {
