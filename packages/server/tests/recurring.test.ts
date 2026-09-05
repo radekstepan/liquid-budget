@@ -1094,6 +1094,31 @@ describe("recurring queries", () => {
       expect(updateCall?.set).toMatchObject({ active: false });
     });
 
+    it("posts scheduled occurrences as Uncleared so they stand out in the register", async () => {
+      const singleRow = {
+        id: 31,
+        accountId: 1,
+        categoryId: 5,
+        payee: "Gym",
+        amount: -5000,
+        frequency: "monthly",
+        nextDate: "2026-06-01",
+        active: true,
+        transferAccountId: null,
+      };
+      mock.respondWithNth("select:recurring", 1, [singleRow]);
+      mock.respondWith("select:recurring_sub_transactions", []);
+      mock.respondWith("select:accounts", [{ onBudget: true }]);
+      mock.respondWith("insert:transactions", [{ id: 310, date: "2026-06-01" }]);
+      mock.respondWith("update:accounts", [{}]);
+      mock.respondWith("update:recurring", [{ ...singleRow, nextDate: "2026-07-01" }]);
+
+      await postRecurringTransaction(mock.db, 31);
+
+      const txnInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
+      expect(txnInsert?.values).toMatchObject({ status: "u" });
+    });
+
     it("posts as a transfer when transferAccountId is set even if children exist (flavour alignment)", async () => {
       const transferWithStaleChildren = {
         id: 40,

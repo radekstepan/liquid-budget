@@ -28,12 +28,14 @@ async function gotoAllTransactions(page: Page) {
 
 async function getTransaction(
   page: Page,
-  payee: string
+  payee: string,
+  date?: string
 ): Promise<{ id: number; status: "u" | "c" | "r" }> {
   const res = await page.request.get("/api/budget");
   const body = await res.json();
   const row = body.transactions.find(
-    (t: { payee: string; status: string }) => t.payee === payee
+    (t: { payee: string; date: string; status: string }) =>
+      t.payee === payee && (date === undefined || t.date === date)
   );
   expect(row, `seed txn ${payee} should exist`).toBeTruthy();
   return row;
@@ -46,17 +48,28 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("clicking the C column cycles a row C → U → C", async ({ page }) => {
-  // "Mountain's Edge MSP" is a stable seed row (TD Unlimited Chequing,
-  // 2026-06-02). The DOM uses a y-cleared span with the letter
-  // C/U/R (primitives.tsx:385); the click target is the table cell
-  // containing that span (TransactionsView.tsx:249 — the column
+  // "Mountain's Edge MSP" on 2026-06-02 is a stable seed row (TD Unlimited
+  // Chequing). The payee alone is not unique: the seed also carries a monthly
+  // schedule for it, so auto-posted occurrences (which enter Uncleared) share
+  // the payee — scope both lookups to the seed date. The DOM uses a y-cleared
+  // span with the letter C/U/R (primitives.tsx:385); the click target is the
+  // table cell containing that span (TransactionsView.tsx:249 — the column
   // has its own stopPropagation guard so clicking elsewhere on the
   // row doesn't open the edit modal).
   const target = "Mountain's Edge MSP";
-  const before = await getTransaction(page, target);
+  const targetDate = "2026-06-02";
+  const before = await getTransaction(page, target, targetDate);
   expect(before.status, "seed assumption: target starts Cleared").toBe("c");
 
-  const row = page.getByRole("row").filter({ hasText: target }).first();
+  // The register virtualizes rows, so narrow it to this payee first —
+  // otherwise the seed row sits outside the rendered window.
+  await page.getByPlaceholder("Search register").fill(target);
+
+  const row = page
+    .getByRole("row")
+    .filter({ hasText: target })
+    .filter({ hasText: targetDate })
+    .first();
   const flag = row.locator(".y-cleared");
   await expect(flag).toHaveText("C");
 
@@ -64,7 +77,7 @@ test("clicking the C column cycles a row C → U → C", async ({ page }) => {
   // wait for the row to update.
   await flag.click();
   await expect
-    .poll(async () => (await getTransaction(page, target)).status, {
+    .poll(async () => (await getTransaction(page, target, targetDate)).status, {
       timeout: 10_000,
     })
     .toBe("u");
@@ -73,7 +86,7 @@ test("clicking the C column cycles a row C → U → C", async ({ page }) => {
   // Second click: U → C.
   await flag.click();
   await expect
-    .poll(async () => (await getTransaction(page, target)).status, {
+    .poll(async () => (await getTransaction(page, target, targetDate)).status, {
       timeout: 10_000,
     })
     .toBe("c");
