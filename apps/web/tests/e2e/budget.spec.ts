@@ -274,6 +274,10 @@ test("today's month column is scrolled into view on init", async ({ page }) => {
   // Regression: on init today's month must be visible in the UI, not
   // stuck behind the horizontal scrollbar/fold at scrollLeft 0.
   // BudgetView centers today's header in the scroller on mount.
+  // Wait for the grid first: a bare evaluate() doesn't retry, so without
+  // this the check can run while the app is still loading (no scroller
+  // rendered yet) and fail spuriously.
+  await expect(page.locator("th.y-table-th--month-label").first()).toBeVisible();
   const scrolled = await page.evaluate(() => {
     const container = document.querySelector(".overflow-auto.y-scroll") as HTMLElement | null;
     if (!container) return { ok: false, reason: "no scroller" };

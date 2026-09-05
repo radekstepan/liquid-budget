@@ -23,6 +23,9 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@types/node": "22.19.15",
     "@vitest/coverage-v8": "2.1.9",
