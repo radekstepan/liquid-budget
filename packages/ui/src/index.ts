@@ -10,6 +10,12 @@ export { ProjectionsView } from "./ProjectionsView.js";
 export { SettingsView } from "./SettingsView.js";
 export { MenuSettingsView } from "./MenuSettingsView.js";
 export {
+  SnapshotsView,
+  formatSnapshotSize,
+  formatSnapshotDate,
+  type SnapshotSummary,
+} from "./SnapshotsView.js";
+export {
   NAV_ITEMS,
   NAV_ORDER,
   DEFAULT_NAV_VISIBILITY,
