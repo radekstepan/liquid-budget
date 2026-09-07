@@ -58,12 +58,14 @@ export function Btn({
   variant = "ghost",
   type = "button",
   disabled,
+  title,
 }: {
   children: ReactNode;
   onClick?: () => void;
   variant?: "primary" | "ghost" | "danger";
   type?: "button" | "submit";
   disabled?: boolean;
+  title?: string;
 }) {
   const map = {
     primary: "primary" as const,
@@ -75,6 +77,7 @@ export function Btn({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       variant={map[variant]}
       className={cx("px-3.5 py-[5px] text-[12px]")}
     >

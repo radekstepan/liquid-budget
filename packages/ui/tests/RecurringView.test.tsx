@@ -262,5 +262,39 @@ describe("RecurringView", () => {
     fireEvent.click(postBtns[1]!);
     expect(onPost).toHaveBeenCalledWith(2, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
   });
+
+  it("posts paused schedules in one click (resume happens on the fly)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 0 },
+      ],
+      groups: [],
+      categories: [
+        { id: 10, groupId: 1, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [],
+      recurring: [
+        {
+          id: 7,
+          accountId: 1,
+          categoryId: 10,
+          payee: "Paused Subscription",
+          amount: "-1500",
+          frequency: "monthly",
+          nextDate: "2020-01-01",
+          active: false,
+          subTransactions: [],
+        },
+      ],
+    };
+
+    const { onPost } = renderView({ data });
+    const postBtn = screen.getByRole("button", { name: /^post now$/i });
+    expect(postBtn).not.toBeDisabled();
+    expect(postBtn).toHaveAttribute("title", "Resume and enter into register");
+    fireEvent.click(postBtn);
+    expect(onPost).toHaveBeenCalledWith(7);
+  });
 });
 

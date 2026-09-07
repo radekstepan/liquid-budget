@@ -2247,6 +2247,112 @@ describe("RecurringModal", () => {
       })
     );
   });
+
+  it("posts a paused schedule in one click via Enter Now", async () => {
+    const onPost = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const initialRecurring = {
+      id: 51,
+      accountId: 1,
+      categoryId: 10,
+      payee: "Paused Amex Fee",
+      memo: "",
+      amount: "-1599",
+      frequency: "monthly",
+      nextDate: "2026-09-05",
+      active: false,
+      flagColor: null,
+      subTransactions: [],
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initialRecurring as any}
+        onClose={onClose}
+        onSave={() => {}}
+        onPost={onPost}
+      />
+    );
+
+    const enterBtn = screen.getByRole("button", { name: /^enter now$/i });
+    expect(enterBtn).not.toBeDisabled();
+    await act(async () => {
+      fireEvent.click(enterBtn);
+    });
+    expect(onPost).toHaveBeenCalledWith(51);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("posts and closes when Enter Now succeeds for an active schedule", async () => {
+    const onPost = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const initialRecurring = {
+      id: 52,
+      accountId: 1,
+      categoryId: 10,
+      payee: "Active Amex Fee",
+      memo: "",
+      amount: "-1599",
+      frequency: "monthly",
+      nextDate: "2026-10-05",
+      active: true,
+      flagColor: null,
+      subTransactions: [],
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initialRecurring as any}
+        onClose={onClose}
+        onSave={() => {}}
+        onPost={onPost}
+      />
+    );
+
+    const enterBtn = screen.getByRole("button", { name: /^enter now$/i });
+    expect(enterBtn).not.toBeDisabled();
+    await act(async () => {
+      fireEvent.click(enterBtn);
+    });
+    expect(onPost).toHaveBeenCalledWith(52);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps the modal open without an unhandled rejection when Enter Now fails", async () => {
+    const onPost = vi.fn().mockRejectedValue(new Error("Recurring transaction is inactive"));
+    const onClose = vi.fn();
+    const initialRecurring = {
+      id: 53,
+      accountId: 1,
+      categoryId: 10,
+      payee: "Stale Schedule",
+      memo: "",
+      amount: "-1599",
+      frequency: "monthly",
+      nextDate: "2026-10-05",
+      active: true,
+      flagColor: null,
+      subTransactions: [],
+    };
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        initial={initialRecurring as any}
+        onClose={onClose}
+        onSave={() => {}}
+        onPost={onPost}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^enter now$/i }));
+    });
+    expect(onPost).toHaveBeenCalledWith(53);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe("GroupModal", () => {

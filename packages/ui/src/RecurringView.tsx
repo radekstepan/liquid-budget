@@ -200,7 +200,10 @@ export function RecurringView({
         <div className="mt-3 flex gap-2">
           <Button
             onClick={() => {
-              if (isFuture) {
+              // onPost resumes a paused rule on the fly, so one click is
+              // enough regardless of paused state. Early-entry uses today
+              // whenever the scheduled date is in the future.
+              if (r.nextDate > today) {
                 onPost(r.id, today);
               } else {
                 onPost(r.id);
@@ -209,7 +212,15 @@ export function RecurringView({
             size="sm"
             variant="blue"
             className="flex-1"
-            title={isFuture ? `Enter early into register as of today (${today})` : "Enter into register"}
+            title={
+              !r.active
+                ? r.nextDate > today
+                  ? `Resume and enter early into register as of today (${today})`
+                  : "Resume and enter into register"
+                : isFuture
+                  ? `Enter early into register as of today (${today})`
+                  : "Enter into register"
+            }
           >
             Post Now
           </Button>
