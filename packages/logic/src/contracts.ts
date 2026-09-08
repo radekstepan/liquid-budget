@@ -854,6 +854,36 @@ export const RenameRuleResponseSchema = z.looseObject({
   updatedAt: z.string().nullable().optional(),
 });
 
+export const SnapshotResponseSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  sizeBytes: z.number(),
+});
+
+export type SnapshotResponse = z.output<typeof SnapshotResponseSchema>;
+
+export const SnapshotsResponseSchema = z.looseObject({
+  snapshots: z.array(SnapshotResponseSchema),
+  suggestedName: z.string(),
+});
+
+export type SnapshotsResponse = z.output<typeof SnapshotsResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `GET /api/snapshots` JSON) against the
+ * response contract. Returns the typed payload on success; throws a
+ * descriptive Error on mismatch. Emits no console output so it is safe in
+ * tested fetch paths.
+ */
+export function parseSnapshotsResponse(data: unknown): SnapshotsResponse {
+  const result = SnapshotsResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid snapshots response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
 const NumberRecord = z.record(z.string(), z.number());
 const NestedNumberRecord = z.record(z.string(), z.record(z.string(), z.number()));
 

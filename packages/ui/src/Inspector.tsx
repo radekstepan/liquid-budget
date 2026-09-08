@@ -34,6 +34,7 @@ export const Inspector = memo(function Inspector({
   onAnalyzeDuplicates,
   onOpenRenameRules,
   onOpenPageVisibility,
+  onOpenSnapshots,
 }: {
   groups: GroupRow[];
   summary?: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -60,6 +61,7 @@ export const Inspector = memo(function Inspector({
   onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
   onOpenRenameRules?: () => void;
   onOpenPageVisibility?: () => void;
+  onOpenSnapshots?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -179,6 +181,17 @@ export const Inspector = memo(function Inspector({
                   className="y-menu-item"
                 >
                   <Icon name="eyeOff" size={12} /> Page Visibility
+                </button>
+              )}
+              {onOpenSnapshots && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenSnapshots();
+                  }}
+                  className="y-menu-item"
+                >
+                  <Icon name="clock" size={12} /> Snapshots
                 </button>
               )}
               {onAnalyzeDuplicates && (

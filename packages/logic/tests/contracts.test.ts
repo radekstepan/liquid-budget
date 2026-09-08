@@ -14,6 +14,7 @@ import {
   parseDuplicateAnalysisResponse,
   parseReconcileStateResponse,
   parseRecurringAutoPostResponse,
+  parseSnapshotsResponse,
   parseTransactionMutationResult,
   toRecurringPayload,
   toTransactionPayload,
@@ -192,6 +193,21 @@ describe("mutation/read response contracts", () => {
     expect(() =>
       parseAssignmentResponse({ id: 1, categoryId: 2, month: "2026-06" })
     ).toThrow(/Invalid assignment response/);
+  });
+
+  it("snapshots response accepts a list plus the suggested name", () => {
+    const payload = {
+      snapshots: [
+        { id: "20260907-120000-aaaaaa", name: "before import", createdAt: "2026-09-07T12:00:00.000Z", sizeBytes: 1234 },
+      ],
+      suggestedName: "Whole Foods -$84.20 (2026-09-06)",
+    };
+    expect(parseSnapshotsResponse(payload)).toEqual(payload);
+    expect(parseSnapshotsResponse({ snapshots: [], suggestedName: "Empty budget" }).snapshots).toEqual([]);
+    expect(() => parseSnapshotsResponse({ snapshots: [] })).toThrow(/Invalid snapshots response/);
+    expect(() =>
+      parseSnapshotsResponse({ snapshots: [{ id: "x" }], suggestedName: "s" })
+    ).toThrow(/Invalid snapshots response/);
   });
 
   it("autopost response accepts full and empty payloads", () => {

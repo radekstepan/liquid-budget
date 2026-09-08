@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseTransactionMutationResult } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseSnapshotsResponse, parseTransactionMutationResult } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -1736,6 +1736,46 @@ export function BudgetAppShell({
             return await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
           },
           { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false }
+        )
+      );
+    },
+    listSnapshots: async () => {
+      const raw = await jsonReq<unknown>("/api/snapshots");
+      return parseSnapshotsResponse(raw);
+    },
+    createSnapshot: async (name) => {
+      return withSync(() =>
+        runMutation(
+          async () => {
+            await jsonReq("/api/snapshots", {
+              method: "POST",
+              body: JSON.stringify({ name }),
+            });
+          },
+          { success: "Snapshot saved.", failure: "Failed to save snapshot.", notifyFailure: false }
+        )
+      );
+    },
+    restoreSnapshot: async (id) => {
+      return withSync(() =>
+        runMutation(
+          async () => {
+            await jsonReq("/api/snapshots?action=restore", {
+              method: "POST",
+              body: JSON.stringify({ id }),
+            });
+          },
+          { success: "Snapshot restored.", failure: "Failed to restore snapshot.", notifyFailure: false }
+        )
+      );
+    },
+    deleteSnapshot: async (id) => {
+      return withSync(() =>
+        runMutation(
+          async () => {
+            await jsonReq(`/api/snapshots?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+          },
+          { success: "Snapshot deleted.", failure: "Failed to delete snapshot.", notifyFailure: false }
         )
       );
     },

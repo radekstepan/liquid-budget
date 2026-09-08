@@ -57,3 +57,5 @@ apps/web/playwright-report/
 repomix-output.xml
 
 *.csv
+
+snapshots/*.json

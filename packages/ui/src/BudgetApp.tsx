@@ -31,6 +31,7 @@ import { CalendarView } from "./CalendarView.js";
 import { ProjectionsView } from "./ProjectionsView.js";
 import { SettingsView } from "./SettingsView.js";
 import { MenuSettingsView } from "./MenuSettingsView.js";
+import { SnapshotsView, type SnapshotSummary } from "./SnapshotsView.js";
 import {
   DEFAULT_NAV_VISIBILITY,
   NAV_VISIBILITY_STORAGE_KEY,
@@ -224,6 +225,10 @@ export type BudgetAppApi = {
   addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
   updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   deleteRenameRule?: (id: number) => Promise<void>;
+  listSnapshots?: () => Promise<{ snapshots: SnapshotSummary[]; suggestedName: string }>;
+  createSnapshot?: (name: string) => Promise<void>;
+  restoreSnapshot?: (id: string) => Promise<void>;
+  deleteSnapshot?: (id: string) => Promise<void>;
 };
 
 export type QuickBudgetType = "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear";
@@ -336,7 +341,11 @@ export function BudgetApp({
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<"rename" | "menu">("rename");
+  const [settingsPage, setSettingsPage] = useState<"rename" | "menu" | "snapshots">("rename");
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [snapshotSuggestion, setSnapshotSuggestion] = useState("");
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
   const [navVisible, setNavVisible] = useLocalStorage<Record<View, boolean>>(
     NAV_VISIBILITY_STORAGE_KEY,
     DEFAULT_NAV_VISIBILITY,
@@ -760,10 +769,29 @@ export function BudgetApp({
     [updateUrl, month]
   );
 
-  const openSettings = useCallback((page: "rename" | "menu") => {
-    setSettingsPage(page);
-    setShowSettingsOverlay(true);
-  }, []);
+  const refreshSnapshots = useCallback(async () => {
+    if (!api.listSnapshots) return;
+    setSnapshotsLoading(true);
+    setSnapshotsError(null);
+    try {
+      const res = await api.listSnapshots();
+      setSnapshots(res.snapshots);
+      setSnapshotSuggestion(res.suggestedName);
+    } catch (e: any) {
+      setSnapshotsError(e?.message ? String(e.message) : String(e));
+    } finally {
+      setSnapshotsLoading(false);
+    }
+  }, [api]);
+
+  const openSettings = useCallback(
+    (page: "rename" | "menu" | "snapshots") => {
+      setSettingsPage(page);
+      setShowSettingsOverlay(true);
+      if (page === "snapshots") void refreshSnapshots();
+    },
+    [refreshSnapshots]
+  );
 
   const handleToggleNav = useCallback(
     (v: View, next: boolean) => {
@@ -1157,6 +1185,26 @@ export function BudgetApp({
               <div className="flex-1 overflow-hidden">
                 {settingsPage === "menu" ? (
                   <MenuSettingsView visible={navVisible} onToggle={handleToggleNav} />
+                ) : settingsPage === "snapshots" ? (
+                  <SnapshotsView
+                    snapshots={snapshots}
+                    suggestedName={snapshotSuggestion}
+                    loading={snapshotsLoading}
+                    error={snapshotsError}
+                    onCreate={async (name) => {
+                      await api.createSnapshot?.(name);
+                      await refreshSnapshots();
+                    }}
+                    onRestore={async (id) => {
+                      await api.restoreSnapshot?.(id);
+                      await api.reload();
+                      await refreshSnapshots();
+                    }}
+                    onDelete={async (id) => {
+                      await api.deleteSnapshot?.(id);
+                      await refreshSnapshots();
+                    }}
+                  />
                 ) : (
                   <SettingsView
                     rules={data.renameRules ?? []}
@@ -1204,6 +1252,7 @@ export function BudgetApp({
           onAnalyzeDuplicates={api.analyzeDuplicates}
           onOpenRenameRules={() => openSettings("rename")}
           onOpenPageVisibility={() => openSettings("menu")}
+          onOpenSnapshots={() => openSettings("snapshots")}
         />
       </ErrorBoundary>
 
