@@ -1302,8 +1302,16 @@ export function RecurringModal({
             {initial && onPost && (
               <Btn
                 variant="primary"
+                title="Enter into register"
                 onClick={async () => {
-                  await onPost(initial.id);
+                  try {
+                    await onPost(initial.id);
+                  } catch {
+                    // The mutation layer already toasted the failure; keep
+                    // the modal open so the user can adjust and retry instead
+                    // of surfacing an unhandled rejection.
+                    return;
+                  }
                   onClose();
                 }}
               >

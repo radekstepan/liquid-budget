@@ -1016,6 +1016,21 @@ export function BudgetApp({
     return map;
   }, [data.recurring]);
 
+  // Single-click entry: resume a paused rule on the fly so posting never
+  // takes two clicks. This performs exactly the resume-then-post the user
+  // would otherwise do manually, with no new server capabilities.
+  const postRecurringOneClick = useCallback(
+    async (id: number, date?: string) => {
+      const today = todayISO();
+      const r = data.recurring.find((x) => x.id === id);
+      if (r && !r.active) {
+        await api.updateRecurring(id, { active: true });
+      }
+      await api.postRecurring(id, date ?? (r && r.nextDate > today ? today : undefined));
+    },
+    [api, data.recurring]
+  );
+
   const otherAccounts = useMemo(
     () => data.accounts.filter((a) => a.id !== accountFilter),
     [data.accounts, accountFilter]
@@ -1150,7 +1165,7 @@ export function BudgetApp({
               onAdd={() => setModal({ kind: "recurring", mode: "single" })}
               onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
               onDelete={api.deleteRecurring}
-              onPost={api.postRecurring}
+              onPost={postRecurringOneClick}
               onToggleActive={(id, active) => api.updateRecurring(id, { active })}
             />
           )}
@@ -1347,10 +1362,7 @@ export function BudgetApp({
             setModal({ kind: "none" });
           }}
           onPost={async (id) => {
-            const today = todayISO();
-            const r = data.recurring.find((x) => x.id === id);
-            const isFuture = r ? r.nextDate > today : false;
-            await api.postRecurring(id, isFuture ? today : undefined);
+            await postRecurringOneClick(id);
             setModal({ kind: "none" });
           }}
         />
