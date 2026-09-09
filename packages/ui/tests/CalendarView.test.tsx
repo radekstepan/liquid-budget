@@ -197,6 +197,41 @@ describe("CalendarView", () => {
     expect(within(dayCell).getByText("-$500.00", { selector: "span.text-\\[10\\.5px\\]" })).toBeInTheDocument();
   });
 
+  it("stacks one pill per line with single-line ellipsis overflow (no side-by-side pills)", () => {
+    const accounts: BudgetData["accounts"] = [
+      { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },
+      { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "50000", onBudget: true, sort: 1 },
+    ];
+    const transferTxn: Transaction = {
+      id: 401,
+      accountId: 1,
+      transferAccountId: 2,
+      categoryId: null,
+      date: "2026-06-10",
+      payee: "Transfer : Savings With A Very Long Account Name",
+      memo: "",
+      amount: "-100000",
+      status: "u",
+    };
+    renderView({ data: makeData([transferTxn, txn(10, "Coffee", -5)], accounts) });
+
+    const dayCell = screen.getByRole("button", { name: /add transaction on 2026-06-10/i });
+    // One block-level wrapper per pill: pills stack vertically instead of
+    // sitting next to each other and overflowing the day cell.
+    const wraps = within(dayCell).getAllByText(/Transfer : Savings|Coffee/);
+    expect(wraps.length).toBe(2);
+    for (const pill of wraps) {
+      const wrap = pill.closest(".y-tip-wrap")!;
+      const classes = wrap.className.split(/\s+/);
+      expect(classes).toContain("block");
+      expect(classes).not.toContain("inline-flex");
+      // Single line with ellipsis overflow for long transfer names.
+      expect(pill.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["truncate", "flex-1", "min-w-0"])
+      );
+    }
+  });
+
   it("excludes internal transfer from dayNet when mixed with standard expense", () => {
     const accounts: BudgetData["accounts"] = [
       { id: 1, name: "Chequing", kind: "liquid", groupLabel: "Liquid", balance: "100000", onBudget: true, sort: 0 },

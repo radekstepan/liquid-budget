@@ -124,6 +124,31 @@ describe("Tooltip", () => {
     expect(screen.getByRole("tooltip")).toHaveStyle({ left: "916px" });
   });
 
+  it("keeps the inline-flex default when no display class is passed", () => {
+    render(
+      <Tooltip tip="Jump to current month">
+        <button type="button">Today</button>
+      </Tooltip>
+    );
+    const wrap = screen.getByRole("button", { name: "Today" }).closest(".y-tip-wrap")!;
+    expect(wrap.className.split(/\s+/)).toContain("inline-flex");
+  });
+
+  it("lets a caller display class win over the inline-flex default", () => {
+    // Tailwind emits `inline-flex` after `block`, so keeping both would
+    // silently keep the wrapper inline (calendar pills sat next to each
+    // other and overflowed the day cell).
+    render(
+      <Tooltip tip="Transfer : Savings" className="block">
+        <span>Transfer : Savings</span>
+      </Tooltip>
+    );
+    const wrap = screen.getByText("Transfer : Savings").closest(".y-tip-wrap")!;
+    const classes = wrap.className.split(/\s+/);
+    expect(classes).toContain("block");
+    expect(classes).not.toContain("inline-flex");
+  });
+
   it("renders only its children when the tip is empty", () => {
     const { container } = render(
       <Tooltip tip={undefined}>

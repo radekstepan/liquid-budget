@@ -205,7 +205,7 @@ export const CalendarView = memo(function CalendarView({
                               color: x.amount < 0 ? "var(--y-red-dk)" : "var(--y-blue-dark)",
                             }}
                           >
-                            <span className="truncate flex-1">{x.payee}</span>
+                            <span className="truncate flex-1 min-w-0">{x.payee}</span>
                             <span className="y-num shrink-0">{fmt(x.amount)}</span>
                           </div>
                         </Tooltip>
