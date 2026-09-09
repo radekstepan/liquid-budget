@@ -25,7 +25,6 @@ import { Icon, Tooltip } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
 import { BudgetView, isInternalGroup } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
-import { RecurringView } from "./RecurringView.js";
 import { ReportsView } from "./ReportsView.js";
 import { CalendarView } from "./CalendarView.js";
 import { ProjectionsView } from "./ProjectionsView.js";
@@ -309,7 +308,7 @@ export function BudgetApp({
   initialAccount?: number;
 }) {
   const [view, setView] = useState<View>(
-    (["budget", "reports", "calendar", "projections", "transactions", "recurring"] as View[]).includes(initialView as View)
+    (["budget", "reports", "calendar", "projections", "transactions"] as View[]).includes(initialView as View)
       ? (initialView as View)
       : "budget"
   );
@@ -381,7 +380,7 @@ export function BudgetApp({
     const parsePath = () => {
       const path = window.location.pathname.replace(/\/$/, "");
       const segments = path.split("/").filter(Boolean);
-      const validViews = ["budget", "reports", "calendar", "projections", "transactions", "recurring"] as const;
+      const validViews = ["budget", "reports", "calendar", "projections", "transactions"] as const;
 
       if (segments.length >= 1 && (validViews as readonly string[]).includes(segments[0]!)) {
         setView(segments[0] as View);
@@ -1159,17 +1158,8 @@ export function BudgetApp({
             />
           )}
           {view === "projections" && <ProjectionsView data={data} />}
-          {view === "recurring" && (
-            <RecurringView
-              data={data}
-              onAdd={() => setModal({ kind: "recurring", mode: "single" })}
-              onEdit={(id) => setModal({ kind: "editRecurring", recurringId: id })}
-              onDelete={api.deleteRecurring}
-              onPost={postRecurringOneClick}
-              onToggleActive={(id, active) => api.updateRecurring(id, { active })}
-            />
-          )}
         </ErrorBoundary>
+
 
         {showSettingsOverlay && (
           <div

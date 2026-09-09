@@ -10,8 +10,7 @@ export type View =
   | "reports"
   | "calendar"
   | "projections"
-  | "transactions"
-  | "recurring";
+  | "transactions";
 
 type NavItem = { key: View; label: string; icon: string; color: string };
 // YNAB4-style nav palette: bright friendly hues, lifted to pastel tints so
@@ -21,7 +20,6 @@ const NAV_TOP: NavItem[] = [
   { key: "reports", label: "Reports", icon: "chart", color: "#ffcc80" },
   { key: "calendar", label: "Calendar", icon: "calendar", color: "#90caf9" },
   { key: "projections", label: "Projections", icon: "projections", color: "#ce93d8" },
-  { key: "recurring", label: "Recurring", icon: "clock", color: "#80cbc4" },
 ];
 const TRANSACTIONS_ICON_COLOR = "#f48fb1";
 

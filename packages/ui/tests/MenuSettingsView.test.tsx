@@ -13,10 +13,10 @@ function renderMenu(over: Partial<Record<View, boolean>> = {}) {
 }
 
 describe("MenuSettingsView", () => {
-  it("renders all six menu pages checked by default", () => {
+  it("renders all five menu pages checked by default", () => {
     renderMenu();
     expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
-    for (const name of ["Budget", "Reports", "Calendar", "Projections", "Recurring", "Transactions"]) {
+    for (const name of ["Budget", "Reports", "Calendar", "Projections", "Transactions"]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
     }
   });
@@ -45,7 +45,6 @@ describe("MenuSettingsView", () => {
       reports: false,
       calendar: false,
       projections: false,
-      recurring: false,
       transactions: false,
     });
     expect(screen.getByRole("checkbox", { name: "Budget" })).toBeDisabled();
