@@ -1189,6 +1189,13 @@ export const Tabs: React.FC<{
  * so no `overflow: hidden/auto` ancestor (sidebar, inspector, dropdowns)
  * can clip it. It flips to the opposite side when there is no room and its
  * center is clamped so wide tips stay inside the viewport. */
+// Callers may pass a display utility (e.g. `block`) via className. Tailwind
+// emits `inline-flex` after `block`, so keeping both classes would silently
+// keep the wrapper inline — pills would sit next to each other and overflow.
+// Only apply the default when the caller did not specify a display.
+const DISPLAY_CLASS_RE =
+  /\b(block|inline-block|inline|flex|inline-flex|grid|inline-grid|contents|flow-root|hidden)\b/;
+
 export const Tooltip: React.FC<{
   tip: React.ReactNode;
   children: React.ReactNode;
@@ -1246,7 +1253,11 @@ export const Tooltip: React.FC<{
   return (
     <span
       ref={wrapRef}
-      className={cx("y-tip-wrap relative inline-flex", className)}
+      className={cx(
+        "y-tip-wrap relative",
+        DISPLAY_CLASS_RE.test(className ?? "") ? null : "inline-flex",
+        className
+      )}
       onMouseEnter={() => setOn(true)}
       onMouseLeave={() => setOn(false)}
       onFocus={() => setOn(true)}
