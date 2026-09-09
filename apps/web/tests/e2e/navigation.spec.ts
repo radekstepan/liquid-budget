@@ -20,7 +20,6 @@ const NAV_ITEMS: { label: string; viewToolbar: string | RegExp; match?: string |
   { label: "Budget", viewToolbar: /Master Category/ },
   { label: "Reports", viewToolbar: "Reports" },
   { label: "Calendar", viewToolbar: "Calendar" },
-  { label: "Projections", viewToolbar: "Projections" },
   // The Transactions button's accessible name includes its running balance
   // (Sidebar.tsx y-side-amt), so it needs a regex match.
   { label: "Transactions", match: /^Transactions/, viewToolbar: "All Transactions" },

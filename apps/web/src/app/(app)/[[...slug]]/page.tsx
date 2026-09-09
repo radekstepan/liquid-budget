@@ -16,7 +16,7 @@ export default async function AppPage({
   if (slug && slug.length > 0) {
     const first = slug[0];
     if (first) {
-      const validViews = ["budget", "reports", "calendar", "projections", "transactions"];
+      const validViews = ["budget", "reports", "calendar", "transactions"];
       if (validViews.includes(first)) {
         initialView = first;
         if (first === "budget" && slug[1] && isValidISOMonth(slug[1])) {

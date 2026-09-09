@@ -10,7 +10,7 @@ import {
 describe("navVisibility", () => {
   it("covers every sidebar view exactly once, transactions included", () => {
     expect([...NAV_ORDER].sort()).toEqual(
-      ["budget", "calendar", "projections", "reports", "transactions"].sort()
+      ["budget", "calendar", "reports", "transactions"].sort()
     );
   });
 
@@ -28,15 +28,14 @@ describe("navVisibility", () => {
         budget: false,
         reports: false,
         calendar: false,
-        projections: false,
         transactions: false,
       })
     ).toBeNull();
   });
 
   it("visibleViewCount counts enabled views", () => {
-    expect(visibleViewCount(DEFAULT_NAV_VISIBILITY)).toBe(5);
-    expect(visibleViewCount({ ...DEFAULT_NAV_VISIBILITY, budget: false })).toBe(4);
+    expect(visibleViewCount(DEFAULT_NAV_VISIBILITY)).toBe(4);
+    expect(visibleViewCount({ ...DEFAULT_NAV_VISIBILITY, budget: false })).toBe(3);
   });
 
   it("isNavVisibility validates stored records", () => {

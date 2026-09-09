@@ -5,7 +5,6 @@ export const NAV_ORDER: View[] = [
   "budget",
   "reports",
   "calendar",
-  "projections",
   "transactions",
 ];
 
@@ -19,7 +18,6 @@ export const NAV_ITEMS: NavItemMeta[] = [
   { key: "budget", label: "Budget", description: "Plan and assign money to categories each month." },
   { key: "reports", label: "Reports", description: "Spending, income and net-worth reports." },
   { key: "calendar", label: "Calendar", description: "See transactions on a monthly calendar." },
-  { key: "projections", label: "Projections", description: "Forecast future account balances." },
   { key: "transactions", label: "Transactions", description: "Browse transactions across all accounts." },
 ];
 
@@ -29,7 +27,6 @@ export const DEFAULT_NAV_VISIBILITY: Record<View, boolean> = {
   budget: true,
   reports: true,
   calendar: true,
-  projections: true,
   transactions: true,
 };
 
