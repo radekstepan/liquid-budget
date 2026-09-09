@@ -3,7 +3,7 @@
 import { useId, useMemo, useState, useCallback, memo } from "react";
 import type { ReactNode } from "react";
 import { fmt, MONTHS, monthLabel, parseMonthKey, type NetWorthPoint } from "@ynab/logic";
-import { Button, Panel } from "@ynab/theme";
+import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   AxisBreakMark,
   AxisBreakMask,
@@ -516,24 +516,26 @@ export function NetWorthReport({ points }: { points: NetWorthPoint[] }) {
               Scale
             </span>
             <div className="y-seg">
-              <Button
-                size="sm"
-                variant={scaleMode === "linear" ? "primary" : "default"}
-                active={scaleMode === "linear"}
-                onClick={() => setScaleMode("linear")}
-                title="Linear scale"
-              >
-                Linear
-              </Button>
-              <Button
-                size="sm"
-                variant={scaleMode === "log" ? "primary" : "default"}
-                active={scaleMode === "log"}
-                onClick={() => setScaleMode("log")}
-                title="Logarithmic scale"
-              >
-                Log
-              </Button>
+              <Tooltip tip="Linear scale">
+                <Button
+                  size="sm"
+                  variant={scaleMode === "linear" ? "primary" : "default"}
+                  active={scaleMode === "linear"}
+                  onClick={() => setScaleMode("linear")}
+                >
+                  Linear
+                </Button>
+              </Tooltip>
+              <Tooltip tip="Logarithmic scale">
+                <Button
+                  size="sm"
+                  variant={scaleMode === "log" ? "primary" : "default"}
+                  active={scaleMode === "log"}
+                  onClick={() => setScaleMode("log")}
+                >
+                  Log
+                </Button>
+              </Tooltip>
             </div>
           </div>
           <span className="y-hint">Hover any month for details</span>

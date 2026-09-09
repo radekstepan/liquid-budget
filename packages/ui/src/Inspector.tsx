@@ -10,7 +10,7 @@ import type {
   ImportSummary,
 } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
-import { Icon, Button, Panel, Notice, cx, money } from "@ynab/theme";
+import { Icon, Button, Panel, Notice, Tooltip, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
 
 export const Inspector = memo(function Inspector({
@@ -114,14 +114,11 @@ export const Inspector = memo(function Inspector({
       {/* Header with Settings Cog */}
       <div className="flex items-center px-1">
         <div className="ml-auto relative" ref={menuRef}>
-          <Button
-            onClick={() => setMenuOpen((o) => !o)}
-            size="sm"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Icon name="cog" size={13} />
-          </Button>
+          <Tooltip tip="Settings">
+            <Button onClick={() => setMenuOpen((o) => !o)} size="sm" aria-label="Settings">
+              <Icon name="cog" size={13} />
+            </Button>
+          </Tooltip>
           {menuOpen && (
             <div
               className="absolute right-0 top-[28px] z-20"
@@ -299,27 +296,30 @@ export const Inspector = memo(function Inspector({
             </div>
             <div className="y-hint text-[10px] mt-0.5">Net Cash Flow</div>
           </div>
-          <span
-            className={cx(
-              "px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide",
-              effectiveCashFlow.income <= 0
-                ? "bg-[var(--y-panel-alt)] text-[var(--y-ink-soft)]"
-                : effectiveCashFlow.net >= 0
-                  ? "bg-[#e4f1d4] text-[#427a1b]"
-                  : "bg-[#f7dedb] text-[#97341f]"
-            )}
-            title={
+          <Tooltip
+            tip={
               effectiveCashFlow.income <= 0
                 ? "No uncategorized income this month, so a savings rate can't be computed"
                 : undefined
             }
           >
-            {effectiveCashFlow.income <= 0
-              ? "No income"
-              : effectiveCashFlow.net >= 0
-                ? `${effectiveCashFlow.savingsRate}% saved`
-                : "Deficit"}
-          </span>
+            <span
+              className={cx(
+                "px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide",
+                effectiveCashFlow.income <= 0
+                  ? "bg-[var(--y-panel-alt)] text-[var(--y-ink-soft)]"
+                  : effectiveCashFlow.net >= 0
+                    ? "bg-[#e4f1d4] text-[#427a1b]"
+                    : "bg-[#f7dedb] text-[#97341f]"
+              )}
+            >
+              {effectiveCashFlow.income <= 0
+                ? "No income"
+                : effectiveCashFlow.net >= 0
+                  ? `${effectiveCashFlow.savingsRate}% saved`
+                  : "Deficit"}
+            </span>
+          </Tooltip>
         </div>
 
         <div className="space-y-[4px] text-[11px] pt-1 border-t border-[var(--y-line-soft)]">
@@ -358,19 +358,21 @@ export const Inspector = memo(function Inspector({
               {hoveredPoint ? formatFullMonth(hoveredPoint.month) : "Current Net Worth"}
             </div>
           </div>
-          <span
-            className={cx(
-              "px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-0.5",
-              effectiveNetWorth.delta >= 0
-                ? "bg-[#e4f1d4] text-[#427a1b]"
-                : "bg-[#f7dedb] text-[#97341f]"
-            )}
-            title="12-Month Change"
-          >
-            {effectiveNetWorth.delta >= 0 ? "▲" : "▼"}{" "}
-            {money(Math.abs(effectiveNetWorth.delta))}
-            {effectiveNetWorth.pctDelta != null ? ` (${effectiveNetWorth.pctDelta >= 0 ? "+" : ""}${effectiveNetWorth.pctDelta}%)` : ""}
-          </span>
+          <Tooltip tip="12-Month Change">
+            <span
+              data-testid="net-worth-delta"
+              className={cx(
+                "px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-0.5",
+                effectiveNetWorth.delta >= 0
+                  ? "bg-[#e4f1d4] text-[#427a1b]"
+                  : "bg-[#f7dedb] text-[#97341f]"
+              )}
+            >
+              {effectiveNetWorth.delta >= 0 ? "▲" : "▼"}{" "}
+              {money(Math.abs(effectiveNetWorth.delta))}
+              {effectiveNetWorth.pctDelta != null ? ` (${effectiveNetWorth.pctDelta >= 0 ? "+" : ""}${effectiveNetWorth.pctDelta}%)` : ""}
+            </span>
+          </Tooltip>
         </div>
 
         {/* SVG Sparkline */}
@@ -568,14 +570,13 @@ export const Inspector = memo(function Inspector({
                     const isHovered = hoveredPoint?.month === p.month;
                     const shortLabel = `${MONTHS[m0]?.slice(0, 1)}`;
                     return (
-                      <button
-                        key={p.month}
-                        onClick={() => onSelectMonth(p.month)}
-                        onMouseEnter={() => setHoveredPoint({ month: p.month, net: p.net })}
-                        onMouseLeave={() => setHoveredPoint(null)}
-                        aria-label={`Jump to ${MONTHS[m0]} ${y}`}
-                        title={`${MONTHS[m0]} ${y}: ${money(p.net)}`}
-                        className={cx(
+                      <Tooltip key={p.month} tip={`${MONTHS[m0]} ${y}: ${money(p.net)}`} className="flex-1">
+                        <button
+                          onClick={() => onSelectMonth(p.month)}
+                          onMouseEnter={() => setHoveredPoint({ month: p.month, net: p.net })}
+                          onMouseLeave={() => setHoveredPoint(null)}
+                          aria-label={`Jump to ${MONTHS[m0]} ${y}`}
+                          className={cx(
                           "flex-1 text-[9px] py-0.5 rounded text-center transition-all",
                           isCurrent
                             ? "bg-[#2f7fb0] text-white font-bold"
@@ -585,7 +586,8 @@ export const Inspector = memo(function Inspector({
                         )}
                       >
                         {shortLabel}
-                      </button>
+                        </button>
+                      </Tooltip>
                     );
                   })}
                 </div>

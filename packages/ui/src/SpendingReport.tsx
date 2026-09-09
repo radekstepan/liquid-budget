@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { fmt } from "@ynab/logic";
-import { Button, Panel } from "@ynab/theme";
+import { Button, Panel, Tooltip } from "@ynab/theme";
 import { ChartTip, colorAt, TipLabel, useElementSize } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -182,30 +182,32 @@ export function SpendingReport({
           <div className="flex items-center gap-1.5">
             <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>View</span>
             <div className="y-seg">
-              <Button
-                size="sm"
-                variant={viewMode === "bars" ? "primary" : "default"}
-                active={viewMode === "bars"}
-                onClick={() => {
-                  setViewMode("bars");
-                  setHover(null);
-                }}
-                title="Bar chart"
-              >
-                Bars
-              </Button>
-              <Button
-                size="sm"
-                variant={viewMode === "donut" ? "primary" : "default"}
-                active={viewMode === "donut"}
-                onClick={() => {
-                  setViewMode("donut");
-                  setHover(null);
-                }}
-                title="Donut chart"
-              >
-                Donut
-              </Button>
+              <Tooltip tip="Bar chart">
+                <Button
+                  size="sm"
+                  variant={viewMode === "bars" ? "primary" : "default"}
+                  active={viewMode === "bars"}
+                  onClick={() => {
+                    setViewMode("bars");
+                    setHover(null);
+                  }}
+                >
+                  Bars
+                </Button>
+              </Tooltip>
+              <Tooltip tip="Donut chart">
+                <Button
+                  size="sm"
+                  variant={viewMode === "donut" ? "primary" : "default"}
+                  active={viewMode === "donut"}
+                  onClick={() => {
+                    setViewMode("donut");
+                    setHover(null);
+                  }}
+                >
+                  Donut
+                </Button>
+              </Tooltip>
             </div>
           </div>
           <span className="y-hint">

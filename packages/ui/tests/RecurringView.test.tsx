@@ -292,7 +292,10 @@ describe("RecurringView", () => {
     const { onPost } = renderView({ data });
     const postBtn = screen.getByRole("button", { name: /^post now$/i });
     expect(postBtn).not.toBeDisabled();
-    expect(postBtn).toHaveAttribute("title", "Resume and enter into register");
+    // No native tooltips: the hint renders as a custom tooltip on hover.
+    expect(postBtn).not.toHaveAttribute("title");
+    fireEvent.mouseOver(postBtn.closest(".y-tip-wrap")!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Resume and enter into register");
     fireEvent.click(postBtn);
     expect(onPost).toHaveBeenCalledWith(7);
   });

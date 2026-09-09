@@ -111,7 +111,7 @@ test("Spending Trends tab renders stacked multi-month chart and supports multi-l
   await expect(panel.getByRole("button", { name: "All Categories" })).toBeVisible();
 
   // Category filter trigger is visible
-  await expect(panel.getByTitle("Filter included categories")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Filter included categories" })).toBeVisible();
 
   // Top level constituents list is visible
   const constituentsTable = panel.locator(".bg-white");
@@ -147,7 +147,7 @@ test("Spending Trends tab renders stacked multi-month chart and supports multi-l
   await expect(constituentsTable.locator("tbody tr.y-row").first()).toBeVisible();
 
   // Open contextual category filter for this group
-  const filterBtn = panel.getByTitle("Filter included categories");
+  const filterBtn = panel.getByRole("button", { name: "Filter included categories" });
   await filterBtn.click();
   await expect(panel.getByText(`Filter: ${groupName}`)).toBeVisible();
   // Close filter

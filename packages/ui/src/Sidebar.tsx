@@ -3,7 +3,7 @@
 import { memo, useState, useRef, useEffect } from "react";
 import type { Account } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
-import { Button, Icon, cx } from "@ynab/theme";
+import { Button, Icon, Tooltip, cx } from "@ynab/theme";
 
 export type View =
   | "budget"
@@ -244,13 +244,11 @@ export const Sidebar = memo(function Sidebar({
         <Icon name="swap" size={14} color={TRANSACTIONS_ICON_COLOR} />
         <span className="truncate flex-1">Transactions</span>
         {dueBadgeCount > 0 && (
-          <span
-            className="y-badge mr-1"
-            aria-label={`${dueBadgeCount} due`}
-            title={`${dueBadgeCount} scheduled transaction${dueBadgeCount === 1 ? "" : "s"} due`}
-          >
-            {dueBadgeCount}
-          </span>
+          <Tooltip tip={`${dueBadgeCount} scheduled transaction${dueBadgeCount === 1 ? "" : "s"} due`}>
+            <span className="y-badge mr-1" aria-label={`${dueBadgeCount} due`}>
+              {dueBadgeCount}
+            </span>
+          </Tooltip>
         )}
         <span
           className="y-side-amt"
@@ -312,13 +310,14 @@ export const Sidebar = memo(function Sidebar({
                       >
                         <span className="truncate">{a.name}</span>
                         {accDueCount > 0 && (
-                          <span
-                            className="y-badge ml-auto mr-1"
-                            style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
-                            title={`${accDueCount} scheduled due`}
-                          >
-                            {accDueCount}
-                          </span>
+                          <Tooltip tip={`${accDueCount} scheduled due`}>
+                            <span
+                              className="y-badge ml-auto mr-1"
+                              style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
+                            >
+                              {accDueCount}
+                            </span>
+                          </Tooltip>
                         )}
                         <span
                           className={cx("y-side-amt", accDueCount === 0 && "ml-auto")}
@@ -332,17 +331,18 @@ export const Sidebar = memo(function Sidebar({
                       </button>
                       {hasActions && onEditAccount && (
                         <div className="y-side-actions">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEditAccount(a.id);
-                            }}
-                            className="y-side-edit-btn"
-                            title="Edit account"
-                            aria-label={`Edit account ${a.name}`}
-                          >
-                            <Icon name="edit" size={11} />
-                          </button>
+                          <Tooltip tip="Edit account">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditAccount(a.id);
+                              }}
+                              className="y-side-edit-btn"
+                              aria-label={`Edit account ${a.name}`}
+                            >
+                              <Icon name="edit" size={11} />
+                            </button>
+                          </Tooltip>
                         </div>
                       )}
                     </div>
@@ -413,17 +413,18 @@ export const Sidebar = memo(function Sidebar({
                     </button>
                     {hasActions && onEditAccount && (
                       <div className="y-side-actions">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditAccount(a.id);
-                          }}
-                          className="y-side-edit-btn"
-                          title="Edit account"
-                          aria-label={`Edit account ${a.name}`}
-                        >
-                          <Icon name="edit" size={11} />
-                        </button>
+                        <Tooltip tip="Edit account">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditAccount(a.id);
+                            }}
+                            className="y-side-edit-btn"
+                            aria-label={`Edit account ${a.name}`}
+                          >
+                            <Icon name="edit" size={11} />
+                          </button>
+                        </Tooltip>
                       </div>
                     )}
                   </div>
@@ -493,7 +494,8 @@ export const Sidebar = memo(function Sidebar({
         onMouseDown={startResizing}
         onDoubleClick={resetWidth}
         className="y-side-resizer"
-        title="Drag to resize sidebar (double-click to reset)"
+        role="separator"
+        aria-orientation="vertical"
         aria-label="Resize sidebar"
       />
     </aside>

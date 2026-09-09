@@ -25,6 +25,7 @@ import {
   Notice,
   FlagPicker,
   SearchList,
+  Tooltip,
   money,
   cx,
   type SearchListOption,
@@ -333,8 +334,12 @@ export function BulkEditTransactionsModal({
                         className={cx("y-row", idx % 2 === 1 && "alt")}
                       >
                         <td className="y-num whitespace-nowrap text-[11.5px]">{t.date}</td>
-                        <td className="font-medium truncate text-[11.5px]" title={t.payee || ""}>
-                          {t.payee || <span className="y-hint">No Payee</span>}
+                        <td className="font-medium truncate text-[11.5px]">
+                          <Tooltip tip={t.payee || undefined} className="block max-w-full">
+                            <span className="block truncate">
+                              {t.payee || <span className="y-hint">No Payee</span>}
+                            </span>
+                          </Tooltip>
                         </td>
                         <td className="num y-num font-medium text-[11.5px] whitespace-nowrap">
                           {money(num(t.amount))}

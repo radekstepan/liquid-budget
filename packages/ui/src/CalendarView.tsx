@@ -3,7 +3,7 @@
 import { memo, useMemo, useState } from "react";
 import type { BudgetData } from "@ynab/logic";
 import { fmt, num, parseMonthKey } from "@ynab/logic";
-import { Icon, Toolbar, ToolbarSep, MonthNav } from "@ynab/theme";
+import { Icon, Toolbar, ToolbarSep, MonthNav, Tooltip } from "@ynab/theme";
 
 export const CalendarView = memo(function CalendarView({
   data,
@@ -171,19 +171,20 @@ export const CalendarView = memo(function CalendarView({
                         >
                           {d}
                         </span>
-                        <button
-                          type="button"
-                          aria-label="Add transaction"
-                          title="Add transaction"
-                          className="flex h-4 w-4 items-center justify-center rounded text-[10px] opacity-60 transition hover:bg-[var(--y-line-soft)] hover:opacity-100"
-                          style={{ color: "var(--y-ink-soft)" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onAdd(dateIso(d));
-                          }}
-                        >
-                          <Icon name="plus" size={10} />
-                        </button>
+                        <Tooltip tip="Add transaction">
+                          <button
+                            type="button"
+                            aria-label="Add transaction"
+                            className="flex h-4 w-4 items-center justify-center rounded text-[10px] opacity-60 transition hover:bg-[var(--y-line-soft)] hover:opacity-100"
+                            style={{ color: "var(--y-ink-soft)" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAdd(dateIso(d));
+                            }}
+                          >
+                            <Icon name="plus" size={10} />
+                          </button>
+                        </Tooltip>
                       </div>
                       {dayNet !== 0 && (
                         <span
@@ -196,18 +197,18 @@ export const CalendarView = memo(function CalendarView({
                     </div>
                     <div className="mt-1 space-y-[2px]">
                       {visible.map((x, j) => (
-                        <div
-                          key={j}
-                          className="flex items-center gap-1 rounded px-1 py-[1px] text-[10px]"
-                          style={{
-                            background: x.amount < 0 ? "var(--y-red-pale)" : "var(--y-blue-pale)",
-                            color: x.amount < 0 ? "var(--y-red-dk)" : "var(--y-blue-dark)",
-                          }}
-                          title={`${x.payee}${x.cat ? ` · ${x.cat}` : ""} · ${fmt(x.amount)}`}
-                        >
-                          <span className="truncate flex-1">{x.payee}</span>
-                          <span className="y-num shrink-0">{fmt(x.amount)}</span>
-                        </div>
+                        <Tooltip key={j} tip={`${x.payee}${x.cat ? ` · ${x.cat}` : ""} · ${fmt(x.amount)}`} className="block">
+                          <div
+                            className="flex items-center gap-1 rounded px-1 py-[1px] text-[10px]"
+                            style={{
+                              background: x.amount < 0 ? "var(--y-red-pale)" : "var(--y-blue-pale)",
+                              color: x.amount < 0 ? "var(--y-red-dk)" : "var(--y-blue-dark)",
+                            }}
+                          >
+                            <span className="truncate flex-1">{x.payee}</span>
+                            <span className="y-num shrink-0">{fmt(x.amount)}</span>
+                          </div>
+                        </Tooltip>
                       ))}
                       {overflow > 0 && (
                         <button

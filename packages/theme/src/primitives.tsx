@@ -1,6 +1,7 @@
 import React, {
   Children,
   isValidElement,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -23,8 +24,10 @@ export const money = (n: number, showZero = true) => {
   return `${rounded < 0 ? "-" : ""}$${s}`;
 };
 
-/* -------------------------------------------------- Button */
-type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+/* -------------------------------------------------- Button
+ * NOTE: `title` is deliberately omitted: native tooltips are banned in this
+ * app — wrap the button in <Tooltip tip="..."> instead. */
+type BtnProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> & {
   variant?: "default" | "primary" | "blue" | "danger" | "flat";
   size?: "sm" | "md" | "lg";
   active?: boolean;
@@ -1096,18 +1099,20 @@ export const Pill: React.FC<{
   "aria-label"?: string;
 }> = ({ tone = "green", children, className, style, onClick, title, ...rest }) => {
   const Tag = onClick ? "button" : "span";
-  return (
+  const inner = (
     <Tag
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      title={title}
       {...rest}
+      aria-label={rest["aria-label"] ?? title}
       className={cx("y-pill", `y-pill--${tone}`, className)}
       style={style}
     >
       {children}
     </Tag>
   );
+  // `title` renders as the custom <Tooltip>, never as a native tooltip.
+  return title ? <Tooltip tip={title}>{inner}</Tooltip> : inner;
 };
 
 export const balanceTone = (n: number): "green" | "red" | "grey" =>
@@ -1174,24 +1179,96 @@ export const Tabs: React.FC<{
   </div>
 );
 
-/* -------------------------------------------------- Tooltip */
-export const Tooltip: React.FC<{ tip: React.ReactNode; children: React.ReactNode }> = ({
-  tip,
-  children,
-}) => {
+/* -------------------------------------------------- Tooltip
+ * The ONLY tooltip in this app. Native `title` attributes are banned (they
+ * are unstyled, slow, keyboard-inaccessible, and inconsistent across
+ * browsers) — wrap the element in <Tooltip tip="..."> instead.
+ * Shows on hover AND keyboard focus; hides on leave, blur, or Escape.
+ *
+ * The bubble renders in a portal on document.body with `position: fixed`,
+ * so no `overflow: hidden/auto` ancestor (sidebar, inspector, dropdowns)
+ * can clip it. It flips to the opposite side when there is no room and its
+ * center is clamped so wide tips stay inside the viewport. */
+export const Tooltip: React.FC<{
+  tip: React.ReactNode;
+  children: React.ReactNode;
+  side?: "top" | "bottom";
+  className?: string;
+}> = ({ tip, children, side = "top", className }) => {
   const [on, setOn] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const tipRef = useRef<HTMLSpanElement | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  const place = useCallback(() => {
+    const wrap = wrapRef.current;
+    const el = tipRef.current;
+    if (!wrap || !el) return;
+    const r = wrap.getBoundingClientRect();
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const gap = 7;
+    const pad = 8;
+    const wantAbove = side === "top";
+    const roomAbove = r.top - h - gap >= pad;
+    const roomBelow = window.innerHeight - r.bottom - h - gap >= pad;
+    const above = wantAbove ? roomAbove || !roomBelow : !roomBelow && roomAbove;
+    const center = r.left + r.width / 2;
+    const left = Math.max(pad + w / 2, Math.min(window.innerWidth - pad - w / 2, center));
+    setPos({ left, top: above ? r.top - h - gap : r.bottom + gap });
+  }, [side]);
+
+  useLayoutEffect(() => {
+    if (!on) {
+      setPos(null);
+      return;
+    }
+    place();
+  }, [on, tip, place]);
+
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOn(false);
+    };
+    const re = () => place();
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", re);
+    window.addEventListener("scroll", re, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", re);
+      window.removeEventListener("scroll", re, true);
+    };
+  }, [on, place]);
+
+  if (tip == null || tip === false || tip === "") return <>{children}</>;
   return (
     <span
-      className="relative inline-flex"
+      ref={wrapRef}
+      className={cx("y-tip-wrap relative inline-flex", className)}
       onMouseEnter={() => setOn(true)}
       onMouseLeave={() => setOn(false)}
+      onFocus={() => setOn(true)}
+      onBlur={() => setOn(false)}
     >
       {children}
-      {on && (
-        <span className="y-tip absolute z-30 left-1/2 -translate-x-1/2 bottom-[calc(100%+7px)] whitespace-nowrap">
-          {tip}
-        </span>
-      )}
+      {on &&
+        createPortal(
+          <span
+            ref={tipRef}
+            role="tooltip"
+            className="y-tip pointer-events-none fixed left-0 top-0 z-[80] w-max max-w-[min(320px,calc(100vw-16px))] whitespace-normal text-center"
+            style={
+              pos
+                ? { left: pos.left, top: pos.top, transform: "translateX(-50%)" }
+                : { visibility: "hidden" }
+            }
+          >
+            {tip}
+          </span>,
+          document.body
+        )}
     </span>
   );
 };
@@ -1216,15 +1293,17 @@ export const ClearedFlag: React.FC<{
   disabled?: boolean;
 }> = ({ state, onCycle, disabled }) => {
   const interactive = !!onCycle && !disabled;
+  const label = state === "c" ? "Cleared" : state === "r" ? "Reconciled" : "Uncleared";
   const inner = (
-    <span
-      className={cx(
-        "y-cleared",
-        `y-cleared--${state}`,
-        interactive && "cursor-pointer"
-      )}
-      title={state === "c" ? "Cleared" : state === "r" ? "Reconciled" : "Uncleared"}
-      onClick={onCycle}
+    <Tooltip tip={label}>
+      <span
+        className={cx(
+          "y-cleared",
+          `y-cleared--${state}`,
+          interactive && "cursor-pointer"
+        )}
+        aria-label={label}
+        onClick={onCycle}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
       onKeyDown={
@@ -1239,7 +1318,8 @@ export const ClearedFlag: React.FC<{
       }
     >
       {state === "u" ? "U" : state === "r" ? "R" : "C"}
-    </span>
+      </span>
+    </Tooltip>
   );
   return inner;
 };
@@ -1296,29 +1376,30 @@ export const FlagPicker: React.FC<{
       {FLAG_COLORS.map((c) => {
         const active = value === c;
         return (
-          <button
-            key={c}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            aria-label={FLAG_LABEL[c]}
-            title={FLAG_LABEL[c]}
-            onClick={() => onChange(c)}
-            className={cx("y-flag-swatch", active && "is-active")}
-            style={{ background: FLAG_HEX[c] }}
-          />
+          <Tooltip key={c} tip={FLAG_LABEL[c]}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={FLAG_LABEL[c]}
+              onClick={() => onChange(c)}
+              className={cx("y-flag-swatch", active && "is-active")}
+              style={{ background: FLAG_HEX[c] }}
+            />
+          </Tooltip>
         );
       })}
       {value != null && (
-        <button
-          type="button"
-          aria-label="Clear flag"
-          title="Clear flag"
-          onClick={() => onChange(null)}
-          className="y-flag-clear"
-        >
-          ×
-        </button>
+        <Tooltip tip="Clear flag">
+          <button
+            type="button"
+            aria-label="Clear flag"
+            onClick={() => onChange(null)}
+            className="y-flag-clear"
+          >
+            ×
+          </button>
+        </Tooltip>
       )}
     </div>
   );
@@ -1396,26 +1477,24 @@ export const FlagCell: React.FC<{
   // way to switch away from it.
   if (isDuplicate) {
     return (
-      <span
-        className="y-flag-cell"
-        aria-label="Flag: Duplicate"
-        title="Duplicate transaction — remove one of the matching transactions and rerun the duplicate check"
-      >
-        <span className="y-cleared y-cleared--duplicate">D</span>
-      </span>
+      <Tooltip tip="Duplicate transaction — remove one of the matching transactions and rerun the duplicate check">
+        <span className="y-flag-cell" aria-label="Flag: Duplicate">
+          <span className="y-cleared y-cleared--duplicate">D</span>
+        </span>
+      </Tooltip>
     );
   }
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-label={color != null ? `Flag: ${FLAG_LABEL[color]}` : "No flag"}
-        title={color != null ? `Flag: ${FLAG_LABEL[color]}` : "Add a flag"}
-        onClick={toggle}
+      <Tooltip tip={color != null ? `Flag: ${FLAG_LABEL[color]}` : "Add a flag"}>
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={color != null ? `Flag: ${FLAG_LABEL[color]}` : "No flag"}
+          onClick={toggle}
         className={cx("y-flag-cell", interactive && "cursor-pointer")}
         style={{ opacity: disabled ? 0.45 : 1 }}
       >
@@ -1424,7 +1503,8 @@ export const FlagCell: React.FC<{
         ) : (
           <span className="y-flag y-flag--empty" />
         )}
-      </button>
+        </button>
+      </Tooltip>
       {open &&
         createPortal(
           <div

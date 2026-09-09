@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Icon, Notice, Button } from "@ynab/theme";
+import { Icon, Notice, Button, Tooltip } from "@ynab/theme";
 import { Modal, Btn, inputCls } from "./ui.js";
 
 export type SnapshotSummary = {
@@ -177,29 +177,33 @@ export function SnapshotsView({
               <tbody>
                 {snapshots.map((s) => (
                   <tr key={s.id} className="y-row">
-                    <td className="truncate max-w-[280px]" title={s.name}>
-                      {s.name}
+                    <td className="truncate max-w-[280px]">
+                      <Tooltip tip={s.name} className="block max-w-full">
+                        <span className="block truncate">{s.name}</span>
+                      </Tooltip>
                     </td>
                     <td className="y-num whitespace-nowrap">{formatSnapshotDate(s.createdAt)}</td>
                     <td className="y-num whitespace-nowrap">{formatSnapshotSize(s.sizeBytes)}</td>
                     <td>
                       <div className="flex items-center gap-1">
-                        <button
-                          className="y-icon-btn"
-                          title="Restore this snapshot"
-                          aria-label={`Restore snapshot ${s.name}`}
-                          onClick={() => setRestoringId(s.id)}
-                        >
-                          <Icon name="clock" size={12} />
-                        </button>
-                        <button
-                          className="y-icon-btn"
-                          title="Delete snapshot"
-                          aria-label={`Delete snapshot ${s.name}`}
-                          onClick={() => setDeletingId(s.id)}
-                        >
+                        <Tooltip tip="Restore this snapshot">
+                          <button
+                            className="y-icon-btn"
+                            aria-label={`Restore snapshot ${s.name}`}
+                            onClick={() => setRestoringId(s.id)}
+                          >
+                            <Icon name="clock" size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip tip="Delete snapshot">
+                          <button
+                            className="y-icon-btn"
+                            aria-label={`Delete snapshot ${s.name}`}
+                            onClick={() => setDeletingId(s.id)}
+                          >
                           <Icon name="trash" size={12} />
-                        </button>
+                          </button>
+                        </Tooltip>
                       </div>
                     </td>
                   </tr>

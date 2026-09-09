@@ -12,7 +12,7 @@ import {
   getSpendingTransactions,
   type SpendingTrendsResult,
 } from "@ynab/logic";
-import { Button, Panel, Icon } from "@ynab/theme";
+import { Button, Panel, Icon, Tooltip } from "@ynab/theme";
 import {
   AxisBreakMark,
   AxisBreakMask,
@@ -415,7 +415,7 @@ const ConstituentTable = memo(function ConstituentTable({
                 onHoverId?.(null);
                 onDrill(c.id);
               }}
-              title={`Click to drill down into ${c.name}`}
+              aria-label={`Click to drill down into ${c.name}`}
             >
               <td>
                 <div className="flex items-center gap-2 min-w-0">
@@ -427,9 +427,11 @@ const ConstituentTable = memo(function ConstituentTable({
                         "inset 0 1px 0 rgba(255,255,255,0.4), 0 0 0 1px rgba(0,0,0,0.1)",
                     }}
                   />
-                  <span className="truncate font-medium text-[var(--y-ink)]">
-                    {c.name}
-                  </span>
+                  <Tooltip tip={`Click to drill down into ${c.name}`}>
+                    <span className="truncate font-medium text-[var(--y-ink)]">
+                      {c.name}
+                    </span>
+                  </Tooltip>
                 </div>
               </td>
               <td className="num y-num font-medium text-[var(--y-ink-soft)] whitespace-nowrap">
@@ -481,14 +483,11 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
             <span className="font-medium text-[var(--y-blue)]">
               Showing: {monthLabel(selectedMonth)}
             </span>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={onClearMonth}
-              title="Show all months"
-            >
-              Show All Months
-            </Button>
+            <Tooltip tip="Show all months">
+              <Button size="sm" variant="default" onClick={onClearMonth}>
+                Show All Months
+              </Button>
+            </Tooltip>
           </div>
         ) : (
           <span className="text-[11px] text-[var(--y-ink-faint)]">
@@ -523,13 +522,15 @@ const CategoryTransactionsTable = memo(function CategoryTransactionsTable({
                     key={t.id}
                     className={`y-row ${idx % 2 === 1 ? "alt" : ""} cursor-pointer hover:bg-[var(--y-row-sel)]`}
                     onClick={() => onSelectTransaction?.(t)}
-                    title={`Click to view transaction in ${accountMap.get(t.accountId) ?? "Account"}`}
+                    aria-label={`Click to view transaction in ${accountMap.get(t.accountId) ?? "Account"}`}
                   >
                     <td className="font-mono whitespace-nowrap text-[11px] text-[var(--y-ink-soft)]">
                       {t.date}
                     </td>
                     <td className="font-medium text-[var(--y-ink)]">
-                      <div className="truncate">{t.payee || "—"}</div>
+                      <Tooltip tip={`Click to view transaction in ${accountMap.get(t.accountId) ?? "Account"}`}>
+                        <div className="truncate">{t.payee || "—"}</div>
+                      </Tooltip>
                     </td>
                     <td className="text-[var(--y-ink-soft)]">
                       <div className="truncate">{accountMap.get(t.accountId) ?? "Account"}</div>
@@ -1260,18 +1261,19 @@ export function SpendingTrendsReport({
           )}
 
           {trends.drillLevel !== "all" && (
-            <Button
-              size="sm"
-              variant="default"
-              className="ml-2 h-[22px] px-2 text-[10.5px]"
-              onClick={() => {
-                if (trends.drillLevel === "category") handleGoToGroup();
-                else handleGoToAll();
-              }}
-              title="Navigate up one level"
-            >
-              ↑ Up
-            </Button>
+            <Tooltip tip="Navigate up one level">
+              <Button
+                size="sm"
+                variant="default"
+                className="ml-2 h-[22px] px-2 text-[10.5px]"
+                onClick={() => {
+                  if (trends.drillLevel === "category") handleGoToGroup();
+                  else handleGoToAll();
+                }}
+              >
+                ↑ Up
+              </Button>
+            </Tooltip>
           )}
         </div>
 
@@ -1296,43 +1298,47 @@ export function SpendingTrendsReport({
               Scale
             </span>
             <div className="y-seg">
-              <button
-                type="button"
-                className={
-                  "y-btn y-btn--sm " +
-                  (scaleMode === "linear" ? "y-btn--primary is-on" : "")
-                }
-                onClick={() => setScaleMode("linear")}
-                title="Linear scale"
-              >
-                Linear
-              </button>
-              <button
-                type="button"
-                className={
-                  "y-btn y-btn--sm " +
-                  (scaleMode === "log" ? "y-btn--primary is-on" : "")
-                }
-                onClick={() => setScaleMode("log")}
-                title="Logarithmic scale"
-              >
-                Log
-              </button>
+              <Tooltip tip="Linear scale">
+                <button
+                  type="button"
+                  className={
+                    "y-btn y-btn--sm " +
+                    (scaleMode === "linear" ? "y-btn--primary is-on" : "")
+                  }
+                  onClick={() => setScaleMode("linear")}
+                >
+                  Linear
+                </button>
+              </Tooltip>
+              <Tooltip tip="Logarithmic scale">
+                <button
+                  type="button"
+                  className={
+                    "y-btn y-btn--sm " +
+                    (scaleMode === "log" ? "y-btn--primary is-on" : "")
+                  }
+                  onClick={() => setScaleMode("log")}
+                >
+                  Log
+                </button>
+              </Tooltip>
             </div>
           </div>
 
           {trends.drillLevel !== "category" && (
             <div className="relative" ref={filterRef}>
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => setFilterOpen((o) => !o)}
-                className="flex items-center gap-1.5 text-[11px]"
-                title="Filter included categories"
-              >
-                <span>{filterButtonLabel}</span>
-                <Icon name="chevronDown" size={10} />
-              </Button>
+              <Tooltip tip="Filter included categories">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => setFilterOpen((o) => !o)}
+                  className="flex items-center gap-1.5 text-[11px]"
+                  aria-label="Filter included categories"
+                >
+                  <span>{filterButtonLabel}</span>
+                  <Icon name="chevronDown" size={10} />
+                </Button>
+              </Tooltip>
 
             {/* Category Filter Popover Menu */}
             {filterOpen && (

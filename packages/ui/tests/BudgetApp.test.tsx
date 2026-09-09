@@ -176,7 +176,7 @@ describe("BudgetApp", () => {
   it("navigates to the Settings view from the Inspector gear menu", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByTitle("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByText("Rename rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
   });
@@ -184,7 +184,7 @@ describe("BudgetApp", () => {
   it("closes the settings overlay when a sidebar nav item is clicked (sidebar stays live)", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-    fireEvent.click(screen.getByTitle("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByText("Rename rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
     // The sidebar remains interactive while Settings is open — clicking a
@@ -892,7 +892,7 @@ describe("BudgetApp", () => {
     try {
       const { api } = makeApi();
       render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       fireEvent.click(screen.getByText("Page Visibility"));
       expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
       for (const name of ["Budget", "Reports", "Calendar", "Projections", "Recurring", "Transactions"]) {
@@ -911,7 +911,7 @@ describe("BudgetApp", () => {
       // Starts on the Budget view.
       expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       fireEvent.click(screen.getByText("Page Visibility"));
 
       // Hide Budget while on Budget.
@@ -935,7 +935,7 @@ describe("BudgetApp", () => {
     try {
       const { api } = makeApi();
       render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
-      fireEvent.click(screen.getByTitle("Settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       fireEvent.click(screen.getByText("Page Visibility"));
 
       // Hide everything except Transactions: each hide moves to the next page.

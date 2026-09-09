@@ -748,6 +748,25 @@ body::after {
 .y-seg .y-btn:last-child {
   border-radius: 0 3px 3px 0;
 }
+/* Custom <Tooltip> wrappers inside segmented groups: a wrapper span would
+   otherwise break the joined-button look (:first-child/:last-child match
+   every wrapped button). Re-apply the outer radii and the -1px overlap. */
+.y-seg > .y-tip-wrap {
+  display: inline-flex;
+  min-width: 0;
+}
+.y-seg > .y-tip-wrap:first-child .y-btn {
+  border-radius: 3px 0 0 3px;
+}
+.y-seg > .y-tip-wrap:last-child .y-btn {
+  border-radius: 0 3px 3px 0;
+}
+.y-seg > .y-tip-wrap + .y-tip-wrap {
+  margin-left: -1px;
+}
+.y-seg > .y-tip-wrap:not(:first-child):not(:last-child) .y-btn {
+  border-radius: 0;
+}
 
 /* ---------- toolbar ---------- */
 .y-toolbar {

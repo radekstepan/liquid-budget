@@ -9,6 +9,7 @@ import {
   Button,
   Toolbar,
   ToolbarSep,
+  Tooltip,
   cx,
 } from "@ynab/theme";
 
@@ -382,27 +383,28 @@ export const BudgetView = memo(function BudgetView({
           maxYear={maxYear}
           nextDisabled={!canGoRight}
         />
-        <Button
-          size="sm"
-          variant={!hasThisMonthInView ? "blue" : "default"}
-          onClick={() => {
-            onSetMonth?.(todayMonth);
-            if (showMulti && currentMonthThRef.current) {
-              if (typeof currentMonthThRef.current.scrollIntoView === "function") {
-                currentMonthThRef.current.scrollIntoView({
-                  behavior: "smooth",
-                  inline: "center",
-                  block: "nearest",
-                });
+        <Tooltip tip={hasThisMonthInView ? "Current month is in view" : "Jump to current month"} side="bottom">
+          <Button
+            size="sm"
+            variant={!hasThisMonthInView ? "blue" : "default"}
+            onClick={() => {
+              onSetMonth?.(todayMonth);
+              if (showMulti && currentMonthThRef.current) {
+                if (typeof currentMonthThRef.current.scrollIntoView === "function") {
+                  currentMonthThRef.current.scrollIntoView({
+                    behavior: "smooth",
+                    inline: "center",
+                    block: "nearest",
+                  });
+                }
               }
-            }
-          }}
-          data-testid="today-btn"
-          title={hasThisMonthInView ? "Current month is in view" : "Jump to current month"}
-          className={hasThisMonthInView ? "text-[var(--y-ink-soft)]" : ""}
-        >
-          <Icon name="calendar" size={11} color={!hasThisMonthInView ? "#fff" : "var(--y-ink-soft)"} /> Today
-        </Button>
+            }}
+            data-testid="today-btn"
+            className={hasThisMonthInView ? "text-[var(--y-ink-soft)]" : ""}
+          >
+            <Icon name="calendar" size={11} color={!hasThisMonthInView ? "#fff" : "var(--y-ink-soft)"} /> Today
+          </Button>
+        </Tooltip>
         <ToolbarSep />
         <Button onClick={onAddGroup} size="sm">
           <Icon name="plus" size={11} /> Master Category
@@ -730,26 +732,27 @@ function MonthQuickBudget({
 
   return (
     <span ref={wrapRef} className={cx("y-month-qb", open && "is-open")}>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (open) onClose();
-          else {
-            resolvePlace();
-            onOpen();
-          }
-        }}
-        aria-label={`Quick budget options for ${label}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={`Quick Budget — ${label}`}
-        data-testid={`quick-budget-trigger-${month}`}
-        className="y-month-qb-btn"
-      >
-        <Icon name="dots" size={12} />
-      </button>
+      <Tooltip tip={`Quick Budget — ${label}`}>
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (open) onClose();
+            else {
+              resolvePlace();
+              onOpen();
+            }
+          }}
+          aria-label={`Quick budget options for ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-testid={`quick-budget-trigger-${month}`}
+          className="y-month-qb-btn"
+        >
+          <Icon name="dots" size={12} />
+        </button>
+      </Tooltip>
       {open && (
         <span
           role="menu"
@@ -775,50 +778,54 @@ function MonthQuickBudget({
               </button>
             )}
           </span>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("lastMonth")}
-            className="y-dropdown-item y-month-qb-item"
-            title="Set budgeted amounts to last month's values"
-            data-testid={`quick-budget-last-month-${month}`}
-          >
-            <span className="y-dropdown-item-label">Budgeted Last Month</span>
-            <span className="y-num">{fmt(lastMonth)}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("spentLastMonth")}
-            className="y-dropdown-item y-month-qb-item"
-            title="Set budgeted amounts to what was spent last month"
-            data-testid={`quick-budget-spent-last-month-${month}`}
-          >
-            <span className="y-dropdown-item-label">Spent Last Month</span>
-            <span className="y-num">{fmt(spentLastMonth)}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("avgBudgeted")}
-            className="y-dropdown-item y-month-qb-item"
-            title="Set budgeted amounts to average budgeted over last 3 months"
-            data-testid={`quick-budget-avg-budgeted-${month}`}
-          >
-            <span className="y-dropdown-item-label">Average Budgeted</span>
-            <span className="y-num">{fmt(avgBudgeted)}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("clear")}
-            className="y-dropdown-item y-month-qb-item"
-            title="Clear budgeted amounts to $0.00"
-            data-testid={`quick-budget-clear-${month}`}
-          >
-            <span className="y-dropdown-item-label">Set to Zero</span>
-            <span className="y-num">$0.00</span>
-          </button>
+          <Tooltip tip="Set budgeted amounts to last month's values" className="w-full">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => choose("lastMonth")}
+              className="y-dropdown-item y-month-qb-item"
+              data-testid={`quick-budget-last-month-${month}`}
+            >
+              <span className="y-dropdown-item-label">Budgeted Last Month</span>
+              <span className="y-num">{fmt(lastMonth)}</span>
+            </button>
+          </Tooltip>
+          <Tooltip tip="Set budgeted amounts to what was spent last month" className="w-full">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => choose("spentLastMonth")}
+              className="y-dropdown-item y-month-qb-item"
+              data-testid={`quick-budget-spent-last-month-${month}`}
+            >
+              <span className="y-dropdown-item-label">Spent Last Month</span>
+              <span className="y-num">{fmt(spentLastMonth)}</span>
+            </button>
+          </Tooltip>
+          <Tooltip tip="Set budgeted amounts to average budgeted over last 3 months" className="w-full">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => choose("avgBudgeted")}
+              className="y-dropdown-item y-month-qb-item"
+              data-testid={`quick-budget-avg-budgeted-${month}`}
+            >
+              <span className="y-dropdown-item-label">Average Budgeted</span>
+              <span className="y-num">{fmt(avgBudgeted)}</span>
+            </button>
+          </Tooltip>
+          <Tooltip tip="Clear budgeted amounts to $0.00" className="w-full">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => choose("clear")}
+              className="y-dropdown-item y-month-qb-item"
+              data-testid={`quick-budget-clear-${month}`}
+            >
+              <span className="y-dropdown-item-label">Set to Zero</span>
+              <span className="y-num">$0.00</span>
+            </button>
+          </Tooltip>
         </span>
       )}
     </span>
@@ -939,14 +946,15 @@ function GroupBlock({
               </span>
             </span>
             <span className="y-group-actions">
-              <button
-                onClick={() => onAddCategory()}
-                className="y-group-add-btn"
-                aria-label="Add category"
-                title="Add category"
-              >
-                <Icon name="plus" size={11} />
-              </button>
+              <Tooltip tip="Add category">
+                <button
+                  onClick={() => onAddCategory()}
+                  className="y-group-add-btn"
+                  aria-label="Add category"
+                >
+                  <Icon name="plus" size={11} />
+                </button>
+              </Tooltip>
             </span>
           </div>
         </td>
@@ -1033,17 +1041,18 @@ function GroupBlock({
                 <div className="flex items-center">
                   <span className="truncate">{r.category.name}</span>
                   <span className="y-cat-actions">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditCategory(r.category.id);
-                      }}
-                      className="y-cat-edit-btn"
-                      aria-label={`Edit ${r.category.name}`}
-                      title="Edit category"
-                    >
-                      <Icon name="edit" size={11} />
-                    </button>
+                    <Tooltip tip="Edit category">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditCategory(r.category.id);
+                        }}
+                        className="y-cat-edit-btn"
+                        aria-label={`Edit ${r.category.name}`}
+                      >
+                        <Icon name="edit" size={11} />
+                      </button>
+                    </Tooltip>
                   </span>
                 </div>
               </td>
@@ -1086,34 +1095,39 @@ function GroupBlock({
                     <td className={cx("num y-num", COL_V, isToday(currentMonth) && "y-grid-col--current-last")} style={{ color: balanceColor(r.available) }}>
                       {fmt(r.available)}
                       {r.available < 0 && r.category.overspendCarriesOver && (
-                        <span
-                          className="ml-1 text-red-600 font-bold"
-                          title="Red Arrow to the Right: Overspending carries over to next month"
-                          aria-label="Red arrow: carry over"
-                        >
-                          ➔
-                        </span>
+                        <Tooltip tip="Red Arrow to the Right: Overspending carries over to next month">
+                          <span
+                            className="ml-1 text-red-600 font-bold"
+                            aria-label="Red arrow: carry over"
+                          >
+                            ➔
+                          </span>
+                        </Tooltip>
                       )}
                       {r.available < 0 && r.assigned > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => onAssign(r.category.id, 0, currentMonth)}
-                          className="ml-1.5 text-[10px] underline cursor-pointer"
-                          style={{ color: "var(--y-red)" }}
-                          aria-label={`Unassign ${fmt(r.assigned)} from ${r.category.name}`}
-                          title="Set assigned to 0"
-                        >
-                          Unassign {fmt(r.assigned)}
-                        </button>
+                        <Tooltip tip="Set assigned to 0">
+                          <button
+                            type="button"
+                            onClick={() => onAssign(r.category.id, 0, currentMonth)}
+                            className="ml-1.5 text-[10px] underline cursor-pointer"
+                            style={{ color: "var(--y-red)" }}
+                            aria-label={`Unassign ${fmt(r.assigned)} from ${r.category.name}`}
+                          >
+                            Unassign {fmt(r.assigned)}
+                          </button>
+                        </Tooltip>
                       )}
                       {r.available < 0 && r.assigned === 0 && (
-                        <span
-                          className="ml-1.5 text-[10px]"
-                          style={{ color: "var(--y-ink-faint)" }}
-                          title={`This category has ${fmt(-r.outflow)} in outflows with $0 assigned. Assign more to cover it, or the overspending will be absorbed into next month's TBB.`}
+                        <Tooltip
+                          tip={`This category has ${fmt(-r.outflow)} in outflows with $0 assigned. Assign more to cover it, or the overspending will be absorbed into next month's TBB.`}
                         >
-                          overspent
-                        </span>
+                          <span
+                            className="ml-1.5 text-[10px]"
+                            style={{ color: "var(--y-ink-faint)" }}
+                          >
+                            overspent
+                          </span>
+                        </Tooltip>
                       )}
                     </td>
                   </>
@@ -1202,13 +1216,14 @@ function MonthCells({
       <td className={cx("num y-num", COL_V, lastCls)} style={{ color: balanceColor(row.available) }}>
         {fmt(row.available)}
         {row.available < 0 && row.category.overspendCarriesOver && (
-          <span
-            className="ml-1 text-red-600 font-bold"
-            title="Red Arrow to the Right: Overspending carries over to next month"
-            aria-label="Red arrow: carry over"
-          >
-            ➔
-          </span>
+          <Tooltip tip="Red Arrow to the Right: Overspending carries over to next month">
+            <span
+              className="ml-1 text-red-600 font-bold"
+              aria-label="Red arrow: carry over"
+            >
+              ➔
+            </span>
+          </Tooltip>
         )}
       </td>
     </>
@@ -1258,42 +1273,46 @@ function CategoryMonthCell({
     categoryId != null ? quickFill?.lastMonthAssignments?.get(categoryId) : undefined;
 
   if (editing) {
+    const preview = (() => {
+      const n = evalAmount(draft);
+      if (n == null || !Number.isFinite(n)) return undefined;
+      if (!/[+\-*/]/.test(draft.replace(/^[+-]/, ""))) return undefined;
+      return `= ${fmt(dollarsToCents(n))}`;
+    })();
     return (
-      <input
-        ref={inputRef}
-        size={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-        onClick={(e) => e.stopPropagation()}
-        title={(() => {
-          const n = evalAmount(draft);
-          if (n == null || !Number.isFinite(n)) return undefined;
-          if (!/[+\-*/]/.test(draft.replace(/^[+-]/, ""))) return undefined;
-          return `= ${fmt(dollarsToCents(n))}`;
-        })()}
-        className="y-inline-amt"
-      />
+      <Tooltip tip={preview}>
+        <input
+          ref={inputRef}
+          size={1}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={preview ?? "Edit assigned amount"}
+          className="y-inline-amt"
+        />
+      </Tooltip>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        setDraft((value / 100).toFixed(2));
-        setEditing(true);
-      }}
-      className="y-inline-amt cursor-text"
-      style={{ color: "var(--y-ink)" }}
-      title={lastMonthVal != null ? `Last month: ${fmt(lastMonthVal)}` : undefined}
-    >
-      {fmt(value)}
-    </button>
+    <Tooltip tip={lastMonthVal != null ? `Last month: ${fmt(lastMonthVal)}` : undefined}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setDraft((value / 100).toFixed(2));
+          setEditing(true);
+        }}
+        className="y-inline-amt cursor-text"
+        style={{ color: "var(--y-ink)" }}
+      >
+        {fmt(value)}
+      </button>
+    </Tooltip>
   );
 }

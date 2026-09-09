@@ -121,7 +121,7 @@ test("importing through the Settings menu previews, swaps Payee/Memo, and import
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   await expect(page.getByText("TD Unlimited Chequing")).toBeVisible();
 
-  await page.getByTitle("Settings").click();
+  await page.getByRole("button", { name: "Settings" }).click();
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.getByText("Import CSV").click(),

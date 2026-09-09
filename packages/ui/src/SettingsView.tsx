@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { RenameRule } from "@ynab/logic";
 import { isPatternRule } from "@ynab/logic";
-import { Icon, Notice, Button } from "@ynab/theme";
+import { Icon, Notice, Button, Tooltip } from "@ynab/theme";
 import { Modal, Field, Btn, inputCls } from "./ui.js";
 
 type RuleDraft = {
@@ -123,26 +123,28 @@ export function SettingsView({
                     <td className="truncate">{r.targetPayee}</td>
                     <td>
                       <div className="flex items-center gap-1">
-                        <button
-                          className="y-icon-btn"
-                          title="Edit rule"
-                          aria-label={`Edit rule ${r.sourcePattern}`}
-                          onClick={() => {
-                            setError(null);
-                            setCreating(false);
-                            setEditing(r);
-                          }}
-                        >
-                          <Icon name="edit" size={12} />
-                        </button>
-                        <button
-                          className="y-icon-btn"
-                          title="Delete rule"
-                          aria-label={`Delete rule ${r.sourcePattern}`}
-                          onClick={() => setDeletingId(r.id)}
-                        >
-                          <Icon name="trash" size={12} />
-                        </button>
+                        <Tooltip tip="Edit rule">
+                          <button
+                            className="y-icon-btn"
+                            aria-label={`Edit rule ${r.sourcePattern}`}
+                            onClick={() => {
+                              setError(null);
+                              setCreating(false);
+                              setEditing(r);
+                            }}
+                          >
+                            <Icon name="edit" size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip tip="Delete rule">
+                          <button
+                            className="y-icon-btn"
+                            aria-label={`Delete rule ${r.sourcePattern}`}
+                            onClick={() => setDeletingId(r.id)}
+                          >
+                            <Icon name="trash" size={12} />
+                          </button>
+                        </Tooltip>
                       </div>
                     </td>
                   </tr>

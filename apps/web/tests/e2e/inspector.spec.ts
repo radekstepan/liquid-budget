@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("Settings cog opens the menu", async ({ page }) => {
-  await page.getByTitle("Settings").click();
+  await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText("Import YNAB4 Backup")).toBeVisible();
 });
 

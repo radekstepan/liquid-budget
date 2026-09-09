@@ -182,7 +182,12 @@ describe("Inspector", () => {
 
       expect(screen.getByText("Net Worth (12 mo)")).toBeInTheDocument();
       expect(screen.getByText("$16,000.00")).toBeInTheDocument();
-      expect(screen.getByTitle("12-Month Change")).toHaveTextContent("$6,000.00");
+      // No native tooltips: the badge hint renders as a custom tooltip on hover.
+      const badge = screen.getByTestId("net-worth-delta");
+      expect(badge).toHaveTextContent("$6,000.00");
+      expect(badge).not.toHaveAttribute("title");
+      fireEvent.mouseOver(badge.closest(".y-tip-wrap")!);
+      expect(screen.getByRole("tooltip")).toHaveTextContent("12-Month Change");
 
       const mayBtn = screen.getByRole("button", { name: /jump to may 2026/i });
       expect(mayBtn).toBeInTheDocument();
