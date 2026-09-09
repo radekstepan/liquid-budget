@@ -44,6 +44,27 @@ describe("TransactionsView", () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
+  it("disables add actions and shows Closed badge plus notes on a closed account register", () => {
+    const data = makeSeedBudgetData();
+    data.accounts = data.accounts.map((a) =>
+      a.id === 1 ? { ...a, archived: true, notes: "Closed after refinance" } : a
+    );
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+    expect(screen.getByText("Closed", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Closed after refinance")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add.*transaction/i })).toBeDisabled();
+  });
+
   it("renders a Balance column anchored at each account's current balance", () => {
     const data = makeSeedBudgetData();
     render(

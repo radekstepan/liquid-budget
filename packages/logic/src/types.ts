@@ -10,6 +10,7 @@ export type Account = {
   lastReconciledAt?: string | null;
   lastReconciledBalance?: number | string | null;
   archived?: boolean;
+  notes?: string | null;
   createdAt?: string | null;
 };
 

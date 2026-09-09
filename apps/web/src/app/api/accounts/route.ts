@@ -40,6 +40,7 @@ export async function POST(req: Request) {
       balance: body.balance,
       onBudget: body.onBudget,
       archived: body.archived,
+      notes: body.notes,
     });
     return Response.json(row);
   } catch (e) {
@@ -66,6 +67,7 @@ export async function PATCH(req: Request) {
   if (body.onBudget !== undefined) patch.onBudget = body.onBudget;
   if (body.sort !== undefined) patch.sort = body.sort;
   if (body.archived !== undefined) patch.archived = body.archived;
+  if (body.notes !== undefined) patch.notes = body.notes;
 
   try {
     const row = await updateAccount(getDefaultDb(), body.id, patch);

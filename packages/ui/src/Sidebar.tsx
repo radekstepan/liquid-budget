@@ -71,7 +71,7 @@ export const Sidebar = memo(function Sidebar({
   const groups = groupsWithSort.map((g) => g.groupLabel);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     Retirement: true,
-    "Archived Accounts": true,
+    "Closed Accounts": true,
   });
   const [nwOpen, setNwOpen] = useState(true);
 
@@ -303,6 +303,13 @@ export const Sidebar = memo(function Sidebar({
                         className={cx("y-side-item", isSelected && "is-sel")}
                       >
                         <span className="truncate">{a.name}</span>
+                        {a.notes ? (
+                          <Tooltip tip={a.notes}>
+                            <span className="shrink-0 opacity-70" aria-label={`Note on ${a.name}`}>
+                              <Icon name="note" size={10} />
+                            </span>
+                          </Tooltip>
+                        ) : null}
                         {accDueCount > 0 && (
                           <Tooltip tip={`${accDueCount} scheduled due`}>
                             <span
@@ -352,7 +359,7 @@ export const Sidebar = memo(function Sidebar({
               onClick={() =>
                 setCollapsed((c) => ({
                   ...c,
-                  "Archived Accounts": !c["Archived Accounts"],
+                  "Closed Accounts": !c["Closed Accounts"],
                 }))
               }
               className="y-side-head flex items-center gap-2 w-full"
@@ -360,11 +367,11 @@ export const Sidebar = memo(function Sidebar({
               <span
                 className={cx(
                   "y-tri ml-[4px] mr-1.5",
-                  !collapsed["Archived Accounts"] && "is-open"
+                  !collapsed["Closed Accounts"] && "is-open"
                 )}
                 style={{ borderLeftColor: "var(--y-side-sel-top)", flexShrink: 0 }}
               />
-              <span className="truncate min-w-0 flex-1">Archived Accounts</span>
+              <span className="truncate min-w-0 flex-1">Closed Accounts</span>
               <span
                 className="y-side-amt"
                 style={{ color: archivedTotal < 0 ? "var(--y-side-neg)" : undefined }}
@@ -372,7 +379,7 @@ export const Sidebar = memo(function Sidebar({
                 {fmt(archivedTotal)}
               </span>
             </button>
-            {!collapsed["Archived Accounts"] &&
+            {!collapsed["Closed Accounts"] &&
               archivedAccounts.map((a) => {
                 const isSelected = view === "transactions" && selectedAccountId === a.id;
                 const isDropTarget = accOverId === a.id;
@@ -395,6 +402,13 @@ export const Sidebar = memo(function Sidebar({
                       )}
                     >
                       <span className="truncate">{a.name}</span>
+                      {a.notes ? (
+                        <Tooltip tip={a.notes}>
+                          <span className="shrink-0 opacity-70" aria-label={`Note on ${a.name}`}>
+                            <Icon name="note" size={10} />
+                          </span>
+                        </Tooltip>
+                      ) : null}
                       <span
                         className="y-side-amt"
                         style={{

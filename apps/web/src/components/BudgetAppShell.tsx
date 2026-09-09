@@ -192,16 +192,23 @@ export function BudgetAppShell({
   const latestCompletedReloadSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
 
-  const addToast = useCallback((message: string, tone: ToastItem["tone"] = "info") => {
-    const t = createToast(message, tone);
-    setToasts((prev) => [...prev, t]);
-    const timer = setTimeout(() => {
-      setToasts((prev) => prev.filter((x) => x.id !== t.id));
-      toastTimers.current.delete(t.id);
-    }, 4000);
-    toastTimers.current.set(t.id, timer);
-    return t;
-  }, []);
+  const addToast = useCallback(
+    (
+      message: string,
+      tone: ToastItem["tone"] = "info",
+      opts?: { action?: { label: string; run: () => void }; durationMs?: number }
+    ) => {
+      const t = createToast(message, tone, opts?.action);
+      setToasts((prev) => [...prev, t]);
+      const timer = setTimeout(() => {
+        setToasts((prev) => prev.filter((x) => x.id !== t.id));
+        toastTimers.current.delete(t.id);
+      }, opts?.durationMs ?? 4000);
+      toastTimers.current.set(t.id, timer);
+      return t;
+    },
+    []
+  );
 
   const dismissToast = useCallback((id: number) => {
     const timer = toastTimers.current.get(id);
@@ -1507,63 +1514,85 @@ export function BudgetAppShell({
         )
       );
     },
-    updateAccount: async (id, patch) => {
+    updateAccount: async (id, patch, opts?: { undo?: boolean }) => {
       const prevAccount = dataRef.current?.accounts.find((a) => a.id === id);
       const prevAccountSnapshot = prevAccount ? { ...prevAccount } : null;
-      setData((prev) => {
-        if (!prev) return prev;
-        const accounts = prev.accounts.map((a) => {
-          if (a.id !== id) return a;
-          const nextKind = patch.kind !== undefined ? patch.kind : a.kind;
-          const nextOnBudget =
-            patch.onBudget !== undefined
-              ? patch.onBudget
-              : patch.kind !== undefined
-                ? patch.kind !== "offbudget"
-                : a.onBudget;
-          return {
-            ...a,
-            ...patch,
-            kind: nextKind,
-            onBudget: nextOnBudget,
-          };
+      const rollback = () => {
+        if (prevAccountSnapshot) {
+          setData((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              accounts: current.accounts.map((a) =>
+                a.id === id ? prevAccountSnapshot : a
+              ),
+              budgetIndex: undefined,
+            };
+          });
+        }
+        reload().catch(() => {});
+      };
+      const sendPatch = (p: typeof patch) => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const accounts = prev.accounts.map((a) => {
+            if (a.id !== id) return a;
+            const nextKind = p.kind !== undefined ? p.kind : a.kind;
+            const nextOnBudget =
+              p.onBudget !== undefined
+                ? p.onBudget
+                : p.kind !== undefined
+                  ? p.kind !== "offbudget"
+                  : a.onBudget;
+            return {
+              ...a,
+              ...p,
+              kind: nextKind,
+              onBudget: nextOnBudget,
+            };
+          });
+          return { ...prev, accounts, budgetIndex: undefined };
         });
-        return { ...prev, accounts, budgetIndex: undefined };
-      });
-      const successMsg =
-        patch.archived === true
-          ? "Account archived."
-          : patch.archived === false
-            ? "Account restored."
-            : "Account updated.";
-      return withSync(() =>
-        runMutation(
-          async () => {
-            return await jsonReq("/api/accounts", {
-              method: "PATCH",
-              body: JSON.stringify({ id, ...patch }),
-            });
-          },
-          { success: successMsg, failure: "Failed to update account." },
-          {
-            onRollback: () => {
-              if (prevAccountSnapshot) {
-                setData((current) => {
-                  if (!current) return current;
-                  return {
-                    ...current,
-                    accounts: current.accounts.map((a) =>
-                      a.id === id ? prevAccountSnapshot : a
-                    ),
-                    budgetIndex: undefined,
-                  };
-                });
-              }
-              reload().catch(() => {});
+        return withSync(() =>
+          runMutation(
+            async () => {
+              return await jsonReq("/api/accounts", {
+                method: "PATCH",
+                body: JSON.stringify({ id, ...p }),
+              });
             },
-          }
-        )
-      );
+            // Close/reopen toasts are raised manually below so they can
+            // carry an Undo action; other patches use the default toast.
+            p.archived !== undefined && opts?.undo !== false
+              ? { success: undefined, failure: "Failed to update account." }
+              : {
+                  success:
+                    p.archived === true
+                      ? "Account closed."
+                      : p.archived === false
+                        ? "Account reopened."
+                        : "Account updated.",
+                  failure: "Failed to update account.",
+                },
+            { onRollback: rollback }
+          )
+        );
+      };
+      const result = await sendPatch(patch);
+      void result;
+      if (patch.archived !== undefined && opts?.undo !== false) {
+        const undoArchived = !patch.archived;
+        addToast(patch.archived ? "Account closed." : "Account reopened.", "ok", {
+          durationMs: 8000,
+          action: {
+            label: "Undo",
+            run: () => {
+              void api.updateAccount(id, { archived: undoArchived }, { undo: false });
+            },
+          },
+        });
+      }
+      return;
     },
     reorderAccount: async (id, sort) => {
       return withSync(() =>

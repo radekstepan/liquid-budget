@@ -39,7 +39,7 @@ describe("GET /api/export", () => {
     expect(res.headers.get("Content-Disposition")).toContain(".csv");
 
     const text = await res.text();
-    expect(text).toContain("Type,ID,Name,Kind,Group,Balance,On Budget,Archived");
+    expect(text).toContain("Type,ID,Name,Kind,Group,Balance,On Budget,Archived,Notes");
     expect(text).toContain("Type,ID,AccountID,CategoryID,Date,Payee,Memo,Amount,Status,Flag,TransferAccountID,ParentID,IsIncome");
 
     // Ensure dollar formatting with decimal point (e.g., "0.00" or numbers like "123.45", "-50.00")

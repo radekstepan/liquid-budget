@@ -169,18 +169,74 @@ export async function isAccountOnBudget(db: Database, accountId: number): Promis
   return row?.onBudget ?? true;
 }
 
+/**
+ * Guard for closed accounts (`archived = true`). Used only when a row is
+ * *moved* onto a different account (edits staying on the current account
+ * remain allowed so history stays fixable). Creation paths piggyback on
+ * their existing account lookups instead — see closedAccountMessage.
+ */
+export async function assertTargetAccountsOpen(db: Database, accountIds: (number | null | undefined)[]): Promise<void> {
+  const ids = Array.from(new Set(accountIds.filter((id): id is number => id != null)));
+  if (ids.length === 0) return;
+  for (const id of ids) {
+    const [row] = await db
+      .select({ id: accounts.id, name: accounts.name, archived: accounts.archived })
+      .from(accounts)
+      .where(eq(accounts.id, id));
+    const message = closedAccountMessage(
+      row ? { archived: Boolean(row.archived), name: row.name } : null,
+      id
+    );
+    if (message) {
+      throw new TransactionError(message, 422);
+    }
+  }
+}
+
 export async function getAccountInfo(
   db: Database,
   accountId: number
-): Promise<{ onBudget: boolean; kind: string } | null> {
+): Promise<{ onBudget: boolean; kind: string; archived: boolean; name: string } | null> {
   const [row] = await db
-    .select({ onBudget: accounts.onBudget, kind: accounts.kind })
+    .select({ onBudget: accounts.onBudget, kind: accounts.kind, archived: accounts.archived, name: accounts.name })
     .from(accounts)
     .where(eq(accounts.id, accountId));
   if (!row) return null;
   const onBudget = row.onBudget ?? true;
   const kind = row.kind ?? (onBudget ? "liquid" : "offbudget");
-  return { onBudget, kind };
+  return { onBudget, kind, archived: Boolean(row.archived), name: row.name ?? "" };
+}
+
+/**
+ * Fetch the fields needed to validate a transfer destination (budget
+ * boundary + closed check) in a single lookup.
+ */
+export async function getTransferTargetInfo(
+  db: Database,
+  accountId: number
+): Promise<{ onBudget: boolean; archived: boolean; name: string } | null> {
+  const [row] = await db
+    .select({ onBudget: accounts.onBudget, archived: accounts.archived, name: accounts.name })
+    .from(accounts)
+    .where(eq(accounts.id, accountId));
+  if (!row) return null;
+  return { onBudget: row.onBudget ?? true, archived: Boolean(row.archived), name: row.name ?? "" };
+}
+
+/**
+ * Closed-account message helper. Returns the 422 message when the account
+ * info indicates a closed (`archived`) account, or null when the target is
+ * usable. Lets each query module throw its own error type
+ * (TransactionError vs RecurringError) without extra lookups.
+ */
+export function closedAccountMessage(
+  info: { archived?: boolean | null; name?: string | null } | null,
+  fallbackId: number
+): string | null {
+  if (info?.archived) {
+    return `Account "${info.name || fallbackId}" is closed. Reopen it before adding transactions.`;
+  }
+  return null;
 }
 
 async function childCount(db: Database, parentId: number): Promise<number> {
@@ -280,6 +336,10 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
 
   return withTransaction(db, async () => {
     const srcAccount = await getAccountInfo(db, input.accountId);
+    const closedSrc = closedAccountMessage(srcAccount, input.accountId);
+    if (closedSrc) {
+      throw new TransactionError(closedSrc, 422);
+    }
     const onBudget = srcAccount?.onBudget ?? true;
     const kind = srcAccount?.kind ?? "liquid";
     const isTransfer = input.transferAccountId != null;
@@ -293,7 +353,12 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       isIncome = false;
       incomeMonth = null;
     } else if (isTransfer) {
-      const destOnBudget = await isAccountOnBudget(db, input.transferAccountId!);
+      const destInfo = await getTransferTargetInfo(db, input.transferAccountId!);
+      const closedDest = closedAccountMessage(destInfo, input.transferAccountId!);
+      if (closedDest) {
+        throw new TransactionError(closedDest, 422);
+      }
+      const destOnBudget = destInfo?.onBudget ?? true;
       const classification = classifyBoundaryTransfer({
         srcOnBudget: onBudget,
         destOnBudget,
@@ -394,8 +459,18 @@ export async function createTransfer(
   }
 
   return withTransaction(db, async () => {
-    const srcOnBudget = await isAccountOnBudget(db, baseInput.accountId);
-    const destOnBudget = await isAccountOnBudget(db, destAccountId);
+    const srcInfo = await getAccountInfo(db, baseInput.accountId);
+    const closedSrc = closedAccountMessage(srcInfo, baseInput.accountId);
+    if (closedSrc) {
+      throw new TransactionError(closedSrc, 422);
+    }
+    const destInfo = await getTransferTargetInfo(db, destAccountId);
+    const closedDest = closedAccountMessage(destInfo, destAccountId);
+    if (closedDest) {
+      throw new TransactionError(closedDest, 422);
+    }
+    const srcOnBudget = srcInfo?.onBudget ?? true;
+    const destOnBudget = destInfo?.onBudget ?? true;
     const classification = classifyBoundaryTransfer({
       srcOnBudget,
       destOnBudget,
@@ -504,6 +579,10 @@ export async function createSplitWithChildren(
       .returning();
 
     const srcAccount = await getAccountInfo(db, parent.accountId);
+    const closedSrc = closedAccountMessage(srcAccount, parent.accountId);
+    if (closedSrc) {
+      throw new TransactionError(closedSrc, 422);
+    }
     const srcOnBudget = srcAccount?.onBudget ?? true;
     const srcKind = srcAccount?.kind ?? "liquid";
     const childRows = [];
@@ -517,7 +596,12 @@ export async function createSplitWithChildren(
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
-        const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+        const destInfo = await getTransferTargetInfo(db, transferAccountId);
+        const closedDest = closedAccountMessage(destInfo, transferAccountId);
+        if (closedDest) {
+          throw new TransactionError(closedDest, 422);
+        }
+        const destOnBudget = destInfo?.onBudget ?? true;
         const classification = classifyBoundaryTransfer({
           srcOnBudget,
           destOnBudget,
@@ -651,6 +735,15 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       accountId: candidateAccountId,
       transferAccountId: candidateTransferAccountId,
     });
+    // Moving a row (or its transfer leg) onto a closed account is blocked.
+    // Edits that stay on the current account remain allowed for history fixes.
+    const movesAccount = patch.accountId != null && Number(patch.accountId) !== existing.accountId;
+    const movesTransfer =
+      patch.transferAccountId !== undefined &&
+      (patch.transferAccountId != null ? Number(patch.transferAccountId) : null) !== existing.transferAccountId;
+    if (movesAccount || movesTransfer) {
+      await assertTargetAccountsOpen(db, [candidateAccountId, candidateTransferAccountId]);
+    }
   }
 
   const p: Record<string, unknown> = {};
@@ -1034,7 +1127,12 @@ export async function updateSplit(
       if (transferAccountId) {
         const destName = await getAccountName(db, transferAccountId);
         payee = `Transfer : ${destName ?? "Unknown"}`;
-        const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+        const destInfo = await getTransferTargetInfo(db, transferAccountId);
+        const closedDest = closedAccountMessage(destInfo, transferAccountId);
+        if (closedDest) {
+          throw new TransactionError(closedDest, 422);
+        }
+        const destOnBudget = destInfo?.onBudget ?? true;
         const classification = classifyBoundaryTransfer({
           srcOnBudget,
           destOnBudget,
@@ -1475,6 +1573,10 @@ export async function bulkUpdateTransactions(
 
       const newAccountId = patch.accountId != null ? Number(patch.accountId) : existing.accountId;
       const newAmount = patch.amount != null ? assertValidAmount(patch.amount) : Number(existing.amount);
+
+      if (patch.accountId != null && Number(patch.accountId) !== existing.accountId) {
+        await assertTargetAccountsOpen(db, [newAccountId]);
+      }
 
       assertEntityInvariants({
         accountId: newAccountId,

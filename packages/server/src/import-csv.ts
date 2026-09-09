@@ -108,6 +108,12 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     if (!account) {
       throw new TransactionError("Account not found", 404);
     }
+    if (account.archived) {
+      throw new TransactionError(
+        `Account "${account.name}" is closed. Reopen it before importing transactions.`,
+        422
+      );
+    }
     const allAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts);
     const accountNameById = new Map(allAccounts.map((a) => [a.id, a.name]));
 

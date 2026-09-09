@@ -458,7 +458,7 @@ describe("BudgetApp", () => {
     pushSpy.mockRestore();
   });
 
-  it("calls api.updateAccount with archived: true when archiving an account", async () => {
+  it("calls api.updateAccount with archived: true when closing an account", async () => {
     const { api, calls } = makeApi();
     const seed = makeSeedBudgetData();
     const account = seed.accounts.find((a) => a.id === 1);
@@ -469,9 +469,9 @@ describe("BudgetApp", () => {
     });
     fireEvent.click(editBtn);
 
-    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
+    fireEvent.click(screen.getByRole("button", { name: /close account/i }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
+      fireEvent.click(screen.getByRole("button", { name: /yes, close it/i }));
     });
 
     expect(
@@ -481,7 +481,7 @@ describe("BudgetApp", () => {
     ).toBe(true);
   });
 
-  it("calls api.updateAccount with archived: false when unarchiving an account", async () => {
+  it("calls api.updateAccount with archived: false when reopening an account", async () => {
     const { api, calls } = makeApi();
     const seed = makeSeedBudgetData();
     const archivedAccount = { ...seed.accounts[0]!, id: 101, name: "Old TD", archived: true };
@@ -491,8 +491,8 @@ describe("BudgetApp", () => {
     };
     render(<BudgetApp data={dataWithArchived} api={api} />);
 
-    // Expand archived accounts section
-    const archivedHead = screen.getByRole("button", { name: /archived accounts/i });
+    // Expand closed accounts section
+    const archivedHead = screen.getByRole("button", { name: /closed accounts/i });
     fireEvent.click(archivedHead);
 
     const editBtn = screen.getByRole("button", {
@@ -500,9 +500,9 @@ describe("BudgetApp", () => {
     });
     fireEvent.click(editBtn);
 
-    expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/edit account \(closed\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
+      fireEvent.click(screen.getByRole("button", { name: /reopen account/i }));
     });
 
     expect(
