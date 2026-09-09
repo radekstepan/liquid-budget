@@ -4,7 +4,6 @@ import type { View } from "./Sidebar.js";
 export const NAV_ORDER: View[] = [
   "budget",
   "reports",
-  "calendar",
   "transactions",
 ];
 
@@ -17,7 +16,6 @@ export type NavItemMeta = {
 export const NAV_ITEMS: NavItemMeta[] = [
   { key: "budget", label: "Budget", description: "Plan and assign money to categories each month." },
   { key: "reports", label: "Reports", description: "Spending, income and net-worth reports." },
-  { key: "calendar", label: "Calendar", description: "See transactions on a monthly calendar." },
   { key: "transactions", label: "Transactions", description: "Browse transactions across all accounts." },
 ];
 
@@ -26,7 +24,6 @@ export const NAV_VISIBILITY_STORAGE_KEY = "ynab:nav:visible";
 export const DEFAULT_NAV_VISIBILITY: Record<View, boolean> = {
   budget: true,
   reports: true,
-  calendar: true,
   transactions: true,
 };
 

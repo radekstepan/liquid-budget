@@ -4,7 +4,6 @@ export { BudgetView } from "./BudgetView.js";
 export { TransactionsView } from "./TransactionsView.js";
 export { ReportsView } from "./ReportsView.js";
 export { SpendingTrendsReport } from "./SpendingTrendsReport.js";
-export { CalendarView } from "./CalendarView.js";
 export { SettingsView } from "./SettingsView.js";
 export { MenuSettingsView } from "./MenuSettingsView.js";
 export {

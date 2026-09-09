@@ -11,7 +11,7 @@ const accounts: Account[] = [
 ];
 
 describe("Sidebar", () => {
-  it("renders all 3 top nav buttons", () => {
+  it("renders all 2 top nav buttons", () => {
     render(
       <Sidebar
         view="budget"
@@ -24,7 +24,6 @@ describe("Sidebar", () => {
     );
     expect(screen.getByRole("button", { name: /budget/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /calendar/i })).toBeInTheDocument();
   });
 
   it("hides nav items disabled via visibleViews", () => {
@@ -39,14 +38,12 @@ describe("Sidebar", () => {
         visibleViews={{
           budget: true,
           reports: true,
-          calendar: false,
           transactions: false,
         }}
       />
     );
     expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^reports$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^calendar$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^transactions/i })).not.toBeInTheDocument();
   });
 
@@ -63,7 +60,6 @@ describe("Sidebar", () => {
     );
     expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^reports$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^calendar$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^transactions/i })).toBeInTheDocument();
   });
 

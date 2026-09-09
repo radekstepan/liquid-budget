@@ -874,7 +874,7 @@ describe("BudgetApp", () => {
       fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       fireEvent.click(screen.getByText("Page Visibility"));
       expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
-      for (const name of ["Budget", "Reports", "Calendar", "Transactions"]) {
+      for (const name of ["Budget", "Reports", "Transactions"]) {
         expect(screen.getByRole("checkbox", { name })).toBeInTheDocument();
       }
     } finally {
@@ -918,7 +918,7 @@ describe("BudgetApp", () => {
       fireEvent.click(screen.getByText("Page Visibility"));
 
       // Hide everything except Transactions: each hide moves to the next page.
-      for (const name of ["Budget", "Reports", "Calendar"]) {
+      for (const name of ["Budget", "Reports"]) {
         fireEvent.click(screen.getByRole("checkbox", { name }));
       }
       // The last remaining page is greyed out and cannot be hidden.

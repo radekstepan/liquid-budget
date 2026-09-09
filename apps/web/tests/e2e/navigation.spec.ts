@@ -1,9 +1,8 @@
 // apps/web/tests/e2e/navigation.spec.ts
 //
-// Covers the sidebar nav (Sidebar.tsx:17-24, 80-94) and the
-// account → transactions deep-link (Sidebar.tsx:118-127 →
-// BudgetApp.tsx:215-218). Each view exposes a toolbar with a title
-// (e.g. "Reports", "Calendar") or a MonthNav, so we assert on those
+// Covers the sidebar nav and the
+// account → transactions deep-link. Each view exposes a toolbar with a title
+// (e.g. "Reports") or a MonthNav, so we assert on those
 // as mount signals.
 import { test, expect, type Page } from "@playwright/test";
 
@@ -19,7 +18,6 @@ test.beforeEach(async ({ page }) => {
 const NAV_ITEMS: { label: string; viewToolbar: string | RegExp; match?: string | RegExp }[] = [
   { label: "Budget", viewToolbar: /Master Category/ },
   { label: "Reports", viewToolbar: "Reports" },
-  { label: "Calendar", viewToolbar: "Calendar" },
   // The Transactions button's accessible name includes its running balance
   // (Sidebar.tsx y-side-amt), so it needs a regex match.
   { label: "Transactions", match: /^Transactions/, viewToolbar: "All Transactions" },
