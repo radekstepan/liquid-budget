@@ -29,17 +29,22 @@ test("Today button appears when viewing other months and jumps to current month"
   const todayBtn = page.getByRole("button", { name: /Today/i });
   await expect(todayBtn).toBeVisible();
 
-  // Step back until today leaves the viewport so the jump state engages.
+  // Step back until today leaves the viewport so the jump state engages. The
+  // state is surfaced through the custom tooltip (native `title` is banned).
+  const jumpTip = page.getByRole("tooltip", { name: "Jump to current month" });
   for (let i = 0; i < 5; i++) {
-    if ((await todayBtn.getAttribute("title")) === "Jump to current month") break;
+    await todayBtn.hover();
+    if (await jumpTip.isVisible()) break;
     await prevBtn.click();
   }
-  await expect(todayBtn).toHaveAttribute("title", "Jump to current month");
+  await todayBtn.hover();
+  await expect(jumpTip).toBeVisible();
 
   // Click Today — back on today's month the button flips to its soft state
   // and the picker shows the real today.
   await todayBtn.click();
-  await expect(todayBtn).toHaveAttribute("title", "Current month is in view");
+  await todayBtn.hover();
+  await expect(page.getByRole("tooltip", { name: "Current month is in view" })).toBeVisible();
   const now = new Date();
   const picker = page.getByTestId("month-nav-picker");
   await expect(picker.getByRole("button", { name: "Month" })).toHaveText(MONTHS_LONG[now.getMonth()]!);

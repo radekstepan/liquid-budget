@@ -9,7 +9,7 @@ import {
   recurringFlavour,
   todayISO,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, money, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, Tooltip, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number | null };
@@ -66,24 +66,25 @@ function SortableTh({
       className={className}
       style={style}
     >
-      <button
-        type="button"
-        className="y-sort-btn"
-        onClick={() => onSort(sortKey)}
-        title={title ?? `Sort by ${label}`}
-      >
-        {label}
-        {/* The indicator slot is always reserved (even when inactive) so a
-            column's intrinsic width never changes when the sort key moves —
-            otherwise the register columns would reflow on every click. */}
-        <span
-          aria-hidden="true"
-          className="y-sort-ind"
-          style={{ display: "inline-block", width: 10, fontSize: 8, textAlign: "center" }}
+      <Tooltip tip={title ?? `Sort by ${label}`} side="bottom">
+        <button
+          type="button"
+          className="y-sort-btn"
+          onClick={() => onSort(sortKey)}
         >
-          {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
-        </span>
-      </button>
+          {label}
+          {/* The indicator slot is always reserved (even when inactive) so a
+              column's intrinsic width never changes when the sort key moves —
+              otherwise the register columns would reflow on every click. */}
+          <span
+            aria-hidden="true"
+            className="y-sort-ind"
+            style={{ display: "inline-block", width: 10, fontSize: 8, textAlign: "center" }}
+          >
+            {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+          </span>
+        </button>
+      </Tooltip>
     </th>
   );
 }
@@ -989,18 +990,21 @@ export const TransactionsView = memo(function TransactionsView({
                         ) : (
                           <>
                             {isSplit && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                   e.stopPropagation();
-                                   toggleExpandSplit(t.id);
-                                }}
-                                className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors align-middle"
-                                aria-label={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
-                                title={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
+                              <Tooltip
+                                tip={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
                               >
-                                {isExpanded ? "▼" : "▶"}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                     e.stopPropagation();
+                                     toggleExpandSplit(t.id);
+                                  }}
+                                  className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors align-middle"
+                                  aria-label={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
+                                >
+                                  {isExpanded ? "▼" : "▶"}
+                                </button>
+                              </Tooltip>
                             )}
                             <span>{displayPayee}</span>
                           </>
@@ -1015,20 +1019,21 @@ export const TransactionsView = memo(function TransactionsView({
                         {isSplit ? (
                           "Split (Multiple Categories)"
                         ) : isTransfer && otherAccountId != null ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onGoToTransfer?.(otherAccountId, t.id);
-                            }}
-                            className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-blue-50/80 transition-colors cursor-pointer align-middle"
-                            style={{ color: "var(--y-blue)" }}
-                            title={`Go to transfer in ${otherAccountName}`}
-                            aria-label={`Go to transfer in ${otherAccountName}`}
-                          >
-                            <Icon name="swap" size={11} color="currentColor" />
-                            {catName ? <span className="truncate">{catName}</span> : null}
-                          </button>
+                          <Tooltip tip={`Go to transfer in ${otherAccountName}`}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onGoToTransfer?.(otherAccountId, t.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-blue-50/80 transition-colors cursor-pointer align-middle"
+                              style={{ color: "var(--y-blue)" }}
+                              aria-label={`Go to transfer in ${otherAccountName}`}
+                            >
+                              <Icon name="swap" size={11} color="currentColor" />
+                              {catName ? <span className="truncate">{catName}</span> : null}
+                            </button>
+                          </Tooltip>
                         ) : (
                           catName
                         )}
@@ -1096,38 +1101,43 @@ export const TransactionsView = memo(function TransactionsView({
             </Button>
           )}
 
-          <Button
-            onClick={toggleScheduledDrawer}
-            variant="default"
-            size="sm"
-            className="flex items-center gap-1.5"
-            title={showScheduledDrawer ? "Hide Scheduled Transactions drawer" : "Show Scheduled Transactions drawer"}
-          >
-            <Icon name="calendar" size={12} />
-            <span>Scheduled Transactions</span>
-            {dueScheduledCount > 0 ? (
-              <span className="y-badge ml-1" title={`${dueScheduledCount} due`}>
-                {dueScheduledCount}
-              </span>
-            ) : scheduledRows.length > 0 ? (
+          <Tooltip tip={showScheduledDrawer ? "Hide Scheduled Transactions drawer" : "Show Scheduled Transactions drawer"} side="bottom">
+            <Button
+              onClick={toggleScheduledDrawer}
+              variant="default"
+              size="sm"
+              className="flex items-center gap-1.5"
+              aria-label={showScheduledDrawer ? "Hide Scheduled Transactions drawer" : "Show Scheduled Transactions drawer"}
+            >
+              <Icon name="calendar" size={12} />
+              <span>Scheduled Transactions</span>
+              {dueScheduledCount > 0 ? (
+                <Tooltip tip={`${dueScheduledCount} due`}>
+                  <span className="y-badge ml-1">
+                    {dueScheduledCount}
+                  </span>
+                </Tooltip>
+              ) : scheduledRows.length > 0 ? (
               <span className="text-[10px] opacity-75 font-bold">({scheduledRows.length})</span>
             ) : null}
             <span className="text-[9px] ml-0.5">{showScheduledDrawer ? "▼" : "▲"}</span>
-          </Button>
+            </Button>
+          </Tooltip>
         </div>
 
         {filterAccount && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => onReconcile(filterAccount.id)}
-            title="Reconcile this account against your bank statement"
-            aria-label="Reconcile"
-            className="font-semibold"
-          >
-            <Icon name="reconcile" size={11} color="var(--y-ink)" />
+          <Tooltip tip="Reconcile this account against your bank statement" side="bottom">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => onReconcile(filterAccount.id)}
+              aria-label="Reconcile"
+              className="font-semibold"
+            >
+              <Icon name="reconcile" size={11} color="var(--y-ink)" />
             <span className="ml-1">Reconcile</span>
-          </Button>
+            </Button>
+          </Tooltip>
         )}
       </div>
 
@@ -1176,15 +1186,17 @@ export const TransactionsView = memo(function TransactionsView({
               </div>
             )}
 
-            <Button
-              variant="default"
-              size="sm"
-              onClick={toggleScheduledDrawer}
-              className="text-[11px] !py-0.5 !px-1.5 text-gray-500 ml-2"
-              title="Close drawer"
-            >
-              <span>✕</span>
-            </Button>
+            <Tooltip tip="Close drawer">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={toggleScheduledDrawer}
+                className="text-[11px] !py-0.5 !px-1.5 text-gray-500 ml-2"
+                aria-label="Close drawer"
+              >
+                <span>✕</span>
+              </Button>
+            </Tooltip>
           </div>
 
           {/* Drawer Scheduled Table */}

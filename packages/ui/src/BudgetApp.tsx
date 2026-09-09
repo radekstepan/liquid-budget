@@ -21,7 +21,7 @@ import {
 import { useLocalStorage } from "./useLocalStorage.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
-import { Icon } from "@ynab/theme";
+import { Icon, Tooltip } from "@ynab/theme";
 import { Inspector } from "./Inspector.js";
 import { BudgetView, isInternalGroup } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
@@ -1188,14 +1188,15 @@ export function BudgetApp({
                   background: "var(--y-chrome-top)",
                 }}
               >
-                <button
-                  className="y-icon-btn"
-                  onClick={() => setShowSettingsOverlay(false)}
-                  aria-label="Close"
-                  title="Close"
-                >
-                  <Icon name="x" size={13} />
-                </button>
+                <Tooltip tip="Close">
+                  <button
+                    className="y-icon-btn"
+                    onClick={() => setShowSettingsOverlay(false)}
+                    aria-label="Close"
+                  >
+                    <Icon name="x" size={13} />
+                  </button>
+                </Tooltip>
               </div>
               <div className="flex-1 overflow-hidden">
                 {settingsPage === "menu" ? (

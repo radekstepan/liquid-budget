@@ -198,7 +198,7 @@ describe("SpendingTrendsReport", () => {
     render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
 
     // Open category filter popover
-    const filterBtn = screen.getByTitle("Filter included categories");
+    const filterBtn = screen.getByRole("button", { name: "Filter included categories" });
     fireEvent.click(filterBtn);
 
     expect(screen.getByText("Filter Categories")).toBeInTheDocument();
@@ -298,7 +298,7 @@ describe("SpendingTrendsReport", () => {
     fireEvent.click(screen.getByText("Everyday Expenses"));
 
     // Open filter popover
-    const filterBtn = screen.getByTitle("Filter included categories");
+    const filterBtn = screen.getByRole("button", { name: "Filter included categories" });
     fireEvent.click(filterBtn);
 
     // Filter popover title shows the current group name

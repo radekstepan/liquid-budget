@@ -44,6 +44,6 @@ test("home page loads and renders the budget app", async ({ page }) => {
 
   // Settings cog lives in the Inspector header (Inspector.tsx:57-64).
   await expect(
-    page.getByTitle("Settings")
+    page.getByRole("button", { name: "Settings" })
   ).toBeVisible();
 });

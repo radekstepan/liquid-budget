@@ -38,7 +38,7 @@ import {
   toRecurringPayload,
   toTransactionPayload,
 } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, type SearchListOption } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
 
@@ -1300,23 +1300,24 @@ export function RecurringModal({
           <div className="flex items-center gap-2 mr-auto">
             <Btn onClick={onClose}>Cancel</Btn>
             {initial && onPost && (
-              <Btn
-                variant="primary"
-                title="Enter into register"
-                onClick={async () => {
-                  try {
-                    await onPost(initial.id);
-                  } catch {
-                    // The mutation layer already toasted the failure; keep
-                    // the modal open so the user can adjust and retry instead
-                    // of surfacing an unhandled rejection.
-                    return;
-                  }
-                  onClose();
-                }}
-              >
-                Enter Now
-              </Btn>
+              <Tooltip tip="Enter into register">
+                <Btn
+                  variant="primary"
+                  onClick={async () => {
+                    try {
+                      await onPost(initial.id);
+                    } catch {
+                      // The mutation layer already toasted the failure; keep
+                      // the modal open so the user can adjust and retry instead
+                      // of surfacing an unhandled rejection.
+                      return;
+                    }
+                    onClose();
+                  }}
+                >
+                  Enter Now
+                </Btn>
+              </Tooltip>
             )}
           </div>
           <div className="flex items-center gap-2 ml-auto">

@@ -17,7 +17,7 @@ test("Inspector Settings cog reveals Backup YNAB4 option and no CSV/JSON/SQLite 
   await page.goto("/");
   await waitForReady(page);
 
-  await page.getByTitle("Settings").click();
+  await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText("Backup YNAB4")).toBeVisible();
   await expect(page.getByText("Export as CSV")).toBeHidden();
   await expect(page.getByText("Export as JSON")).toBeHidden();

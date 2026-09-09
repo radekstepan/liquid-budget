@@ -10,7 +10,7 @@ import {
   recurringFlavour,
   groupRecurringByTimeline,
 } from "@ynab/logic";
-import { Icon, Toolbar, Button, Panel, MathCell, Pill } from "@ynab/theme";
+import { Icon, Toolbar, Button, Panel, MathCell, Pill, Tooltip } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
 
 export function RecurringView({
@@ -198,21 +198,9 @@ export function RecurringView({
         </div>
 
         <div className="mt-3 flex gap-2">
-          <Button
-            onClick={() => {
-              // onPost resumes a paused rule on the fly, so one click is
-              // enough regardless of paused state. Early-entry uses today
-              // whenever the scheduled date is in the future.
-              if (r.nextDate > today) {
-                onPost(r.id, today);
-              } else {
-                onPost(r.id);
-              }
-            }}
-            size="sm"
-            variant="blue"
+          <Tooltip
             className="flex-1"
-            title={
+            tip={
               !r.active
                 ? r.nextDate > today
                   ? `Resume and enter early into register as of today (${today})`
@@ -222,24 +210,42 @@ export function RecurringView({
                   : "Enter into register"
             }
           >
-            Post Now
-          </Button>
-          <Button
-            onClick={() => onEdit(r.id)}
-            size="sm"
-            aria-label={`Edit ${r.payee}`}
-            title="Edit"
-          >
-            <Icon name="edit" size={12} />
-          </Button>
-          <Button
-            onClick={() => setDeletingId(r.id)}
-            size="sm"
-            aria-label={`Delete ${r.payee}`}
-            title="Delete"
-          >
-            <Icon name="trash" size={12} />
-          </Button>
+            <Button
+              onClick={() => {
+                // onPost resumes a paused rule on the fly, so one click is
+                // enough regardless of paused state. Early-entry uses today
+                // whenever the scheduled date is in the future.
+                if (r.nextDate > today) {
+                  onPost(r.id, today);
+                } else {
+                  onPost(r.id);
+                }
+              }}
+              size="sm"
+              variant="blue"
+              className="w-full"
+            >
+              Post Now
+            </Button>
+          </Tooltip>
+          <Tooltip tip="Edit">
+            <Button
+              onClick={() => onEdit(r.id)}
+              size="sm"
+              aria-label={`Edit ${r.payee}`}
+            >
+              <Icon name="edit" size={12} />
+            </Button>
+          </Tooltip>
+          <Tooltip tip="Delete">
+            <Button
+              onClick={() => setDeletingId(r.id)}
+              size="sm"
+              aria-label={`Delete ${r.payee}`}
+            >
+              <Icon name="trash" size={12} />
+            </Button>
+          </Tooltip>
         </div>
       </Panel>
     );
