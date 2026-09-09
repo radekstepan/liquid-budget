@@ -1,7 +1,15 @@
-import { eq, asc, or, and, isNull } from "drizzle-orm";
+import { eq, asc, or, and, isNull, inArray } from "drizzle-orm";
+import { isTransferPayee } from "@ynab/logic";
 import type { Db } from "../client.js";
-import { payees, transactions, recurring } from "../schema.js";
+import { categories, payees, transactions, recurring } from "../schema.js";
 import { withTransaction } from "../transaction.js";
+
+export class PayeeError extends Error {
+  constructor(message: string, public readonly status = 400) {
+    super(message);
+    this.name = "PayeeError";
+  }
+}
 
 export type PayeeRow = typeof payees.$inferSelect;
 export type CreatePayeeInput = {
@@ -80,13 +88,36 @@ export async function updatePayee(
 
   const updates: Partial<typeof payees.$inferInsert> = {};
   if (patch.name !== undefined) {
-    updates.name = patch.name.trim();
+    const next = patch.name.trim();
+    if (!next) throw new PayeeError("Payee name cannot be empty", 400);
+    if (next.length > 255) throw new PayeeError("Payee name is too long", 400);
+    if (isTransferPayee(next)) {
+      throw new PayeeError(
+        'Payees like "Transfer : <account>" are managed by transfers, not the payee manager',
+        400
+      );
+    }
+    updates.name = next;
   }
   if (patch.autoCategoryId !== undefined) {
+    if (patch.autoCategoryId != null) {
+      const cat = db.select().from(categories).where(eq(categories.id, patch.autoCategoryId)).get();
+      if (!cat) throw new PayeeError("Default category does not exist", 400);
+    }
     updates.autoCategoryId = patch.autoCategoryId;
   }
 
   if (Object.keys(updates).length === 0) return current;
+
+  if (updates.name !== undefined && updates.name !== current.name) {
+    const clash = getPayeeByName(db, updates.name);
+    if (clash && clash.id !== id) {
+      throw new PayeeError(
+        `A payee named "${updates.name}" already exists. Merge them instead of renaming.`,
+        409
+      );
+    }
+  }
 
   return withTransaction(db, async () => {
     const updated = db
@@ -143,4 +174,71 @@ export async function updatePayee(
 export function deletePayee(db: Db, id: number): boolean {
   const res = db.delete(payees).where(eq(payees.id, id)).run();
   return res.changes > 0;
+}
+
+/**
+ * Merge source payees into a target payee (YNAB4-style).
+ *
+ * Every transaction and recurring rule linked to a source — by `payeeId`
+ * or, for legacy text-only rows, by exact payee name on regular rows —
+ * is repointed at the target (adopting the target's name), then the
+ * source payee rows are deleted. Transfer rows and split sub-rows without
+ * an explicit `payeeId` are never rewritten (same BUG-22 guard as rename).
+ */
+export async function mergePayees(
+  db: Db,
+  targetId: number,
+  sourceIds: number[]
+): Promise<PayeeRow | null> {
+  const target = getPayeeById(db, targetId);
+  if (!target) return null;
+
+  const uniqueSources = [...new Set(sourceIds)].filter((id) => id !== targetId);
+  if (uniqueSources.length === 0) {
+    throw new PayeeError("Choose at least one other payee to merge", 400);
+  }
+
+  const sources = db.select().from(payees).where(inArray(payees.id, uniqueSources)).all();
+  if (sources.length !== uniqueSources.length) {
+    throw new PayeeError("One of the payees to merge does not exist", 404);
+  }
+
+  return withTransaction(db, async () => {
+    for (const source of sources) {
+      const txCondition = source.name
+        ? or(
+            eq(transactions.payeeId, source.id),
+            and(
+              eq(transactions.payee, source.name),
+              isNull(transactions.parentId),
+              isNull(transactions.transferAccountId)
+            )
+          )
+        : eq(transactions.payeeId, source.id);
+
+      db.update(transactions)
+        .set({ payee: target.name, payeeId: target.id })
+        .where(txCondition)
+        .run();
+
+      const recCondition = source.name
+        ? or(
+            eq(recurring.payeeId, source.id),
+            and(
+              eq(recurring.payee, source.name),
+              isNull(recurring.transferAccountId)
+            )
+          )
+        : eq(recurring.payeeId, source.id);
+
+      db.update(recurring)
+        .set({ payee: target.name, payeeId: target.id })
+        .where(recCondition)
+        .run();
+
+      db.delete(payees).where(eq(payees.id, source.id)).run();
+    }
+
+    return getPayeeById(db, targetId);
+  });
 }

@@ -712,5 +712,117 @@ describe("importCsvTransactions", () => {
     expect(salary.categoryId).toBe(income!.id);
     expect(salary.isIncome).toBe(false);
   });
+
+  it("gives a new payee the default category of the last transaction with that payee", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [groceries] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+    const [dining] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Dining", sort: 1, carryover: 0 })
+      .returning();
+
+    // History for a payee that has no payees row yet: latest is Dining.
+    await db.insert(schema.transactions).values([
+      {
+        accountId,
+        categoryId: groceries!.id,
+        date: "2026-06-01",
+        payee: "Corner Store",
+        memo: "",
+        amount: -1000,
+        status: "c",
+        createdAt: "",
+        isIncome: false,
+      },
+      {
+        accountId,
+        categoryId: dining!.id,
+        date: "2026-07-01",
+        payee: "Corner Store",
+        memo: "",
+        amount: -2000,
+        status: "c",
+        createdAt: "",
+        isIncome: false,
+      },
+    ]);
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Corner Store", amountCents: -500 })],
+    });
+    expect(out.count).toBe(1);
+
+    const payeeRows = await db.select().from(schema.payees);
+    expect(payeeRows).toHaveLength(1);
+    expect(payeeRows[0]!.name).toBe("Corner Store");
+    expect(payeeRows[0]!.autoCategoryId).toBe(dining!.id);
+
+    const data = await getBudgetData(db);
+    const imported = data.transactions.find(
+      (t) => t.payee === "Corner Store" && t.amount === "-500"
+    )!;
+    expect(imported.categoryId).toBe(dining!.id);
+  });
+
+  it("leaves a new payee without history uncategorized", async () => {
+    const accountId = await seedAccount();
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Brand New", amountCents: -500 })],
+    });
+    expect(out.count).toBe(1);
+
+    const payeeRows = await db.select().from(schema.payees);
+    expect(payeeRows).toHaveLength(1);
+    expect(payeeRows[0]!.autoCategoryId).toBeNull();
+
+    const data = await getBudgetData(db);
+    const imported = data.transactions.find((t) => t.payee === "Brand New")!;
+    expect(imported.categoryId).toBeNull();
+  });
+
+  it("does not overwrite an existing payee's cleared default category on import", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [groceries] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+
+    await db.insert(schema.payees).values({ name: "Known Store", autoCategoryId: null, createdAt: "" });
+    await db.insert(schema.transactions).values({
+      accountId,
+      categoryId: groceries!.id,
+      date: "2026-07-01",
+      payee: "Known Store",
+      memo: "",
+      amount: -2000,
+      status: "c",
+      createdAt: "",
+      isIncome: false,
+    });
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "Known Store", amountCents: -500 })],
+    });
+    expect(out.count).toBe(1);
+
+    const payeeRows = await db.select().from(schema.payees);
+    expect(payeeRows).toHaveLength(1);
+    expect(payeeRows[0]!.autoCategoryId).toBeNull();
+  });
 });
 

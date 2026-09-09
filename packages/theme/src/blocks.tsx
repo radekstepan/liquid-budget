@@ -190,6 +190,10 @@ export const Modal: React.FC<{
   inline?: boolean;
   dismissOnScrim?: boolean;
 }> = ({ title, children, footer, width = 420, onClose, inline, dismissOnScrim = true }) => {
+  // Track where the press started: a drag-select that begins inside the
+  // dialog and releases over the scrim fires a click on the scrim, which
+  // must NOT dismiss (otherwise selecting text in an input closes the modal).
+  const scrimArmedRef = React.useRef(false);
   const body = (
     <div className="y-modal" style={{ width }}>
       <div className="y-modal-head flex items-center">
@@ -213,7 +217,17 @@ export const Modal: React.FC<{
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center y-scrim"
-      onClick={dismissOnScrim ? onClose : undefined}
+      onMouseDown={(e) => {
+        scrimArmedRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (!dismissOnScrim || !onClose) return;
+        // Only dismiss for a genuine scrim press: the click must land on the
+        // scrim itself and the press must have started there. This keeps
+        // text-selection drags that end over the scrim from closing the modal.
+        if (e.target === e.currentTarget && scrimArmedRef.current) onClose();
+        scrimArmedRef.current = false;
+      }}
     >
       <div onClick={(e) => e.stopPropagation()}>{body}</div>
     </div>

@@ -1,11 +1,11 @@
-import { eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
 import { applyRenameRules, buildExistingImportFingerprints, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, categories, categoryGroups, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
-import { findOrCreatePayee } from "./queries/payees.js";
+import { findOrCreatePayee, getPayeeByName, updatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
 
 export type ImportCsvInput = {
@@ -227,7 +227,29 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       // fall back to the payee's auto-category when the statement row carries no
       // resolvable category. Off-budget accounts stay uncategorized, matching the
       // explicit-category resolution above.
-      const payeeRow = findOrCreatePayee(db, row.payee ?? "");
+      const knownPayee = getPayeeByName(db, row.payee ?? "");
+      let payeeRow = findOrCreatePayee(db, row.payee ?? "");
+      // A brand-new payee inherits the category most recently used with that
+      // name, so the first statement that mentions it still categorizes like
+      // history. Existing payees — including ones whose default was cleared —
+      // are left alone.
+      if (!knownPayee && payeeRow.autoCategoryId == null) {
+        const prior = db
+          .select({ categoryId: transactions.categoryId })
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.payee, payeeRow.name),
+              isNotNull(transactions.categoryId)
+            )
+          )
+          .orderBy(desc(transactions.date), desc(transactions.id))
+          .limit(1)
+          .get();
+        if (prior?.categoryId != null) {
+          payeeRow = (await updatePayee(db, payeeRow.id, { autoCategoryId: prior.categoryId })) ?? payeeRow;
+        }
+      }
       const effectiveCategoryId =
         categoryId === null && account.onBudget && payeeRow.autoCategoryId != null
           ? payeeRow.autoCategoryId

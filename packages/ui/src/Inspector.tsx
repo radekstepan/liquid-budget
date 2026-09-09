@@ -33,6 +33,7 @@ export const Inspector = memo(function Inspector({
   onImportCsv,
   onAnalyzeDuplicates,
   onOpenRenameRules,
+  onOpenPayees,
   onOpenPageVisibility,
   onOpenSnapshots,
 }: {
@@ -60,6 +61,7 @@ export const Inspector = memo(function Inspector({
   onImportCsv?: (file: File) => void;
   onAnalyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
   onOpenRenameRules?: () => void;
+  onOpenPayees?: () => void;
   onOpenPageVisibility?: () => void;
   onOpenSnapshots?: () => void;
 }) {
@@ -166,7 +168,18 @@ export const Inspector = memo(function Inspector({
                   }}
                   className="y-menu-item"
                 >
-                  <Icon name="az" size={12} /> Rename rules
+                  <Icon name="az" size={12} /> Rename Rules
+                </button>
+              )}
+              {onOpenPayees && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenPayees();
+                  }}
+                  className="y-menu-item"
+                >
+                  <Icon name="bank" size={12} /> Payees Manager
                 </button>
               )}
               {onOpenPageVisibility && (
@@ -210,7 +223,7 @@ export const Inspector = memo(function Inspector({
                   disabled={analyzing}
                 >
                   <Icon name="flag" size={12} />{" "}
-                  {analyzing ? "Analyzing" : "Flag duplicates"}
+                  {analyzing ? "Analyzing" : "Flag Duplicates"}
                 </button>
               )}
             </div>

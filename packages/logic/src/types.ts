@@ -100,6 +100,14 @@ export type RenameRule = {
   updatedAt?: string | null;
 };
 
+export type Payee = {
+  id: number;
+  entityId?: string | null;
+  name: string;
+  autoCategoryId: number | null;
+  createdAt: string;
+};
+
 export type Transaction = {
   id: number;
   entityId?: string | null;
@@ -222,6 +230,12 @@ export type BudgetData = {
    * no rules have been learned or added.
    */
   renameRules?: RenameRule[];
+  /**
+   * Known payees with their default (auto-assign) categories. Empty when
+   * no payees have been recorded. Text-only payee names that appear on
+   * transactions without a payees row are not included.
+   */
+  payees?: Payee[];
 };
 
 export type CatRow = {

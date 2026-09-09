@@ -359,6 +359,32 @@ export const RenameRulePatchSchema = z
   })
   .strict();
 
+export const PayeePatchSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Payees like "Transfer : <account>" are managed by transfers, not the payee manager',
+    }).optional(),
+    autoCategoryId: z.number().int().positive().nullable().optional(),
+  })
+  .strict();
+
+export const PayeeCreateSchema = z
+  .object({
+    name: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Payees like "Transfer : <account>" are managed by transfers, not the payee manager',
+    }),
+    autoCategoryId: z.number().int().positive().nullable().optional(),
+  })
+  .strict();
+
+export const PayeeMergeSchema = z
+  .object({
+    targetId: z.number().int().positive(),
+    sourceIds: z.array(z.number().int().positive()).min(1).max(50),
+  })
+  .strict();
+
 const BaseRecurringCreateFields = {
   accountId: z.number().int().positive(),
   payee: z.string().max(255).optional().default(""),
@@ -854,6 +880,13 @@ export const RenameRuleResponseSchema = z.looseObject({
   updatedAt: z.string().nullable().optional(),
 });
 
+export const PayeeResponseSchema = z.looseObject({
+  ...LooseIdEntity,
+  name: z.string(),
+  autoCategoryId: z.number().int().nullable(),
+  createdAt: z.string(),
+});
+
 export const SnapshotResponseSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
@@ -916,6 +949,7 @@ export const BudgetDataResponseSchema = z.looseObject({
   recurring: z.array(RecurringResponseSchema),
   budgetIndex: BudgetIndexResponseSchema,
   renameRules: z.array(RenameRuleResponseSchema).optional(),
+  payees: z.array(PayeeResponseSchema).optional(),
 });
 
 export type BudgetDataResponse = z.output<typeof BudgetDataResponseSchema>;
