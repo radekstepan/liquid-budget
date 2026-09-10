@@ -18,6 +18,8 @@ import {
   findOrCreatePayee,
   updatePayee,
   deletePayee,
+  mergePayees,
+  PayeeError,
 } from "../src/queries/payees.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -178,5 +180,80 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     const deleted = deletePayee(db, p.id);
     expect(deleted).toBe(true);
     expect(getPayees(db)).toHaveLength(0);
+  });
+
+  it("sets and clears the default category", async () => {
+    const p = findOrCreatePayee(db, "Safeway");
+    const updated = await updatePayee(db, p.id, { autoCategoryId: 10 });
+    expect(updated?.autoCategoryId).toBe(10);
+
+    const cleared = await updatePayee(db, p.id, { autoCategoryId: null });
+    expect(cleared?.autoCategoryId).toBeNull();
+  });
+
+  it("rejects a default category that does not exist", async () => {
+    const p = findOrCreatePayee(db, "Safeway");
+    await expect(updatePayee(db, p.id, { autoCategoryId: 999 })).rejects.toBeInstanceOf(PayeeError);
+  });
+
+  it("rejects empty, transfer, and clashing renames", async () => {
+    const p = findOrCreatePayee(db, "Safeway");
+    findOrCreatePayee(db, "Whole Foods");
+
+    await expect(updatePayee(db, p.id, { name: "   " })).rejects.toBeInstanceOf(PayeeError);
+    await expect(updatePayee(db, p.id, { name: "Transfer : Savings" })).rejects.toBeInstanceOf(
+      PayeeError
+    );
+    const clash = updatePayee(db, p.id, { name: "Whole Foods" });
+    await expect(clash).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("merges source payees into the target and repoints their rows", async () => {
+    const target = findOrCreatePayee(db, "Starbucks", 10);
+    const source = findOrCreatePayee(db, "Starbucks #123");
+
+    db.run(
+      `INSERT INTO transactions (account_id, category_id, date, payee, payee_id, memo, amount, status, created_at, is_income) VALUES (1, 10, '2026-06-01', 'Starbucks #123', ${source.id}, '', -600, 'c', '', 0);`
+    );
+    db.run(
+      `INSERT INTO recurring (account_id, category_id, payee, payee_id, amount, frequency, next_date, active) VALUES (1, 10, 'Starbucks #123', ${source.id}, -600, 'monthly', '2026-07-01', 1);`
+    );
+
+    const merged = await mergePayees(db, target.id, [source.id]);
+    expect(merged?.id).toBe(target.id);
+    expect(getPayeeById(db, source.id)).toBeNull();
+
+    const tx = db.select().from(transactions).all()[0]!;
+    expect(tx.payee).toBe("Starbucks");
+    expect(tx.payeeId).toBe(target.id);
+
+    const rec = db.select().from(recurring).all()[0]!;
+    expect(rec.payee).toBe("Starbucks");
+    expect(rec.payeeId).toBe(target.id);
+  });
+
+  it("merge also adopts legacy text-only rows matching the source name", async () => {
+    const target = findOrCreatePayee(db, "Amazon");
+    const source = findOrCreatePayee(db, "AMZN");
+
+    db.run(
+      `INSERT INTO transactions (account_id, category_id, date, payee, memo, amount, status, created_at, is_income) VALUES (1, 10, '2026-06-01', 'AMZN', '', -2000, 'c', '', 0);`
+    );
+
+    await mergePayees(db, target.id, [source.id]);
+
+    const tx = db.select().from(transactions).all()[0]!;
+    expect(tx.payee).toBe("Amazon");
+    expect(tx.payeeId).toBe(target.id);
+    expect(getPayeeById(db, source.id)).toBeNull();
+  });
+
+  it("merge rejects empty sources, self-merge, and unknown payees", async () => {
+    const target = findOrCreatePayee(db, "Amazon");
+
+    await expect(mergePayees(db, target.id, [])).rejects.toBeInstanceOf(PayeeError);
+    await expect(mergePayees(db, target.id, [target.id])).rejects.toBeInstanceOf(PayeeError);
+    await expect(mergePayees(db, target.id, [4242])).rejects.toMatchObject({ status: 404 });
+    expect(await mergePayees(db, 4242, [target.id])).toBeNull();
   });
 });

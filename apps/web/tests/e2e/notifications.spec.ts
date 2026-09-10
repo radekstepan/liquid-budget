@@ -181,7 +181,7 @@ test.describe("success notifications", () => {
 
   test("adding a rename rule shows a success toast", async ({ page }) => {
     await page.getByRole("button", { name: /^settings$/i }).first().click();
-    await page.getByText("Rename rules").click();
+    await page.getByText("Rename Rules").click();
     await expect(page.getByText("Payee Rename Rules")).toBeVisible();
     await page.getByRole("button", { name: "Add rename rule" }).click();
     await page.getByLabel("Source pattern").fill(`PW ${Date.now()}`);
@@ -258,7 +258,7 @@ test.describe("failure notifications", () => {
     });
 
     await page.getByRole("button", { name: /^settings$/i }).first().click();
-    await page.getByText("Rename rules").click();
+    await page.getByText("Rename Rules").click();
     await expect(page.getByText("Payee Rename Rules")).toBeVisible();
     await page.getByRole("button", { name: "Add rename rule" }).click();
     await page.getByLabel("Source pattern").fill(`PW ${Date.now()}`);

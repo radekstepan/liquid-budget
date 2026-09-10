@@ -160,7 +160,7 @@ describe("BudgetApp", () => {
       />
     );
     fireEvent.click(screen.getAllByRole("button", { name: /settings/i })[0]!);
-    fireEvent.click(screen.getByText("Rename rules"));
+    fireEvent.click(screen.getByText("Rename Rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
     expect(screen.getByText("BCF[N]")).toBeInTheDocument();
 
@@ -177,7 +177,7 @@ describe("BudgetApp", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(screen.getByText("Rename rules"));
+    fireEvent.click(screen.getByText("Rename Rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
   });
 
@@ -185,7 +185,7 @@ describe("BudgetApp", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(screen.getByText("Rename rules"));
+    fireEvent.click(screen.getByText("Rename Rules"));
     expect(screen.getByText("Payee Rename Rules")).toBeInTheDocument();
     // The sidebar remains interactive while Settings is open — clicking a
     // nav item navigates away and dismisses the overlay.

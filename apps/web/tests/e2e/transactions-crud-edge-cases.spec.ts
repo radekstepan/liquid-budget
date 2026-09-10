@@ -436,7 +436,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 4. In Settings -> Rename Rules, verify the rule is displayed.
     await page.getByRole("button", { name: /^settings$/i }).first().click();
-    await page.getByText("Rename rules").click();
+    await page.getByText("Rename Rules").click();
     await expect(page.getByText("Payee Rename Rules")).toBeVisible();
     const ruleRow = page.locator("table.y-table tbody tr.y-row").filter({ hasText: rawPayee });
     await expect(ruleRow).toBeVisible();

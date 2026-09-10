@@ -1189,6 +1189,17 @@ button.y-pill:hover {
   background: var(--y-row);
   vertical-align: middle;
 }
+/* Payees Manager rows: the full list renders so the scrollbar reflects the
+   true list size from first paint, while the browser skips layout/paint for
+   off-screen rows until they scroll near. Every row is a fixed 31px (22px
+   action buttons + 8px padding + 1px border), so the intrinsic placeholder
+   matches the real height exactly and the scrollbar never shifts; `auto`
+   memorizes each row's measured size after first paint. Browsers without
+   support ignore both declarations and render normally. */
+.y-payee-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 31px;
+}
 .y-row.alt td {
   background: var(--y-row-alt);
 }

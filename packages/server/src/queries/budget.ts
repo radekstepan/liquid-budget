@@ -5,6 +5,7 @@ import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { sanitizeFlagColor, sanitizeFlagState } from "./transactions.js";
 import { getRenameRules } from "./rename-rules.js";
+import { getPayees } from "./payees.js";
 
 export async function getBudgetData(db: Db): Promise<BudgetData> {
   const [accts, groups, cats, assigns, txns, recur, recurSubs] = await Promise.all([
@@ -77,6 +78,7 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       })),
     })),
     renameRules: getRenameRules(db),
+    payees: getPayees(db),
   };
 
   data.budgetIndex = buildBudgetIndex(data);

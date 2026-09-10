@@ -321,7 +321,7 @@ describe("Inspector", () => {
       render(<Inspector {...baseProps} onAnalyzeDuplicates={onAnalyzeDuplicates} />);
 
       fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-      fireEvent.click(screen.getByText("Flag duplicates"));
+      fireEvent.click(screen.getByText("Flag Duplicates"));
 
       await waitFor(() =>
         expect(screen.getByText("Duplicate Analysis")).toBeInTheDocument()
@@ -334,7 +334,7 @@ describe("Inspector", () => {
     it("hides the analyze menu item when the callback is not provided", () => {
       render(<Inspector {...baseProps} />);
       fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-      expect(screen.queryByText("Flag duplicates")).not.toBeInTheDocument();
+      expect(screen.queryByText("Flag Duplicates")).not.toBeInTheDocument();
     });
   });
 
@@ -343,14 +343,14 @@ describe("Inspector", () => {
       const onOpenRenameRules = vi.fn();
       render(<Inspector {...baseProps} onOpenRenameRules={onOpenRenameRules} />);
       fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-      fireEvent.click(screen.getByText("Rename rules"));
+      fireEvent.click(screen.getByText("Rename Rules"));
       expect(onOpenRenameRules).toHaveBeenCalledTimes(1);
     });
 
     it("hides the menu item when the callback is not provided", () => {
       render(<Inspector {...baseProps} />);
       fireEvent.click(screen.getByRole("button", { name: /settings/i }));
-      expect(screen.queryByText("Rename rules")).not.toBeInTheDocument();
+      expect(screen.queryByText("Rename Rules")).not.toBeInTheDocument();
     });
   });
 

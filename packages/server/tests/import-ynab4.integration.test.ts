@@ -350,6 +350,61 @@ describe("importYnab4 full import", () => {
     }
   });
 
+  it("carries over YNAB4 auto-fill categories as payee defaults, with history fallback", async () => {
+    const data = {
+      accounts: [
+        { entityId: "acc1", accountName: "Chequing", accountType: "Checking", onBudget: true },
+      ],
+      payees: [
+        { entityId: "p1", name: "AutoFill Store", autoFillCategoryId: "sc9" },
+        { entityId: "p2", name: "History Cafe", autoFillCategoryId: null },
+        { entityId: "p3", name: "Income Boss", autoFillCategoryId: "Category/__ImmediateIncome__" },
+        { entityId: "p4", name: "Ghost", autoFillCategoryId: "sc-missing" },
+        { entityId: "p6", name: "Drifter", autoFillCategoryId: null },
+        { entityId: "p5", name: "Transfer : Savings", targetAccountId: "acc9", autoFillCategoryId: "sc1" },
+      ],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Everyday",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc1", name: "Groceries" },
+            { entityId: "sc9", name: "Dining" },
+          ],
+        },
+      ],
+      transactions: [
+        // History says Groceries, but the explicit auto-fill (Dining) wins.
+        { entityId: "t1", accountId: "acc1", date: "2026-06-01", amount: -100, cleared: "Cleared", payeeId: "p1", categoryId: "sc1" },
+        { entityId: "t2", accountId: "acc1", date: "2026-06-02", amount: -75, cleared: "Cleared", payeeId: "p1", categoryId: "sc1" },
+        // No auto-fill: most-used category (Groceries x3 over Dining x1) wins.
+        { entityId: "t3", accountId: "acc1", date: "2026-06-01", amount: -100, cleared: "Cleared", payeeId: "p2", categoryId: "sc1" },
+        { entityId: "t4", accountId: "acc1", date: "2026-06-02", amount: -200, cleared: "Cleared", payeeId: "p2", categoryId: "sc1" },
+        { entityId: "t5", accountId: "acc1", date: "2026-06-03", amount: -300, cleared: "Cleared", payeeId: "p2", categoryId: "sc9" },
+        { entityId: "t5b", accountId: "acc1", date: "2026-06-04", amount: -400, cleared: "Cleared", payeeId: "p2", categoryId: "sc1" },
+        // Special income marker maps to no default.
+        { entityId: "t6", accountId: "acc1", date: "2026-06-01", amount: 3000, cleared: "Cleared", payeeId: "p3", categoryId: "Category/__ImmediateIncome__" },
+        // Weak history signal (1-1 split) mints no default.
+        { entityId: "t7", accountId: "acc1", date: "2026-06-01", amount: -100, cleared: "Cleared", payeeId: "p6", categoryId: "sc1" },
+        { entityId: "t8", accountId: "acc1", date: "2026-06-02", amount: -200, cleared: "Cleared", payeeId: "p6", categoryId: "sc9" },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    };
+    await importYnab4(db, data);
+    const rows = await db.select().from(schema.payees);
+    const byName = new Map(rows.map((p) => [p.name, p]));
+    const cats = await db.select().from(schema.categories);
+    const catId = new Map(cats.map((c) => [c.entityId, c.id]));
+    expect(byName.get("AutoFill Store")?.autoCategoryId).toBe(catId.get("sc9"));
+    expect(byName.get("History Cafe")?.autoCategoryId).toBe(catId.get("sc1"));
+    expect(byName.get("Income Boss")?.autoCategoryId).toBeNull();
+    expect(byName.get("Ghost")?.autoCategoryId).toBeNull();
+    expect(byName.get("Drifter")?.autoCategoryId).toBeNull();
+    expect(byName.has("Transfer : Savings")).toBe(false);
+  });
+
   it("imports assignments only for non-zero budgeted amounts and ignores tombstones", async () => {
     await importYnab4(db, ynabData);
     const { assignments } = await getBudgetData(db);

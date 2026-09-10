@@ -13,7 +13,7 @@ import {
 import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
-import { accounts, assignments, categoryGroups, categories, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
 import { findOrCreatePayee } from "./queries/payees.js";
@@ -1272,6 +1272,79 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
             reconciliationId: isTxReconciled ? txRecId : null,
           });
           totalImportedTxCount++;
+        }
+      }
+    }
+
+    // 5b. Carry over per-payee default categories (Payees Manager "Default
+    // Category"). YNAB4 stores it as payee.autoFillCategoryId, which the
+    // payee-creation pass above ignored, leaving every default empty.
+    // Primary source is the YNAB4 auto-fill id resolved through the category
+    // map; payees without a resolvable auto-fill fall back to the category
+    // they use most often across regular (non-transfer, non-split-child)
+    // transactions. Special income/split markers map to no default. Skipped
+    // entirely when no payee rows were created (nothing to backfill).
+    if (payeeDbIdMap.size > 0) {
+      const SPECIAL_AUTO_FILL = new Set([
+        "Category/__ImmediateIncome__",
+        "Category/__DeferredIncome__",
+        "Category/__Split__",
+      ]);
+      const usage = await db
+        .select({
+          payeeId: transactions.payeeId,
+          categoryId: transactions.categoryId,
+          uses: sql<number>`count(*)`,
+        })
+        .from(transactions)
+        .where(
+          and(
+            isNotNull(transactions.payeeId),
+            isNotNull(transactions.categoryId),
+            isNull(transactions.transferAccountId),
+            isNull(transactions.parentId)
+          )
+        )
+        .groupBy(transactions.payeeId, transactions.categoryId);
+      const modeByPayee = new Map<number, number>();
+      const usesByPayee = new Map<number, number>();
+      const totalByPayee = new Map<number, number>();
+      for (const row of usage) {
+        if (row.payeeId == null || row.categoryId == null) continue;
+        const n = Number(row.uses);
+        totalByPayee.set(row.payeeId, (totalByPayee.get(row.payeeId) ?? 0) + n);
+        if (n > (usesByPayee.get(row.payeeId) ?? 0)) {
+          usesByPayee.set(row.payeeId, n);
+          modeByPayee.set(row.payeeId, row.categoryId);
+        }
+      }
+      for (const p of yPayees) {
+        if (p.isTombstone || p.targetAccountId) continue;
+        if (typeof p.name !== "string" || !p.name.trim()) continue;
+        const localPayeeId = payeeDbIdMap.get(p.entityId);
+        if (!localPayeeId) continue;
+        let defaultCatId: number | null = null;
+        const raw = p.autoFillCategoryId;
+        if (typeof raw === "string" && raw && !SPECIAL_AUTO_FILL.has(raw)) {
+          defaultCatId = categoryIdMap.get(raw) ?? null;
+        }
+        if (defaultCatId == null) {
+          // History fallback only when the signal is strong: the modal
+          // category needs at least 3 uses and an outright majority, so
+          // one-off coincidences (e.g. opening-balance rows) don't mint
+          // misleading defaults.
+          const mode = modeByPayee.get(localPayeeId);
+          const best = usesByPayee.get(localPayeeId) ?? 0;
+          const total = totalByPayee.get(localPayeeId) ?? 0;
+          if (mode != null && best >= 3 && best > total / 2) {
+            defaultCatId = mode;
+          }
+        }
+        if (defaultCatId != null) {
+          db.update(payees)
+            .set({ autoCategoryId: defaultCatId })
+            .where(eq(payees.id, localPayeeId))
+            .run();
         }
       }
     }

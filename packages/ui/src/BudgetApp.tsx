@@ -28,6 +28,7 @@ import { TransactionsView } from "./TransactionsView.js";
 import { ReportsView } from "./ReportsView.js";
 import { SettingsView } from "./SettingsView.js";
 import { MenuSettingsView } from "./MenuSettingsView.js";
+import { PayeesView } from "./PayeesView.js";
 import { SnapshotsView, type SnapshotSummary } from "./SnapshotsView.js";
 import {
   DEFAULT_NAV_VISIBILITY,
@@ -222,6 +223,11 @@ export type BudgetAppApi = {
   addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
   updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   deleteRenameRule?: (id: number) => Promise<void>;
+  ensurePayee?: (name: string) => Promise<number>;
+  renamePayee?: (id: number, name: string) => Promise<void>;
+  setPayeeDefaultCategory?: (id: number, categoryId: number | null) => Promise<void>;
+  mergePayees?: (targetId: number, sourceIds: number[]) => Promise<void>;
+  deletePayee?: (id: number) => Promise<void>;
   listSnapshots?: () => Promise<{ snapshots: SnapshotSummary[]; suggestedName: string }>;
   createSnapshot?: (name: string) => Promise<void>;
   restoreSnapshot?: (id: string) => Promise<void>;
@@ -338,7 +344,7 @@ export function BudgetApp({
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<"rename" | "menu" | "snapshots">("rename");
+  const [settingsPage, setSettingsPage] = useState<"rename" | "payees" | "menu" | "snapshots">("rename");
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
   const [snapshotSuggestion, setSnapshotSuggestion] = useState("");
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
@@ -782,7 +788,7 @@ export function BudgetApp({
   }, [api]);
 
   const openSettings = useCallback(
-    (page: "rename" | "menu" | "snapshots") => {
+    (page: "rename" | "payees" | "menu" | "snapshots") => {
       setSettingsPage(page);
       setShowSettingsOverlay(true);
       if (page === "snapshots") void refreshSnapshots();
@@ -1176,6 +1182,30 @@ export function BudgetApp({
               <div className="flex-1 overflow-hidden">
                 {settingsPage === "menu" ? (
                   <MenuSettingsView visible={navVisible} onToggle={handleToggleNav} />
+                ) : settingsPage === "payees" ? (
+                  <PayeesView
+                    payees={data.payees ?? []}
+                    transactions={data.transactions}
+                    recurring={data.recurring}
+                    categories={data.categories}
+                    groups={data.groups}
+                    onEnsurePayee={async (name) => {
+                      if (!api.ensurePayee) throw new Error("Payee creation is not available");
+                      return api.ensurePayee(name);
+                    }}
+                    onRename={async (id, name) => {
+                      await api.renamePayee?.(id, name);
+                    }}
+                    onSetDefaultCategory={async (id, categoryId) => {
+                      await api.setPayeeDefaultCategory?.(id, categoryId);
+                    }}
+                    onMerge={async (targetId, sourceIds) => {
+                      await api.mergePayees?.(targetId, sourceIds);
+                    }}
+                    onDelete={async (id) => {
+                      await api.deletePayee?.(id);
+                    }}
+                  />
                 ) : settingsPage === "snapshots" ? (
                   <SnapshotsView
                     snapshots={snapshots}
@@ -1242,6 +1272,7 @@ export function BudgetApp({
           onImportCsv={(file) => setModal({ kind: "csvImport", file })}
           onAnalyzeDuplicates={api.analyzeDuplicates}
           onOpenRenameRules={() => openSettings("rename")}
+          onOpenPayees={() => openSettings("payees")}
           onOpenPageVisibility={() => openSettings("menu")}
           onOpenSnapshots={() => openSettings("snapshots")}
         />

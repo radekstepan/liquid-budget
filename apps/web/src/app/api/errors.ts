@@ -1,6 +1,7 @@
 import {
   AccountError,
   CategoryError,
+  PayeeError,
   RecurringError,
   RenameRuleError,
   TransactionError,
@@ -10,6 +11,7 @@ export function apiErrorResponse(e: unknown): Response {
   if (
     e instanceof AccountError ||
     e instanceof CategoryError ||
+    e instanceof PayeeError ||
     e instanceof RecurringError ||
     e instanceof RenameRuleError ||
     e instanceof TransactionError
