@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { BudgetApp, type BudgetAppApi } from "../src/BudgetApp.js";
 import type { BudgetData } from "@ynab/logic";
-import { makeSeedBudgetData, todayISO, parseMonthKey, MONTHS_LONG } from "@ynab/logic";
+import { makeSeedBudgetData, todayISO, MONTHS_LONG } from "@ynab/logic";
 import { openSearchlistByPlaceholder } from "./dropdown.js";
 
 function makeApi(overrides: Partial<BudgetAppApi> = {}): {
@@ -651,27 +651,6 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
   });
 
-  it("anchors Projections view to current month even when viewing historical budget months (BUG-16)", () => {
-    const { api } = makeApi();
-    const currentMonth = todayISO().slice(0, 7);
-    const histMonth = currentMonth === "2024-01" ? "2023-01" : "2024-01";
-    const { year: hYear, month0: hMonth0 } = parseMonthKey(histMonth);
-    const histLabel = `${MONTHS_LONG[hMonth0]?.slice(0, 3)} ${String(hYear).slice(2)}`;
-
-    // Render BudgetApp initialized to a historical month
-    render(<BudgetApp data={makeSeedBudgetData()} api={api} initialMonth={histMonth} />);
-
-    // Switch to Projections view
-    fireEvent.click(screen.getByRole("button", { name: /projections/i }));
-
-    // Month 0 should be labeled with current month (todayISO) rather than historical month
-    const { year, month0 } = parseMonthKey(currentMonth);
-    const expectedCurrentLabel = `${MONTHS_LONG[month0]?.slice(0, 3)} ${String(year).slice(2)}`;
-
-    expect(screen.queryByText(histLabel)).not.toBeInTheDocument();
-    expect(screen.getAllByText(expectedCurrentLabel).length).toBeGreaterThan(0);
-  });
-
   it("BUG-46: popstate to /transactions clears account filter", () => {
     const { api } = makeApi();
     window.history.pushState(null, "", "/transactions/1");
@@ -895,7 +874,7 @@ describe("BudgetApp", () => {
       fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       fireEvent.click(screen.getByText("Page Visibility"));
       expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
-      for (const name of ["Budget", "Reports", "Calendar", "Projections", "Transactions"]) {
+      for (const name of ["Budget", "Reports", "Calendar", "Transactions"]) {
         expect(screen.getByRole("checkbox", { name })).toBeInTheDocument();
       }
     } finally {
@@ -939,7 +918,7 @@ describe("BudgetApp", () => {
       fireEvent.click(screen.getByText("Page Visibility"));
 
       // Hide everything except Transactions: each hide moves to the next page.
-      for (const name of ["Budget", "Reports", "Calendar", "Projections"]) {
+      for (const name of ["Budget", "Reports", "Calendar"]) {
         fireEvent.click(screen.getByRole("checkbox", { name }));
       }
       // The last remaining page is greyed out and cannot be hidden.

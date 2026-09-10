@@ -27,7 +27,6 @@ import { BudgetView, isInternalGroup } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
 import { ReportsView } from "./ReportsView.js";
 import { CalendarView } from "./CalendarView.js";
-import { ProjectionsView } from "./ProjectionsView.js";
 import { SettingsView } from "./SettingsView.js";
 import { MenuSettingsView } from "./MenuSettingsView.js";
 import { SnapshotsView, type SnapshotSummary } from "./SnapshotsView.js";
@@ -308,7 +307,7 @@ export function BudgetApp({
   initialAccount?: number;
 }) {
   const [view, setView] = useState<View>(
-    (["budget", "reports", "calendar", "projections", "transactions"] as View[]).includes(initialView as View)
+    (["budget", "reports", "calendar", "transactions"] as View[]).includes(initialView as View)
       ? (initialView as View)
       : "budget"
   );
@@ -380,7 +379,7 @@ export function BudgetApp({
     const parsePath = () => {
       const path = window.location.pathname.replace(/\/$/, "");
       const segments = path.split("/").filter(Boolean);
-      const validViews = ["budget", "reports", "calendar", "projections", "transactions"] as const;
+      const validViews = ["budget", "reports", "calendar", "transactions"] as const;
 
       if (segments.length >= 1 && (validViews as readonly string[]).includes(segments[0]!)) {
         setView(segments[0] as View);
@@ -1157,7 +1156,6 @@ export function BudgetApp({
               onAdd={(date) => setModal({ kind: "addTransaction", defaultDate: date })}
             />
           )}
-          {view === "projections" && <ProjectionsView data={data} />}
         </ErrorBoundary>
 
 

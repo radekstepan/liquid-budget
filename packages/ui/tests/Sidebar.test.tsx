@@ -11,7 +11,7 @@ const accounts: Account[] = [
 ];
 
 describe("Sidebar", () => {
-  it("renders all 4 top nav buttons", () => {
+  it("renders all 3 top nav buttons", () => {
     render(
       <Sidebar
         view="budget"
@@ -25,7 +25,6 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /budget/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reports/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /calendar/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
   });
 
   it("hides nav items disabled via visibleViews", () => {
@@ -39,16 +38,14 @@ describe("Sidebar", () => {
         onAddAccount={() => {}}
         visibleViews={{
           budget: true,
-          reports: false,
+          reports: true,
           calendar: false,
-          projections: true,
           transactions: false,
         }}
       />
     );
     expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^reports$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^reports$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^calendar$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^transactions/i })).not.toBeInTheDocument();
   });
@@ -153,7 +150,7 @@ describe("Sidebar", () => {
   it("does not mark any account row as selected when view is not transactions", () => {
     render(
       <Sidebar
-        view="projections"
+        view="reports"
         setView={() => {}}
         accounts={accounts}
         selectedAccountId={2}
@@ -162,7 +159,7 @@ describe("Sidebar", () => {
       />
     );
     expect(screen.getByRole("button", { name: /checking/i })).not.toHaveClass(/is-sel/);
-    expect(screen.getByRole("button", { name: /projections/i })).toHaveClass(/is-sel/);
+    expect(screen.getByRole("button", { name: /^reports$/i })).toHaveClass(/is-sel/);
   });
 
   it("does not render per-account delete or reconcile buttons", () => {
