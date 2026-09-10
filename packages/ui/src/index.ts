@@ -36,6 +36,8 @@ export {
   type ReconcileResultPayload,
 } from "./ReconcileModal.js";
 export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";
+export { GlobalSearch, type GlobalSearchJump } from "./GlobalSearch.js";
+export { GlobalSearchModal } from "./GlobalSearchModal.js";
 export { Modal, Field, Btn, inputCls } from "./ui.js";
 export { AmountPreview } from "./AmountInput.js";
 export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.js";
