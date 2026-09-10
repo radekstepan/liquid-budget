@@ -883,6 +883,13 @@ export function BudgetApp({
     [updateUrl, month]
   );
 
+  // Dropping the register filter entirely (rather than just hiding it) so a
+  // cleared filter can't resurrect when the register remounts after a view
+  // switch. Stable identity: TransactionsView effects depend on it.
+  const handleClearRegisterFilter = useCallback(() => {
+    setRegisterFilter(null);
+  }, []);
+
   // Global search jumps always land in the register: a transaction focuses
   // its row, while a payee/category/text/query selection filters the register.
   const handleGlobalSearchJump = useCallback(
@@ -1199,6 +1206,7 @@ export function BudgetApp({
                 setSearchInitialQuery(q);
                 setSearchOpen(true);
               }}
+              onClearFilter={handleClearRegisterFilter}
               onGoToTransfer={handleGoToTransfer}
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
@@ -1357,13 +1365,6 @@ export function BudgetApp({
           onOpenPayees={() => openSettings("payees")}
           onOpenPageVisibility={() => openSettings("menu")}
           onOpenSnapshots={() => openSettings("snapshots")}
-          searchData={data}
-          scopeAccountId={accountFilter}
-          onSearchJump={handleGlobalSearchJump}
-          onOpenSearch={() => {
-            setSearchInitialQuery(null);
-            setSearchOpen(true);
-          }}
         />
       </ErrorBoundary>
 

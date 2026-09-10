@@ -2,7 +2,6 @@
 
 import { memo, useState, useRef, useEffect } from "react";
 import type {
-  BudgetData,
   GroupRow,
   CashFlowSummary,
   TrailingNetWorthSummary,
@@ -11,9 +10,8 @@ import type {
   ImportSummary,
 } from "@ynab/logic";
 import { MONTHS, parseMonthKey } from "@ynab/logic";
-import { Icon, Button, Panel, Notice, Tooltip, Kbd, cx, money } from "@ynab/theme";
+import { Icon, Button, Panel, Notice, Tooltip, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
-import { GlobalSearch, type GlobalSearchJump } from "./GlobalSearch.js";
 
 export const Inspector = memo(function Inspector({
   groups,
@@ -38,10 +36,6 @@ export const Inspector = memo(function Inspector({
   onOpenPayees,
   onOpenPageVisibility,
   onOpenSnapshots,
-  searchData,
-  scopeAccountId,
-  onSearchJump,
-  onOpenSearch,
 }: {
   groups: GroupRow[];
   summary?: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -70,12 +64,6 @@ export const Inspector = memo(function Inspector({
   onOpenPayees?: () => void;
   onOpenPageVisibility?: () => void;
   onOpenSnapshots?: () => void;
-  /** When provided (with onSearchJump), a global search box is shown next to Settings. */
-  searchData?: BudgetData;
-  scopeAccountId?: number | null;
-  onSearchJump?: (jump: GlobalSearchJump) => void;
-  /** When provided, a search icon opens the ⌘K modal instead of the inline box. */
-  onOpenSearch?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -125,30 +113,8 @@ export const Inspector = memo(function Inspector({
 
   return (
     <aside className="y-inspector w-[252px] shrink-0 p-2.5 space-y-2.5 y-scroll overflow-auto">
-      {/* Header with global search + Settings cog */}
+      {/* Header with Settings cog (search lives in the ⌘K modal + register toolbar) */}
       <div className="flex items-center gap-1.5 px-1">
-        {onOpenSearch ? (
-          <Tooltip tip={<span>Search <Kbd>⌘K</Kbd></span>}>
-            <Button
-              onClick={onOpenSearch}
-              size="sm"
-              aria-label="Open search"
-              data-testid="global-search-trigger"
-            >
-              <Icon name="search" size={13} />
-            </Button>
-          </Tooltip>
-        ) : (
-          searchData &&
-          onSearchJump && (
-            <GlobalSearch
-              data={searchData}
-              scopeAccountId={scopeAccountId ?? null}
-              onJump={onSearchJump}
-              className="flex-1"
-            />
-          )
-        )}
         <div className="ml-auto relative shrink-0" ref={menuRef}>
           <Tooltip tip="Settings">
             <Button onClick={() => setMenuOpen((o) => !o)} size="sm" aria-label="Settings">

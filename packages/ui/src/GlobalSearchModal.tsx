@@ -384,53 +384,44 @@ export function GlobalSearchModal({
         {/* Chip input */}
         <div
           onClick={() => inputRef.current?.focus()}
-          className="flex min-h-[42px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-md border px-2.5 py-1.5"
-          style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
+          className="y-searchbox flex min-h-[32px] w-full cursor-text flex-wrap items-center gap-1.5 px-1.5 py-1"
         >
           <Icon name="search" size={14} color="var(--y-ink-soft)" />
           {filters.map((f, i) => {
             const { key, value } = filterLabel(f);
             return (
-              <span
-                key={`${filterId(f)}:${i}`}
-                className="inline-flex h-6 max-w-full items-center overflow-hidden rounded border text-[12px] leading-none"
-                style={{ borderColor: "var(--y-line)", background: "var(--y-chrome-top)" }}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    editFilter(i);
-                  }}
-                  className="flex h-full items-center gap-1 px-1.5"
-                  aria-label={`Edit ${key} filter`}
-                >
-                  <span style={{ color: "var(--y-ink-soft)" }}>{key}</span>
-                  <span className="max-w-[14rem] truncate font-medium">{value}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFilter(i);
-                  }}
-                  className="flex h-full items-center border-l px-1"
-                  style={{ borderColor: "var(--y-line)" }}
-                  aria-label={`Remove ${key} filter`}
-                >
-                  <Icon name="x" size={10} />
-                </button>
+              <span key={`${filterId(f)}:${i}`} className="y-chip">
+                <Tooltip tip={`Edit ${key} filter`} className="flex h-full">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      editFilter(i);
+                    }}
+                    className="y-chip-edit"
+                    aria-label={`Edit ${key} filter`}
+                  >
+                    <span className="y-chip-key">{key}</span>
+                    <span className="y-chip-val">{value}</span>
+                  </button>
+                </Tooltip>
+                <Tooltip tip={`Remove ${key} filter`} className="flex h-full">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFilter(i);
+                    }}
+                    className="y-chip-x"
+                    aria-label={`Remove ${key} filter`}
+                  >
+                    <Icon name="x" size={10} />
+                  </button>
+                </Tooltip>
               </span>
             );
           })}
-          {ctxKey && (
-            <span
-              className="inline-flex h-6 items-center gap-1 rounded px-2 text-[12px] font-medium leading-none text-white"
-              style={{ background: "var(--y-ink)" }}
-            >
-              {KEYS[ctxKey].label}
-            </span>
-          )}
+          {ctxKey && <span className="y-chip--key">{KEYS[ctxKey].label}</span>}
           <input
             ref={inputRef}
             value={input}
@@ -481,7 +472,12 @@ export function GlobalSearchModal({
         {parsed.key && (
           <div
             className="flex items-center justify-between rounded px-2.5 py-1.5 text-[12px]"
-            style={{ background: "var(--y-chrome-top)", color: "var(--y-ink-soft)" }}
+            style={{
+              background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+              border: "1px solid var(--y-chrome-line)",
+              borderRadius: 3,
+              color: "var(--y-ink-soft)",
+            }}
           >
             <span>
               Filter by <strong style={{ color: "var(--y-ink)" }}>{KEYS[parsed.key].label.toLowerCase()}</strong>
@@ -497,8 +493,7 @@ export function GlobalSearchModal({
           id="global-search-listbox"
           role="listbox"
           aria-label="Search results"
-          className="y-scroll max-h-[24rem] overflow-y-auto rounded-md border py-1"
-          style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
+          className="y-dropdown y-dropdown--inline y-scroll max-h-[24rem] overflow-y-auto py-1"
         >
           {groups.map((g) => (
             <div key={g.id} className="px-1 py-0.5">
@@ -603,9 +598,9 @@ function ResultRow({
     );
   }
 
-  const rowCls = cx("flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-[13px]");
+  const rowCls = cx("flex w-full items-center gap-2.5 rounded px-2 py-1 text-left text-[12px]");
   const rowStyle: React.CSSProperties = {
-    background: active ? "var(--y-highlight, #eef4ff)" : "transparent",
+    background: active ? "var(--y-row-sel)" : "transparent",
     color: "var(--y-ink)",
   };
   const subStyle: React.CSSProperties = { color: "var(--y-ink-soft)" };
@@ -647,7 +642,11 @@ function ResultRow({
           )}
           <span
             className="ml-auto rounded px-1.5 py-0.5 text-[11px] tabular-nums"
-            style={{ background: "var(--y-chrome-top)", ...subStyle }}
+            style={{
+              background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+              border: "1px solid var(--y-chrome-line)",
+              ...subStyle,
+            }}
           >
             {item.count}
           </span>
@@ -662,7 +661,11 @@ function ResultRow({
           </span>
           <span
             className="ml-auto rounded px-1.5 py-0.5 text-[11px] tabular-nums"
-            style={{ background: "var(--y-chrome-top)", ...subStyle }}
+            style={{
+              background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+              border: "1px solid var(--y-chrome-line)",
+              ...subStyle,
+            }}
           >
             {item.count}
           </span>
