@@ -15,7 +15,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { computeBudget, num, type BudgetData } from "@ynab/logic";
-import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
+import { fillSearchlist, openSearchField, pickSubCategory, filterRegisterByText, clearRegisterFilter } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -72,7 +72,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await expect(addModal).toBeHidden();
 
     // 2. Open edit modal by clicking the split parent row.
-    await page.getByPlaceholder("Search register").fill(payee);
+    await filterRegisterByText(page, payee);
     const parentRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(parentRow).toBeVisible();
     await parentRow.click();
@@ -203,7 +203,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const initialCheckingBal = num(initialChecking.balance);
 
     // 3. Click row to open edit modal, switch segmented toggle from "Single" to "Split".
-    await page.getByPlaceholder("Search register").fill(payee);
+    await filterRegisterByText(page, payee);
     const row = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(row).toBeVisible();
     await row.click();
@@ -302,7 +302,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await page.reload();
     await waitForReady(page);
     await gotoAllTransactions(page);
-    await page.getByPlaceholder("Search register").fill(payee);
+    await filterRegisterByText(page, payee);
 
     const standaloneRow = page.getByRole("row").filter({ hasText: payee }).first();
     await expect(standaloneRow).toBeVisible();
@@ -541,7 +541,7 @@ test.describe("Split Transaction Edge Cases", () => {
     expect(initialPayees).toEqual([subPayee1, subPayee2].sort());
 
     // 3. Open edit modal by clicking the parent row.
-    await page.getByPlaceholder("Search register").fill(parentPayee);
+    await filterRegisterByText(page, parentPayee);
     const parentRow = page.getByRole("row").filter({ hasText: parentPayee }).first();
     await expect(parentRow).toBeVisible();
     await parentRow.click();
@@ -600,9 +600,8 @@ test.describe("Split Transaction Edge Cases", () => {
     const initialSubrowCount = await childGlyphRows.filter({ hasText: uniqueMemo }).count();
     expect(initialSubrowCount).toBe(0);
 
-    // 2. Type "SecretGiftItem" in the register search box.
-    const searchBox = page.getByPlaceholder("Search register");
-    await searchBox.fill(uniqueMemo);
+    // 2. Filter the register for the child memo via the search modal.
+    await filterRegisterByText(page, uniqueMemo);
 
     // 3. Verify the split parent row is displayed.
     const matchingParent = page.getByRole("row").filter({ hasText: payee }).first();
@@ -614,8 +613,8 @@ test.describe("Split Transaction Edge Cases", () => {
     await expect(matchingChildRow).toContainText("↳");
     await expect(matchingChildRow).toContainText(uniqueMemo);
 
-    // 5. Clear search input and verify register restores normal collapsed state.
-    await searchBox.fill("");
+    // 5. Clear the filter and verify register restores normal collapsed state.
+    await clearRegisterFilter(page);
     await expect(matchingChildRow).toBeHidden();
   });
 });

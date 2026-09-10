@@ -13,7 +13,7 @@
 // baseline. Toasts auto-dismiss after 4 seconds; every assertion targets
 // exact toast text so stale toasts from earlier steps cannot collide.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist } from "./helpers";
+import { fillSearchlist, filterRegisterByText } from "./helpers";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
@@ -94,7 +94,7 @@ test.describe("success notifications", () => {
     const payee = `PW Notify Tx ${Date.now()}`;
     await addTransactionViaModal(page, payee);
     await expect(page.getByText("Transaction added.")).toBeVisible();
-    await page.getByPlaceholder("Search register").fill(payee);
+    await filterRegisterByText(page, payee);
     await expect(page.getByRole("row").filter({ hasText: payee })).toBeVisible();
   });
 

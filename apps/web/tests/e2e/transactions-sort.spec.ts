@@ -5,6 +5,7 @@
 //   - aria-sort reflects the active column and direction
 //   - the header stays sticky (position: sticky) while the register scrolls
 import { test, expect, type Page } from "@playwright/test";
+import { filterRegisterByText } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -86,7 +87,7 @@ test("sorts transactions by flag when the F header is clicked", async ({ page })
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const register = page.locator("table.y-table:not(.y-scheduled-table)");
   const rows = register.locator("tbody tr.y-row");
@@ -95,7 +96,9 @@ test("sorts transactions by flag when the F header is clicked", async ({ page })
   // Ascending: unflagged, red, then purple. The flag button's accessible name
   // stays exactly "F" (the sort arrow is aria-hidden), so it is always found.
   const flagBtn = register.getByRole("button", { name: /^F$/ });
-  const flagTh = flagBtn.locator("..");
+  // The sort button sits inside the custom <Tooltip> wrapper span, so the
+  // th is an ancestor, not the direct parent.
+  const flagTh = flagBtn.locator("xpath=ancestor::th[1]");
   await flagBtn.click();
   await expect(flagTh).toHaveAttribute("aria-sort", "ascending");
   await expect(rows.nth(0)).toContainText(payeeNone);
@@ -135,7 +138,7 @@ test("sorts transactions by payee when the header is clicked", async ({ page }) 
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const register = page.locator("table.y-table:not(.y-scheduled-table)");
   const payeeTh = register.locator("thead th").filter({ hasText: "Payee" });
