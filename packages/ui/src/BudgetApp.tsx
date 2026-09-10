@@ -196,6 +196,8 @@ export type BudgetAppApi = {
     kind: "liquid" | "credit" | "offbudget";
     groupLabel: string;
     startingBalance?: number;
+    balance?: number;
+    notes?: string;
   }) => Promise<void>;
   deleteAccount: (id: number) => Promise<void>;
   updateAccount: (
@@ -205,7 +207,9 @@ export type BudgetAppApi = {
       kind?: "liquid" | "credit" | "offbudget";
       onBudget?: boolean;
       archived?: boolean;
-    }
+      notes?: string;
+    },
+    opts?: { undo?: boolean }
   ) => Promise<void>;
   reorderAccount: (id: number, sort: number) => Promise<void>;
   reconcileAccount: (input: {
@@ -1395,6 +1399,7 @@ export function BudgetApp({
               name: v.name,
               kind: v.kind,
               onBudget: v.onBudget,
+              notes: v.notes,
             });
             setModal({ kind: "none" });
           }}

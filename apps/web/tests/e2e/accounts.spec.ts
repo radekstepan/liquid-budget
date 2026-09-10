@@ -119,14 +119,15 @@ test("deletes an account after accepting the confirm dialog", async ({ page }) =
   ).toHaveCount(0);
 });
 
-test("archives an account and unarchives it back to active accounts", async ({ page }) => {
-  const name = `PW Archive ${Date.now()}`;
+test("closes an account and reopens it back to active accounts", async ({ page }) => {
+  const name = `PW Close ${Date.now()}`;
   await page.getByRole("button", { name: "Add Account" }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator("input").first().fill(name);
   await addModal.locator(".y-select-trigger").first().click();
   await page.locator('.y-dropdown [data-value="liquid"]').click();
   await addModal.locator('input[inputmode="decimal"]').first().fill("50.00");
+  await addModal.locator("textarea").first().fill("Closing note for e2e");
   await addModal
     .locator(".y-modal-foot")
     .getByRole("button", { name: "Add Account" })
@@ -138,7 +139,7 @@ test("archives an account and unarchives it back to active accounts", async ({ p
     page.getByRole("button", { name: new RegExp(`^${name} `) })
   ).toBeVisible();
 
-  // Step 1: Open Edit modal and archive it
+  // Step 1: Open Edit modal and close it
   await page
     .getByRole("button", { name: `Edit account ${name}` })
     .click({ force: true });
@@ -146,41 +147,45 @@ test("archives an account and unarchives it back to active accounts", async ({ p
   const editModal = page.locator(".y-modal").last();
   await expect(editModal.locator(".y-modal-head")).toHaveText("Edit Account");
 
-  await editModal
-    .locator(".y-modal-foot")
-    .getByRole("button", { name: "Archive account" })
-    .click();
-  await expect(editModal.locator(".y-modal-head")).toContainText("Archive");
+  // Notes field is editable
+  await expect(editModal.locator("textarea").first()).toHaveValue("Closing note for e2e");
 
   await editModal
     .locator(".y-modal-foot")
-    .getByRole("button", { name: "Yes, archive it" })
+    .getByRole("button", { name: "Close account" })
+    .click();
+  await expect(editModal.locator(".y-modal-head")).toContainText("Close");
+
+  await editModal
+    .locator(".y-modal-foot")
+    .getByRole("button", { name: "Yes, close it" })
     .click();
   await expect(editModal).toBeHidden();
 
-  // Step 2: The account is now in the "Archived Accounts" section
-  const archivedHeader = page.getByRole("button", { name: /Archived Accounts/ });
+  // Step 2: The account is now in the "Closed Accounts" section
+  const archivedHeader = page.getByRole("button", { name: /Closed Accounts/ });
   await expect(archivedHeader).toBeVisible();
 
-  // Expand the archived accounts section
+  // Expand the closed accounts section
   await archivedHeader.click();
   const archivedRow = page.getByRole("button", { name: new RegExp(`^${name} `) });
   await expect(archivedRow).toBeVisible();
 
-  // Click the archived account to navigate to its register
+  // Click the closed account to navigate to its register
   await archivedRow.click();
-  await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+  await expect(page.getByText("Closed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Closing note for e2e")).toBeVisible();
 
-  // Step 3: Unarchive the account
+  // Step 3: Reopen the account
   await page
     .getByRole("button", { name: `Edit account ${name}` })
     .click({ force: true });
 
   const unarchiveModal = page.locator(".y-modal").last();
-  await expect(unarchiveModal.locator(".y-modal-head")).toHaveText("Edit Account (Archived)");
+  await expect(unarchiveModal.locator(".y-modal-head")).toHaveText("Edit Account (Closed)");
   await unarchiveModal
     .locator(".y-modal-foot")
-    .getByRole("button", { name: "Unarchive account" })
+    .getByRole("button", { name: "Reopen account" })
     .click();
   await expect(unarchiveModal).toBeHidden();
 

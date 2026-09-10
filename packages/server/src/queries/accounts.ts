@@ -19,6 +19,7 @@ export type CreateAccountInput = {
   balance?: number;
   onBudget?: boolean;
   archived?: boolean;
+  notes?: string;
 };
 
 export type UpdateAccountInput = {
@@ -28,6 +29,7 @@ export type UpdateAccountInput = {
   onBudget?: boolean;
   sort?: number;
   archived?: boolean;
+  notes?: string;
 };
 
 export async function createAccount(db: Database, input: CreateAccountInput) {
@@ -56,6 +58,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
         onBudget,
         sort: Number(maxRow?.max ?? -1) + 1,
         archived: input.archived ?? false,
+        notes: String(input.notes ?? ""),
       })
       .returning();
     if (!row) {
@@ -152,6 +155,7 @@ export async function updateAccount(db: Database, id: number, patch: UpdateAccou
   if (patch.groupLabel !== undefined && patch.groupLabel != null) p.groupLabel = String(patch.groupLabel);
   if (patch.sort !== undefined && patch.sort != null) p.sort = Number(patch.sort);
   if (patch.archived !== undefined && patch.archived != null) p.archived = !!patch.archived;
+  if (patch.notes !== undefined && patch.notes != null) p.notes = String(patch.notes).slice(0, 2000);
 
   const touchesTypeOrBoundary = patch.kind !== undefined || patch.onBudget !== undefined;
 

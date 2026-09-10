@@ -1546,12 +1546,17 @@ export type ToastItem = {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: { label: string; run: () => void };
 };
 
 let _nextToastId = 0;
 
-export function createToast(message: string, tone: ToastTone = "info"): ToastItem {
-  return { id: ++_nextToastId, message, tone };
+export function createToast(
+  message: string,
+  tone: ToastTone = "info",
+  action?: { label: string; run: () => void }
+): ToastItem {
+  return { id: ++_nextToastId, message, tone, action };
 }
 
 const TOAST_BG: Record<ToastTone, string> = {
@@ -1576,6 +1581,18 @@ export const Toast: React.FC<{ items: ToastItem[]; onDismiss: (id: number) => vo
           onClick={() => onDismiss(t.id)}
         >
           <span className="y-toast-msg">{t.message}</span>
+          {t.action && (
+            <button
+              className="y-toast-action"
+              onClick={(e) => {
+                e.stopPropagation();
+                t.action!.run();
+                onDismiss(t.id);
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>,

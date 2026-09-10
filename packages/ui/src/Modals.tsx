@@ -1751,6 +1751,7 @@ export function AccountModal({
     groupLabel: string;
     balance?: number;
     onBudget: boolean;
+    notes: string;
   }) => void;
   /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
   onDelete?: () => Promise<void>;
@@ -1762,6 +1763,7 @@ export function AccountModal({
   const [balance, setBalance] = useState(
     initial != null ? (Math.abs(num(initial.balance)) / 100).toFixed(2) : ""
   );
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
@@ -1774,6 +1776,7 @@ export function AccountModal({
     setConfirmingArchive(false);
     setArchiving(false);
     setUnarchiving(false);
+    setNotes(initial?.notes ?? "");
   }, [initial?.id]);
 
   const isEdit = !!initial;
@@ -1786,10 +1789,11 @@ export function AccountModal({
     const b = evalAmount(balance) ?? 0;
     const bCents = dollarsToCents(b);
     const finalBalance = kind === "credit" ? -Math.abs(bCents) : bCents;
+    const trimmedNotes = notes.trim().slice(0, 2000);
     if (isEdit) {
-      onSave({ name: name.trim(), kind, groupLabel, onBudget: kind !== "offbudget" });
+      onSave({ name: name.trim(), kind, groupLabel, onBudget: kind !== "offbudget", notes: trimmedNotes });
     } else {
-      onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget" });
+      onSave({ name: name.trim(), kind, groupLabel, balance: finalBalance, onBudget: kind !== "offbudget", notes: trimmedNotes });
     }
   };
 
@@ -1829,10 +1833,10 @@ export function AccountModal({
         confirmingDelete
           ? `Delete "${initial?.name ?? "Account"}"?`
           : confirmingArchive
-            ? `Archive "${initial?.name ?? "Account"}"?`
+            ? `Close "${initial?.name ?? "Account"}"?`
             : isEdit
               ? isArchived
-                ? "Edit Account (Archived)"
+                ? "Edit Account (Closed)"
                 : "Edit Account"
               : "Add Account"
       }
@@ -1860,7 +1864,7 @@ export function AccountModal({
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <Btn variant="primary" onClick={confirmArchive} disabled={archiving}>
-                {archiving ? "Archiving" : "Yes, archive it"}
+                {archiving ? "Closing" : "Yes, close it"}
               </Btn>
             </div>
           </>
@@ -1869,11 +1873,11 @@ export function AccountModal({
             <div className="flex items-center gap-2 mr-auto">
               <Btn onClick={onClose}>Cancel</Btn>
               {isEdit && !isArchived && onArchive && (
-                <Btn onClick={() => setConfirmingArchive(true)}>Archive account</Btn>
+                <Btn onClick={() => setConfirmingArchive(true)}>Close account</Btn>
               )}
               {isEdit && isArchived && onUnarchive && (
                 <Btn onClick={handleUnarchive} disabled={unarchiving}>
-                  {unarchiving ? "Unarchiving" : "Unarchive account"}
+                  {unarchiving ? "Reopening" : "Reopen account"}
                 </Btn>
               )}
               {isEdit && onDelete && (
@@ -1908,13 +1912,19 @@ export function AccountModal({
       ) : confirmingArchive ? (
         <div className="space-y-2 text-[12.5px] leading-relaxed" style={{ color: "var(--y-ink)" }}>
           <p>
-            Archive <strong>{initial?.name}</strong>?
+            Close <strong>{initial?.name}</strong>?
           </p>
           <p className="y-hint text-[11.5px]">
-            Archived accounts are hidden from the sidebar and new transaction dropdowns,
-            but all transaction history and reports are preserved. You can unarchive it
-            at any time.
+            Closed accounts collapse under Closed Accounts and are excluded from new
+            transaction dropdowns, but all transaction history and reports are
+            preserved. You can reopen it at any time.
           </p>
+          {initial != null && num(initial.balance) !== 0 && (
+            <Notice tone="warn" title={`Balance is ${(num(initial.balance) / 100).toFixed(2)}`}>
+              This account still has a non-zero balance. Closing keeps the balance in
+              net worth — transfer it to $0 first if you want a clean close.
+            </Notice>
+          )}
         </div>
       ) : (
         <>
@@ -1967,6 +1977,16 @@ export function AccountModal({
               Starting balance is locked after creation. To adjust the working balance, add a transaction or use the Reconcile flow.
             </div>
           )}
+          <Field label="Notes">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value.slice(0, 2000))}
+              placeholder="Optional note — e.g. why this account was closed"
+              rows={2}
+              maxLength={2000}
+              className="y-input w-full py-[3px] min-h-[44px]"
+            />
+          </Field>
         </>
       )}
     </Modal>

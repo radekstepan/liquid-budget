@@ -239,6 +239,7 @@ export const AccountCreateSchema = z
     balance: z.number().int().optional().default(0),
     onBudget: z.boolean().optional(),
     archived: z.boolean().optional().default(false),
+    notes: z.string().max(2000).optional().default(""),
   })
   .strict()
   .transform((data) => ({
@@ -265,6 +266,7 @@ export const AccountPatchSchema = z
     onBudget: z.boolean().optional(),
     sort: z.number().int().optional(),
     archived: z.boolean().optional(),
+    notes: z.string().max(2000).optional(),
   })
   .strict()
   .refine(
@@ -794,6 +796,7 @@ export const AccountResponseSchema = z.looseObject({
   lastReconciledAt: z.string().nullable().optional(),
   lastReconciledBalance: z.union([z.string(), z.number()]).nullable().optional(),
   archived: z.boolean().optional(),
+  notes: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
 });
 

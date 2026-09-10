@@ -68,9 +68,9 @@ export async function GET(req: NextRequest) {
       const lines: string[] = [];
 
       // Accounts
-      lines.push(csvLine(["Type", "ID", "Name", "Kind", "Group", "Balance", "On Budget", "Archived"]));
+      lines.push(csvLine(["Type", "ID", "Name", "Kind", "Group", "Balance", "On Budget", "Archived", "Notes"]));
       for (const a of data.accounts) {
-        lines.push(csvLine(["Account", a.id, a.name, a.kind, a.groupLabel, formatCents(a.balance), a.onBudget ? "Y" : "N", a.archived ? "Y" : "N"]));
+        lines.push(csvLine(["Account", a.id, a.name, a.kind, a.groupLabel, formatCents(a.balance), a.onBudget ? "Y" : "N", a.archived ? "Y" : "N", (a as { notes?: string | null }).notes ?? ""]));
       }
 
       lines.push("");

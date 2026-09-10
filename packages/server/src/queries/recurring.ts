@@ -15,8 +15,10 @@ import { recurring, recurringSubTransactions } from "../schema.js";
 import {
   createSplitWithChildren,
   createTransaction,
+  closedAccountMessage,
+  getAccountInfo,
+  getTransferTargetInfo,
   assertValidAmount,
-  isAccountOnBudget,
   sanitizeFlagColor,
   TransactionError,
   assertEntityInvariants,
@@ -178,15 +180,24 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
       }
     }
   }
-
   return withTransaction(db, async () => {
-    const srcOnBudget = await isAccountOnBudget(db, input.accountId);
+    const srcInfo = await getAccountInfo(db, input.accountId);
+    const closedSrc = closedAccountMessage(srcInfo, input.accountId);
+    if (closedSrc) {
+      throw new RecurringError(closedSrc, 422);
+    }
+    const srcOnBudget = srcInfo?.onBudget ?? true;
     let categoryId: number | null = null;
 
     if (norm.isSplit) {
       categoryId = null;
     } else if (norm.isTransfer && norm.effectiveTransferAccountId != null) {
-      const destOnBudget = await isAccountOnBudget(db, norm.effectiveTransferAccountId);
+      const destInfo = await getTransferTargetInfo(db, norm.effectiveTransferAccountId);
+      const closedDest = closedAccountMessage(destInfo, norm.effectiveTransferAccountId);
+      if (closedDest) {
+        throw new RecurringError(closedDest, 422);
+      }
+      const destOnBudget = destInfo?.onBudget ?? true;
       const classification = classifyBoundaryTransfer({
         srcOnBudget,
         destOnBudget,
@@ -231,7 +242,12 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         const childAmount = assertValidAmount(c.amount);
 
         if (transferAccountId) {
-          const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+          const destInfo = await getTransferTargetInfo(db, transferAccountId);
+          const closedDest = closedAccountMessage(destInfo, transferAccountId);
+          if (closedDest) {
+            throw new RecurringError(closedDest, 422);
+          }
+          const destOnBudget = destInfo?.onBudget ?? true;
           const classification = classifyBoundaryTransfer({
             srcOnBudget,
             destOnBudget,
@@ -285,6 +301,16 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
     transferAccountId: effectiveTransferAccountId,
     subTransactions: norm.isSplit ? norm.subTransactions : undefined,
   });
+
+  // Moving a schedule (or its transfer leg) onto a closed account is blocked
+  // at post time below; pure field edits on closed-account schedules stay
+  // allowed (e.g. deactivating). Replaced split children introduce new
+  // destinations, so those are always checked.
+  const movesAccount =
+    patch.accountId !== undefined && patch.accountId != null && Number(patch.accountId) !== existing.accountId;
+  const movesTransfer =
+    patch.transferAccountId !== undefined &&
+    (norm.effectiveTransferAccountId ?? null) !== existing.transferAccountId;
 
   // Validate split children if supplied.
   if (norm.isSplit) {
@@ -365,13 +391,27 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
 
   return withTransaction(db, async () => {
     const targetAccountId = (p.accountId as number | undefined) ?? existing.accountId;
-    const srcOnBudget = await isAccountOnBudget(db, targetAccountId);
+    const targetInfo = await getAccountInfo(db, targetAccountId);
+    if (movesAccount) {
+      const closedTarget = closedAccountMessage(targetInfo, targetAccountId);
+      if (closedTarget) {
+        throw new RecurringError(closedTarget, 422);
+      }
+    }
+    const srcOnBudget = targetInfo?.onBudget ?? true;
 
     if (norm.isSplit) {
       p.transferAccountId = null;
       p.categoryId = null;
     } else if (isTransfer) {
-      const destOnBudget = await isAccountOnBudget(db, effectiveTransferAccountId!);
+      const destInfo = await getTransferTargetInfo(db, effectiveTransferAccountId!);
+      if (movesTransfer) {
+        const closedDest = closedAccountMessage(destInfo, effectiveTransferAccountId!);
+        if (closedDest) {
+          throw new RecurringError(closedDest, 422);
+        }
+      }
+      const destOnBudget = destInfo?.onBudget ?? true;
       const candidateCatId =
         patch.categoryId !== undefined && norm.effectiveCategoryId !== undefined
           ? norm.effectiveCategoryId
@@ -414,7 +454,12 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
           const childAmount = assertValidAmount(c.amount);
 
           if (transferAccountId) {
-            const destOnBudget = await isAccountOnBudget(db, transferAccountId);
+            const destInfo = await getTransferTargetInfo(db, transferAccountId);
+            const closedDest = closedAccountMessage(destInfo, transferAccountId);
+            if (closedDest) {
+              throw new RecurringError(closedDest, 422);
+            }
+            const destOnBudget = destInfo?.onBudget ?? true;
             const classification = classifyBoundaryTransfer({
               srcOnBudget,
               destOnBudget,

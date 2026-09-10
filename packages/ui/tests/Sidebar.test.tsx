@@ -249,7 +249,7 @@ describe("Sidebar", () => {
     fireEvent.doubleClick(handle);
   });
 
-  it("renders Archived Accounts section when archived accounts exist", () => {
+  it("renders Closed Accounts section when closed accounts exist", () => {
     const mixedAccounts: Account[] = [
       ...accounts,
       { id: 99, name: "Old Bank", kind: "liquid", groupLabel: "Liquid", balance: "0", onBudget: true, sort: 4, archived: true },
@@ -267,7 +267,7 @@ describe("Sidebar", () => {
     );
 
     // Header is rendered
-    const archivedGroupHead = screen.getByRole("button", { name: /archived accounts/i });
+    const archivedGroupHead = screen.getByRole("button", { name: /closed accounts/i });
     expect(archivedGroupHead).toBeInTheDocument();
 
     // By default it is collapsed, so Old Bank is not visible yet
@@ -368,6 +368,26 @@ describe("Sidebar", () => {
     );
 
     expect(screen.queryByText("3")).not.toBeInTheDocument();
+  });
+
+  it("shows a note indicator with the note as tooltip when an account has notes", () => {
+    const notedAccounts: Account[] = [
+      { id: 20, name: "Noted Checking", kind: "liquid", groupLabel: "Liquid", balance: "1000", onBudget: true, sort: 0, notes: "Closed after refinance" },
+      { id: 21, name: "Plain Checking", kind: "liquid", groupLabel: "Liquid", balance: "1000", onBudget: true, sort: 1 },
+    ];
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={notedAccounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+
+    expect(screen.getByLabelText("Note on Noted Checking")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Note on Plain Checking")).not.toBeInTheDocument();
   });
 });
 

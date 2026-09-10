@@ -685,17 +685,29 @@ export const TransactionsView = memo(function TransactionsView({
             {filterAccount ? filterAccount.name : "All Transactions"}
           </span>
           {filterAccount?.archived && (
-            <span
-              className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border"
-              style={{
-                backgroundColor: "var(--y-gray-100, #f1f5f9)",
-                borderColor: "var(--y-gray-300, #cbd5e1)",
-                color: "var(--y-ink-soft, #64748b)",
-              }}
-            >
-              Archived
-            </span>
+            <Tooltip tip="This account is closed. Reopen it to add new transactions.">
+              <span
+                className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border"
+                style={{
+                  backgroundColor: "var(--y-gray-100, #f1f5f9)",
+                  borderColor: "var(--y-gray-300, #cbd5e1)",
+                  color: "var(--y-ink-soft, #64748b)",
+                }}
+              >
+                Closed
+              </span>
+            </Tooltip>
           )}
+          {filterAccount?.notes ? (
+            <Tooltip tip={filterAccount.notes}>
+              <span
+                className="text-[11px] truncate max-w-[320px]"
+                style={{ color: "var(--y-ink-soft, #64748b)" }}
+              >
+                {filterAccount.notes}
+              </span>
+            </Tooltip>
+          ) : null}
         </div>
         <ToolbarSep />
         <TextField
@@ -1089,16 +1101,26 @@ export const TransactionsView = memo(function TransactionsView({
       {/* Register Footer Bar: Action Buttons */}
       <div className="y-register-footer">
         <div className="flex items-center gap-2">
-          <Button onClick={onAdd} variant="primary" size="sm">
-            <Icon name="plus" size={11} color="#fff" />
-            <span className="ml-1 font-bold">Add a new transaction</span>
-          </Button>
+          <Tooltip
+            tip={filterAccount?.archived ? "Reopen this account to add transactions." : undefined}
+            side="bottom"
+          >
+            <Button onClick={onAdd} variant="primary" size="sm" disabled={filterAccount?.archived}>
+              <Icon name="plus" size={11} color="#fff" />
+              <span className="ml-1 font-bold">Add a new transaction</span>
+            </Button>
+          </Tooltip>
 
           {onAddTransfer && (
-            <Button onClick={onAddTransfer} variant="default" size="sm">
-              <Icon name="swap" size={11} color="var(--y-ink)" />
-              <span className="ml-1">Make a transfer</span>
-            </Button>
+            <Tooltip
+              tip={filterAccount?.archived ? "Reopen this account to add transactions." : undefined}
+              side="bottom"
+            >
+              <Button onClick={onAddTransfer} variant="default" size="sm" disabled={filterAccount?.archived}>
+                <Icon name="swap" size={11} color="var(--y-ink)" />
+                <span className="ml-1">Make a transfer</span>
+              </Button>
+            </Tooltip>
           )}
 
           <Tooltip tip={showScheduledDrawer ? "Hide Scheduled Transactions drawer" : "Show Scheduled Transactions drawer"} side="bottom">

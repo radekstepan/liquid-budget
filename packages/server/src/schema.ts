@@ -23,6 +23,7 @@ export const accounts = sqliteTable(
     lastReconciledAt: text("last_reconciled_at"),
     lastReconciledBalance: integer("last_reconciled_balance"),
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes").notNull().default(""),
   },
   (t) => ({
     kindCheck: check("accounts_kind_check", sql`${t.kind} IN ('liquid', 'credit', 'offbudget')`),

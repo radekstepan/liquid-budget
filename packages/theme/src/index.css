@@ -1857,6 +1857,19 @@ input.y-inline-amt {
   min-width: 0;
   line-height: 1.4;
 }
+.y-toast-action {
+  flex-shrink: 0;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  color: #fff;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--y-font);
+  padding: 2px 4px;
+}
 @keyframes toast-in {
   from {
     opacity: 0;

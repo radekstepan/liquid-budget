@@ -2408,6 +2408,7 @@ describe("AccountModal", () => {
       groupLabel: "Liquid",
       balance: 25075,
       onBudget: true,
+      notes: "",
     });
   });
 
@@ -2431,6 +2432,7 @@ describe("AccountModal", () => {
       groupLabel: "Credit Cards",
       balance: -30000,
       onBudget: true,
+      notes: "",
     });
   });
 
@@ -2448,6 +2450,7 @@ describe("AccountModal", () => {
       groupLabel: "Retirement",
       balance: 0,
       onBudget: false,
+      notes: "",
     });
   });
 
@@ -2476,6 +2479,7 @@ describe("AccountModal", () => {
       kind: "liquid",
       groupLabel: "Liquid",
       onBudget: true,
+      notes: "",
     });
   });
 
@@ -2497,15 +2501,15 @@ describe("AccountModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /archive account/i }));
-    expect(screen.getByText(/archived accounts are hidden/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /close account/i }));
+    expect(screen.getByText(/closed accounts collapse/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /yes, archive it/i }));
+      fireEvent.click(screen.getByRole("button", { name: /yes, close it/i }));
     });
     expect(onArchive).toHaveBeenCalledTimes(1);
   });
 
-  it("triggers onUnarchive when editing an archived account", async () => {
+  it("triggers onUnarchive when editing a closed account", async () => {
     const onUnarchive = vi.fn();
     render(
       <AccountModal
@@ -2516,11 +2520,43 @@ describe("AccountModal", () => {
       />
     );
 
-    expect(screen.getByText(/edit account \(archived\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/edit account \(closed\)/i)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /unarchive account/i }));
+      fireEvent.click(screen.getByRole("button", { name: /reopen account/i }));
     });
     expect(onUnarchive).toHaveBeenCalledTimes(1);
+  });
+
+  it("pre-fills and saves account notes", () => {
+    const onSave = vi.fn();
+    render(
+      <AccountModal
+        initial={{ id: 7, name: "Noted", kind: "liquid", balance: "0", onBudget: true, sort: 0, notes: "Original note" }}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    expect(screen.getByDisplayValue("Original note")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/optional note/i), {
+      target: { value: "Updated reason" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Noted", notes: "Updated reason" })
+    );
+  });
+
+  it("warns about a non-zero balance in the close confirmation", () => {
+    render(
+      <AccountModal
+        initial={{ id: 8, name: "Funded", kind: "liquid", balance: "5000", onBudget: true, sort: 0 }}
+        onClose={() => {}}
+        onSave={() => {}}
+        onArchive={() => Promise.resolve()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /close account/i }));
+    expect(screen.getByText(/non-zero balance/i)).toBeInTheDocument();
   });
 
   it("enables Account Type dropdown in edit mode when transactionCount is 0", () => {
@@ -2540,6 +2576,7 @@ describe("AccountModal", () => {
       kind: "offbudget",
       groupLabel: "Retirement",
       onBudget: false,
+      notes: "",
     });
   });
 
