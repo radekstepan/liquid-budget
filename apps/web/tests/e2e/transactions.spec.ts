@@ -9,7 +9,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, openSearchField, pickSubCategory } from "./helpers";
+import { fillSearchlist, openSearchField, pickSubCategory, filterRegisterByText, clearRegisterFilter } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -44,7 +44,7 @@ test("adds a new transaction via the modal and renders the row", async ({ page }
 
   // Modal closes and the new row appears.
   await expect(modal).toBeHidden();
-  await page.getByPlaceholder("Search register").fill(uniquePayee);
+  await filterRegisterByText(page, uniquePayee);
   await expect(page.getByRole("row").filter({ hasText: uniquePayee })).toBeVisible();
 });
 
@@ -67,12 +67,12 @@ test("search filter narrows the register rows", async ({ page }) => {
   const totalBefore = await allRows.count();
 
   // Type the exact stamp; only the matching row stays visible.
-  await page.getByPlaceholder("Search register").fill(stamp);
+  await filterRegisterByText(page, stamp);
   await expect(allRows).toHaveCount(1);
   await expect(allRows.first()).toContainText(uniquePayee);
 
   // Clearing the search restores every row.
-  await page.getByPlaceholder("Search register").fill("");
+  await clearRegisterFilter(page);
   await expect(allRows).toHaveCount(totalBefore);
 });
 
@@ -107,21 +107,29 @@ test("selecting a sidebar account marks the row and scopes the register; Transac
 });
 
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {
-  const rows = page.locator("tbody tr.y-row");
-  const targetRow = rows.first();
-  const hasFlag = (await page.locator("table.y-table thead th", { hasText: /^F$/ }).count()) > 0;
-  const payeeColIdx = hasFlag ? 4 : 3;
-  const rawPayee = (await targetRow.locator("td").nth(payeeColIdx).textContent())?.trim();
-  const cleanPayee = rawPayee?.replace(/^[▶▼]\s*/, "");
-  expect(cleanPayee).toBeTruthy();
+  // Create a dedicated regular transaction: the register's first row is
+  // seed-dependent (currently an auto-posted Wealthsimple TFSA *transfer*,
+  // whose edit modal has no payee SearchList), so the old rows.first()
+  // lookup was not deterministic.
+  const uniquePayee = `PW Row ${Date.now()}`;
+  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  const addModal = page.locator(".y-modal").last();
+  await addModal.locator('input[inputmode="decimal"]').first().fill("12.34");
+  await addModal.locator('input[type="date"]').first().fill("2026-06-15");
+  await fillSearchlist(addModal, "e.g. Whole Foods", uniquePayee);
+  await addModal.getByRole("button", { name: "Save Transaction" }).click();
+  await expect(addModal).toBeHidden();
 
+  await filterRegisterByText(page, uniquePayee);
+  const targetRow = page.getByRole("row").filter({ hasText: uniquePayee }).first();
+  await expect(targetRow).toBeVisible();
   await targetRow.click();
 
   const editModal = page.locator(".y-modal").last();
   // The payee field contains the current payee value.
   await expect(
     editModal.locator(".y-searchlist input").first()
-  ).toHaveValue(cleanPayee!);
+  ).toHaveValue(uniquePayee);
 });
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
@@ -134,7 +142,7 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
-  await page.getByPlaceholder("Search register").fill(uniquePayee);
+  await filterRegisterByText(page, uniquePayee);
   const createdRow = page.getByRole("row").filter({ hasText: uniquePayee });
   await expect(createdRow).toBeVisible();
 
@@ -177,7 +185,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
-  await page.getByPlaceholder("Search register").fill(transferPayee);
+  await filterRegisterByText(page, transferPayee);
   const createdRow = page.getByRole("row").filter({ hasText: transferPayee });
   await expect(createdRow.first()).toBeVisible();
 
@@ -226,7 +234,7 @@ test("deletes a split transaction via modal showing split warning notice", async
   await expect(addModal).toBeHidden();
 
   // Find the split transaction row
-  await page.getByPlaceholder("Search register").fill(stamp);
+  await filterRegisterByText(page, stamp);
   const parentRow = page.getByRole("row").filter({ hasText: splitPayee }).first();
   await expect(parentRow).toBeVisible();
 
@@ -245,6 +253,6 @@ test("deletes a split transaction via modal showing split warning notice", async
   await expect(editModal).toBeHidden();
 
   // Clear search and verify row is gone
-  await page.getByPlaceholder("Search register").fill("");
+  await clearRegisterFilter(page);
   await expect(page.getByRole("row").filter({ hasText: splitPayee })).toHaveCount(0);
 });

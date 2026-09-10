@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist } from "./helpers";
+import { fillSearchlist, filterRegisterByText } from "./helpers";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
@@ -38,7 +38,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
-  await page.getByPlaceholder("Search register").fill(payee);
+  await filterRegisterByText(page, payee);
   const row = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(row).toBeVisible();
   await expect(register.locator("thead th", { hasText: /^F$/ })).toHaveCount(1);
@@ -51,7 +51,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
-  await page.getByPlaceholder("Search register").fill(payee);
+  await filterRegisterByText(page, payee);
   const reloadedRow = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(reloadedRow.getByRole("button", { name: "Flag: Blue" })).toBeVisible();
 
@@ -101,7 +101,7 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   await page.reload();
   await waitForReady(page);
   await gotoAllTransactions(page);
-  await page.getByPlaceholder("Search register").fill(payee);
+  await filterRegisterByText(page, payee);
 
   const row = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(row).toBeVisible();

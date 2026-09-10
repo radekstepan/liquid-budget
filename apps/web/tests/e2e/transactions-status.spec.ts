@@ -13,7 +13,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, pickSubCategory } from "./helpers";
+import { fillSearchlist, pickSubCategory, filterRegisterByText } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -63,7 +63,7 @@ test("clicking the C column cycles a row C → U → C", async ({ page }) => {
 
   // The register virtualizes rows, so narrow it to this payee first —
   // otherwise the seed row sits outside the rendered window.
-  await page.getByPlaceholder("Search register").fill(target);
+  await filterRegisterByText(page, target);
 
   const row = page
     .getByRole("row")

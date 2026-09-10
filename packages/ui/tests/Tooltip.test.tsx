@@ -149,14 +149,19 @@ describe("Tooltip", () => {
     expect(classes).not.toContain("inline-flex");
   });
 
-  it("renders only its children when the tip is empty", () => {
+  it("renders no bubble when the tip is empty (wrapper stays for DOM stability)", () => {
+    // The wrapper span is always rendered — even with an empty tip — so
+    // stateful children (e.g. BudgetView's inline amount input) keep a
+    // stable DOM identity when a tip appears mid-interaction (expression
+    // preview). Conditionally switching between a fragment and a span
+    // remounted the input, dropping focus and breaking blur-commit.
     const { container } = render(
       <Tooltip tip={undefined}>
         <span data-testid="plain">hi</span>
       </Tooltip>
     );
     expect(screen.getByTestId("plain")).toBeInTheDocument();
-    expect(container.querySelector(".y-tip-wrap")).toBeNull();
+    expect(container.querySelector(".y-tip-wrap")).not.toBeNull();
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });

@@ -10,7 +10,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, pickSubCategory } from "./helpers";
+import { fillSearchlist, pickSubCategory, filterRegisterByText } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -45,7 +45,7 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
     await expect(modal).toBeHidden();
   }
 
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -91,7 +91,7 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
     await expect(modal).toBeHidden();
   }
 
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -146,7 +146,7 @@ test("bulk deletes selected transactions", async ({ page }) => {
     await expect(modal).toBeHidden();
   }
 
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const row1 = page.getByRole("row").filter({ hasText: payee1 }).first();
   const row2 = page.getByRole("row").filter({ hasText: payee2 }).first();
@@ -195,7 +195,7 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
-  await page.getByPlaceholder("Search register").fill(String(stamp));
+  await filterRegisterByText(page, String(stamp));
 
   const createdRow = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(createdRow).toBeVisible();
@@ -261,7 +261,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await companionModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(companionModal).toBeHidden();
 
-  await page.getByPlaceholder("Search register").fill(stamp);
+  await filterRegisterByText(page, stamp);
 
   const parentRow = page.getByRole("row").filter({ hasText: uniquePayee }).first();
   await expect(parentRow).toBeVisible();

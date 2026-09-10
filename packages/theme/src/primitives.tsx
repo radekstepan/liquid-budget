@@ -1255,7 +1255,14 @@ export const Tooltip: React.FC<{
     };
   }, [on, place]);
 
-  if (tip == null || tip === false || tip === "") return <>{children}</>;
+  // Always render the wrapper span (even when there is no tip) so children
+  // keep a stable DOM identity. Conditionally switching between a fragment
+  // and a span remounts stateful children (e.g. BudgetView's inline amount
+  // input) the moment a tip appears, dropping focus and breaking blur-commit.
+  // Hover/focus tracking stays unconditional so a tip that appears while the
+  // child already has focus (e.g. an expression preview) shows immediately;
+  // only the portal bubble itself is gated on a non-empty tip.
+  const hasTip = tip != null && tip !== false && tip !== "";
   return (
     <span
       ref={wrapRef}
@@ -1270,7 +1277,8 @@ export const Tooltip: React.FC<{
       onBlur={() => setOn(false)}
     >
       {children}
-      {on &&
+      {hasTip &&
+        on &&
         createPortal(
           <span
             ref={tipRef}

@@ -11,7 +11,7 @@
 // Skeletons define the exact behavior and verification steps required for 100% transaction modification coverage.
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
-import { fillSearchlist } from "./helpers";
+import { fillSearchlist, filterRegisterByText } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -79,7 +79,7 @@ async function selectOption(scope: Locator, labelText: string, optionText: strin
 }
 
 async function searchRegister(page: Page, text: string) {
-  await page.getByPlaceholder("Search register").fill(text);
+  await filterRegisterByText(page, text);
 }
 
 test.beforeEach(async ({ page }) => {
