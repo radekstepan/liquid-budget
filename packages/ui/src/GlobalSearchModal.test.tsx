@@ -119,6 +119,65 @@ describe("GlobalSearchModal", () => {
     });
   });
 
+  it("styles committed chips with the theme and tooltips edit/remove affordances", async () => {
+    const onJump = vi.fn();
+    const onClose = vi.fn();
+    const { container } = render(
+      <GlobalSearchModal
+        data={fixture()}
+        scopeAccountId={null}
+        open
+        onClose={onClose}
+        onJump={onJump}
+        initialQuery={{ filters: [{ kind: "is", value: "cleared" }], text: "" }}
+      />
+    );
+    // Theme chip styling: chrome-gradient chip inside a y-input-language box.
+    expect(container.querySelector(".y-searchbox")).not.toBeNull();
+    const chip = container.querySelector(".y-chip");
+    expect(chip).not.toBeNull();
+    const editBtn = screen.getByRole("button", { name: "Edit Is filter" });
+    const removeBtn = screen.getByRole("button", { name: "Remove Is filter" });
+    expect(chip!.contains(editBtn)).toBe(true);
+    expect(chip!.contains(removeBtn)).toBe(true);
+    // Both halves use the theme chip classes that carry cursor:pointer.
+    expect(editBtn.classList.contains("y-chip-edit")).toBe(true);
+    expect(removeBtn.classList.contains("y-chip-x")).toBe(true);
+    // Hovering the chip body offers an edit tooltip; hovering x offers remove.
+    fireEvent.mouseOver(editBtn.closest(".y-tip-wrap")!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Edit Is filter");
+    fireEvent.mouseOut(editBtn.closest(".y-tip-wrap")!);
+    fireEvent.mouseOver(removeBtn.closest(".y-tip-wrap")!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Remove Is filter");
+    fireEvent.mouseOut(removeBtn.closest(".y-tip-wrap")!);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("renders the key pill with the blue theme treatment instead of white-on-black", async () => {
+    const onJump = vi.fn();
+    const onClose = vi.fn();
+    const { container } = render(
+      <GlobalSearchModal data={fixture()} scopeAccountId={null} open onClose={onClose} onJump={onJump} />
+    );
+    const input = screen.getByTestId("global-search-input");
+    fireEvent.change(input, { target: { value: "payee:" } });
+    const pill = container.querySelector(".y-chip--key");
+    expect(pill).not.toBeNull();
+    expect(pill).toHaveTextContent("Payee");
+    expect(pill!.classList.contains("text-white")).toBe(false);
+  });
+
+  it("renders the results list inline with no popover drop shadow", () => {
+    const onJump = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <GlobalSearchModal data={fixture()} scopeAccountId={null} open onClose={onClose} onJump={onJump} />
+    );
+    const list = screen.getByRole("listbox", { name: "Search results" });
+    expect(list.classList.contains("y-dropdown")).toBe(true);
+    expect(list.classList.contains("y-dropdown--inline")).toBe(true);
+  });
+
   it("jumps to a transaction from free-text results", async () => {
     const onJump = vi.fn();
     const onClose = vi.fn();

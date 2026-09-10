@@ -974,13 +974,17 @@ describe("TransactionsView", () => {
       };
     }
 
-    function renderWithQuery(query: Query, onEditFilter?: (q: Query) => void) {
-      render(
+    function renderWithQuery(
+      query: Query,
+      opts?: { onEditFilter?: (q: Query) => void; onClearFilter?: () => void }
+    ) {
+      return render(
         <TransactionsView
           data={filterFixture()}
           accountFilter={null}
           externalFilter={{ query, nonce: 1 }}
-          onEditFilter={onEditFilter}
+          onEditFilter={opts?.onEditFilter}
+          onClearFilter={opts?.onClearFilter}
           onAdd={() => {}}
           onEdit={() => {}}
           onDelete={() => {}}
@@ -1010,9 +1014,29 @@ describe("TransactionsView", () => {
         filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
         text: "",
       };
-      renderWithQuery(query, onEditFilter);
+      renderWithQuery(query, { onEditFilter });
       fireEvent.click(screen.getByRole("button", { name: "Edit Date filter" }));
       expect(onEditFilter).toHaveBeenCalledWith(query);
+    });
+
+    it("styles filter-bar chips with the theme and tooltips edit/remove affordances", () => {
+      const { container } = renderWithQuery({
+        filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
+        text: "",
+      });
+      const chip = container.querySelector("#register-filter-bar .y-chip, [data-testid='register-filter-bar'] .y-chip");
+      expect(chip).not.toBeNull();
+      const editBtn = screen.getByRole("button", { name: "Edit Date filter" });
+      const removeBtn = screen.getByRole("button", { name: "Remove Date filter" });
+      expect(editBtn.classList.contains("y-chip-edit")).toBe(true);
+      expect(removeBtn.classList.contains("y-chip-x")).toBe(true);
+      fireEvent.mouseOver(editBtn.closest(".y-tip-wrap")!);
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Edit Date filter");
+      fireEvent.mouseOut(editBtn.closest(".y-tip-wrap")!);
+      fireEvent.mouseOver(removeBtn.closest(".y-tip-wrap")!);
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Remove Date filter");
+      fireEvent.mouseOut(removeBtn.closest(".y-tip-wrap")!);
+      expect(screen.queryByRole("tooltip")).toBeNull();
     });
 
     it("shows a Filter button (and no search box) when nothing is applied", () => {
@@ -1052,6 +1076,40 @@ describe("TransactionsView", () => {
       expect(screen.getByTestId("register-filter-bar")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Clear" }));
       expect(screen.getByText("Old Grocer")).toBeInTheDocument();
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
+    });
+
+    it("notifies the owner when cleared so the filter can't come back on remount", () => {
+      const onClearFilter = vi.fn();
+      renderWithQuery(
+        {
+          filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
+          text: "",
+        },
+        { onClearFilter }
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+      expect(onClearFilter).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
+    });
+
+    it("notifies the owner only when removing the last remaining chip", () => {
+      const onClearFilter = vi.fn();
+      renderWithQuery(
+        {
+          filters: [
+            { kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" },
+            { kind: "is", value: "cleared" },
+          ],
+          text: "",
+        },
+        { onClearFilter }
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Remove Date filter" }));
+      expect(screen.getByTestId("register-filter-bar")).toBeInTheDocument();
+      expect(onClearFilter).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Remove Is filter" }));
+      expect(onClearFilter).toHaveBeenCalledTimes(1);
       expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
     });
   });

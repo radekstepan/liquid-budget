@@ -122,6 +122,7 @@ export const TransactionsView = memo(function TransactionsView({
   onBulkUpdateRecurring,
   onBulkDeleteRecurring,
   onEditFilter,
+  onClearFilter,
 }: {
   data: BudgetData;
   accountFilter: number | null;
@@ -155,11 +156,39 @@ export const TransactionsView = memo(function TransactionsView({
   onBulkDeleteRecurring?: (ids: number[]) => Promise<void> | void;
   /** Open the search modal pre-filled with `query` so the filter can be edited. */
   onEditFilter?: (query: Query) => void;
+  /** Notify the owner that the applied filter was cleared so stale external
+      filters can't re-apply on remount (e.g. after navigating away and back). */
+  onClearFilter?: () => void;
 }) {
   // Structured search applied from the global search modal (chips + text).
   // This is the single source of truth for register narrowing, rendered as
   // chips in the toolbar; the modal is the only place it gets edited.
   const [appliedQuery, setAppliedQuery] = useState<Query | null>(null);
+
+  // Clearing must also notify the owner: BudgetApp's registerFilter persists
+  // across view switches, so a locally-cleared filter would otherwise
+  // re-apply when the register remounts (filter "comes back" after Clear +
+  // navigating away and back).
+  const clearAppliedQuery = useCallback(() => {
+    setAppliedQuery(null);
+    onClearFilter?.();
+  }, [onClearFilter]);
+
+  const removeAppliedFilterChip = useCallback(
+    (idx: number) => {
+      if (!appliedQuery) return;
+      const next = { ...appliedQuery, filters: appliedQuery.filters.filter((_, j) => j !== idx) };
+      if (next.filters.length === 0 && !next.text.trim()) clearAppliedQuery();
+      else setAppliedQuery(next);
+    },
+    [appliedQuery, clearAppliedQuery]
+  );
+
+  const removeAppliedTextChip = useCallback(() => {
+    if (!appliedQuery) return;
+    if (appliedQuery.filters.length === 0) clearAppliedQuery();
+    else setAppliedQuery({ ...appliedQuery, text: "" });
+  }, [appliedQuery, clearAppliedQuery]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
@@ -651,8 +680,9 @@ export const TransactionsView = memo(function TransactionsView({
 
     const targetId = focusTransaction.id;
     // A focused jump is fresh navigation: a stale applied filter could hide
-    // the target row, so clear it.
+    // the target row, so clear it (including the owner's copy).
     setAppliedQuery(null);
+    onClearFilter?.();
     setSelectedIds(new Set([targetId]));
     setSelectedId(targetId);
 
@@ -676,7 +706,7 @@ export const TransactionsView = memo(function TransactionsView({
       }
       setScrollTop(targetScroll);
     }
-  }, [focusTransaction, filtered, containerHeight, data.transactions]);
+  }, [focusTransaction, filtered, containerHeight, data.transactions, onClearFilter]);
 
   // Handle register filtering from global search. The applied query becomes
   // the single source of truth, shown as chips in the toolbar.
@@ -744,78 +774,60 @@ export const TransactionsView = memo(function TransactionsView({
             {appliedQuery.filters.map((f, i) => {
               const { key, value } = filterLabel(f);
               return (
-                <span
-                  key={`${filterId(f)}:${i}`}
-                  className="inline-flex h-6 max-w-full shrink-0 items-center overflow-hidden rounded border text-[12px] leading-none"
-                  style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
-                    className="flex h-full items-center gap-1 px-1.5"
-                    aria-label={`Edit ${key} filter`}
-                  >
-                    <span style={{ color: "var(--y-ink-soft)" }}>{key}</span>
-                    <span className="max-w-[14rem] truncate font-medium">{value}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAppliedQuery((prev) => {
-                        if (!prev) return prev;
-                        const next = {
-                          ...prev,
-                          filters: prev.filters.filter((_, j) => j !== i),
-                        };
-                        return next.filters.length === 0 && !next.text.trim() ? null : next;
-                      });
-                    }}
-                    className="flex h-full items-center border-l px-1"
-                    style={{ borderColor: "var(--y-line)" }}
-                    aria-label={`Remove ${key} filter`}
-                  >
-                    <Icon name="x" size={10} />
-                  </button>
+                <span key={`${filterId(f)}:${i}`} className="y-chip shrink-0">
+                  <Tooltip tip={`Edit ${key} filter`} className="flex h-full">
+                    <button
+                      type="button"
+                      onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
+                      className="y-chip-edit"
+                      aria-label={`Edit ${key} filter`}
+                    >
+                      <span className="y-chip-key">{key}</span>
+                      <span className="y-chip-val">{value}</span>
+                    </button>
+                  </Tooltip>
+                  <Tooltip tip={`Remove ${key} filter`} className="flex h-full">
+                    <button
+                      type="button"
+                      onClick={() => removeAppliedFilterChip(i)}
+                      className="y-chip-x"
+                      aria-label={`Remove ${key} filter`}
+                    >
+                      <Icon name="x" size={10} />
+                    </button>
+                  </Tooltip>
                 </span>
               );
             })}
             {appliedQuery.text.trim().length > 0 && (
-              <span
-                className="inline-flex h-6 max-w-full shrink-0 items-center overflow-hidden rounded border text-[12px] leading-none"
-                style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
-              >
-                <button
-                  type="button"
-                  onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
-                  className="flex h-full items-center gap-1 px-1.5"
-                  aria-label="Edit search text filter"
-                >
-                  <span style={{ color: "var(--y-ink-soft)" }}>Search</span>
-                  <span className="max-w-[14rem] truncate font-medium">
-                    “{appliedQuery.text.trim()}”
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAppliedQuery((prev) => {
-                      if (!prev) return prev;
-                      const next = { ...prev, text: "" };
-                      return next.filters.length === 0 ? null : next;
-                    });
-                  }}
-                  className="flex h-full items-center border-l px-1"
-                  style={{ borderColor: "var(--y-line)" }}
-                  aria-label="Remove search text filter"
-                >
-                  <Icon name="x" size={10} />
-                </button>
+              <span className="y-chip shrink-0">
+                <Tooltip tip="Edit search text filter" className="flex h-full">
+                  <button
+                    type="button"
+                    onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
+                    className="y-chip-edit"
+                    aria-label="Edit search text filter"
+                  >
+                    <span className="y-chip-key">Search</span>
+                    <span className="y-chip-val">“{appliedQuery.text.trim()}”</span>
+                  </button>
+                </Tooltip>
+                <Tooltip tip="Remove search text filter" className="flex h-full">
+                  <button
+                    type="button"
+                    onClick={removeAppliedTextChip}
+                    className="y-chip-x"
+                    aria-label="Remove search text filter"
+                  >
+                    <Icon name="x" size={10} />
+                  </button>
+                </Tooltip>
               </span>
             )}
             <button
               type="button"
               className="y-btn y-btn--sm shrink-0"
-              onClick={() => setAppliedQuery(null)}
+              onClick={clearAppliedQuery}
             >
               Clear
             </button>

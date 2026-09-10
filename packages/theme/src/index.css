@@ -1009,6 +1009,12 @@ body::after {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
+/* Inline (in-flow) lists: same dropdown surface, but no popover drop
+   shadow — the surrounding modal already casts one. Keeps the inset top
+   highlight so the surface still reads as recessed chrome. */
+.y-dropdown--inline {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
 .y-dropdown-empty {
   display: block;
   padding: 6px 10px;
@@ -1032,6 +1038,104 @@ body::after {
 .y-search:focus {
   border-color: var(--y-blue);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 3px rgba(47, 127, 176, 0.38);
+}
+
+/* ---------- chip search box (wraps committed filter chips + input) ---------- */
+/* Same input language as .y-input/.y-search: 3px radius, inset shadow, blue
+   focus ring — but as a flex container so chips can live inside it. */
+.y-searchbox {
+  font-family: var(--y-font);
+  font-size: 12px;
+  color: var(--y-ink);
+  background: #fff;
+  border: 1px solid #a8adb0;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.y-searchbox:hover {
+  border-color: #7e858a;
+}
+.y-searchbox:focus-within {
+  border-color: var(--y-blue);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.28);
+}
+
+/* ---------- filter chips (committed structured filters) ---------- */
+.y-chip {
+  display: inline-flex;
+  height: 22px;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #a8adb0;
+  border-radius: 3px;
+  background: linear-gradient(var(--y-chrome-top), var(--y-chrome-bot));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 1px 1px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--y-ink);
+  white-space: nowrap;
+}
+.y-chip button {
+  cursor: pointer;
+}
+.y-chip-edit {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+}
+.y-chip-edit:hover {
+  background: rgba(47, 127, 176, 0.12);
+}
+.y-chip-key {
+  color: var(--y-ink-soft);
+}
+.y-chip-val {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+.y-chip-x {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  padding: 0 5px;
+  border: 0;
+  border-left: 1px solid #a8adb0;
+  background: transparent;
+  color: var(--y-ink-soft);
+}
+.y-chip-x:hover {
+  background: var(--y-hover);
+  color: var(--y-ink);
+}
+/* Active key pill ("Filter by xyz"): YNAB4 blue selection language, same
+   tokens as .y-btn--blue — never white-on---y-ink. */
+.y-chip--key {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid #17527a;
+  border-radius: 3px;
+  background: linear-gradient(#4092c2, var(--y-blue));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 1px 1px rgba(0, 0, 0, 0.12);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
 }
 
 /* checkbox / radio */

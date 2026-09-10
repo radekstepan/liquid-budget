@@ -381,25 +381,11 @@ describe("Inspector", () => {
   });
 
   describe("Global search", () => {
-    const searchData = {
-      accounts: [
-        { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Cash", balance: "0", onBudget: true, sort: 0 },
-      ],
-      groups: [],
-      categories: [],
-      assignments: [],
-      transactions: [],
-      recurring: [],
-    };
-
-    it("shows no search box without searchData", () => {
+    it("renders no search UI in the sidebar (search lives in the ⌘K modal)", () => {
       render(<Inspector {...baseProps} />);
       expect(screen.queryByLabelText("Global search")).not.toBeInTheDocument();
-    });
-
-    it("shows the search box next to Settings when searchData is provided", () => {
-      render(<Inspector {...baseProps} searchData={searchData} scopeAccountId={null} onSearchJump={() => {}} />);
-      expect(screen.getByLabelText("Global search")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /open search/i })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("global-search-trigger")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
     });
   });
