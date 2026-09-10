@@ -13,10 +13,10 @@ function renderMenu(over: Partial<Record<View, boolean>> = {}) {
 }
 
 describe("MenuSettingsView", () => {
-  it("renders all four menu pages checked by default", () => {
+  it("renders all three menu pages checked by default", () => {
     renderMenu();
     expect(screen.getByRole("heading", { name: "Page Visibility" })).toBeInTheDocument();
-    for (const name of ["Budget", "Reports", "Calendar", "Transactions"]) {
+    for (const name of ["Budget", "Reports", "Transactions"]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
     }
   });
@@ -43,7 +43,6 @@ describe("MenuSettingsView", () => {
   it("greys out the last visible page so it cannot be hidden", () => {
     const { onToggle } = renderMenu({
       reports: false,
-      calendar: false,
       transactions: false,
     });
     expect(screen.getByRole("checkbox", { name: "Budget" })).toBeDisabled();

@@ -8,7 +8,6 @@ import { Button, Icon, Tooltip, cx } from "@ynab/theme";
 export type View =
   | "budget"
   | "reports"
-  | "calendar"
   | "transactions";
 
 type NavItem = { key: View; label: string; icon: string; color: string };
@@ -17,7 +16,6 @@ type NavItem = { key: View; label: string; icon: string; color: string };
 const NAV_TOP: NavItem[] = [
   { key: "budget", label: "Budget", icon: "budget", color: "#a5d6a7" },
   { key: "reports", label: "Reports", icon: "chart", color: "#ffcc80" },
-  { key: "calendar", label: "Calendar", icon: "calendar", color: "#90caf9" },
 ];
 const TRANSACTIONS_ICON_COLOR = "#f48fb1";
 
