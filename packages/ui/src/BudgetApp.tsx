@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -22,6 +22,8 @@ import { useLocalStorage } from "./useLocalStorage.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
 import { Icon, Tooltip } from "@ynab/theme";
+import type { GlobalSearchJump } from "./GlobalSearch.js";
+import { GlobalSearchModal } from "./GlobalSearchModal.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView, isInternalGroup } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
@@ -347,6 +349,17 @@ export function BudgetApp({
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
+  const [registerFilter, setRegisterFilter] = useState<{
+    payee?: string;
+    categoryId?: number | null;
+    text?: string;
+    query?: Query;
+    nonce: number;
+  } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Query the search modal opens with: null for a fresh search, or the
+  // register's applied filter when editing it from the toolbar.
+  const [searchInitialQuery, setSearchInitialQuery] = useState<Query | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
   const [settingsPage, setSettingsPage] = useState<"rename" | "payees" | "menu" | "snapshots">("rename");
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
@@ -870,6 +883,66 @@ export function BudgetApp({
     [updateUrl, month]
   );
 
+  // Global search jumps always land in the register: a transaction focuses
+  // its row, while a payee/category/text/query selection filters the register.
+  const handleGlobalSearchJump = useCallback(
+    (jump: GlobalSearchJump) => {
+      startTransition(() => {
+        setShowSettingsOverlay(false);
+        setSearchOpen(false);
+        if (jump.kind === "transaction") {
+          setAccountFilter(jump.accountId);
+          setView("transactions");
+          setFocusTransaction({ id: jump.transactionId, nonce: Date.now() });
+          updateUrl("transactions", jump.accountId, month);
+        } else if (jump.kind === "payee") {
+          setView("transactions");
+          setRegisterFilter({ payee: jump.payee, categoryId: null, nonce: Date.now() });
+          updateUrl("transactions", accountFilter, month);
+        } else if (jump.kind === "category") {
+          setView("transactions");
+          setRegisterFilter({ categoryId: jump.categoryId, nonce: Date.now() });
+          updateUrl("transactions", accountFilter, month);
+        } else if (jump.kind === "query") {
+          setView("transactions");
+          setRegisterFilter({ query: jump.query, nonce: Date.now() });
+          updateUrl("transactions", accountFilter, month);
+        } else {
+          setView("transactions");
+          setRegisterFilter({ text: jump.text, nonce: Date.now() });
+          updateUrl("transactions", accountFilter, month);
+        }
+      });
+    },
+    [updateUrl, month, accountFilter]
+  );
+
+  // ⌘K / Ctrl+K and "/" open the search modal from anywhere except while
+  // typing in a field. Escape is handled by the modal itself.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing =
+        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        // Fresh search from anywhere — never resume an edit session.
+        setSearchInitialQuery(null);
+        setSearchOpen(true);
+        return;
+      }
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setSearchInitialQuery(null);
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const cycleStatus = useCallback(
     async (id: number) => {
       const t = data.transactions.find((x) => x.id === id);
@@ -1121,6 +1194,11 @@ export function BudgetApp({
               data={data}
               accountFilter={accountFilter}
               focusTransaction={focusTransaction}
+              externalFilter={registerFilter}
+              onEditFilter={(q) => {
+                setSearchInitialQuery(q);
+                setSearchOpen(true);
+              }}
               onGoToTransfer={handleGoToTransfer}
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
@@ -1279,8 +1357,26 @@ export function BudgetApp({
           onOpenPayees={() => openSettings("payees")}
           onOpenPageVisibility={() => openSettings("menu")}
           onOpenSnapshots={() => openSettings("snapshots")}
+          searchData={data}
+          scopeAccountId={accountFilter}
+          onSearchJump={handleGlobalSearchJump}
+          onOpenSearch={() => {
+            setSearchInitialQuery(null);
+            setSearchOpen(true);
+          }}
         />
       </ErrorBoundary>
+
+      {searchOpen && (
+        <GlobalSearchModal
+          data={data}
+          scopeAccountId={accountFilter}
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onJump={handleGlobalSearchJump}
+          initialQuery={searchInitialQuery}
+        />
+      )}
 
       {modal.kind === "addTransaction" && (
         <TransactionModal

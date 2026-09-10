@@ -246,6 +246,12 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
   );
 };
 
+/* -------------------------------------------------- Kbd */
+export const Kbd: React.FC<{ children: React.ReactNode; className?: string }> = ({
+  children,
+  className,
+}) => <kbd className={cx("y-kbd", className)}>{children}</kbd>;
+
 /* -------------------------------------------------- Toolbar */
 export const Toolbar: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,

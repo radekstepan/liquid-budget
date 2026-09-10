@@ -1,15 +1,19 @@
 "use client";
 
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, Transaction, TransactionFlagColor } from "@ynab/logic";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { BudgetData, BulkUpdateTransactionPatch, Query, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
+  applyQuery,
+  buildSearchCtx,
   computeRunningBalances,
+  filterId,
+  filterLabel,
   frequencyLabel,
   num,
   recurringFlavour,
   todayISO,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, TextField, Button, Tooltip, money, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Tooltip, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number | null };
@@ -96,6 +100,7 @@ export const TransactionsView = memo(function TransactionsView({
   data,
   accountFilter,
   focusTransaction,
+  externalFilter,
   onGoToTransfer,
   onAdd,
   onAddTransfer,
@@ -116,10 +121,18 @@ export const TransactionsView = memo(function TransactionsView({
   onBulkPostRecurring,
   onBulkUpdateRecurring,
   onBulkDeleteRecurring,
+  onEditFilter,
 }: {
   data: BudgetData;
   accountFilter: number | null;
   focusTransaction?: { id: number; nonce: number } | null;
+  externalFilter?: {
+    payee?: string;
+    categoryId?: number | null;
+    text?: string;
+    query?: Query;
+    nonce: number;
+  } | null;
   onGoToTransfer?: (accountId: number, transactionId: number) => void;
   onAdd: () => void;
   onAddTransfer?: () => void;
@@ -140,9 +153,13 @@ export const TransactionsView = memo(function TransactionsView({
   onBulkPostRecurring?: (ids: number[], date?: string) => Promise<void> | void;
   onBulkUpdateRecurring?: (ids: number[], patch: { flagColor?: TransactionFlagColor | null; active?: boolean }) => Promise<void> | void;
   onBulkDeleteRecurring?: (ids: number[]) => Promise<void> | void;
+  /** Open the search modal pre-filled with `query` so the filter can be edited. */
+  onEditFilter?: (query: Query) => void;
 }) {
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
+  // Structured search applied from the global search modal (chips + text).
+  // This is the single source of truth for register narrowing, rendered as
+  // chips in the toolbar; the modal is the only place it gets edited.
+  const [appliedQuery, setAppliedQuery] = useState<Query | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
@@ -287,52 +304,44 @@ export const TransactionsView = memo(function TransactionsView({
     return map;
   }, [rows]);
 
+  // Top-level rows for the active account. Free-text narrowing now lives in
+  // the structured `appliedQuery` stage below (fed by the search modal), so
+  // there is no separate substring pass here anymore.
   const searchFilteredTopLevel = useMemo(() => {
-    const q = deferredSearch.trim().toLowerCase();
     const isTopLevel = (r: Txn) => {
       if (r.parentId == null) return true;
       if (accountFilter != null && r.transferAccountId === accountFilter) return true;
       return false;
     };
-    const topLevelRows = rows.filter(isTopLevel);
-    if (!q) return topLevelRows;
+    return rows.filter(isTopLevel);
+  }, [rows, accountFilter]);
 
-    return topLevelRows.filter((r) => {
-      const isIncoming = accountFilter != null && r.transferAccountId === accountFilter;
-      const payeeText = isIncoming
-        ? `Transfer : ${accountById.get(r.accountId)?.name ?? "Unknown"}`
-        : r.payee;
-      const catName = (r.categoryId != null ? categoryById.get(r.categoryId)?.name : "") ?? "";
-      if (
-        payeeText.toLowerCase().includes(q) ||
-        catName.toLowerCase().includes(q) ||
-        (r.memo ?? "").toLowerCase().includes(q)
-      ) {
-        return true;
-      }
+  // Structured filter stage for the applied search query (chips + text from
+  // the global search modal). Evaluated on raw transactions, then intersected
+  // with the account-scoped rows by id. Split parents are kept when any of
+  // their children match, mirroring the substring behaviour above.
+  const searchCtx = useMemo(() => buildSearchCtx(data), [data]);
+  const queryIdSet = useMemo(() => {
+    if (!appliedQuery) return null;
+    if (appliedQuery.filters.length === 0 && !appliedQuery.text.trim()) return null;
+    const matched = applyQuery(data.transactions, appliedQuery, searchCtx);
+    return new Set(matched.map((t) => t.id));
+  }, [data.transactions, appliedQuery, searchCtx]);
+
+  const queryFilteredTopLevel = useMemo(() => {
+    if (!queryIdSet) return searchFilteredTopLevel;
+    return searchFilteredTopLevel.filter((r) => {
+      if (queryIdSet.has(r.id)) return true;
       const children = childrenByParent.get(r.id);
-      if (children) {
-        return children.some((c) => {
-          const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
-          const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
-          const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
-          return (
-            childPayee.toLowerCase().includes(q) ||
-            childCat.toLowerCase().includes(q) ||
-            (c.memo ?? "").toLowerCase().includes(q)
-          );
-        });
-      }
-      return false;
+      return children != null && children.some((c) => queryIdSet.has(c.id));
     });
-  }, [rows, deferredSearch, childrenByParent, categoryById, accountFilter, accountById]);
+  }, [searchFilteredTopLevel, queryIdSet, childrenByParent]);
 
-  // Apply the user-selected column sort on top of the search-filtered rows.
-  // The default (Date descending) returns `searchFilteredTopLevel` unchanged since
-  // `rows` is already date-descending — running balances stay anchored to
-  // that canonical order regardless of how the display is sorted.
+  // Apply the user-selected column sort on top of the query-filtered rows.
+  // The default (Date descending) returns `queryFilteredTopLevel` unchanged
+  // since `rows` is already date-descending — running balances stay anchored
+  // to that canonical order regardless of how the display is sorted.
   const filtered = useMemo(() => {
-    const q = deferredSearch.trim().toLowerCase();
     const dir = sort.dir === "asc" ? 1 : -1;
     const payeeOf = (t: Txn): string => {
       const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
@@ -354,9 +363,9 @@ export const TransactionsView = memo(function TransactionsView({
 
     let sortedTopLevel: Txn[];
     if (sort.key === "date" && sort.dir === "desc") {
-      sortedTopLevel = searchFilteredTopLevel;
+      sortedTopLevel = queryFilteredTopLevel;
     } else {
-      sortedTopLevel = [...searchFilteredTopLevel].sort((a, b) => {
+      sortedTopLevel = [...queryFilteredTopLevel].sort((a, b) => {
         let cmp = 0;
         switch (sort.key) {
           case "date":
@@ -432,17 +441,7 @@ export const TransactionsView = memo(function TransactionsView({
         const children = childrenByParent.get(parent.id);
         if (children && children.length > 0) {
           const hasMatchingChild =
-            q !== "" &&
-            children.some((c) => {
-              const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
-              const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
-              const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
-              return (
-                childPayee.toLowerCase().includes(q) ||
-                childCat.toLowerCase().includes(q) ||
-                (c.memo ?? "").toLowerCase().includes(q)
-              );
-            });
+            queryIdSet != null && children.some((c) => queryIdSet.has(c.id));
           const isChildSelected = selectedId != null && children.some((c) => c.id === selectedId);
           const isChildInMultiSelect = Array.from(selectedIds).some((id) => children.some((c) => c.id === id));
           const isParentSelected = selectedId === parent.id || selectedIds.has(parent.id);
@@ -463,14 +462,14 @@ export const TransactionsView = memo(function TransactionsView({
     }
     return result;
   }, [
-    searchFilteredTopLevel,
+    queryFilteredTopLevel,
+    queryIdSet,
     sort,
     accountById,
     categoryById,
     accountFilter,
     splitParentIds,
     childrenByParent,
-    deferredSearch,
     expandedSplitIds,
     selectedId,
     selectedIds,
@@ -515,7 +514,9 @@ export const TransactionsView = memo(function TransactionsView({
       return subChildren.some((c) => c.transferAccountId === accountFilter);
     });
 
-    const q = deferredSearch.trim().toLowerCase();
+    // Scheduled rows only understand free text (they are Recurring, not
+    // Transactions), so they follow the text part of the applied query.
+    const q = (appliedQuery?.text ?? "").trim().toLowerCase();
     const filteredList = !q
       ? list
       : list.filter((r) => {
@@ -547,7 +548,7 @@ export const TransactionsView = memo(function TransactionsView({
     return [...filteredList].sort((a, b) =>
       a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : a.payee.localeCompare(b.payee)
     );
-  }, [data.recurring, accountFilter, deferredSearch, accountById, categoryById]);
+  }, [data.recurring, accountFilter, appliedQuery, accountById, categoryById]);
 
   const today = useMemo(() => todayISO(), []);
   const dueScheduledCount = useMemo(() => {
@@ -649,7 +650,9 @@ export const TransactionsView = memo(function TransactionsView({
     if (!focusTransaction || focusTransaction.nonce === lastHandledNonce.current) return;
 
     const targetId = focusTransaction.id;
-    if (search) setSearch("");
+    // A focused jump is fresh navigation: a stale applied filter could hide
+    // the target row, so clear it.
+    setAppliedQuery(null);
     setSelectedIds(new Set([targetId]));
     setSelectedId(targetId);
 
@@ -673,7 +676,29 @@ export const TransactionsView = memo(function TransactionsView({
       }
       setScrollTop(targetScroll);
     }
-  }, [focusTransaction, filtered, containerHeight, search, data.transactions]);
+  }, [focusTransaction, filtered, containerHeight, data.transactions]);
+
+  // Handle register filtering from global search. The applied query becomes
+  // the single source of truth, shown as chips in the toolbar.
+  const lastHandledFilterNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!externalFilter || externalFilter.nonce === lastHandledFilterNonce.current) return;
+    lastHandledFilterNonce.current = externalFilter.nonce;
+    if (externalFilter.query) {
+      setAppliedQuery(externalFilter.query);
+    } else if (externalFilter.text) {
+      setAppliedQuery({ filters: [], text: externalFilter.text });
+    } else if (externalFilter.payee) {
+      setAppliedQuery({ filters: [{ kind: "payee", value: externalFilter.payee }], text: "" });
+    } else if (externalFilter.categoryId != null) {
+      const cat = data.categories.find((c) => c.id === externalFilter.categoryId);
+      setAppliedQuery(
+        cat ? { filters: [{ kind: "category", value: cat.name, exact: true }], text: "" } : null
+      );
+    }
+    setSelectedIds(new Set());
+    setSelectedId(null);
+  }, [externalFilter, data.categories]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white" onKeyDown={handleKeyDown} tabIndex={0}>
@@ -710,13 +735,106 @@ export const TransactionsView = memo(function TransactionsView({
           ) : null}
         </div>
         <ToolbarSep />
-        <TextField
-          search
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search register"
-          style={{ width: 168 }}
-        />
+        {appliedQuery != null &&
+        (appliedQuery.filters.length > 0 || appliedQuery.text.trim().length > 0) ? (
+          <div
+            data-testid="register-filter-bar"
+            className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
+          >
+            {appliedQuery.filters.map((f, i) => {
+              const { key, value } = filterLabel(f);
+              return (
+                <span
+                  key={`${filterId(f)}:${i}`}
+                  className="inline-flex h-6 max-w-full shrink-0 items-center overflow-hidden rounded border text-[12px] leading-none"
+                  style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
+                    className="flex h-full items-center gap-1 px-1.5"
+                    aria-label={`Edit ${key} filter`}
+                  >
+                    <span style={{ color: "var(--y-ink-soft)" }}>{key}</span>
+                    <span className="max-w-[14rem] truncate font-medium">{value}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppliedQuery((prev) => {
+                        if (!prev) return prev;
+                        const next = {
+                          ...prev,
+                          filters: prev.filters.filter((_, j) => j !== i),
+                        };
+                        return next.filters.length === 0 && !next.text.trim() ? null : next;
+                      });
+                    }}
+                    className="flex h-full items-center border-l px-1"
+                    style={{ borderColor: "var(--y-line)" }}
+                    aria-label={`Remove ${key} filter`}
+                  >
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              );
+            })}
+            {appliedQuery.text.trim().length > 0 && (
+              <span
+                className="inline-flex h-6 max-w-full shrink-0 items-center overflow-hidden rounded border text-[12px] leading-none"
+                style={{ borderColor: "var(--y-line)", background: "var(--y-row)" }}
+              >
+                <button
+                  type="button"
+                  onClick={() => appliedQuery && onEditFilter?.(appliedQuery)}
+                  className="flex h-full items-center gap-1 px-1.5"
+                  aria-label="Edit search text filter"
+                >
+                  <span style={{ color: "var(--y-ink-soft)" }}>Search</span>
+                  <span className="max-w-[14rem] truncate font-medium">
+                    “{appliedQuery.text.trim()}”
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppliedQuery((prev) => {
+                      if (!prev) return prev;
+                      const next = { ...prev, text: "" };
+                      return next.filters.length === 0 ? null : next;
+                    });
+                  }}
+                  className="flex h-full items-center border-l px-1"
+                  style={{ borderColor: "var(--y-line)" }}
+                  aria-label="Remove search text filter"
+                >
+                  <Icon name="x" size={10} />
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              className="y-btn y-btn--sm shrink-0"
+              onClick={() => setAppliedQuery(null)}
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <Tooltip tip="Filter transactions (⌘K)">
+            <button
+              type="button"
+              className="y-btn y-btn--sm"
+              aria-label="Filter transactions"
+              onClick={() => onEditFilter?.({ filters: [], text: "" })}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="search" size={12} />
+                Filter
+              </span>
+            </button>
+          </Tooltip>
+        )}
       </Toolbar>
 
       {/* Register Summary Strip / Multi-Selection Actions Bar (in-place replacement, no layout shift) */}
@@ -923,18 +1041,8 @@ export const TransactionsView = memo(function TransactionsView({
 
                   const children = childrenByParent.get(t.id);
                   const hasMatchingChild =
-                    deferredSearch.trim() !== "" &&
-                    (children?.some((c) => {
-                      const q = deferredSearch.trim().toLowerCase();
-                      const childDest = c.transferAccountId != null ? accountById.get(c.transferAccountId)?.name : "";
-                      const childPayee = childDest ? `Transfer : ${childDest}` : c.payee;
-                      const childCat = (c.categoryId != null ? categoryById.get(c.categoryId)?.name : "") ?? "";
-                      return (
-                        childPayee.toLowerCase().includes(q) ||
-                        childCat.toLowerCase().includes(q) ||
-                        (c.memo ?? "").toLowerCase().includes(q)
-                      );
-                    }) ?? false);
+                    queryIdSet != null &&
+                    (children?.some((c) => queryIdSet.has(c.id)) ?? false);
                   const isChildSelected = selectedId != null && (children?.some((c) => c.id === selectedId) ?? false);
                   const isChildInMultiSelect = Array.from(selectedIds).some((id) => children?.some((c) => c.id === id) ?? false);
                   const isParentSelected = selectedId === t.id || selectedIds.has(t.id);

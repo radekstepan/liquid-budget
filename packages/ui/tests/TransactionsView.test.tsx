@@ -1,28 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TransactionsView } from "../src/TransactionsView.js";
-import { makeSeedBudgetData, type TransactionFlagColor } from "@ynab/logic";
+import { makeSeedBudgetData, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
-  it("renders transaction rows and search filters them", () => {
+  it("renders transaction rows and narrows them via an applied search query", () => {
     const data = makeSeedBudgetData();
-    render(
-      <TransactionsView
-        data={data}
-        accountFilter={null}
-        onAdd={() => {}}
-        onEdit={() => {}}
-        onDelete={() => {}}
-        onReconcile={() => {}}
-        onCycleStatus={() => {}}
-      />
-    );
+    const props = {
+      data,
+      accountFilter: null as number | null,
+      onAdd: () => {},
+      onEdit: () => {},
+      onDelete: () => {},
+      onReconcile: () => {},
+      onCycleStatus: () => {},
+    };
+    const { rerender } = render(<TransactionsView {...props} />);
 
     expect(screen.getAllByText("Superstore").length).toBeGreaterThan(0);
     expect(screen.getAllByText("SAP Concur").length).toBeGreaterThan(0);
 
-    const search = screen.getByPlaceholderText(/search/i);
-    fireEvent.change(search, { target: { value: "Superstore" } });
+    rerender(
+      <TransactionsView
+        {...props}
+        externalFilter={{ query: { filters: [], text: "Superstore" }, nonce: 1 }}
+      />
+    );
     expect(screen.getAllByText("Superstore").length).toBeGreaterThan(0);
     expect(screen.queryByText("SAP Concur")).not.toBeInTheDocument();
   });
@@ -265,6 +268,7 @@ describe("TransactionsView", () => {
       <TransactionsView
         data={data}
         accountFilter={1}
+        externalFilter={{ query: { filters: [], text: "UniqueGroceriesMemo123" }, nonce: 1 }}
         onAdd={() => {}}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -272,10 +276,6 @@ describe("TransactionsView", () => {
         onCycleStatus={() => {}}
       />
     );
-
-    // Search for child memo
-    const searchInput = screen.getByPlaceholderText("Search register");
-    fireEvent.change(searchInput, { target: { value: "UniqueGroceriesMemo123" } });
 
     // Both parent and child should be rendered
     expect(screen.getAllByText("Costco Wholesale Split").length).toBe(2);
@@ -516,6 +516,7 @@ describe("TransactionsView", () => {
         <TransactionsView
           data={data}
           accountFilter={null}
+          externalFilter={{ query: { filters: [], text: "sortx" }, nonce: 1 }}
           onAdd={() => {}}
           onEdit={() => {}}
           onDelete={() => {}}
@@ -574,11 +575,9 @@ describe("TransactionsView", () => {
         mk(2, "SORTX ZZZ Apple"),
         mk(3, "SORTX AAA Zebra"),
       ];
+      // Scoped to just our rows via renderView's applied query so all of
+      // them fit in the virtualization window.
       renderView(data);
-
-      // Scope the register to just our rows so all of them fit in the
-      // virtualization window.
-      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
 
       fireEvent.click(screen.getByRole("button", { name: /^payee$/i }));
       expect(visiblePayees()).toEqual(["SORTX AAA Zebra", "SORTX MMM Middle", "SORTX ZZZ Apple"]);
@@ -597,8 +596,6 @@ describe("TransactionsView", () => {
       ];
       renderView(data);
 
-      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
-
       fireEvent.click(screen.getByRole("button", { name: /^outflow$/i }));
       expect(visiblePayees()).toEqual(["SORTX O Small", "SORTX O Medium", "SORTX O Big"]);
 
@@ -615,8 +612,6 @@ describe("TransactionsView", () => {
         mk(3, "SORTX F Red", "-100", "red"),
       ];
       renderView(data);
-
-      fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "sortx" } });
 
       // Ascending: unflagged first, then palette order (red before purple).
       fireEvent.click(screen.getByRole("button", { name: /^f$/i }));
@@ -957,6 +952,107 @@ describe("TransactionsView", () => {
 
       fireEvent.click(transferBtn!);
       expect(onGoToTransfer).toHaveBeenCalledWith(2, 9302);
+    });
+  });
+
+  describe("applied search query (filter bar)", () => {
+    function filterFixture(): BudgetData {
+      return {
+        accounts: [
+          { id: 1, name: "Checking", kind: "liquid", groupLabel: "Cash", balance: "0", onBudget: true, sort: 0 },
+        ],
+        groups: [{ id: 10, name: "Food", sort: 0, isCreditCardPayments: false }],
+        categories: [
+          { id: 100, groupId: 10, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        ],
+        assignments: [],
+        transactions: [
+          { id: 1, accountId: 1, categoryId: 100, date: "2026-09-01", payee: "Whole Foods", memo: "", amount: "-5000", status: "c", parentId: null, transferAccountId: null },
+          { id: 2, accountId: 1, categoryId: 100, date: "2026-08-01", payee: "Old Grocer", memo: "", amount: "-2000", status: "c", parentId: null, transferAccountId: null },
+        ],
+        recurring: [],
+      };
+    }
+
+    function renderWithQuery(query: Query, onEditFilter?: (q: Query) => void) {
+      render(
+        <TransactionsView
+          data={filterFixture()}
+          accountFilter={null}
+          externalFilter={{ query, nonce: 1 }}
+          onEditFilter={onEditFilter}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+    }
+
+    it("narrows rows to a structured date filter and shows it as a chip in the toolbar", () => {
+      renderWithQuery({
+        filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
+        text: "",
+      });
+      expect(screen.getAllByText("Whole Foods").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Old Grocer")).not.toBeInTheDocument();
+      // The filter lives in the toolbar — no separate search box or extra row.
+      expect(screen.getByTestId("register-filter-bar")).toBeInTheDocument();
+      expect(screen.getByText("Sep 2026")).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/search/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Filter transactions" })).not.toBeInTheDocument();
+    });
+
+    it("opens the editor with the applied query when a chip is clicked", () => {
+      const onEditFilter = vi.fn();
+      const query: Query = {
+        filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
+        text: "",
+      };
+      renderWithQuery(query, onEditFilter);
+      fireEvent.click(screen.getByRole("button", { name: "Edit Date filter" }));
+      expect(onEditFilter).toHaveBeenCalledWith(query);
+    });
+
+    it("shows a Filter button (and no search box) when nothing is applied", () => {
+      const onEditFilter = vi.fn();
+      render(
+        <TransactionsView
+          data={filterFixture()}
+          accountFilter={null}
+          onEditFilter={onEditFilter}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+        />
+      );
+      expect(screen.queryByPlaceholderText(/search/i)).not.toBeInTheDocument();
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Filter transactions" }));
+      expect(onEditFilter).toHaveBeenCalledWith({ filters: [], text: "" });
+    });
+
+    it("removing the chip restores all rows and hides the bar", () => {
+      renderWithQuery({
+        filters: [{ kind: "date", start: "2026-09-01", end: "2026-09-30", label: "Sep 2026" }],
+        text: "",
+      });
+      expect(screen.queryByText("Old Grocer")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Remove Date filter" }));
+      expect(screen.getByText("Old Grocer")).toBeInTheDocument();
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
+    });
+
+    it("clear resets a text-only applied query", () => {
+      renderWithQuery({ filters: [], text: "whole" });
+      expect(screen.queryByText("Old Grocer")).not.toBeInTheDocument();
+      expect(screen.getByTestId("register-filter-bar")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+      expect(screen.getByText("Old Grocer")).toBeInTheDocument();
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
     });
   });
 });

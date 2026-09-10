@@ -730,7 +730,7 @@ describe("BudgetApp", () => {
 
     // Switch to Transactions view to verify TransactionsView handles corrupted sort gracefully
     fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
-    expect(screen.getByPlaceholderText("Search register")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter transactions" })).toBeInTheDocument();
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:transactions:sort")).toBeNull();
 
