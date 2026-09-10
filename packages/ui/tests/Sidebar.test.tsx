@@ -42,14 +42,12 @@ describe("Sidebar", () => {
           reports: false,
           calendar: false,
           projections: true,
-          recurring: true,
           transactions: false,
         }}
       />
     );
     expect(screen.getByRole("button", { name: /^budget$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /projections/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /recurring/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^reports$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^calendar$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^transactions/i })).not.toBeInTheDocument();

@@ -6,7 +6,6 @@ export const NAV_ORDER: View[] = [
   "reports",
   "calendar",
   "projections",
-  "recurring",
   "transactions",
 ];
 
@@ -21,7 +20,6 @@ export const NAV_ITEMS: NavItemMeta[] = [
   { key: "reports", label: "Reports", description: "Spending, income and net-worth reports." },
   { key: "calendar", label: "Calendar", description: "See transactions on a monthly calendar." },
   { key: "projections", label: "Projections", description: "Forecast future account balances." },
-  { key: "recurring", label: "Recurring", description: "Manage scheduled transactions." },
   { key: "transactions", label: "Transactions", description: "Browse transactions across all accounts." },
 ];
 
@@ -32,7 +30,6 @@ export const DEFAULT_NAV_VISIBILITY: Record<View, boolean> = {
   reports: true,
   calendar: true,
   projections: true,
-  recurring: true,
   transactions: true,
 };
 

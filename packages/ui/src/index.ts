@@ -2,7 +2,6 @@ export { Sidebar, type View } from "./Sidebar.js";
 export { Inspector } from "./Inspector.js";
 export { BudgetView } from "./BudgetView.js";
 export { TransactionsView } from "./TransactionsView.js";
-export { RecurringView } from "./RecurringView.js";
 export { ReportsView } from "./ReportsView.js";
 export { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 export { CalendarView } from "./CalendarView.js";
