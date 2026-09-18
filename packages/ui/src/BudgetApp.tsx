@@ -306,6 +306,25 @@ function avgBudgetedMapFor(
   return result;
 }
 
+export const ACCOUNT_FILTER_STORAGE_KEY = "ynab:transactions:accountFilter";
+
+export function isStoredAccountFilter(v: unknown): v is number | null {
+  return v === null || (typeof v === "number" && Number.isInteger(v) && v > 0);
+}
+
+/**
+ * Drop a persisted/URL account id that no longer matches a live account
+ * (e.g. the account was deleted or archived away) so the register falls
+ * back to all accounts instead of an empty dead-end.
+ */
+export function resolveAccountFilter(
+  stored: number | null,
+  accounts: { id: number }[]
+): number | null {
+  if (stored == null) return null;
+  return accounts.some((a) => a.id === stored) ? stored : null;
+}
+
 export function BudgetApp({
   data,
   api,
@@ -347,7 +366,19 @@ export function BudgetApp({
     (v): v is Record<number, boolean> =>
       typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "boolean")
   );
-  const [accountFilter, setAccountFilter] = useState<number | null>(initialAccount ?? null);
+  const [storedAccountFilter, setStoredAccountFilter] = useLocalStorage<number | null>(
+    ACCOUNT_FILTER_STORAGE_KEY,
+    initialAccount ?? null,
+    isStoredAccountFilter
+  );
+  // Active filter: the persisted selection, unless it points at an account
+  // that no longer exists. View switches deliberately leave this alone so
+  // returning to the register restores the last account.
+  const accountFilter = useMemo(
+    () => resolveAccountFilter(storedAccountFilter, data.accounts),
+    [storedAccountFilter, data.accounts]
+  );
+  const setAccountFilter = setStoredAccountFilter;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [reportsResetKey, setReportsResetKey] = useState(0);
   const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
@@ -411,19 +442,14 @@ export function BudgetApp({
         setView("budget");
       }
 
-      if (segments[0] === "transactions") {
-        if (segments[1]) {
-          const accId = Number(segments[1]);
-          if (!Number.isNaN(accId)) {
-            setAccountFilter(accId);
-          } else {
-            setAccountFilter(null);
-          }
-        } else {
-          setAccountFilter(null);
+      // The account filter is persisted: a transactions URL with an id sets
+      // it explicitly, while any other path leaves the last selection alone
+      // so the register restores it on return.
+      if (segments[0] === "transactions" && segments[1]) {
+        const accId = Number(segments[1]);
+        if (!Number.isNaN(accId)) {
+          setAccountFilter(accId);
         }
-      } else {
-        setAccountFilter(null);
       }
 
       if (segments[0] === "budget" && segments[1] && isValidISOMonth(segments[1])) {
@@ -779,16 +805,15 @@ export function BudgetApp({
   const navigateView = useCallback(
     (v: View) => {
       startTransition(() => {
-        setAccountFilter(null);
         setView(v);
         if (v === "reports") {
           setReportsResetKey((k) => k + 1);
         }
         setShowSettingsOverlay(false);
-        updateUrl(v, null, month);
+        updateUrl(v, accountFilter, month);
       });
     },
-    [updateUrl, month]
+    [updateUrl, month, accountFilter]
   );
 
   const refreshSnapshots = useCallback(async () => {
@@ -829,7 +854,6 @@ export function BudgetApp({
         const fallback = firstAvailableView(updated);
         if (fallback) {
           startTransition(() => {
-            setAccountFilter(null);
             setView(fallback);
             if (fallback === "reports") {
               setReportsResetKey((k) => k + 1);

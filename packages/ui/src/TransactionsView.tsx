@@ -96,6 +96,63 @@ function SortableTh({
 const ROW_HEIGHT = 27;
 const OVERSCAN = 15;
 
+function RegisterEmptyState({
+  hasTransactions,
+  hasSearch,
+  hasExternalFilter,
+  accountName,
+  onAdd,
+  onClearSearch,
+  onClearFilter,
+}: {
+  hasTransactions: boolean;
+  hasSearch: boolean;
+  hasExternalFilter: boolean;
+  accountName?: string;
+  onAdd: () => void;
+  onClearSearch: () => void;
+  onClearFilter: () => void;
+}) {
+  const title = !hasTransactions
+    ? "No transactions yet"
+    : hasSearch
+      ? "No transactions match your search"
+      : hasExternalFilter
+        ? "No transactions match this filter"
+        : accountName
+          ? `No transactions in ${accountName} yet`
+          : "No transactions here yet";
+  const hint = !hasTransactions
+    ? "Record your first transaction below — every budget starts with one entry."
+    : hasSearch || hasExternalFilter
+      ? "Try widening the search, or clear it to see everything again."
+      : "Add one to get this account moving.";
+  return (
+    <div
+      className="mx-auto flex max-w-[420px] flex-col items-center gap-2"
+      data-testid="register-empty-state"
+    >
+      <div className="text-[13px] font-semibold" style={{ color: "var(--y-ink)" }}>
+        {title}
+      </div>
+      <p className="y-hint text-[12px] leading-relaxed">{hint}</p>
+      <div className="mt-1 flex items-center justify-center gap-2">
+        {(hasSearch || hasExternalFilter) && (
+          <Button
+            size="sm"
+            onClick={hasSearch ? onClearSearch : onClearFilter}
+          >
+            Clear {hasSearch ? "search" : "filter"}
+          </Button>
+        )}
+        <Button size="sm" variant="primary" onClick={onAdd}>
+          Add transaction
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export const TransactionsView = memo(function TransactionsView({
   data,
   accountFilter,
@@ -1012,8 +1069,16 @@ export const TransactionsView = memo(function TransactionsView({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={colCount} className="text-center py-6 y-hint">
-                  No transactions match your filter.
+                <td colSpan={colCount} className="text-center" style={{ padding: "28px 12px" }}>
+                  <RegisterEmptyState
+                    hasTransactions={data.transactions.length > 0}
+                    hasSearch={appliedQuery != null}
+                    hasExternalFilter={externalFilter != null}
+                    accountName={accountFilter != null ? accountById.get(accountFilter)?.name : undefined}
+                    onAdd={onAdd}
+                    onClearSearch={clearAppliedQuery}
+                    onClearFilter={() => onClearFilter?.()}
+                  />
                 </td>
               </tr>
             ) : (
@@ -1381,10 +1446,22 @@ export const TransactionsView = memo(function TransactionsView({
                   <tr>
                     <td
                       colSpan={scheduledColCount}
-                      className="text-center py-8 text-[12px]"
-                      style={{ color: "var(--y-ink-faint)", background: "#ffffff" }}
+                      className="text-center text-[12px]"
+                      style={{ color: "var(--y-ink-faint)", background: "#ffffff", padding: "24px 12px" }}
                     >
-                      No scheduled transactions for {filterAccount ? filterAccount.name : "these accounts"}.
+                      <div className="mx-auto flex max-w-[420px] flex-col items-center gap-1.5">
+                        <div className="font-semibold" style={{ color: "var(--y-ink-soft)" }}>
+                          Nothing scheduled for {filterAccount ? filterAccount.name : "these accounts"}
+                        </div>
+                        <p className="y-hint leading-relaxed">
+                          Put bills and paychecks on autopilot — they post themselves on the right date.
+                        </p>
+                        {onAddRecurring && (
+                          <Button size="sm" onClick={onAddRecurring} className="mt-1">
+                            Schedule one
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ) : (

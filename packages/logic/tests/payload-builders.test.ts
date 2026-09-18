@@ -406,3 +406,47 @@ describe("toRecurringPayload", () => {
     });
   });
 });
+
+describe("date validation", () => {
+  const baseSingle = {
+    mode: "single" as const,
+    accountId: 1,
+    date: "2026-06-15",
+    payee: "Grocery Store",
+    amount: "45.50",
+    categoryId: 10,
+  };
+
+  it("rejects malformed transaction dates", () => {
+    for (const date of ["", "2026-13-01", "2026-02-30", "06/15/2026", "2026-6-5", "not-a-date"]) {
+      expect(
+        toTransactionPayload({ ...baseSingle, date }, { accounts }),
+        `date ${JSON.stringify(date)}`
+      ).toBeNull();
+      expect(canBuildTransactionPayload({ ...baseSingle, date }, { accounts })).toBe(false);
+    }
+  });
+
+  it("accepts a valid transaction date", () => {
+    expect(toTransactionPayload(baseSingle, { accounts })).not.toBeNull();
+  });
+
+  it("rejects malformed recurring next dates", () => {
+    const baseRecurring = {
+      mode: "single" as const,
+      accountId: 1,
+      payee: "Rent",
+      amount: "100.00",
+      categoryId: 10,
+      frequency: "monthly",
+      nextDate: "2026-07-01",
+    };
+    for (const nextDate of ["", "2026-13-01", "2026-02-30", "07/01/2026"]) {
+      expect(
+        toRecurringPayload({ ...baseRecurring, nextDate }, { accounts }),
+        `nextDate ${JSON.stringify(nextDate)}`
+      ).toBeNull();
+      expect(canBuildRecurringPayload({ ...baseRecurring, nextDate }, { accounts })).toBe(false);
+    }
+  });
+});

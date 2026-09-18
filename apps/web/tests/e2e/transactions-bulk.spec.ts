@@ -36,7 +36,7 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
 
   // Create two distinct transactions
   for (const p of [payee1, payee2]) {
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("15.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-01");
@@ -82,7 +82,7 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
   ];
 
   for (const cfg of txConfigs) {
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill(cfg.amount);
     await modal.locator('input[type="date"]').first().fill(cfg.date);
@@ -137,7 +137,7 @@ test("bulk deletes selected transactions", async ({ page }) => {
   const payee2 = `PW BulkDel 2 ${stamp}`;
 
   for (const p of [payee1, payee2]) {
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("18.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-01");
@@ -187,7 +187,7 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   const stamp = Date.now();
   const payee = `PW Keyboard ${stamp}`;
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("33.00");
   await addModal.locator('input[type="date"]').first().fill("2026-06-01");
@@ -235,7 +235,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   const stamp = uniquePayee.split(" ").pop()!;
 
   // Create a 2-way split (parent + two children, all cleared).
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
   await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
@@ -253,7 +253,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   // multi-select Edit (N) opens the Bulk Edit modal (single selection
   // opens the single-row editor instead).
   const companionPayee = `PW BulkSplit Companion ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const companionModal = page.locator(".y-modal").last();
   await companionModal.locator('input[inputmode="decimal"]').first().fill("10.00");
   await companionModal.locator('input[type="date"]').first().fill("2026-06-01");

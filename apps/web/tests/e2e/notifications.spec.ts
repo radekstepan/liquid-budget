@@ -57,7 +57,7 @@ async function addTransactionViaModal(
   payee: string,
   amount = "12.34"
 ) {
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill(amount);
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -212,7 +212,7 @@ test.describe("failure notifications", () => {
     ).transactions.length;
 
     const payee = `PW Notify Fail ${Date.now()}`;
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-15");

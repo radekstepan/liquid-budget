@@ -112,7 +112,7 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
 
   // Add a fresh row
   const payee = `PW Reconcile Cycle ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("3.21");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
@@ -144,7 +144,7 @@ test("editing a transaction through the modal persists the new amount", async ({
   // find after the save.
   const stamp = Date.now();
   const payee = `PW Edit ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("1.11");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
@@ -213,7 +213,7 @@ test("split transactions render parent ClearedFlag and no subtransaction rows in
   const stamp = Date.now();
   const payee = `PW Split Parent Flag ${stamp}`;
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
   await fillSearchlist(modal, "e.g. Whole Foods", payee);

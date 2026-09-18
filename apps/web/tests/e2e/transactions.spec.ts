@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 test("adds a new transaction via the modal and renders the row", async ({ page }) => {
   const uniquePayee = `PW Test ${Date.now()}`;
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   await expect(page.getByText("Add Transaction", { exact: true }).first()).toBeVisible();
 
   // The modal title is rendered twice (toolbar button + modal head);
@@ -55,7 +55,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   // just the prefix.
   const stamp = Date.now().toString();
   const uniquePayee = `PW Search ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -76,7 +76,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(allRows).toHaveCount(totalBefore);
 });
 
-test("selecting a sidebar account marks the row and scopes the register; Transactions nav clears it", async ({ page }) => {
+test("selecting a sidebar account marks the row and scopes the register; Transactions nav keeps the persisted filter", async ({ page }) => {
   // The toolbar title (a <span>) shows "All Transactions" by default
   // and the account name when an account row is selected
   // (TransactionsView.tsx).
@@ -98,10 +98,16 @@ test("selecting a sidebar account marks the row and scopes the register; Transac
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
-  // Re-select, then click the top-level "Transactions" nav to clear.
+  // Re-select, then click the top-level "Transactions" nav: the persisted
+  // filter keeps the register scoped (it used to clear here).
   await accountRow.click();
   await expect(accountRow).toHaveClass(/is-sel/);
   await page.getByRole("button", { name: /^Transactions/ }).click();
+  await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
+  await expect(accountRow).toHaveClass(/is-sel/);
+
+  // Toggling the same account off returns to All Transactions.
+  await accountRow.click();
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 });
@@ -112,7 +118,7 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
   // whose edit modal has no payee SearchList), so the old rows.first()
   // lookup was not deterministic.
   const uniquePayee = `PW Row ${Date.now()}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("12.34");
   await addModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -134,7 +140,7 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
 
 test("deletes a transaction via the modal after confirming", async ({ page }) => {
   const uniquePayee = `PW Delete ${Date.now()}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const addModal = page.locator(".y-modal").last();
   await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
   await addModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -166,7 +172,7 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
 test("deletes a transfer transaction via modal showing linked transfer warning", async ({ page }) => {
   const stamp = Date.now().toString();
   const transferPayee = `PW Transfer ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const addModal = page.locator(".y-modal").last();
 
   // Switch to Transfer mode
@@ -210,7 +216,7 @@ test("deletes a transfer transaction via modal showing linked transfer warning",
 test("deletes a split transaction via modal showing split warning notice", async ({ page }) => {
   const stamp = Date.now().toString();
   const splitPayee = `PW Split ${stamp}`;
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const addModal = page.locator(".y-modal").last();
 
   // Switch to Split mode

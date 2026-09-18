@@ -40,7 +40,7 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     await expect(page.locator(".y-toolbar").getByText(accName, { exact: true })).toBeVisible();
 
     // Add a fresh cleared transaction
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("15.50");
     await addModal.locator('input[type="date"]').first().fill("2026-08-15");
@@ -169,7 +169,7 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     await expect(page.locator(".y-toolbar").getByText(accName, { exact: true })).toBeVisible();
 
     // Add transaction
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("20.00");
     await addModal.locator('input[type="date"]').first().fill("2026-08-15");

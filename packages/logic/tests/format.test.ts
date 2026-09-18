@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dollarsToCents, evalAmount, fmt, fmtSigned, isValidISODate, isValidISOMonth, monthKey, monthLabel, nextDateFor, num, numCents, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut } from "../src/format.js";
+import { dollarsToCents, evalAmount, fmt, fmtSigned, isValidISODate, isValidISOMonth, monthKey, monthLabel, nextDateFor, num, numCents, parseMonthKey, prevMonthKey, previousMonthKey, round2, todayISO, adjustDateShortcut, validateAmountInput } from "../src/format.js";
 
 describe("format", () => {
   it("fmt signs negative numbers and formats cents as dollars", () => {
@@ -708,6 +708,33 @@ describe("format", () => {
       expect(previousMonthKey("2026-06")).toBe("2026-05");
       expect(previousMonthKey("2026-01")).toBe("2025-12");
       expect(prevMonthKey("2026-01")).toBe("2025-12");
+    });
+  });
+
+  describe("validateAmountInput", () => {
+    it("reports empty for blank input", () => {
+      expect(validateAmountInput("").status).toBe("empty");
+      expect(validateAmountInput("   ").status).toBe("empty");
+      expect(validateAmountInput(null).status).toBe("empty");
+      expect(validateAmountInput(undefined).status).toBe("empty");
+    });
+
+    it("accepts plain and arithmetic amounts with exact cents", () => {
+      expect(validateAmountInput("45.50")).toEqual({ status: "valid", value: 45.5, cents: 4550 });
+      expect(validateAmountInput("10+5")).toEqual({ status: "valid", value: 15, cents: 1500 });
+      expect(validateAmountInput("-12.34")).toEqual({ status: "valid", value: -12.34, cents: -1234 });
+    });
+
+    it("flags unparseable input as invalid", () => {
+      expect(validateAmountInput("abc").status).toBe("invalid");
+      expect(validateAmountInput("10++").status).toBe("invalid");
+      expect(validateAmountInput("12..5").status).toBe("invalid");
+    });
+
+    it("flags zero as zero (builders reject zero amounts)", () => {
+      expect(validateAmountInput("0")).toEqual({ status: "zero", value: 0, cents: 0 });
+      expect(validateAmountInput("0.00").status).toBe("zero");
+      expect(validateAmountInput("10-10").status).toBe("zero");
     });
   });
 });

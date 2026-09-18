@@ -15,7 +15,7 @@ import type {
   TransferRecurringSavePayload,
   TransferTransactionSavePayload,
 } from "./action-payloads.js";
-import { evalAmount, dollarsToCents, nextMonthKey } from "./format.js";
+import { evalAmount, dollarsToCents, isValidISODate, nextMonthKey } from "./format.js";
 import { assertSplitsBalanced } from "./split.js";
 
 export type PayloadAccountContext = {
@@ -98,7 +98,7 @@ export function toTransactionPayload(
   options?: TransactionBuilderOptions
 ): TransactionSavePayload | null {
   const { mode, accountId, date } = formData;
-  if (!accountId || !date) return null;
+  if (!accountId || !isValidISODate(date)) return null;
 
   const accounts = options?.accounts ?? [];
   const selectedAccount = accounts.find((a) => a.id === accountId);
@@ -330,7 +330,7 @@ export function toRecurringPayload(
   options?: RecurringBuilderOptions
 ): RecurringSavePayload | null {
   const { mode, accountId, frequency, nextDate } = formData;
-  if (!accountId || !frequency || !nextDate) return null;
+  if (!accountId || !frequency || !isValidISODate(nextDate)) return null;
 
   const accounts = options?.accounts ?? [];
   const selectedAccount = accounts.find((a) => a.id === accountId);

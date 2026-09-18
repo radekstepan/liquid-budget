@@ -4,6 +4,24 @@ import { memo, useState, useRef, useEffect } from "react";
 import type { Account } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
 import { Button, Icon, Tooltip, cx } from "@ynab/theme";
+import { useLocalStorage } from "./useLocalStorage.js";
+
+export const SIDEBAR_SECTIONS_STORAGE_KEY = "ynab:sidebar:sections";
+export const SIDEBAR_NETWORTH_STORAGE_KEY = "ynab:sidebar:netWorthOpen";
+
+const DEFAULT_COLLAPSED_SECTIONS: Record<string, boolean> = {
+  Retirement: true,
+  "Closed Accounts": true,
+};
+
+export function isCollapsedSections(v: unknown): v is Record<string, boolean> {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.values(v).every((x) => typeof x === "boolean")
+  );
+}
 
 export type View =
   | "budget"
@@ -69,11 +87,16 @@ export const Sidebar = memo(function Sidebar({
   });
 
   const groups = groupsWithSort.map((g) => g.groupLabel);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
-    Retirement: true,
-    "Closed Accounts": true,
-  });
-  const [nwOpen, setNwOpen] = useState(true);
+  const [collapsed, setCollapsed] = useLocalStorage<Record<string, boolean>>(
+    SIDEBAR_SECTIONS_STORAGE_KEY,
+    DEFAULT_COLLAPSED_SECTIONS,
+    isCollapsedSections
+  );
+  const [nwOpen, setNwOpen] = useLocalStorage<boolean>(
+    SIDEBAR_NETWORTH_STORAGE_KEY,
+    true,
+    (v): v is boolean => typeof v === "boolean"
+  );
 
   // Resizable sidebar width with localStorage persistence
   const [width, setWidth] = useState<number>(() => {

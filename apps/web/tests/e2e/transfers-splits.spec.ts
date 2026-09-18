@@ -27,7 +27,7 @@ test("creates a transfer between two accounts", async ({ page }) => {
   const uniquePayee = `PW Transfer ${Date.now()}`;
   const stamp = uniquePayee.split(" ").pop()!;
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
 
   // Switch to Transfer mode.
@@ -62,7 +62,7 @@ test("creates a 2-way split and renders in register with children visible only i
   const uniquePayee = `PW Split ${Date.now()}`;
   const stamp = uniquePayee.split(" ").pop()!;
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
 
   // Switch to Split mode.
@@ -109,7 +109,7 @@ test("creates a 2-way split and renders in register with children visible only i
 test("split editor disables save when children don't sum to the parent total", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.getByRole("button", { name: /^split$/i }).click();
 

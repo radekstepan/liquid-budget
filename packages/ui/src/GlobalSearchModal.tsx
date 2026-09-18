@@ -525,7 +525,17 @@ export function GlobalSearchModal({
           ))}
           {groups.length === 0 && (
             <div className="px-3 py-4 text-[12px]" style={{ color: "var(--y-ink-soft)" }}>
-              No matches
+              <div className="font-semibold" style={{ color: "var(--y-ink)" }}>
+                {fullInput.trim() ? <>No matches for &ldquo;{fullInput.trim()}&rdquo;</> : "No matches"}
+              </div>
+              <div className="mt-1 leading-relaxed">
+                Try fewer keywords, or narrow it down with{" "}
+                <span className="font-mono">payee:</span>,{" "}
+                <span className="font-mono">category:</span>,{" "}
+                <span className="font-mono">account:</span>,{" "}
+                <span className="font-mono">amount:</span> or{" "}
+                <span className="font-mono">date:</span>.
+              </div>
             </div>
           )}
         </div>
