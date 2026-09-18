@@ -19,6 +19,7 @@ import {
   type TransactionFlagColor,
 } from "@ynab/logic";
 import { useLocalStorage } from "./useLocalStorage.js";
+import { useTodayISO } from "./useTodayISO.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption } from "@ynab/theme";
 import { Icon, Tooltip } from "@ynab/theme";
@@ -1080,15 +1081,19 @@ export function BudgetApp({
     return data.accounts.find((a) => a.id === modal.accountId) ?? null;
   }, [modal, data.accounts]);
 
+  // Live wall-date: ticks over at local midnight (plus focus/visibility
+  // re-checks) so due-badge counts stay correct when the app is left open
+  // overnight. `todayISO()` alone would freeze inside the memos below.
+  const todayDay = useTodayISO();
+
   const dueBadgeCount = useMemo(() => {
-    return countDueRecurring(data.recurring, todayISO());
-  }, [data.recurring]);
+    return countDueRecurring(data.recurring, todayDay);
+  }, [data.recurring, todayDay]);
 
   const dueByAccount = useMemo(() => {
-    const today = todayISO();
     const map: Record<number, number> = {};
     for (const r of data.recurring) {
-      if (r.active && r.nextDate <= today) {
+      if (r.active && r.nextDate <= todayDay) {
         map[r.accountId] = (map[r.accountId] ?? 0) + 1;
         if (r.transferAccountId != null) {
           map[r.transferAccountId] = (map[r.transferAccountId] ?? 0) + 1;
@@ -1101,7 +1106,7 @@ export function BudgetApp({
       }
     }
     return map;
-  }, [data.recurring]);
+  }, [data.recurring, todayDay]);
 
   // Single-click entry: resume a paused rule on the fly so posting never
   // takes two clicks. This performs exactly the resume-then-post the user

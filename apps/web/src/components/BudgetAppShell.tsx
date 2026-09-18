@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BudgetApp, ErrorBoundary, type BudgetAppApi } from "@ynab/ui";
+import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
 import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseSnapshotsResponse, parseTransactionMutationResult } from "@ynab/logic";
@@ -281,47 +281,52 @@ export function BudgetAppShell({
     }
   }, []);
 
+  const runAutoPost = useCallback(async () => {
+    try {
+      const autoPostRes = parseRecurringAutoPostResponse(
+        await jsonReq<unknown>("/api/recurring?action=autopost", { method: "POST" })
+      );
+      if (autoPostRes) {
+        const count = autoPostRes.postedCount ?? 0;
+        if (count > 0) {
+          addToast(
+            `Automatically entered ${count} scheduled transaction${
+              count === 1 ? "" : "s"
+            }.`,
+            "ok"
+          );
+        }
+        if (autoPostRes.capped && autoPostRes.capped.length > 0) {
+          const names = autoPostRes.capped
+            .map((c) => c.payee || "Scheduled transaction")
+            .join(", ");
+          addToast(
+            `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
+            "warn"
+          );
+        }
+        if (autoPostRes.failures && autoPostRes.failures.length > 0) {
+          const names = autoPostRes.failures
+            .map((f) => (f.payee ? `${f.payee}: ${f.error}` : f.error))
+            .join("; ");
+          addToast(
+            `Failed to auto-post scheduled transaction: ${names}`,
+            "danger"
+          );
+        }
+      }
+    } catch (autoErr) {
+      console.error("Auto-post failed:", autoErr);
+    }
+  }, [addToast]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         // Auto-post due scheduled transactions on mount (keeping GET /api/budget pure, BUG-20)
-        try {
-          const autoPostRes = parseRecurringAutoPostResponse(
-            await jsonReq<unknown>("/api/recurring?action=autopost", { method: "POST" })
-          );
-          if (mounted && autoPostRes) {
-            const count = autoPostRes.postedCount ?? 0;
-            if (count > 0) {
-              addToast(
-                `Automatically entered ${count} scheduled transaction${
-                  count === 1 ? "" : "s"
-                }.`,
-                "ok"
-              );
-            }
-            if (autoPostRes.capped && autoPostRes.capped.length > 0) {
-              const names = autoPostRes.capped
-                .map((c) => c.payee || "Scheduled transaction")
-                .join(", ");
-              addToast(
-                `Catch-up limit reached for ${names}. Additional overdue occurrences remain.`,
-                "warn"
-              );
-            }
-            if (autoPostRes.failures && autoPostRes.failures.length > 0) {
-              const names = autoPostRes.failures
-                .map((f) => (f.payee ? `${f.payee}: ${f.error}` : f.error))
-                .join("; ");
-              addToast(
-                `Failed to auto-post scheduled transaction: ${names}`,
-                "danger"
-              );
-            }
-          }
-        } catch (autoErr) {
-          console.error("Auto-post on mount failed:", autoErr);
-        }
+        await runAutoPost();
+        if (!mounted) return;
         await reload();
       } catch (e: unknown) {
         if (mounted) setError(String(e));
@@ -330,7 +335,35 @@ export function BudgetAppShell({
     return () => {
       mounted = false;
     };
-  }, [reload, addToast]);
+  }, [reload, runAutoPost]);
+
+  // Overnight rollover: when the wall-date ticks over while the app stays
+  // open, re-run auto-post (new rules may have come due at midnight) and
+  // reload so the red due-count badges and ledger stay correct. The mount
+  // effect above covers the initial load, so skip the first value.
+  const today = useTodayISO();
+  const initialTodayRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialTodayRef.current == null) {
+      initialTodayRef.current = today;
+      return;
+    }
+    if (initialTodayRef.current === today) return;
+    initialTodayRef.current = today;
+    let cancelled = false;
+    (async () => {
+      await runAutoPost();
+      if (cancelled) return;
+      try {
+        await reload();
+      } catch (e: unknown) {
+        console.error("Budget reload after date rollover failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [today, runAutoPost, reload]);
 
   const api: BudgetAppApi = {
     reload,

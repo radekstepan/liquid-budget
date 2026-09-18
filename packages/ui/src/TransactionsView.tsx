@@ -11,10 +11,10 @@ import {
   frequencyLabel,
   num,
   recurringFlavour,
-  todayISO,
 } from "@ynab/logic";
 import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Tooltip, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
+import { useTodayISO } from "./useTodayISO.js";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number | null };
 
@@ -579,7 +579,7 @@ export const TransactionsView = memo(function TransactionsView({
     );
   }, [data.recurring, accountFilter, appliedQuery, accountById, categoryById]);
 
-  const today = useMemo(() => todayISO(), []);
+  const today = useTodayISO();
   const dueScheduledCount = useMemo(() => {
     return scheduledRows.filter((r) => r.active && r.nextDate <= today).length;
   }, [scheduledRows, today]);
