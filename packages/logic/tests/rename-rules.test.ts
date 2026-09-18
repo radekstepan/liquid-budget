@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRenameRules,
   inferRenameRule,
+  isPatternRule,
   isTransferPayee,
   learnRenameRule,
   matchesRenameRule,
@@ -342,5 +343,148 @@ describe("learnRenameRule transfer guards", () => {
 
   it("refuses to infer a pattern from a transfer source", () => {
     expect(inferRenameRule(["Transfer : A1"], "Transfer : A2")).toBeNull();
+  });
+});
+
+describe("normalizeRenameText separator folding", () => {
+  it("folds bank separator punctuation to spaces", () => {
+    expect(normalizeRenameText("AMZN*MKTP")).toBe("amzn mktp");
+    expect(normalizeRenameText("Amzn-Mktp")).toBe("amzn mktp");
+    expect(normalizeRenameText("AMZN.MKTP/US")).toBe("amzn mktp us");
+  });
+
+  it("keeps # significant so #24 never equals 24", () => {
+    expect(normalizeRenameText("WHOLE FOODS #24")).toBe("whole foods #24");
+    expect(normalizeRenameText("WHOLE FOODS #24")).not.toBe(
+      normalizeRenameText("WHOLE FOODS 24")
+    );
+  });
+
+  it("keeps [N]/[X] wildcards intact through normalisation", () => {
+    expect(normalizeRenameText("BCF[N]")).toBe("bcf[n]");
+    expect(normalizeRenameText("AMZN*[X]")).toBe("amzn [x]");
+  });
+});
+
+describe("reference wildcard [X]", () => {
+  it("builds a regex where [X] matches letter/digit runs", () => {
+    const re = renamePatternToRegExp("AMZN Mktp US*[X]");
+    expect(re).not.toBeNull();
+    // Inputs are normalised before matching (as matchesRenameRule does).
+    expect(re!.test(normalizeRenameText("amzn mktp us rt3abcd12"))).toBe(true);
+    expect(re!.test(normalizeRenameText("AMZN Mktp US*XY9ZZ"))).toBe(true);
+    expect(re!.test(normalizeRenameText("AMZN Mktp US*123"))).toBe(true);
+    expect(re!.test(normalizeRenameText("AMZN Mktp US ****"))).toBe(false);
+    expect(re!.test(normalizeRenameText("AMZN Mktp US"))).toBe(false);
+  });
+
+  it("detects [X] patterns and applies them", () => {
+    expect(isPatternRule("AMZN*[X]")).toBe(true);
+    expect(isPatternRule("BCF[N]")).toBe(true);
+    expect(isPatternRule("BCF1")).toBe(false);
+    const rules = [rule(1, "AMZN Mktp US*[X]", "Amazon")];
+    expect(applyRenameRules(rules, "AMZN Mktp US*RT3ABCD12")).toBe("Amazon");
+    expect(applyRenameRules(rules, "AMZN Mktp US*XY9ZZ")).toBe("Amazon");
+    expect(applyRenameRules(rules, "AMZN Mktp US")).toBe("AMZN Mktp US");
+  });
+});
+
+describe("inferRenameRule generalised families", () => {
+  it("generalises middle numbers with a fixed suffix", () => {
+    const inferred = inferRenameRule(
+      ["STORE #123 - SEATTLE"],
+      "STORE #456 - SEATTLE"
+    );
+    expect(inferred).toEqual({ sourcePattern: "STORE #[N] - SEATTLE" });
+  });
+
+  it("generalises number-like prefixes", () => {
+    const inferred = inferRenameRule(["123 Main St"], "456 Main St");
+    expect(inferred).toEqual({ sourcePattern: "[N] Main St" });
+  });
+
+  it("generalises bank reference codes into [X]", () => {
+    const inferred = inferRenameRule(
+      ["AMZN Mktp US*RT3ABCD12"],
+      "AMZN Mktp US*XY9ZZ"
+    );
+    expect(inferred).toEqual({ sourcePattern: "AMZN Mktp US*[X]" });
+  });
+
+  it("generalises several varying runs at once", () => {
+    const inferred = inferRenameRule(["CHK 12 REF 34"], "CHK 56 REF 78");
+    expect(inferred).toEqual({ sourcePattern: "CHK [N] REF [N]" });
+  });
+
+  it("treats numbers as atomic (WHOLE FOODS #24 + #25 vary as 24)", () => {
+    const inferred = inferRenameRule(["WHOLE FOODS #24"], "WHOLE FOODS #25");
+    expect(inferred).toEqual({ sourcePattern: "WHOLE FOODS #[N]" });
+    expect(
+      applyRenameRules(
+        [{ ...rule(1, inferred!.sourcePattern, "Whole Foods") }],
+        "WHOLE FOODS #31"
+      )
+    ).toBe("Whole Foods");
+  });
+
+  it("refuses pure-letter variation (distinct names, not numbering)", () => {
+    expect(inferRenameRule(["STORE A"], "STORE B")).toBeNull();
+  });
+
+  it("refuses a pattern that would be all wildcard", () => {
+    expect(inferRenameRule(["12"], "34")).toBeNull();
+  });
+
+  it("keeps a generalisable pair when junk shares the target", () => {
+    const inferred = inferRenameRule(
+      ["Uber 123", "Shell 999", "Lyft 456"],
+      "Uber 789"
+    );
+    expect(inferred).toEqual({ sourcePattern: "Uber [N]" });
+  });
+
+  it("matches punctuation variants of a generalised pattern", () => {
+    const inferred = inferRenameRule(["AMZN*MKTP 12"], "AMZN*MKTP 34");
+    expect(inferred).toEqual({ sourcePattern: "AMZN*MKTP [N]" });
+    expect(
+      applyRenameRules(
+        [{ ...rule(1, inferred!.sourcePattern, "Amazon") }],
+        "AMZN-MKTP 56"
+      )
+    ).toBe("Amazon");
+  });
+});
+
+describe("learnRenameRule generalised families", () => {
+  it("learns a middle-number family end to end", () => {
+    let { rules } = learnRenameRule([], "STORE #123 - SEATTLE", "PCC");
+    const second = learnRenameRule(rules, "STORE #456 - SEATTLE", "PCC");
+    expect(second.generalised).toBe(true);
+    expect(second.rules).toHaveLength(1);
+    expect(second.rules[0]).toMatchObject({
+      sourcePattern: "STORE #[N] - SEATTLE",
+      targetPayee: "PCC",
+    });
+    expect(applyRenameRules(second.rules, "STORE #789 - SEATTLE")).toBe("PCC");
+    expect(applyRenameRules(second.rules, "STORE #789 - TACOMA")).toBe(
+      "STORE #789 - TACOMA"
+    );
+  });
+
+  it("learns a reference-code family end to end", () => {
+    let { rules } = learnRenameRule([], "AMZN Mktp US*RT3ABCD12", "Amazon");
+    const second = learnRenameRule(rules, "AMZN Mktp US*XY9ZZ", "Amazon");
+    expect(second.generalised).toBe(true);
+    expect(second.rules).toHaveLength(1);
+    expect(second.rules[0]!.sourcePattern).toContain("[X]");
+    expect(applyRenameRules(second.rules, "AMZN Mktp US*QQ1WW")).toBe("Amazon");
+  });
+
+  it("gives newer rules precedence when [N] and [X] overlap", () => {
+    const rules = [
+      { ...rule(1, "AMZN [N]", "Amazon Digits"), createdAt: "2026-01-01T00:00:00.000Z" },
+      { ...rule(2, "AMZN [X]", "Amazon Refs"), createdAt: "2026-01-02T00:00:00.000Z" },
+    ];
+    expect(applyRenameRules(rules, "AMZN 123")).toBe("Amazon Refs");
   });
 });

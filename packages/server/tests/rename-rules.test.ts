@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
@@ -14,6 +15,7 @@ import {
   updateTransaction,
 } from "../src/queries/transactions.js";
 import {
+  applyRenameRuleToExisting,
   createRenameRule,
   deleteRenameRule,
   getRenameRules,
@@ -175,6 +177,34 @@ describe("CSV import applies rename rules", () => {
     expect(second.count).toBe(0);
     expect(second.skipped).toHaveLength(1);
     expect(second.skipped[0]!.reason).toBe("Matches an existing transaction");
+  });
+
+  it("applies separator folding on import without any pattern", async () => {
+    const accountId = await seedAccount();
+    await createRenameRule(db, { sourcePattern: "AMZN*MKTP", targetPayee: "Amazon" });
+
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ payee: "AMZN-MKTP", amountCents: -1000 })],
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.map((t) => t.payee)).toEqual(["Amazon"]);
+  });
+
+  it("applies a learned [X] pattern to the next import", async () => {
+    const accountId = await seedAccount();
+    await learnRenameRuleFromPayees(db, "AMZN Mktp US*RT3ABCD12", "Amazon");
+    await learnRenameRuleFromPayees(db, "AMZN Mktp US*XY9ZZ", "Amazon");
+    expect(getRenameRules(db)[0]!.sourcePattern).toContain("[X]");
+
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ payee: "AMZN Mktp US*QQ1WW", amountCents: -1000 })],
+    });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.map((t) => t.payee)).toEqual(["Amazon"]);
   });
 
   it("a rename learned from an edit applies to the next import", async () => {
@@ -373,5 +403,177 @@ describe("transfer guards", () => {
     );
     expect(res.children).toHaveLength(2);
     expect(getRenameRules(db)).toHaveLength(0);
+  });
+});
+
+describe("applyRenameRuleToExisting", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openMigratedDb();
+  });
+
+  async function seedAccount(name = "Chequing") {
+    const [a] = await db
+      .insert(schema.accounts)
+      .values({
+        name,
+        kind: "liquid",
+        groupLabel: "Budget Accounts",
+        balance: 100000,
+        onBudget: true,
+        sort: 0,
+      })
+      .returning();
+    return a!.id;
+  }
+
+  function insertTx(
+    accountId: number,
+    over: {
+      payee?: string;
+      amount?: number;
+      status?: string;
+      transferAccountId?: number | null;
+      parentId?: number | null;
+    } = {}
+  ) {
+    const {
+      payee = "BCF1",
+      amount = -1000,
+      status = "c",
+      transferAccountId = null,
+      parentId = null,
+    } = over;
+    const row = db
+      .insert(schema.transactions)
+      .values({
+        accountId,
+        categoryId: null,
+        date: "2026-08-13",
+        payee,
+        payeeId: null,
+        memo: "",
+        amount,
+        status: status as "u" | "c" | "r",
+        transferStatus: transferAccountId != null ? ("c" as const) : null,
+        flagColor: null,
+        transferAccountId,
+        parentId,
+        isIncome: false,
+        incomeMonth: null,
+      })
+      .returning()
+      .get();
+    return row!.id;
+  }
+
+  function payeesOf(accountId: number): string[] {
+    return db
+      .select({ payee: schema.transactions.payee })
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, accountId))
+      .all()
+      .map((r) => r.payee)
+      .sort();
+  }
+
+  it("renames matching stored payees and links the target payee entity", async () => {
+    const accountId = await seedAccount();
+    insertTx(accountId, { payee: "BCF1", amount: -1000 });
+    insertTx(accountId, { payee: "BCF2", amount: -2000 });
+    insertTx(accountId, { payee: "UBER TRIP", amount: -500 });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
+
+    const res = await applyRenameRuleToExisting(db, rule.id);
+
+    expect(res).toMatchObject({ updated: 2, skippedLocked: 0 });
+    expect(payeesOf(accountId)).toEqual(["BC Ferries", "BC Ferries", "UBER TRIP"]);
+
+    const target = db
+      .select()
+      .from(schema.payees)
+      .where(eq(schema.payees.name, "BC Ferries"))
+      .get();
+    expect(target).toBeTruthy();
+    const linked = db
+      .select({ payeeId: schema.transactions.payeeId })
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, accountId))
+      .all();
+    expect(linked.filter((r) => r.payeeId === target!.id)).toHaveLength(2);
+  });
+
+  it("is a no-op the second time (idempotent)", async () => {
+    const accountId = await seedAccount();
+    insertTx(accountId, { payee: "BCF1" });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+
+    expect(await applyRenameRuleToExisting(db, rule.id)).toMatchObject({
+      updated: 1,
+      skippedLocked: 0,
+    });
+    expect(await applyRenameRuleToExisting(db, rule.id)).toMatchObject({
+      updated: 0,
+      skippedLocked: 0,
+    });
+  });
+
+  it("counts reconciled rows as skippedLocked instead of editing them", async () => {
+    const accountId = await seedAccount();
+    insertTx(accountId, { payee: "BCF1", amount: -1000, status: "c" });
+    insertTx(accountId, { payee: "BCF2", amount: -2000, status: "r" });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
+
+    const res = await applyRenameRuleToExisting(db, rule.id);
+
+    expect(res).toMatchObject({ updated: 1, skippedLocked: 1 });
+    expect(payeesOf(accountId)).toEqual(["BC Ferries", "BCF2"]);
+  });
+
+  it("never rewrites transfers or split children", async () => {
+    const srcId = await seedAccount("Chequing");
+    const dstId = await seedAccount("Savings");
+    insertTx(srcId, { payee: "BCF1", transferAccountId: dstId });
+    const parentId = insertTx(srcId, { payee: "Split parent" });
+    insertTx(srcId, { payee: "BCF1", parentId });
+    insertTx(srcId, { payee: "BCF2" });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
+
+    const res = await applyRenameRuleToExisting(db, rule.id);
+
+    expect(res).toMatchObject({ updated: 1, skippedLocked: 0 });
+    expect(payeesOf(srcId).sort()).toEqual(
+      ["BC Ferries", "BCF1", "BCF1", "Split parent"].sort()
+    );
+  });
+
+  it("applies separator folding and [X] patterns to history too", async () => {
+    const accountId = await seedAccount();
+    insertTx(accountId, { payee: "AMZN*MKTP US*RT3ABCD12" });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "AMZN Mktp US*[X]",
+      targetPayee: "Amazon",
+    });
+
+    const res = await applyRenameRuleToExisting(db, rule.id);
+
+    expect(res).toMatchObject({ updated: 1, skippedLocked: 0 });
+    expect(payeesOf(accountId)).toEqual(["Amazon"]);
+  });
+
+  it("returns null for an unknown rule", async () => {
+    await expect(applyRenameRuleToExisting(db, 4242)).resolves.toBeNull();
   });
 });

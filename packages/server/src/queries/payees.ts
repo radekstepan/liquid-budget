@@ -3,6 +3,7 @@ import { isTransferPayee } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { categories, payees, transactions, recurring } from "../schema.js";
 import { withTransaction } from "../transaction.js";
+import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
 export class PayeeError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -119,7 +120,12 @@ export async function updatePayee(
     }
   }
 
-  return withTransaction(db, async () => {
+  // Seed a rename rule when the payee itself is renamed so future CSV
+  // imports arrive with the curated name. Learned after the commit so a
+  // rule-learning failure never rolls back (or blocks) the rename itself.
+  const nextName = updates.name;
+
+  const result = await withTransaction(db, async () => {
     const updated = db
       .update(payees)
       .set(updates)
@@ -169,6 +175,16 @@ export async function updatePayee(
 
     return updated ?? null;
   });
+
+  if (nextName !== undefined && nextName !== current.name) {
+    try {
+      await learnRenameRuleFromPayees(db, current.name, nextName);
+    } catch (learnErr) {
+      console.error("[payees] failed to learn rename rule:", learnErr);
+    }
+  }
+
+  return result;
 }
 
 export function deletePayee(db: Db, id: number): boolean {
@@ -203,7 +219,15 @@ export async function mergePayees(
     throw new PayeeError("One of the payees to merge does not exist", 404);
   }
 
-  return withTransaction(db, async () => {
+  // Seed one rename rule per absorbed source so future CSV imports arrive
+  // with the surviving name (several sources may generalise into a
+  // pattern, e.g. merging BCF1 + BCF2 into BC Ferries learns BCF[N]).
+  const learned: Array<{ from: string; to: string }> = sources
+    .map((s) => s.name)
+    .filter((name): name is string => name.trim() !== "" && name !== target.name)
+    .map((name) => ({ from: name, to: target.name }));
+
+  const result = await withTransaction(db, async () => {
     for (const source of sources) {
       const txCondition = source.name
         ? or(
@@ -241,4 +265,14 @@ export async function mergePayees(
 
     return getPayeeById(db, targetId);
   });
+
+  for (const rule of learned) {
+    try {
+      await learnRenameRuleFromPayees(db, rule.from, rule.to);
+    } catch (learnErr) {
+      console.error("[payees] failed to learn rename rule on merge:", learnErr);
+    }
+  }
+
+  return result;
 }

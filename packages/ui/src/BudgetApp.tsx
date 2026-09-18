@@ -230,6 +230,7 @@ export type BudgetAppApi = {
   addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
   updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   deleteRenameRule?: (id: number) => Promise<void>;
+  applyRenameRule?: (id: number) => Promise<{ updated: number; skippedLocked: number }>;
   ensurePayee?: (name: string) => Promise<number>;
   renamePayee?: (id: number, name: string) => Promise<void>;
   setPayeeDefaultCategory?: (id: number, categoryId: number | null) => Promise<void>;
@@ -1324,6 +1325,7 @@ export function BudgetApp({
                 ) : (
                   <SettingsView
                     rules={data.renameRules ?? []}
+                    existingPayees={data.transactions.map((t) => t.payee)}
                     onAdd={async (sourcePattern, targetPayee) => {
                       await api.addRenameRule?.(sourcePattern, targetPayee);
                     }}
@@ -1333,6 +1335,7 @@ export function BudgetApp({
                     onDelete={async (id) => {
                       await api.deleteRenameRule?.(id);
                     }}
+                    onApply={api.applyRenameRule}
                   />
                 )}
               </div>

@@ -361,6 +361,12 @@ export const RenameRulePatchSchema = z
   })
   .strict();
 
+export const RenameRuleApplySchema = z
+  .object({
+    id: z.number().int().positive(),
+  })
+  .strict();
+
 export const PayeePatchSchema = z
   .object({
     id: z.number().int().positive(),

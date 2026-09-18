@@ -1801,6 +1801,23 @@ export function BudgetAppShell({
         )
       );
     },
+    applyRenameRule: async (id) => {
+      return withSync(() =>
+        runMutation(
+          async () => {
+            const res = await jsonReq<{ updated: number; skippedLocked: number }>(
+              "/api/rename-rules/apply",
+              {
+                method: "POST",
+                body: JSON.stringify({ id }),
+              }
+            );
+            return { updated: res.updated, skippedLocked: res.skippedLocked };
+          },
+          { success: "Rename rule applied to existing transactions.", failure: "Failed to apply rename rule.", notifyFailure: false }
+        )
+      );
+    },
     ensurePayee: async (name) => {
       return withSync(() =>
         runMutation(

@@ -1,9 +1,14 @@
-import { eq, asc } from "drizzle-orm";
+import { and, eq, asc, isNull } from "drizzle-orm";
 import type { RenameRule as RenameRuleView } from "@ynab/logic";
-import { isTransferPayee, learnRenameRule as pureLearn } from "@ynab/logic";
+import {
+  isTransferPayee,
+  learnRenameRule as pureLearn,
+  matchesRenameRule,
+  normalizeRenameText,
+} from "@ynab/logic";
 import type { Db } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { renameRules } from "../schema.js";
+import { payees, renameRules, transactions } from "../schema.js";
 
 export type RenameRuleRow = typeof renameRules.$inferSelect;
 export type RenameRuleInput = {
@@ -141,4 +146,87 @@ export async function learnRenameRuleFromPayees(
   });
 
   return { generalised, rules: getRenameRules(db) };
+}
+
+export type ApplyRenameRuleResult = {
+  rule: RenameRuleView;
+  /** Rows rewritten to the rule's target payee. */
+  updated: number;
+  /** Matching rows left untouched because they are reconciled (locked). */
+  skippedLocked: number;
+};
+
+/**
+ * Apply one rename rule to already-stored transactions (learning a rule
+ * otherwise only affects *future* CSV imports).
+ *
+ * Only regular, non-transfer, non-split-child rows are rewritten — the
+ * same guard the payee-rename cascade uses — and reconciled rows are
+ * counted as `skippedLocked` instead of edited. Rewritten rows are
+ * relinked to the target payee entity (created when missing), mirroring
+ * CSV import linkage.
+ */
+export async function applyRenameRuleToExisting(
+  db: Db,
+  id: number
+): Promise<ApplyRenameRuleResult | null> {
+  const rule = getRenameRuleById(db, id);
+  if (!rule) return null;
+  const target = rule.targetPayee.trim();
+  if (!target) return { rule, updated: 0, skippedLocked: 0 };
+
+  const rows = db
+    .select({
+      id: transactions.id,
+      payee: transactions.payee,
+      status: transactions.status,
+      transferStatus: transactions.transferStatus,
+    })
+    .from(transactions)
+    .where(
+      and(
+        isNull(transactions.parentId),
+        isNull(transactions.transferAccountId)
+      )
+    )
+    .all();
+
+  const hits = rows.filter(
+    (r) =>
+      matchesRenameRule(rule, r.payee) &&
+      normalizeRenameText(r.payee) !== normalizeRenameText(target)
+  );
+  if (hits.length === 0) return { rule, updated: 0, skippedLocked: 0 };
+
+  const locked = hits.filter(
+    (r) => r.status === "r" || r.transferStatus === "r"
+  );
+  const editable = hits.filter(
+    (r) => r.status !== "r" && r.transferStatus !== "r"
+  );
+
+  await withTransaction(db, async () => {
+    let targetPayee = db
+      .select()
+      .from(payees)
+      .where(eq(payees.name, target))
+      .get();
+    if (!targetPayee && editable.length > 0) {
+      const now = new Date().toISOString();
+      targetPayee = db
+        .insert(payees)
+        .values({ entityId: null, name: target, autoCategoryId: null, createdAt: now })
+        .returning()
+        .get();
+    }
+    for (const r of editable) {
+      db
+        .update(transactions)
+        .set({ payee: target, payeeId: targetPayee?.id ?? null })
+        .where(eq(transactions.id, r.id))
+        .run();
+    }
+  });
+
+  return { rule, updated: editable.length, skippedLocked: locked.length };
 }

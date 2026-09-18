@@ -3,6 +3,7 @@ import {
   IdListQuerySchema,
   PositiveIntQuerySchema,
   RecurringCreateSchema,
+  RenameRuleApplySchema,
   RecurringPatchSchema,
   ReconcileStateQuerySchema,
   TransactionBulkUpdateSchema,
@@ -311,5 +312,15 @@ describe("query-string contracts", () => {
     expect(
       ReconcileStateQuerySchema.safeParse({ accountId: "3", statementDate: "08/01/2026" }).success
     ).toBe(false);
+  });
+
+  it("validates the rename-rule apply payload", () => {
+    expect(RenameRuleApplySchema.safeParse({ id: 7 })).toMatchObject({
+      success: true,
+      data: { id: 7 },
+    });
+    for (const bad of [{}, { id: 0 }, { id: -3 }, { id: "7" }, { id: 1, extra: true }]) {
+      expect(RenameRuleApplySchema.safeParse(bad).success).toBe(false);
+    }
   });
 });
