@@ -363,7 +363,7 @@ export function ReconcileModal({
           been entered since. You can{" "}
           <button
             type="button"
-            className="underline"
+            className="underline cursor-pointer"
             style={{ color: "var(--y-blue)" }}
             onClick={() => onUnreconcile(state.accountId)}
             disabled={busy}

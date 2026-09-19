@@ -1196,7 +1196,7 @@ export const TransactionsView = memo(function TransactionsView({
                                      e.stopPropagation();
                                      toggleExpandSplit(t.id);
                                   }}
-                                  className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors align-middle"
+                                  className="inline-flex items-center justify-center w-3.5 h-3.5 mr-1 text-[9px] text-gray-500 hover:text-gray-900 rounded hover:bg-gray-200 transition-colors cursor-pointer align-middle"
                                   aria-label={isExpanded ? "Collapse split sub-transactions" : "Expand split sub-transactions"}
                                 >
                                   {isExpanded ? "▼" : "▶"}

@@ -389,7 +389,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditDate(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -432,7 +432,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditPayee(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -472,7 +472,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditCategory(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -545,7 +545,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditMemo(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -586,7 +586,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditAccount(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -628,7 +628,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditAmount(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -668,7 +668,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditStatus(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
@@ -717,7 +717,7 @@ export function BulkEditTransactionsModal({
                 <button
                   type="button"
                   onClick={() => setEditFlag(false)}
-                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline"
+                  className="text-[11px] text-[var(--y-ink-soft)] hover:underline cursor-pointer"
                 >
                   Keep existing
                 </button>
