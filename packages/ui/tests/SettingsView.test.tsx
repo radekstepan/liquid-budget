@@ -19,6 +19,8 @@ function renderView(over: Partial<Parameters<typeof SettingsView>[0]> = {}) {
       onAdd={over.onAdd ?? onAdd}
       onUpdate={over.onUpdate ?? onUpdate}
       onDelete={over.onDelete ?? onDelete}
+      existingPayees={over.existingPayees}
+      onApply={over.onApply}
     />
   );
   return { view, onAdd, onUpdate, onDelete };
@@ -79,5 +81,52 @@ describe("SettingsView", () => {
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledWith(1);
     });
+  });
+
+  it("hides match counts and apply actions without history props", () => {
+    renderView();
+    const table = within(screen.getByRole("table"));
+    expect(table.getAllByText("—").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: /apply rule/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows per-rule existing match counts", () => {
+    renderView({
+      existingPayees: ["BCF1", "BCF9", "BC Ferries", "UBER TRIP"],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+    });
+    // BCF1 (exact) matches 1; BCF[N] matches BCF1 + BCF9; UBER matches none.
+    expect(screen.getByLabelText("1 existing transactions match BCF1")).toBeInTheDocument();
+    expect(screen.getByLabelText("2 existing transactions match BCF[N]")).toBeInTheDocument();
+    expect(screen.getByLabelText("0 existing transactions match UBER")).toBeInTheDocument();
+  });
+
+  it("applies a rule and reports the result", async () => {
+    const onApply = vi.fn().mockResolvedValue({ updated: 2, skippedLocked: 1 });
+    renderView({ existingPayees: ["BCF1", "BCF2"], onApply });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /apply rule BCF\[N\] to existing transactions/i })
+    );
+    await waitFor(() => {
+      expect(onApply).toHaveBeenCalledWith(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Rule applied")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/renamed 2 existing transactions/)).toBeInTheDocument();
+    expect(screen.getByText(/1 reconciled left untouched/)).toBeInTheDocument();
+  });
+
+  it("disables apply when a rule matches nothing", () => {
+    renderView({
+      existingPayees: ["BC Ferries"],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+    });
+    expect(
+      screen.getByRole("button", { name: /apply rule UBER to existing transactions/i })
+    ).toBeDisabled();
   });
 });

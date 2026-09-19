@@ -21,6 +21,7 @@ import {
   mergePayees,
   PayeeError,
 } from "../src/queries/payees.js";
+import { getRenameRules } from "../src/queries/rename-rules.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -255,5 +256,74 @@ describe("Payees Entity & Management (UNI-38 / F-19)", () => {
     await expect(mergePayees(db, target.id, [target.id])).rejects.toBeInstanceOf(PayeeError);
     await expect(mergePayees(db, target.id, [4242])).rejects.toMatchObject({ status: 404 });
     expect(await mergePayees(db, 4242, [target.id])).toBeNull();
+  });
+
+  it("renaming a payee seeds an exact rename rule for future imports", async () => {
+    const p = findOrCreatePayee(db, "BCF1");
+
+    await updatePayee(db, p.id, { name: "BC Ferries" });
+
+    const rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+  });
+
+  it("a payee rename plus a merge generalises into a pattern rule", async () => {
+    const p1 = findOrCreatePayee(db, "BCF1");
+    const p2 = findOrCreatePayee(db, "BCF2");
+
+    await updatePayee(db, p1.id, { name: "BC Ferries" });
+    // A second entity cannot take the same name (409) — the user merges
+    // instead, and the merge seeds the sibling rule that generalises.
+    const target = getPayeeByName(db, "BC Ferries")!;
+    await mergePayees(db, target.id, [p2.id]);
+
+    const rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
+  });
+
+  it("changing only the default category seeds no rule", async () => {
+    const p = findOrCreatePayee(db, "BCF1");
+
+    await updatePayee(db, p.id, { autoCategoryId: 10 });
+
+    expect(getRenameRules(db)).toHaveLength(0);
+  });
+
+  it("merging sources into a target seeds exact rename rules", async () => {
+    const target = findOrCreatePayee(db, "Amazon");
+    const s1 = findOrCreatePayee(db, "AMZN Mktp");
+    const s2 = findOrCreatePayee(db, "AMZN Market");
+
+    await mergePayees(db, target.id, [s1.id, s2.id]);
+
+    const rules = getRenameRules(db);
+    expect(rules.map((r) => r.sourcePattern).sort()).toEqual([
+      "AMZN Market",
+      "AMZN Mktp",
+    ]);
+    expect(rules.every((r) => r.targetPayee === "Amazon")).toBe(true);
+  });
+
+  it("merging a numbered family generalises into a pattern rule", async () => {
+    const target = findOrCreatePayee(db, "BC Ferries");
+    const s1 = findOrCreatePayee(db, "BCF1");
+    const s2 = findOrCreatePayee(db, "BCF2");
+
+    await mergePayees(db, target.id, [s1.id, s2.id]);
+
+    const rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
   });
 });

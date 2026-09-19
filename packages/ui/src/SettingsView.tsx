@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { RenameRule } from "@ynab/logic";
-import { isPatternRule } from "@ynab/logic";
+import { isPatternRule, matchesRenameRule, normalizeRenameText } from "@ynab/logic";
 import { Icon, Notice, Button, Tooltip } from "@ynab/theme";
 import { Modal, Field, Btn, inputCls } from "./ui.js";
 
@@ -11,27 +11,78 @@ type RuleDraft = {
   targetPayee: string;
 };
 
+export type ApplyRuleResult = {
+  updated: number;
+  skippedLocked: number;
+};
+
 export function SettingsView({
   rules,
   onAdd,
   onUpdate,
   onDelete,
+  existingPayees,
+  onApply,
 }: {
   rules: RenameRule[];
   onAdd: (sourcePattern: string, targetPayee: string) => Promise<void>;
   onUpdate: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  /** Payee names of stored transactions; enables per-rule match counts. */
+  existingPayees?: string[];
+  /** Rewrite stored transactions matching a rule; enables the Apply button. */
+  onApply?: (id: number) => Promise<ApplyRuleResult>;
 }) {
   const [editing, setEditing] = useState<RenameRule | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<number | null>(null);
+  const [applyResult, setApplyResult] = useState<
+    (ApplyRuleResult & { sourcePattern: string }) | null
+  >(null);
 
   const sorted = useMemo(
     () => [...rules].sort((a, b) => a.sourcePattern.localeCompare(b.sourcePattern)),
     [rules]
   );
+
+  // Rows this rule would rewrite: matching stored payees not already at
+  // the target (mirrors the server's apply semantics). Unknown without
+  // existingPayees, in which case no count is shown.
+  const matchCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    if (!existingPayees) return counts;
+    for (const r of sorted) {
+      let n = 0;
+      for (const payee of existingPayees) {
+        if (
+          matchesRenameRule(r, payee) &&
+          normalizeRenameText(payee) !== normalizeRenameText(r.targetPayee)
+        ) {
+          n++;
+        }
+      }
+      counts.set(r.id, n);
+    }
+    return counts;
+  }, [sorted, existingPayees]);
+
+  const applyRule = async (r: RenameRule) => {
+    if (!onApply || applyingId != null) return;
+    setError(null);
+    setApplyResult(null);
+    setApplyingId(r.id);
+    try {
+      const res = await onApply(r.id);
+      setApplyResult({ ...res, sourcePattern: r.sourcePattern });
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : String(e));
+    } finally {
+      setApplyingId(null);
+    }
+  };
 
   const openCreate = () => {
     setError(null);
@@ -85,7 +136,8 @@ export function SettingsView({
               <span className="y-num">BCF1</span> → <span className="y-num">BC Ferries</span>).
               Renaming <span className="y-num">BCF2</span> the same way generalises the rule
               to <span className="y-num">BCF[N] → BC Ferries</span>, where <span className="y-num">[N]</span>{" "}
-              matches one or more digits.
+              matches one or more digits and <span className="y-num">[X]</span> matches a
+              bank reference code (letters and digits).
             </p>
           </div>
           <Button size="sm" variant="primary" onClick={openCreate} aria-label="Add rename rule">
@@ -96,6 +148,17 @@ export function SettingsView({
         {error && (
           <Notice tone="danger" title="Rule not saved" className="mt-3">
             {error}
+          </Notice>
+        )}
+
+        {applyResult && (
+          <Notice tone="ok" title="Rule applied" className="mt-3">
+            <span className="y-num">{applyResult.sourcePattern}</span> renamed{" "}
+            {applyResult.updated} existing transaction
+            {applyResult.updated === 1 ? "" : "s"}
+            {applyResult.skippedLocked > 0 &&
+              ` (${applyResult.skippedLocked} reconciled left untouched)`}
+            .
           </Notice>
         )}
 
@@ -113,42 +176,67 @@ export function SettingsView({
                 <tr>
                   <th>Source (matches)</th>
                   <th>Renamed to</th>
+                  <th className="w-[84px]">Existing</th>
                   <th className="w-[92px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r) => (
-                  <tr key={r.id} className="y-row">
-                    <td className="y-num whitespace-nowrap">{r.sourcePattern}</td>
-                    <td className="truncate">{r.targetPayee}</td>
-                    <td>
-                      <div className="flex items-center gap-1">
-                        <Tooltip tip="Edit rule">
-                          <button
-                            className="y-icon-btn"
-                            aria-label={`Edit rule ${r.sourcePattern}`}
-                            onClick={() => {
-                              setError(null);
-                              setCreating(false);
-                              setEditing(r);
-                            }}
-                          >
-                            <Icon name="edit" size={12} />
-                          </button>
-                        </Tooltip>
-                        <Tooltip tip="Delete rule">
-                          <button
-                            className="y-icon-btn"
-                            aria-label={`Delete rule ${r.sourcePattern}`}
-                            onClick={() => setDeletingId(r.id)}
-                          >
-                            <Icon name="trash" size={12} />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {sorted.map((r) => {
+                  const matches = matchCounts.get(r.id);
+                  return (
+                    <tr key={r.id} className="y-row">
+                      <td className="y-num whitespace-nowrap">{r.sourcePattern}</td>
+                      <td className="truncate">{r.targetPayee}</td>
+                      <td className="y-num">
+                        {matches == null ? (
+                          <span className="y-hint">—</span>
+                        ) : (
+                          <span aria-label={`${matches} existing transactions match ${r.sourcePattern}`}>
+                            {matches}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-1">
+                          {onApply && (
+                            <Tooltip tip="Apply to existing transactions">
+                              <button
+                                className="y-icon-btn"
+                                aria-label={`Apply rule ${r.sourcePattern} to existing transactions`}
+                                disabled={applyingId != null || matches === 0}
+                                onClick={() => void applyRule(r)}
+                              >
+                                <Icon name="check" size={12} />
+                              </button>
+                            </Tooltip>
+                          )}
+                          <Tooltip tip="Edit rule">
+                            <button
+                              className="y-icon-btn"
+                              aria-label={`Edit rule ${r.sourcePattern}`}
+                              onClick={() => {
+                                setError(null);
+                                setCreating(false);
+                                setEditing(r);
+                              }}
+                            >
+                              <Icon name="edit" size={12} />
+                            </button>
+                          </Tooltip>
+                          <Tooltip tip="Delete rule">
+                            <button
+                              className="y-icon-btn"
+                              aria-label={`Delete rule ${r.sourcePattern}`}
+                              onClick={() => setDeletingId(r.id)}
+                            >
+                              <Icon name="trash" size={12} />
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -263,8 +351,9 @@ function RuleFormModal({
       <p className="y-hint text-[11px] -mt-1">
         Use <span className="y-num">[N]</span> to match one or more digits, e.g.{" "}
         <span className="y-num">BCF[N]</span> matches <span className="y-num">BCF1</span>,{" "}
-        <span className="y-num">BCF2</span>, <span className="y-num">BCF10</span>. Leave it out for
-        an exact match.
+        <span className="y-num">BCF2</span>, <span className="y-num">BCF10</span>. Use{" "}
+        <span className="y-num">[X]</span> for a bank reference code (letters and digits).
+        Leave both out for an exact match.
       </p>
       {isPatternRule(sourcePattern) && (
         <div className="mt-3">
