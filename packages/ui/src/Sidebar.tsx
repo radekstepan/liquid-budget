@@ -479,7 +479,7 @@ export const Sidebar = memo(function Sidebar({
       <div className="y-side-nw">
         <button
           onClick={() => setNwOpen((o) => !o)}
-          className="flex w-full items-center gap-1.5"
+          className="flex w-full cursor-pointer items-center gap-1.5"
           style={{ color: "var(--y-side-ink)" }}
         >
           <span

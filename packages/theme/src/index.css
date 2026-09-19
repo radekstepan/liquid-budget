@@ -446,6 +446,7 @@ body::after {
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+  cursor: pointer;
   color: var(--y-side-ink-dim);
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
   padding: 6px 10px 5px;
@@ -608,6 +609,7 @@ body::after {
   border-radius: 3px;
   color: var(--y-side-ink-dim);
   opacity: 0.7;
+  cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease;
 }
 .y-side-edit-btn:hover {
@@ -623,11 +625,16 @@ body::after {
   border-radius: 4px;
   color: var(--y-ink-soft);
   background: transparent;
+  cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease;
 }
 .y-icon-btn:hover {
   background: var(--y-hover);
   color: var(--y-ink);
+}
+.y-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 .y-side-section-divider {
   height: 1px;
@@ -1403,6 +1410,7 @@ button.y-pill:hover {
   border-radius: 3px;
   color: var(--y-ink-soft);
   opacity: 0.6;
+  cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease;
 }
 .y-cat-edit-btn:hover {
@@ -1430,6 +1438,7 @@ button.y-pill:hover {
   border-radius: 3px;
   color: var(--y-ink-soft);
   opacity: 0.6;
+  cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease;
 }
 .y-group-add-btn:hover {

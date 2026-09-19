@@ -590,7 +590,7 @@ export const Inspector = memo(function Inspector({
                           onMouseLeave={() => setHoveredPoint(null)}
                           aria-label={`Jump to ${MONTHS[m0]} ${y}`}
                           className={cx(
-                          "flex-1 text-[9px] py-0.5 rounded text-center transition-all",
+                          "flex-1 cursor-pointer text-[9px] py-0.5 rounded text-center transition-all",
                           isCurrent
                             ? "bg-[#2f7fb0] text-white font-bold"
                             : isHovered
