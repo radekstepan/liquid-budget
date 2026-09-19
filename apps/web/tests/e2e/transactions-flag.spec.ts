@@ -29,7 +29,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
 
   await expect(register.locator("thead th", { hasText: /^F$/ })).toHaveCount(0);
 
-  await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
   const modal = page.locator(".y-modal").last();
   await modal.locator('input[inputmode="decimal"]').first().fill("4.20");
   await modal.locator('input[type="date"]').first().fill("2026-06-01");

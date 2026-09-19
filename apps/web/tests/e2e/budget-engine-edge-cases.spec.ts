@@ -100,7 +100,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const txModal = page.locator(".y-modal").last();
 
     // Select checking account
@@ -181,7 +181,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const txModal = page.locator(".y-modal").last();
 
     // Select AMEX Cobalt account
@@ -256,7 +256,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const txModal = page.locator(".y-modal").last();
     await txModal.locator('input[inputmode="decimal"]').first().fill("-200.00");
     await txModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -352,7 +352,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
     await page.getByRole("button", { name: /^Transactions/ }).click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const txModal = page.locator(".y-modal").last();
 
     // Switch to Transfer mode

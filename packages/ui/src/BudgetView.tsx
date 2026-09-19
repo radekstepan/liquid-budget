@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
 import type { GroupRow, CatRow, BudgetResult, CategoryGroup } from "@ynab/logic";
-import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents } from "@ynab/logic";
+import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents, validateAmountInput } from "@ynab/logic";
 import {
   Icon,
   MonthNav,
@@ -313,6 +313,7 @@ export const BudgetView = memo(function BudgetView({
   };
 
   const visibleGroups = budget.groups.filter((g) => !isInternalGroup(g.group));
+  const totalCategories = visibleGroups.reduce((n, g) => n + g.rows.length, 0);
   const structureGroups = visibleGroups.filter(
     (g) => !g.group.isCreditCardPayments && !isHiddenGroup(g.group)
   );
@@ -418,6 +419,23 @@ export const BudgetView = memo(function BudgetView({
       </Toolbar>
 
       <div className={cx("min-h-0 flex-1 overflow-auto y-scroll", isHScrolled && "is-hscrolled")} ref={scrollContainerRef}>
+        {totalCategories === 0 ? (
+          <div
+            className="flex h-full flex-col items-center justify-center gap-2 px-6 py-16 text-center"
+            data-testid="budget-empty-state"
+          >
+            <div className="text-[14px] font-semibold" style={{ color: "var(--y-ink)" }}>
+              No budget categories yet
+            </div>
+            <p className="max-w-[380px] text-[12px] leading-relaxed" style={{ color: "var(--y-ink-soft)" }}>
+              Every dollar needs a job. Create a master category (like “Monthly Bills”),
+              add categories inside it, then assign money to {formatMonthLong(currentMonth)}.
+            </p>
+            <Button size="sm" variant="primary" onClick={onAddGroup}>
+              <Icon name="plus" size={11} /> Create your first category group
+            </Button>
+          </div>
+        ) : (
         <table className={cx("y-table", showMulti && "y-table--multi", "y-budget-grid")}>
           <thead className="y-thead y-thead--sticky">
             {showMulti ? (
@@ -590,6 +608,7 @@ export const BudgetView = memo(function BudgetView({
             </tr>
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );
@@ -1251,6 +1270,7 @@ function CategoryMonthCell({
   onAssign,
   quickFill,
   categoryId,
+  available,
 }: CategoryMonthCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -1264,8 +1284,10 @@ function CategoryMonthCell({
   }, [editing]);
 
   const commit = () => {
-    const v = evalAmount(draft);
-    if (v != null) onAssign(dollarsToCents(v));
+    // Note: zero is assignable here (it clears the category) even though
+    // zero-amount transactions are rejected elsewhere.
+    const v = validateAmountInput(draft);
+    if ((v.status === "valid" || v.status === "zero") && v.cents != null) onAssign(v.cents);
     setEditing(false);
   };
 
@@ -1273,14 +1295,32 @@ function CategoryMonthCell({
     categoryId != null ? quickFill?.lastMonthAssignments?.get(categoryId) : undefined;
 
   if (editing) {
+    const validation = validateAmountInput(draft);
+    // Zero is assignable (it clears the category); only unparseable input blocks.
+    const blocked = validation.status === "invalid";
+    const assignableCents =
+      (validation.status === "valid" || validation.status === "zero") ? validation.cents : null;
+    // Projected balance if this draft were assigned: assigning replaces the
+    // current value, so availability shifts by the delta.
+    const projected =
+      assignableCents != null && available != null
+        ? available - value + assignableCents
+        : null;
+    const overspend = projected != null && projected < 0 ? projected : null;
     const preview = (() => {
       const n = evalAmount(draft);
       if (n == null || !Number.isFinite(n)) return undefined;
       if (!/[+\-*/]/.test(draft.replace(/^[+-]/, ""))) return undefined;
       return `= ${fmt(dollarsToCents(n))}`;
     })();
+    const tip = blocked
+      ? "Enter a valid amount"
+      : overspend != null
+        ? `Would overspend by ${fmt(-overspend)}`
+        : preview;
+    const warn = blocked || overspend != null;
     return (
-      <Tooltip tip={preview}>
+      <Tooltip tip={tip}>
         <input
           ref={inputRef}
           size={1}
@@ -1288,12 +1328,16 @@ function CategoryMonthCell({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
+            // Blocked drafts stay open on Enter so the hint can be read;
+            // Escape or blurring away still discards without saving.
+            if (e.key === "Enter" && !blocked) commit();
             if (e.key === "Escape") setEditing(false);
           }}
           onClick={(e) => e.stopPropagation()}
-          aria-label={preview ?? "Edit assigned amount"}
+          aria-label={tip ?? "Edit assigned amount"}
+          aria-invalid={blocked}
           className="y-inline-amt"
+          style={warn ? { color: "var(--y-red)" } : undefined}
         />
       </Tooltip>
     );

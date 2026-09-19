@@ -34,13 +34,27 @@ import {
   nextMonthKey,
   num,
   RECURRING_FREQUENCIES,
+  isValidISODate,
   todayISO,
   toRecurringPayload,
   toTransactionPayload,
 } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
-import { AmountPreview } from "./AmountInput.js";
+import { AmountPreview, AmountFieldError } from "./AmountInput.js";
+
+function DateFieldError({ value }: { value: string }) {
+  if (isValidISODate(value)) return null;
+  return (
+    <div
+      role="alert"
+      className="mt-1 text-[11px]"
+      style={{ color: "var(--y-red)" }}
+    >
+      Enter a valid date.
+    </div>
+  );
+}
 
 export { BulkEditTransactionsModal } from "./BulkEditModal.js";
 export type {
@@ -440,7 +454,9 @@ export function TransactionModal({
                   }
                 }}
                 className={inputClass}
+                aria-invalid={!isValidISODate(date)}
               />
+              <DateFieldError value={date} />
             </Field>
             <Field label={mode === "split" ? "Total Amount" : "Amount"}>
               <TextField
@@ -452,6 +468,7 @@ export function TransactionModal({
                 className={inputClass}
               />
               <AmountPreview value={amount} />
+              <AmountFieldError value={amount} />
             </Field>
           </div>
 
@@ -1353,6 +1370,7 @@ export function RecurringModal({
             className={inputClass}
           />
           <AmountPreview value={amount} />
+          <AmountFieldError value={amount} />
         </Field>
         <Field label="Frequency">
           <Select
@@ -1706,7 +1724,9 @@ export function RecurringModal({
             }
           }}
           className={inputClass}
+          aria-invalid={!isValidISODate(nextDate)}
         />
+        <DateFieldError value={nextDate} />
       </Field>
 
       {mode !== "split" && (

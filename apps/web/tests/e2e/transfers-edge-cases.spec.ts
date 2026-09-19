@@ -129,7 +129,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
     await gotoAllTransactions(page);
 
     // 1. Create a transfer of -$50 from Checking to Savings.
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
 
     // Select source account in Single mode before switching to Transfer mode
@@ -396,7 +396,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
 
     // 2. Create a transfer of -$300 from Checking (on-budget) to Savings (on-budget).
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
 
     await selectOption(modal, "Account", chkName, page);
@@ -467,7 +467,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
     await gotoAllTransactions(page);
 
     // 1. Open Add Transaction in Transfer mode: source = Checking (on-budget), destination = Investment Account (off-budget tracking).
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
 
     await selectOption(modal, "Account", chkName, page);
@@ -547,7 +547,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
 
     // 1. Create boundary transfer inflow from Investment Account (off-budget) to Checking (on-budget) of +$400 without category.
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     let modal = page.locator(".y-modal").last();
 
     await selectOption(modal, "Account", chkName, page);
@@ -577,7 +577,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
 
     // 3. Create second boundary transfer inflow of +$200 with category = "Investments".
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     modal = page.locator(".y-modal").last();
 
     await selectOption(modal, "Account", chkName, page);
@@ -665,7 +665,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
 
     // 2. Create a transfer payment of -$200 from Checking to Credit Card.
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
 
     await selectOption(modal, "Account", chkName, page);

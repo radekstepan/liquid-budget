@@ -104,7 +104,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     const cashInitialBalance = Number(cashAccount.balance);
 
     // 2. Create a -$60 transaction in TD Unlimited Chequing account.
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await expect(addModal.locator(".y-modal-head")).toContainText("Add Transaction");
 
@@ -199,7 +199,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 1. Create a -$75 expense categorized as "Groceries".
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("-75.00");
     await addModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -277,7 +277,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 1. Create a -$120 expense on 2026-06-15 under "Clothing"
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("-120.00");
     await addModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -347,7 +347,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 1. Create +$1,000 Income transaction on 2026-06-01 (Income: Available this month).
     await gotoAllTransactions(page);
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("1000.00");
     await addModal.locator('input[type="date"]').first().fill("2026-06-01");
@@ -407,7 +407,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     const cleanPayee = `Shell ${stamp}`;
 
     // 1. Create a transaction with raw imported payee "SHELL OIL #...".
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await addModal.locator('input[inputmode="decimal"]').first().fill("-45.00");
     await addModal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -470,7 +470,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     ];
 
     for (const cfg of txConfigs) {
-      await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+      await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
       const modal = page.locator(".y-modal").last();
       await modal.locator('input[inputmode="decimal"]').first().fill(cfg.amount);
       await modal.locator('input[type="date"]').first().fill(cfg.date);
@@ -500,8 +500,10 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     await expect(row05.locator("td.y-num").last()).toHaveText("$800.00");
     await expect(row01.locator("td.y-num").last()).toHaveText("$1,000.00");
 
-    // 4. Click "Transactions" in sidebar to switch to All Transactions view.
+    // 4. Click "Transactions" in sidebar. The account filter persists, so the
+    // register stays scoped — toggle the account off to reach All Transactions.
     await page.getByRole("button", { name: /^Transactions/ }).click();
+    await accountRow.click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
     // 5. Switch back to account view and sort table by Payee: verify running balance values stay anchored to chronological dates.

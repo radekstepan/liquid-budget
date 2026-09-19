@@ -46,7 +46,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW ModSplit ${stamp}`;
 
     // 1. Create a 2-way split (-$100 = -$60 Groceries + -$40 Household).
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const addModal = page.locator(".y-modal").last();
     await expect(addModal.locator(".y-modal-head")).toContainText("Add Transaction");
 
@@ -125,7 +125,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW AddRemSplit ${stamp}`;
 
     // 1. Open Add Transaction modal in Split mode.
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
@@ -184,7 +184,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW ConvertSplit ${stamp}`;
 
     // 1. Create a single transaction (-$80 on Groceries).
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.locator('input[inputmode="decimal"]').first().fill("-80.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-15");
@@ -251,7 +251,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW FlattenSplit ${stamp}`;
 
     // 1. Create a 2-way split: Parent = -$60, Child 1 = -$40 (Groceries), Child 2 = -$20 (Rent).
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
@@ -319,7 +319,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW 3WaySplit ${stamp}`;
 
     // 1. Create a 3-way split: Parent = -$100, Child 1 = -$50, Child 2 = -$30, Child 3 = -$20.
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
@@ -382,7 +382,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const tbbBefore = budgetMonthBefore.tbb;
 
     // 1. Open Add Transaction modal in Split mode with parent amount = +$3,000 (Paycheck net deposit).
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
@@ -453,7 +453,7 @@ test.describe("Split Transaction Edge Cases", () => {
     // 1. Create a split transaction on Checking with total -$200:
     //    - Sub-row 1: -$120 Category = Groceries
     //    - Sub-row 2: -$80 Transfer to = EQ Bank (Savings)
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 
@@ -573,7 +573,7 @@ test.describe("Split Transaction Edge Cases", () => {
     const payee = `PW Supermarket Split ${stamp}`;
 
     // 1. Create a split parent with unique payee "Supermarket Split" and child memo "SecretGiftItem".
-    await page.getByRole("button", { name: /Add.*Transaction/i }).click();
+    await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     const modal = page.locator(".y-modal").last();
     await modal.getByRole("button", { name: /^split$/i }).click();
 

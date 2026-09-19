@@ -651,7 +651,7 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
   });
 
-  it("BUG-46: popstate to /transactions clears account filter", () => {
+  it("BUG-46 (persisted filter): popstate to /transactions keeps the last account filter", () => {
     const { api } = makeApi();
     window.history.pushState(null, "", "/transactions/1");
     render(<BudgetApp data={makeSeedBudgetData()} api={api} initialView="transactions" initialAccount={1} />);
@@ -659,16 +659,18 @@ describe("BudgetApp", () => {
     const acctBtn = screen.getByRole("button", { name: /^TD Unlimited Chequing/ });
     expect(acctBtn.className).toContain("is-sel");
 
-    // Simulate popstate navigation to /transactions (no account ID)
+    // Simulate popstate navigation to /transactions (no account ID).
+    // The account filter is persisted now: a bare transactions URL leaves
+    // the last selection alone instead of clearing it (old BUG-46 behavior).
     act(() => {
       window.history.pushState(null, "", "/transactions");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    // Account filter is cleared -> Main Transactions button in sidebar is selected
+    // Account stays selected -> main Transactions button is not selected
     const txBtn = screen.getByRole("button", { name: /^transactions/i });
-    expect(txBtn.className).toContain("is-sel");
-    expect(acctBtn.className).not.toContain("is-sel");
+    expect(txBtn.className).not.toContain("is-sel");
+    expect(acctBtn.className).toContain("is-sel");
   });
 
   it("BUG-46: popstate with invalid month /budget/2026-99 does not set invalid month", () => {

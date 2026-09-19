@@ -248,6 +248,41 @@ export function dollarsToCents(d: number | string | null | undefined): number {
   return c === 0 ? 0 : c;
 }
 
+export type AmountInputStatus = "empty" | "invalid" | "zero" | "valid";
+
+export type AmountInputValidation = {
+  status: AmountInputStatus;
+  /** Evaluated dollar value; null unless the input parses. */
+  value: number | null;
+  /** Integer cents; null unless the input parses. */
+  cents: number | null;
+};
+
+/**
+ * Inline validation for free-text amount fields (transaction/split/budget
+ * inputs that accept arithmetic like "10+5"). Pure: no I/O, safe to call on
+ * every keystroke. "empty" means untouched-or-cleared (no error shown);
+ * "invalid" means unparseable; "zero" parses to exactly 0 cents (builders
+ * reject zero amounts, so the UI should say so before submit).
+ */
+export function validateAmountInput(s: string | number | null | undefined): AmountInputValidation {
+  if (s == null) return { status: "empty", value: null, cents: null };
+  const raw = typeof s === "number" ? String(s) : s;
+  if (raw.trim() === "") return { status: "empty", value: null, cents: null };
+  const n = evalAmount(raw);
+  if (n == null || Number.isNaN(n) || !Number.isFinite(n)) {
+    return { status: "invalid", value: null, cents: null };
+  }
+  let cents: number;
+  try {
+    cents = dollarsToCents(n);
+  } catch {
+    return { status: "invalid", value: n, cents: null };
+  }
+  if (cents === 0) return { status: "zero", value: n, cents };
+  return { status: "valid", value: n, cents };
+}
+
 type _Token = { kind: "num"; value: number } | { kind: "op"; op: string };
 
 const _VALID = /^[-+*/().\d\s]+$/;
