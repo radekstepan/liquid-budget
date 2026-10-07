@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, Query, Transaction, TransactionFlagColor } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, Query, SplitTemplate, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
   applyQuery,
   buildSearchCtx,
@@ -12,7 +12,7 @@ import {
   num,
   recurringFlavour,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Tooltip, money, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Select, Tooltip, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
 
@@ -162,6 +162,8 @@ export const TransactionsView = memo(function TransactionsView({
   onAdd,
   onAddTransfer,
   onEdit,
+  splitTemplates,
+  onApplySplitTemplate,
   onBulkEdit,
   onDelete,
   onReconcile,
@@ -195,6 +197,10 @@ export const TransactionsView = memo(function TransactionsView({
   onAdd: () => void;
   onAddTransfer?: () => void;
   onEdit: (id: number) => void;
+  /** Named split templates offered for one-click convert of a single transaction. */
+  splitTemplates?: SplitTemplate[];
+  /** Open the editor for `id` in split mode with the template applied. */
+  onApplySplitTemplate?: (id: number, templateId: number) => void;
   onBulkEdit?: (ids: number[]) => void;
   onDelete: (id: number) => void;
   onReconcile: (accountId: number) => void;
@@ -931,6 +937,34 @@ export const TransactionsView = memo(function TransactionsView({
             >
               Edit{selectedIds.size > 1 ? ` (${selectedIds.size})` : ""}
             </Button>
+            {selectedIds.size === 1 && onApplySplitTemplate && splitTemplates && splitTemplates.length > 0 && (() => {
+              const onlyId = Array.from(selectedIds)[0]!;
+              const txn = data.transactions.find((t) => t.id === onlyId);
+              const convertible =
+                txn != null &&
+                txn.parentId == null &&
+                txn.transferAccountId == null &&
+                !splitParentIds.has(txn.id) &&
+                txn.status !== "r" &&
+                txn.transferStatus !== "r";
+              if (!convertible) return null;
+              return (
+                <Select
+                  value=""
+                  onChange={(v) => {
+                    if (!v) return;
+                    setSelectedIds(new Set());
+                    onApplySplitTemplate(onlyId, Number(v));
+                  }}
+                  options={[
+                    { value: "", label: "Split with template…" },
+                    ...splitTemplates.map((t) => ({ value: t.id, label: t.name })),
+                  ]}
+                  aria-label="Split with template"
+                  size="sm"
+                />
+              );
+            })()}
             <Button
               variant="danger"
               size="sm"

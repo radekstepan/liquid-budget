@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import type {
   Account,
   Category,
@@ -14,6 +14,7 @@ import type {
   SingleTransactionSavePayload,
   SplitRecurringSavePayload,
   SplitTransactionSavePayload,
+  SplitTemplate,
   SubTransaction,
   Transaction,
   TransactionDuplicateFlag,
@@ -25,6 +26,7 @@ import type {
 } from "@ynab/logic";
 import {
   adjustDateShortcut,
+  applySplitTemplate,
   assertSplitsBalanced,
   canBuildRecurringPayload,
   canBuildTransactionPayload,
@@ -39,7 +41,7 @@ import {
   toRecurringPayload,
   toTransactionPayload,
 } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, type SearchListOption } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, Icon, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview, AmountFieldError } from "./AmountInput.js";
 
@@ -73,6 +75,24 @@ const inputClass = "w-full py-[3px]";
 export type DraftSubRow = DraftSubRowInput;
 
 /**
+ * Map a template's legs onto editable sub-rows for a parent total
+ * (cents). Returns null when the template is invalid for the total.
+ */
+function templateToSubRows(template: SplitTemplate, totalCents: number): DraftSubRow[] | null {
+  try {
+    return applySplitTemplate(totalCents, template.legs).map((l) => ({
+      categoryId: l.categoryId,
+      transferAccountId: l.transferAccountId,
+      amount: (l.amount / 100).toFixed(2),
+      memo: l.memo ?? "",
+      ...(l.payee ? { payee: l.payee } : {}),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The single transaction entry point. Supports three modes that the user
  * picks via a segmented toggle:
  *
@@ -97,6 +117,8 @@ export function TransactionModal({
   initialMode,
   allTransactions,
   initial,
+  splitTemplates,
+  initialSplitTemplateId,
   onClose,
   onSave,
   onDelete,
@@ -112,6 +134,15 @@ export function TransactionModal({
   /** All transactions in the budget, used to look up split children when editing. */
   allTransactions?: Transaction[];
   initial?: Transaction;
+  /** Named split templates offered in split mode to pre-fill sub-rows. */
+  splitTemplates?: SplitTemplate[];
+  /**
+   * When set while editing a single transaction, the modal opens in split
+   * mode with this template applied to the transaction total (one-click
+   * convert, e.g. from the register). Ignored for splits, transfers,
+   * children, and reconciled rows.
+   */
+  initialSplitTemplateId?: number | null;
   onClose: () => void;
   onSave: (t: TransactionSavePayload) => void;
   /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
@@ -134,6 +165,21 @@ export function TransactionModal({
     initialChildren.length > 0;
 
   const isEdit = !!initial;
+  // One-click convert: a template chosen in the register opens the modal in
+  // split mode with the template applied. Only valid when editing a plain
+  // single transaction; splits, transfers, children, and reconciled
+  // (locked) rows ignore it.
+  const openTemplate =
+    initialSplitTemplateId != null
+      ? splitTemplates?.find((t) => t.id === initialSplitTemplateId)
+      : undefined;
+  const isConvertibleSingle =
+    isEdit &&
+    !isInitialTransfer &&
+    !isInitialSplit &&
+    initial?.parentId == null &&
+    initial?.status !== "r";
+  const applyAtOpen = isConvertibleSingle && openTemplate != null;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingUnreconcile, setConfirmingUnreconcile] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -145,7 +191,7 @@ export function TransactionModal({
   }, [initial?.id]);
 
   const [mode, setMode] = useState<"single" | "transfer" | "split">(
-    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : (initialMode ?? "single")
+    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : applyAtOpen ? "split" : (initialMode ?? "single")
   );
 
   const availableAccounts = useMemo(() => {
@@ -231,11 +277,52 @@ export function TransactionModal({
           amount: (num(c.amount) / 100).toFixed(2),
           memo: c.memo ?? "",
         }))
-      : [
-          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-        ]
+      : applyAtOpen && initial && openTemplate
+        ? (templateToSubRows(openTemplate, num(initial.amount)) ?? [
+            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+          ])
+        : [
+            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+          ]
   );
+
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
+  const templateControlsLocked = initial?.status === "r";
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
+  const templateMenuRef = useRef<HTMLSpanElement>(null);
+  const hasTemplateMenu = splitTemplates != null && splitTemplates.length > 0 && !templateControlsLocked;
+
+  // Close the template menu when the user clicks outside of it.
+  useEffect(() => {
+    if (!templateMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (templateMenuRef.current && !templateMenuRef.current.contains(e.target as Node)) {
+        setTemplateMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [templateMenuOpen]);
+
+  const applyTemplateById = (templateId: number) => {
+    const template = splitTemplates?.find((t) => t.id === templateId);
+    if (!template) return;
+    const totalCents = dollarsToCents(evalAmount(amount));
+    if (!Number.isInteger(totalCents) || totalCents === 0) {
+      setTemplateNotice("Enter the total amount first, then apply the template.");
+      return;
+    }
+    const rows = templateToSubRows(template, totalCents);
+    if (!rows) {
+      setTemplateNotice(`Template "${template.name}" is no longer valid.`);
+      return;
+    }
+    setTemplateNotice(null);
+    if (mode !== "split") switchingMode("split");
+    setSubRows(rows);
+  };
 
   const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
 
@@ -426,7 +513,7 @@ export function TransactionModal({
       ) : (
         <>
           <div className="y-seg mb-3 w-full">
-            {(["single", "transfer", "split"] as const).map((m) => (
+            {(["single", "transfer"] as const).map((m) => (
               <Button
                 key={m}
                 size="sm"
@@ -435,10 +522,87 @@ export function TransactionModal({
                 onClick={() => switchingMode(m)}
                 className="flex-1 capitalize"
               >
-                {m === "single" ? "Single" : m === "transfer" ? "Transfer" : "Split"}
+                {m === "single" ? "Single" : "Transfer"}
               </Button>
             ))}
+            {hasTemplateMenu ? (
+              <span className="flex-1 flex" role="group" aria-label="Split" style={{ marginLeft: -1 }}>
+                <Button
+                  size="sm"
+                  variant={mode === "split" ? "primary" : "default"}
+                  active={mode === "split"}
+                  onClick={() => switchingMode("split")}
+                  className="flex-1 capitalize"
+                  style={{ borderRadius: 0 }}
+                >
+                  Split
+                </Button>
+                <span className="relative flex" ref={templateMenuRef} style={{ marginLeft: -1 }}>
+                  <Button
+                    size="sm"
+                    variant={mode === "split" ? "primary" : "default"}
+                    active={mode === "split"}
+                    onClick={() => setTemplateMenuOpen((o) => !o)}
+                    aria-label="Choose split template"
+                    aria-haspopup="menu"
+                    aria-expanded={templateMenuOpen}
+                    style={{ borderRadius: "0 3px 3px 0", paddingLeft: 6, paddingRight: 6 }}
+                  >
+                    <Icon name="chevronDown" size={12} />
+                  </Button>
+                  {templateMenuOpen && (
+                    <span
+                      role="menu"
+                      aria-label="Split templates"
+                      className="absolute right-0 top-full z-20 mt-1"
+                      style={{
+                        width: 220,
+                        padding: 4,
+                        background: "linear-gradient(var(--y-chrome-top), var(--y-chrome-bot))",
+                        border: "1px solid var(--y-chrome-line)",
+                        borderRadius: 4,
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setTemplateMenuOpen(false);
+                      }}
+                    >
+                      {splitTemplates!.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          role="menuitem"
+                          className="y-menu-item"
+                          style={{ width: "100%" }}
+                          onClick={() => {
+                            setTemplateMenuOpen(false);
+                            applyTemplateById(t.id);
+                          }}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant={mode === "split" ? "primary" : "default"}
+                active={mode === "split"}
+                onClick={() => switchingMode("split")}
+                className="flex-1 capitalize"
+              >
+                Split
+              </Button>
+            )}
           </div>
+          {templateNotice && (
+            <div className="mb-2 text-[11px]" style={{ color: "var(--y-red)" }}>
+              {templateNotice}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date">
