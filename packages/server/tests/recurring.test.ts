@@ -959,6 +959,7 @@ describe("recurring queries", () => {
       expect(parentInsert?.values).toMatchObject({
         date: "2026-07-01",
         amount: 400000,
+        needsReview: true,
       });
     });
 
@@ -1094,7 +1095,7 @@ describe("recurring queries", () => {
       expect(updateCall?.set).toMatchObject({ active: false });
     });
 
-    it("posts scheduled occurrences as Uncleared so they stand out in the register", async () => {
+    it("posts scheduled occurrences as Uncleared + needsReview so they stand out in the register", async () => {
       const singleRow = {
         id: 31,
         accountId: 1,
@@ -1116,7 +1117,7 @@ describe("recurring queries", () => {
       await postRecurringTransaction(mock.db, 31);
 
       const txnInsert = mock.calls.find((c) => c.op === "insert" && c.table === "transactions");
-      expect(txnInsert?.values).toMatchObject({ status: "u" });
+      expect(txnInsert?.values).toMatchObject({ status: "u", needsReview: true });
     });
 
     it("posts as a transfer when transferAccountId is set even if children exist (flavour alignment)", async () => {
@@ -1152,6 +1153,7 @@ describe("recurring queries", () => {
         accountId: 1,
         amount: -50000,
         transferAccountId: 2,
+        needsReview: true,
       });
     });
 

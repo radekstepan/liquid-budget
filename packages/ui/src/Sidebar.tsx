@@ -42,6 +42,48 @@ const MIN_WIDTH = 170;
 const MAX_WIDTH = 450;
 const STORAGE_KEY = "ynab_sidebar_width";
 
+/**
+ * Rendered width of a formatted amount in ch units. Amounts render with
+ * tabular figures, so digits are exactly 1ch; $, commas, periods and the
+ * minus sign run ~0.55ch. Sizes each group's amount column to its own
+ * balances so badges align with almost no gap — a large balance in one
+ * group never pushes another group's badges left. min-width only grows,
+ * so a small underestimate degrades gracefully.
+ */
+function estimateAmountCh(formatted: string): number {
+  let digits = 0;
+  let narrow = 0;
+  for (const ch of formatted) {
+    if (ch >= "0" && ch <= "9") digits++;
+    else narrow++;
+  }
+  return digits + narrow * 0.55;
+}
+
+function amtWidthFor(list: Account[]): string {
+  return `${list
+    .reduce((m, a) => Math.max(m, estimateAmountCh(fmt(num(a.balance)))), 0)
+    .toFixed(2)}ch`;
+}
+
+/** New-count cell right of the account name: badge when > 0, empty gutter otherwise. */
+function NewCountCell({ count }: { count: number }) {
+  return (
+    <span className="y-side-newcol" aria-hidden={count === 0 ? true : undefined}>
+      {count > 0 && (
+        <Tooltip tip={`${count} new`}>
+          <span
+            className="y-badge"
+            style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
+          >
+            {count}
+          </span>
+        </Tooltip>
+      )}
+    </span>
+  );
+}
+
 export const Sidebar = memo(function Sidebar({
   view,
   setView,
@@ -51,8 +93,7 @@ export const Sidebar = memo(function Sidebar({
   onAddAccount,
   onEditAccount,
   onReorderAccount,
-  dueBadgeCount = 0,
-  dueByAccount,
+  newByAccount,
   visibleViews,
 }: {
   view: View;
@@ -63,14 +104,17 @@ export const Sidebar = memo(function Sidebar({
   onAddAccount: () => void;
   onEditAccount?: (id: number) => void;
   onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
-  dueBadgeCount?: number;
-  dueByAccount?: Record<number, number>;
+  /** Per-account "new" count: unreviewed imports/posts plus still-due scheduled. */
+  newByAccount?: Record<number, number>;
   /** Per-view menu visibility. Omitted views (or an omitted map) stay visible. */
   visibleViews?: Partial<Record<View, boolean>>;
 }) {
   const isNavVisible = (key: View) => visibleViews?.[key] ?? true;
   const activeAccounts = accounts.filter((a) => !a.archived);
   const archivedAccounts = accounts.filter((a) => !!a.archived);
+  // The new-count column shows on every account row once at least one
+  // account has new items, keeping the badges in one aligned column.
+  const showNewCol = accounts.some((a) => (newByAccount?.[a.id] ?? 0) > 0);
 
   // Group ordering: discover all groupLabels, prioritizing budget accounts first, sorted by account sort indices
   const seen = Array.from(new Set(activeAccounts.map((a) => a.groupLabel)));
@@ -205,6 +249,7 @@ export const Sidebar = memo(function Sidebar({
   const offAssets = off.filter((a) => num(a.balance) >= 0).reduce((s, a) => s + num(a.balance), 0);
   const offLiab = off.filter((a) => num(a.balance) < 0).reduce((s, a) => s + num(a.balance), 0);
   const archivedTotal = archivedAccounts.reduce((s, a) => s + num(a.balance), 0);
+  const archivedAmtWidth = amtWidthFor(archivedAccounts);
   const netWorth = liquidTotal + creditTotal + offAssets + offLiab + archivedTotal;
 
   const totalFor = (label: string) =>
@@ -260,13 +305,6 @@ export const Sidebar = memo(function Sidebar({
       >
         <Icon name="swap" size={14} color={TRANSACTIONS_ICON_COLOR} />
         <span className="truncate flex-1">Transactions</span>
-        {dueBadgeCount > 0 && (
-          <Tooltip tip={`${dueBadgeCount} scheduled transaction${dueBadgeCount === 1 ? "" : "s"} due`}>
-            <span className="y-badge mr-1" aria-label={`${dueBadgeCount} due`}>
-              {dueBadgeCount}
-            </span>
-          </Tooltip>
-        )}
         <span
           className="y-side-amt"
           style={{
@@ -287,6 +325,9 @@ export const Sidebar = memo(function Sidebar({
           if (list.length === 0) return null;
           const isCollapsed = collapsed[label];
           const total = totalFor(label);
+          // Per-group amount width: badges align within the group whether
+          // or not other groups hold much larger balances.
+          const amtWidth = amtWidthFor(list);
           return (
             <div key={label} className="y-side-group">
               <button
@@ -300,7 +341,7 @@ export const Sidebar = memo(function Sidebar({
                 <span className="truncate min-w-0 flex-1">{label}</span>
                 <span
                   className="y-side-amt"
-                  style={{ color: total < 0 ? "var(--y-side-neg)" : undefined }}
+                  style={{ color: total < 0 ? "var(--y-side-neg)" : undefined, minWidth: amtWidth }}
                 >
                   {fmt(total)}
                 </span>
@@ -310,7 +351,7 @@ export const Sidebar = memo(function Sidebar({
                   const isSelected = view === "transactions" && selectedAccountId === a.id;
                   const isDropTarget = accOverId === a.id;
                   const hasActions = Boolean(onEditAccount);
-                  const accDueCount = dueByAccount?.[a.id] ?? 0;
+                  const accNewCount = newByAccount?.[a.id] ?? 0;
                   return (
                     <div
                       key={a.id}
@@ -333,21 +374,13 @@ export const Sidebar = memo(function Sidebar({
                             </span>
                           </Tooltip>
                         ) : null}
-                        {accDueCount > 0 && (
-                          <Tooltip tip={`${accDueCount} scheduled due`}>
-                            <span
-                              className="y-badge ml-auto mr-1"
-                              style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
-                            >
-                              {accDueCount}
-                            </span>
-                          </Tooltip>
-                        )}
+                        {showNewCol && <NewCountCell count={accNewCount} />}
                         <span
-                          className={cx("y-side-amt", accDueCount === 0 && "ml-auto")}
+                          className="y-side-amt"
                           style={{
                             color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
                             fontWeight: 500,
+                            minWidth: amtWidth,
                           }}
                         >
                           {fmt(num(a.balance))}
@@ -397,7 +430,10 @@ export const Sidebar = memo(function Sidebar({
               <span className="truncate min-w-0 flex-1">Closed Accounts</span>
               <span
                 className="y-side-amt"
-                style={{ color: archivedTotal < 0 ? "var(--y-side-neg)" : undefined }}
+                style={{
+                  color: archivedTotal < 0 ? "var(--y-side-neg)" : undefined,
+                  minWidth: archivedAmtWidth,
+                }}
               >
                 {fmt(archivedTotal)}
               </span>
@@ -407,6 +443,7 @@ export const Sidebar = memo(function Sidebar({
                 const isSelected = view === "transactions" && selectedAccountId === a.id;
                 const isDropTarget = accOverId === a.id;
                 const hasActions = Boolean(onEditAccount);
+                const accNewCount = newByAccount?.[a.id] ?? 0;
                 return (
                   <div
                     key={a.id}
@@ -432,11 +469,13 @@ export const Sidebar = memo(function Sidebar({
                           </span>
                         </Tooltip>
                       ) : null}
+                      {showNewCol && <NewCountCell count={accNewCount} />}
                       <span
                         className="y-side-amt"
                         style={{
                           color: num(a.balance) < 0 ? "var(--y-side-neg)" : undefined,
                           fontWeight: 500,
+                          minWidth: archivedAmtWidth,
                         }}
                       >
                         {fmt(num(a.balance))}

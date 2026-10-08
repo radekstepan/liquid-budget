@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { TransactionsView } from "../src/TransactionsView.js";
-import { makeSeedBudgetData, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
+import { addDaysISO, makeSeedBudgetData, todayISO, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
   it("renders transaction rows and narrows them via an applied search query", () => {
@@ -508,6 +508,56 @@ describe("TransactionsView", () => {
     // Click toggle button again to reopen
     fireEvent.click(drawerBtn);
     expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
+  });
+
+  it("bolds due scheduled rows like unreviewed imports, leaving future rows plain", () => {
+    const data = makeSeedBudgetData();
+    const today = todayISO();
+    data.recurring = [
+      {
+        id: 9001,
+        accountId: 1,
+        categoryId: null,
+        payee: "SCHEDBOLD Due Row",
+        memo: "",
+        amount: "-5000",
+        frequency: "monthly",
+        nextDate: addDaysISO(today, -1),
+        active: true,
+        transferAccountId: null,
+        subTransactions: [],
+      },
+      {
+        id: 9002,
+        accountId: 1,
+        categoryId: null,
+        payee: "SCHEDBOLD Future Row",
+        memo: "",
+        amount: "-5000",
+        frequency: "monthly",
+        nextDate: addDaysISO(today, 30),
+        active: true,
+        transferAccountId: null,
+        subTransactions: [],
+      },
+    ];
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // Drawer is open by default.
+    const dueRow = screen.getByText("SCHEDBOLD Due Row").closest("tr")!;
+    const futureRow = screen.getByText("SCHEDBOLD Future Row").closest("tr")!;
+    expect(dueRow.classList.contains("font-bold")).toBe(true);
+    expect(futureRow.classList.contains("font-bold")).toBe(false);
   });
 
   describe("column sorting", () => {

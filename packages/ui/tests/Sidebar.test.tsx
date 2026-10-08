@@ -334,7 +334,7 @@ describe("Sidebar", () => {
     expect(groupTexts[2]).toContain("Investments");
   });
 
-  it("renders a numeric badge on the Transactions button when dueBadgeCount > 0 and on individual accounts", () => {
+  it("renders the new-count badge on individual accounts but not on the Transactions button", () => {
     const { rerender } = render(
       <Sidebar
         view="budget"
@@ -343,17 +343,17 @@ describe("Sidebar", () => {
         selectedAccountId={null}
         onSelectAccount={() => {}}
         onAddAccount={() => {}}
-        dueBadgeCount={3}
-        dueByAccount={{ 1: 2, 2: 1 }}
+        newByAccount={{ 1: 2, 2: 1 }}
       />
     );
 
-    const totalBadge = screen.getByText("3");
-    expect(totalBadge).toBeInTheDocument();
-    expect(totalBadge).toHaveClass("y-badge");
-
     const cashBadge = screen.getByText("2");
     expect(cashBadge).toBeInTheDocument();
+    expect(cashBadge).toHaveClass("y-badge");
+
+    // The overall Transactions row carries no count label.
+    const txBtn = screen.getByRole("button", { name: /^transactions/i });
+    expect(txBtn.querySelector(".y-badge")).toBeNull();
 
     rerender(
       <Sidebar
@@ -363,11 +363,81 @@ describe("Sidebar", () => {
         selectedAccountId={null}
         onSelectAccount={() => {}}
         onAddAccount={() => {}}
-        dueBadgeCount={0}
+        newByAccount={{}}
       />
     );
 
-    expect(screen.queryByText("3")).not.toBeInTheDocument();
+    expect(screen.queryByText("2")).not.toBeInTheDocument();
+  });
+
+  it("renders the new-count badge right of the account name with an aligning column on every row", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+      />
+    );
+
+    const cashBtn = screen.getByRole("button", { name: /cash/i });
+    const cashCols = cashBtn.querySelectorAll(".y-side-newcol");
+    expect(cashCols).toHaveLength(1);
+    // Badge follows the name and precedes the amount in DOM order.
+    const name = cashBtn.querySelector(".truncate")!;
+    const amt = cashBtn.querySelector(".y-side-amt")!;
+    expect(name.compareDocumentPosition(cashCols[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cashCols[0]!.compareDocumentPosition(amt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cashCols[0]!.querySelector(".y-badge")).toHaveTextContent("2");
+
+    // Rows without new items still render the (empty) column so names align.
+    const checkingBtn = screen.getByRole("button", { name: /checking/i });
+    const checkingCols = checkingBtn.querySelectorAll(".y-side-newcol");
+    expect(checkingCols).toHaveLength(1);
+    expect(checkingCols[0]!.querySelector(".y-badge")).toBeNull();
+  });
+
+  it("sizes the amount column per group so badges align without cross-group push", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2, 3: 1 }}
+      />
+    );
+
+    const cashAmt = screen.getByRole("button", { name: /cash/i }).querySelector(".y-side-amt")!;
+    const checkingAmt = screen.getByRole("button", { name: /checking/i }).querySelector(".y-side-amt")!;
+    const chaseAmt = screen.getByRole("button", { name: /chase/i }).querySelector(".y-side-amt")!;
+    // Same group shares one width (badges land underneath each other) ...
+    expect(cashAmt.style.minWidth).toBe("7.65ch");
+    expect(checkingAmt.style.minWidth).toBe("7.65ch");
+    // ... while other groups size to their own balances, so the large
+    // Retirement balance never pushes Credit Cards badges left.
+    expect(chaseAmt.style.minWidth).toBe("6.65ch");
+    const retirementHead = screen.getByRole("button", { name: /retirement/i }).querySelector(".y-side-amt")!;
+    expect(retirementHead.style.minWidth).toBe("8.65ch");
+  });
+
+  it("renders no new-count column when no account has new items", () => {
+    const { container } = render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+      />
+    );
+    expect(container.querySelectorAll(".y-side-newcol")).toHaveLength(0);
   });
 
   it("shows a note indicator with the note as tooltip when an account has notes", () => {
