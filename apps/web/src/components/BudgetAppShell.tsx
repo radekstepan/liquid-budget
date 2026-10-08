@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult } from "@ynab/logic";
+import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, MergeableTransaction, ReconcileState, Transaction } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -1141,6 +1141,113 @@ export function BudgetAppShell({
                 );
                 return {
                   ...current,
+                  accounts,
+                  transactions: [...otherTransactions, ...prevAffectedTxs],
+                  budgetIndex: undefined,
+                };
+              });
+              reload().catch(() => {});
+            },
+          }
+        )
+      );
+    },
+    mergeTransactions: async (ids: number[]) => {
+      const current = dataRef.current;
+      const pair = (current?.transactions ?? []).filter((tx) => ids.includes(tx.id));
+      if (pair.length !== 2 || pair[0] == null || pair[1] == null) {
+        throw new Error("Select exactly two transactions to merge.");
+      }
+      const toMergeable = (tx: Transaction): MergeableTransaction => ({
+        ...tx,
+        transferAccountId: tx.transferAccountId ?? null,
+        amount: num(tx.amount),
+      });
+      const [primary, secondary] = pickMergePrimary(toMergeable(pair[0]), toMergeable(pair[1]));
+      const primaryTx = primary.id === pair[0].id ? pair[0] : pair[1];
+      const srcAcc = current?.accounts.find((a) => a.id === primary.accountId);
+      const destAcc =
+        primary.transferAccountId != null
+          ? current?.accounts.find((a) => a.id === primary.transferAccountId)
+          : null;
+      const mergedFields = resolveMergedTransaction({
+        primary,
+        secondary,
+        sourceAccount: { onBudget: srcAcc?.onBudget ?? true, kind: srcAcc?.kind ?? "liquid" },
+        destAccount: destAcc ? { onBudget: destAcc.onBudget } : null,
+      });
+
+      const prevAffectedTxs = [{ ...pair[0] }, { ...pair[1] }];
+      let appliedDeltas = new Map<number, number>();
+      setData((prev) => {
+        if (!prev) return prev;
+        const deltas = new Map<number, number>();
+        const reverse = (tx: Transaction) => {
+          deltas.set(tx.accountId, (deltas.get(tx.accountId) ?? 0) - num(tx.amount));
+          if (tx.transferAccountId != null) {
+            deltas.set(tx.transferAccountId, (deltas.get(tx.transferAccountId) ?? 0) + num(tx.amount));
+          }
+        };
+        reverse(pair[0]!);
+        reverse(pair[1]!);
+        deltas.set(
+          mergedFields.accountId,
+          (deltas.get(mergedFields.accountId) ?? 0) + mergedFields.amount
+        );
+        if (mergedFields.transferAccountId != null) {
+          deltas.set(
+            mergedFields.transferAccountId,
+            (deltas.get(mergedFields.transferAccountId) ?? 0) - mergedFields.amount
+          );
+        }
+        appliedDeltas = deltas;
+        const accounts = applyAccountDeltas(prev.accounts, deltas);
+        const mergedTx: Transaction = {
+          ...primaryTx,
+          accountId: mergedFields.accountId,
+          categoryId: mergedFields.categoryId,
+          transferAccountId: mergedFields.transferAccountId,
+          date: mergedFields.date,
+          payee: mergedFields.payee,
+          memo: mergedFields.memo,
+          amount: String(mergedFields.amount),
+          status: mergedFields.status,
+          transferStatus: mergedFields.transferStatus,
+          flagColor: mergedFields.flagColor,
+          isIncome: mergedFields.isIncome,
+          incomeMonth: mergedFields.incomeMonth,
+          needsReview: mergedFields.needsReview,
+          entityId: mergedFields.entityId,
+          transferEntityId: mergedFields.transferEntityId,
+        };
+        const transactions = prev.transactions
+          .filter((tx) => tx.id !== primary.id && tx.id !== secondary.id)
+          .concat([mergedTx]);
+        return { ...prev, accounts, transactions, budgetIndex: undefined };
+      });
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return await jsonReq("/api/transactions?action=merge", {
+              method: "POST",
+              body: JSON.stringify({ ids }),
+            });
+          },
+          { success: "Merged 2 transactions into one.", failure: "Failed to merge transactions." },
+          {
+            onRollback: () => {
+              const reverseDeltas = new Map<number, number>();
+              for (const [accId, delta] of appliedDeltas.entries()) {
+                reverseDeltas.set(accId, -delta);
+              }
+              setData((currentData) => {
+                if (!currentData) return currentData;
+                const accounts = applyAccountDeltas(currentData.accounts, reverseDeltas);
+                const otherTransactions = currentData.transactions.filter(
+                  (tx) => tx.id !== primary.id && tx.id !== secondary.id
+                );
+                return {
+                  ...currentData,
                   accounts,
                   transactions: [...otherTransactions, ...prevAffectedTxs],
                   budgetIndex: undefined,

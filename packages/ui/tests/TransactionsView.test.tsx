@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { TransactionsView } from "../src/TransactionsView.js";
 import { pickFromOpenDropdownByValue } from "./dropdown.js";
 import { makeSeedBudgetData, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
@@ -1203,6 +1203,127 @@ describe("TransactionsView", () => {
     const plain = container.querySelector(`tr[data-txn-id="${plainId}"]`);
     expect(plain).not.toBeNull();
     expect(plain!.classList.contains("font-bold")).toBe(false);
+  });
+
+  it("offers Merge only when exactly two transactions are selected", () => {
+    const data = makeSeedBudgetData();
+    const onMergeTransactions = vi.fn();
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onMergeTransactions={onMergeTransactions}
+      />
+    );
+
+    const rowCheckboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(rowCheckboxes[1]!);
+    expect(screen.queryByRole("button", { name: /merge/i })).not.toBeInTheDocument();
+
+    fireEvent.click(rowCheckboxes[2]!);
+    expect(screen.getByRole("button", { name: /merge \(2\)/i })).toBeInTheDocument();
+
+    // Selecting a third row hides Merge again.
+    fireEvent.click(rowCheckboxes[3]!);
+    expect(screen.getByText(/3 selected/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /merge/i })).not.toBeInTheDocument();
+  });
+
+  it("opens a merge preview and keeps the merged transaction selected after confirming", async () => {
+    const data = makeSeedBudgetData();
+    const onMergeTransactions = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onMergeTransactions={onMergeTransactions}
+      />
+    );
+
+    const rowCheckboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(rowCheckboxes[1]!);
+    fireEvent.click(rowCheckboxes[2]!);
+    const renderedIds = Array.from(container.querySelectorAll("tr[data-txn-id]")).map((r) =>
+      Number(r.getAttribute("data-txn-id"))
+    );
+    const [firstId, secondId] = renderedIds;
+
+    // Merge opens a preview first — nothing is merged yet.
+    fireEvent.click(screen.getByRole("button", { name: /merge \(2\)/i }));
+    expect(onMergeTransactions).not.toHaveBeenCalled();
+    expect(screen.getByTestId("merge-result")).toBeInTheDocument();
+    expect(screen.getByTestId("merge-constituents")).toBeInTheDocument();
+
+    // Confirming merges and leaves the surviving row selected.
+    fireEvent.click(screen.getByRole("button", { name: "Merge transactions" }));
+    await waitFor(() => expect(onMergeTransactions).toHaveBeenCalledWith([firstId, secondId]));
+    await waitFor(() => expect(screen.queryByTestId("merge-result")).not.toBeInTheDocument());
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    const survivorId = Math.min(firstId!, secondId!);
+    const removedId = survivorId === firstId ? secondId! : firstId!;
+    const survivorRow = container.querySelector(`tr[data-txn-id="${survivorId}"]`)!;
+    expect(within(survivorRow as HTMLElement).getByRole("checkbox")).toBeChecked();
+    const removedRow = container.querySelector(`tr[data-txn-id="${removedId}"]`)!;
+    expect(within(removedRow as HTMLElement).getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("cancelling the merge preview merges nothing and keeps the selection", () => {
+    const data = makeSeedBudgetData();
+    const onMergeTransactions = vi.fn();
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onMergeTransactions={onMergeTransactions}
+      />
+    );
+
+    const rowCheckboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(rowCheckboxes[1]!);
+    fireEvent.click(rowCheckboxes[2]!);
+    fireEvent.click(screen.getByRole("button", { name: /merge \(2\)/i }));
+    expect(screen.getByTestId("merge-result")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onMergeTransactions).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("merge-result")).not.toBeInTheDocument();
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+  });
+
+  it("hides Merge when the merge handler is not provided", () => {
+    const data = makeSeedBudgetData();
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={null}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    const rowCheckboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(rowCheckboxes[1]!);
+    fireEvent.click(rowCheckboxes[2]!);
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /merge/i })).not.toBeInTheDocument();
   });
 });
 

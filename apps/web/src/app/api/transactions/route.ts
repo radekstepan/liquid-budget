@@ -6,6 +6,7 @@ import {
   deleteSplitChildren,
   deleteTransaction,
   getDefaultDb,
+  mergeTransactions,
   TransactionError,
   updateSplit,
   updateTransaction,
@@ -22,6 +23,7 @@ import {
   TransactionBulkDeleteSchema,
   TransactionBulkUpdateSchema,
   TransactionCreateSchema,
+  TransactionMergeSchema,
   TransactionPatchSchema,
 } from "../schemas";
 
@@ -40,6 +42,19 @@ export async function POST(req: Request) {
     try {
       const deleted = await bulkDeleteTransactions(db, parseResult.data.ids);
       return Response.json({ ok: true, count: deleted.length, deleted });
+    } catch (e) {
+      return apiErrorResponse(e);
+    }
+  }
+
+  if (action === "merge" || (typeof json === "object" && json !== null && (json as any).action === "merge")) {
+    const parseResult = TransactionMergeSchema.safeParse(json);
+    if (!parseResult.success) {
+      return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
+    }
+    try {
+      const { merged, deletedId } = await mergeTransactions(db, parseResult.data.ids);
+      return Response.json({ ok: true, merged, deletedId });
     } catch (e) {
       return apiErrorResponse(e);
     }
