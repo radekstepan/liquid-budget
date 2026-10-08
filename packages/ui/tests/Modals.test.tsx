@@ -1708,7 +1708,7 @@ describe("TransactionModal", () => {
       });
     });
 
-    it("shows the unreconcile warning dialog when unchecking cleared on a reconciled transaction", () => {
+    it("shows the unreconcile warning dialog when toggling cleared on a reconciled transaction", () => {
       const onSave = vi.fn();
       const initial: Transaction = {
         id: 1,
@@ -1736,10 +1736,10 @@ describe("TransactionModal", () => {
         />
       );
 
-      const checkbox = screen.getByLabelText(/cleared \(bank has processed this\)/i);
-      expect(checkbox).toBeChecked();
+      const clearedToggle = screen.getByRole("button", { name: "Cleared" });
+      expect(clearedToggle).toHaveTextContent("C");
 
-      fireEvent.click(checkbox);
+      fireEvent.click(clearedToggle);
 
       expect(screen.getByText("Unreconcile Transaction?")).toBeInTheDocument();
       expect(screen.getByText(/Past reconciliation affected/i)).toBeInTheDocument();
@@ -1775,18 +1775,18 @@ describe("TransactionModal", () => {
         />
       );
 
-      fireEvent.click(screen.getByLabelText(/cleared \(bank has processed this\)/i));
+      fireEvent.click(screen.getByRole("button", { name: "Cleared" }));
       expect(screen.getByText("Unreconcile Transaction?")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
       expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
-      expect(screen.getByLabelText(/cleared \(bank has processed this\)/i)).toBeChecked();
+      expect(screen.getByRole("button", { name: "Cleared" })).toHaveTextContent("C");
 
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "r" }));
     });
 
-    it("confirming the unreconcile warning unchecks cleared and saves with status: 'u'", () => {
+    it("confirming the unreconcile warning toggles cleared off and saves with status: 'u'", () => {
       const onSave = vi.fn();
       const initial: Transaction = {
         id: 1,
@@ -1814,11 +1814,11 @@ describe("TransactionModal", () => {
         />
       );
 
-      fireEvent.click(screen.getByLabelText(/cleared \(bank has processed this\)/i));
+      fireEvent.click(screen.getByRole("button", { name: "Cleared" }));
       fireEvent.click(screen.getByRole("button", { name: /yes, unreconcile/i }));
 
       expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
-      expect(screen.getByLabelText(/cleared \(bank has processed this\)/i)).not.toBeChecked();
+      expect(screen.getByRole("button", { name: "Uncleared" })).toHaveTextContent("U");
 
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "u" }));
@@ -1852,12 +1852,11 @@ describe("TransactionModal", () => {
         />
       );
 
-      const checkbox = screen.getByLabelText(/cleared \(bank has processed this\)/i);
-      expect(checkbox).toBeChecked();
-      fireEvent.click(checkbox);
+      expect(screen.getByRole("button", { name: "Cleared" })).toHaveTextContent("C");
+      fireEvent.click(screen.getByRole("button", { name: "Cleared" }));
 
       expect(screen.queryByText("Unreconcile Transaction?")).not.toBeInTheDocument();
-      expect(checkbox).not.toBeChecked();
+      expect(screen.getByRole("button", { name: "Uncleared" })).toHaveTextContent("U");
 
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: "u" }));

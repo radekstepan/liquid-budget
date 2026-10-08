@@ -22,7 +22,7 @@ import {
   resolveMergedTransaction,
   validateAmountInput,
 } from "@ynab/logic";
-import { Checkbox, FlagPicker, Notice, SearchList, Select, TextField, money, type SearchListOption } from "@ynab/theme";
+import { ClearedFlag, FlagPicker, Notice, SearchList, Select, TextField, money, type SearchListOption } from "@ynab/theme";
 import { Modal, Btn, Field } from "./ui.js";
 import { AmountPreview, AmountFieldError } from "./AmountInput.js";
 
@@ -404,17 +404,13 @@ function MergeEditorModal({
           </Field>
         )}
 
-        <div className="pt-1">
-          <Checkbox
-            checked={cleared}
-            onChange={setCleared}
-            label="Cleared (bank has processed this)"
-          />
-        </div>
-
         <div className="pt-1 mb-3 flex items-center gap-2">
           <span className="y-label">Flag</span>
           <FlagPicker value={flagColor} onChange={setFlagColor} />
+          <span className="ml-auto flex items-center gap-2">
+            <span className="y-label">Cleared</span>
+            <ClearedFlag state={cleared ? "c" : "u"} onCycle={() => setCleared(!cleared)} />
+          </span>
         </div>
       </div>
 

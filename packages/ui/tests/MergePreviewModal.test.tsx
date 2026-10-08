@@ -59,7 +59,7 @@ describe("MergePreviewModal", () => {
     expect(within(result).getByDisplayValue("WHOLE FOODS #24")).toBeInTheDocument();
     expect(within(result).getByDisplayValue("2026-08-01")).toBeInTheDocument();
     expect(within(result).getByDisplayValue("-50.00")).toBeInTheDocument();
-    expect(within(result).getByLabelText(/cleared/i)).not.toBeChecked();
+    expect(within(result).getByRole("button", { name: "Uncleared" })).toHaveTextContent("U");
     // ...while manual curation fills the gaps the import left empty.
     expect(within(result).getByText(categoryName)).toBeInTheDocument();
     expect(within(result).getByDisplayValue("weekly shop")).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe("MergePreviewModal", () => {
     setup({ onConfirm });
     const result = screen.getByTestId("merge-result");
 
-    fireEvent.click(within(result).getByLabelText(/cleared/i));
+    fireEvent.click(within(result).getByRole("button", { name: "Uncleared" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Merge transactions" }));
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith([101, 102], { status: "c" }));

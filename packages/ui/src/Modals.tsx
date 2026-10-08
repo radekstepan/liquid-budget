@@ -41,7 +41,7 @@ import {
   toRecurringPayload,
   toTransactionPayload,
 } from "@ynab/logic";
-import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, Icon, type SearchListOption } from "@ynab/theme";
+import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, Icon, ClearedFlag, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
 import { AmountPreview, AmountFieldError } from "./AmountInput.js";
 
@@ -1032,20 +1032,6 @@ export function TransactionModal({
             </div>
           )}
 
-          <div className="pt-1">
-            <Checkbox
-              checked={cleared}
-              onChange={(nextChecked) => {
-                if (!nextChecked && initial?.status === "r") {
-                  setConfirmingUnreconcile(true);
-                } else {
-                  setCleared(nextChecked);
-                }
-              }}
-              label="Cleared (bank has processed this)"
-            />
-          </div>
-
           <div className="pt-1 flex items-center gap-2">
             <span className="y-label">Flag</span>
             {isDuplicateFlag ? (
@@ -1063,6 +1049,19 @@ export function TransactionModal({
                 disabled={initial?.status === "r"}
               />
             )}
+            <span className="ml-auto flex items-center gap-2">
+              <span className="y-label">Cleared</span>
+              <ClearedFlag
+                state={cleared ? "c" : "u"}
+                onCycle={() => {
+                  if (cleared && initial?.status === "r") {
+                    setConfirmingUnreconcile(true);
+                  } else {
+                    setCleared(!cleared);
+                  }
+                }}
+              />
+            </span>
           </div>
         </>
       )}
