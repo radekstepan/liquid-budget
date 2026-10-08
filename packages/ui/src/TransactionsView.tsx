@@ -560,14 +560,12 @@ export const TransactionsView = memo(function TransactionsView({
         if (children && children.length > 0) {
           const hasMatchingChild =
             queryIdSet != null && children.some((c) => queryIdSet.has(c.id));
-          const isChildSelected = selectedId != null && children.some((c) => c.id === selectedId);
-          const isChildInMultiSelect = Array.from(selectedIds).some((id) => children.some((c) => c.id === id));
+          // Selection is parent-only: sub-rows are never in selectedId /
+          // selectedIds, so expansion only follows the parent.
           const isParentSelected = selectedId === parent.id || selectedIds.has(parent.id);
           const isExpanded =
             expandedSplitIds.has(parent.id) ||
             isParentSelected ||
-            isChildSelected ||
-            isChildInMultiSelect ||
             hasMatchingChild;
 
           if (isExpanded) {
@@ -695,7 +693,14 @@ export const TransactionsView = memo(function TransactionsView({
   const bottomHeight = Math.max(0, (totalCount - endIndex) * ROW_HEIGHT);
   const visibleRows = filtered.slice(startIndex, endIndex);
 
-  const topLevelVisibleRows = visibleRows.filter((r) => r.parentId == null);
+  // Selectable rows: parents plus incoming split-transfer legs, which render
+  // as top-level rows on the destination account. Expanded ↳ sub-rows
+  // (parentId set, not an incoming leg) are never selectable.
+  const isSelectableTxn = (r: {
+    parentId?: number | null;
+    transferAccountId?: number | null;
+  }) => r.parentId == null || (accountFilter != null && r.transferAccountId === accountFilter);
+  const topLevelVisibleRows = visibleRows.filter(isSelectableTxn);
   const allVisibleSelected =
     topLevelVisibleRows.length > 0 && topLevelVisibleRows.every((r) => selectedIds.has(r.id));
 
@@ -714,6 +719,8 @@ export const TransactionsView = memo(function TransactionsView({
 
   const toggleRowSelect = (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    const txn = data.transactions.find((t) => t.id === id);
+    if (txn && !isSelectableTxn(txn)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -725,31 +732,44 @@ export const TransactionsView = memo(function TransactionsView({
     });
   };
 
+  const toggleRecurringRowSelect = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedRecurringIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (filtered.length === 0) return;
-      const currentIndex = selectedId != null ? filtered.findIndex((r) => r.id === selectedId) : -1;
+      // Keyboard selection skips ↳ sub-rows, mirroring the checkboxes.
+      const selectableRows = filtered.filter(isSelectableTxn);
+      if (selectableRows.length === 0) return;
+      const currentIndex =
+        selectedId != null ? selectableRows.findIndex((r) => r.id === selectedId) : -1;
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        const nextIndex = currentIndex < filtered.length - 1 ? currentIndex + 1 : 0;
-        const nextRow = filtered[nextIndex];
+        const nextIndex = currentIndex < selectableRows.length - 1 ? currentIndex + 1 : 0;
+        const nextRow = selectableRows[nextIndex];
         if (nextRow) setSelectedId(nextRow.id);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        const prevIndex = currentIndex > 0 ? currentIndex - 1 : filtered.length - 1;
-        const prevRow = filtered[prevIndex];
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : selectableRows.length - 1;
+        const prevRow = selectableRows[prevIndex];
         if (prevRow) setSelectedId(prevRow.id);
       } else if (e.key === "Enter" && selectedId != null) {
         e.preventDefault();
-        const row = filtered.find((r) => r.id === selectedId);
+        const row = selectableRows.find((r) => r.id === selectedId);
         if (row) {
           setSelectedId(null);
           onEdit(row.parentId ?? row.id);
         }
       } else if ((e.key === "c" || e.key === "C" || e.key === " ") && selectedId != null) {
         e.preventDefault();
-        const row = filtered.find((r) => r.id === selectedId);
+        const row = selectableRows.find((r) => r.id === selectedId);
         if (row) {
           const isIncoming = accountFilter != null && row.transferAccountId === accountFilter;
           const currentStatus = isIncoming ? (row.transferStatus ?? row.status) : row.status;
@@ -760,7 +780,7 @@ export const TransactionsView = memo(function TransactionsView({
         onDelete(selectedId);
       }
     },
-    [filtered, selectedId, onEdit, onCycleStatus, onDelete]
+    [filtered, selectedId, onEdit, onCycleStatus, onDelete, accountFilter]
   );
 
   // Handle focusing/selecting a transaction from external navigation (e.g. Reports, Transfer links)
@@ -772,10 +792,16 @@ export const TransactionsView = memo(function TransactionsView({
     // the target row, so clear it (including the owner's copy).
     setAppliedQuery(null);
     onClearFilter?.();
-    setSelectedIds(new Set([targetId]));
-    setSelectedId(targetId);
-
     const txn = data.transactions.find((x) => x.id === targetId);
+    // Selection is parent-only: a sub-row focus lands on its parent (and
+    // expands it). Incoming transfer legs stay as-is — they render as
+    // top-level rows on the destination account.
+    const isIncomingLeg =
+      txn?.parentId != null && accountFilter != null && txn.transferAccountId === accountFilter;
+    const selectId = txn?.parentId != null && !isIncomingLeg ? txn.parentId : targetId;
+    setSelectedIds(new Set([selectId]));
+    setSelectedId(selectId);
+
     if (txn?.parentId != null) {
       setExpandedSplitIds((prev) => {
         if (prev.has(txn.parentId!)) return prev;
@@ -785,7 +811,7 @@ export const TransactionsView = memo(function TransactionsView({
       });
     }
 
-    const targetIndex = filtered.findIndex((r) => r.id === targetId);
+    const targetIndex = filtered.findIndex((r) => r.id === selectId);
     if (targetIndex !== -1) {
       lastHandledNonce.current = focusTransaction.nonce;
       const effH = containerHeight > 0 ? containerHeight : 500;
@@ -795,7 +821,7 @@ export const TransactionsView = memo(function TransactionsView({
       }
       setScrollTop(targetScroll);
     }
-  }, [focusTransaction, filtered, containerHeight, data.transactions, onClearFilter]);
+  }, [focusTransaction, filtered, containerHeight, data.transactions, onClearFilter, accountFilter]);
 
   // Handle register filtering from global search. The applied query becomes
   // the single source of truth, shown as chips in the toolbar.
@@ -1134,16 +1160,18 @@ export const TransactionsView = memo(function TransactionsView({
                 )}
                 {visibleRows.map((t, idx) => {
                   const globalIndex = startIndex + idx;
-                  const isSelected = t.id === selectedId || selectedIds.has(t.id);
-                  const isChecked = selectedIds.has(t.id);
                   const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
+                  const isChildRow = t.parentId != null && !isIncoming;
+                  // Sub-rows are display-only: no checkbox, no highlight, even
+                  // if a stale id lingers in selection state.
+                  const isSelected = !isChildRow && (t.id === selectedId || selectedIds.has(t.id));
+                  const isChecked = !isChildRow && selectedIds.has(t.id);
                   const effAmt = isIncoming ? -t.amount : t.amount;
                   const effStatus = isIncoming ? (t.transferStatus ?? t.status) : t.status;
                   const isReconciled = effStatus === "r";
                   const outflow = effAmt < 0 ? -effAmt : 0;
                   const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
-                  const isChildRow = t.parentId != null && !isIncoming;
                   const isTransfer = t.transferAccountId != null && !isSplit;
                   const otherAccountId = isTransfer
                     ? accountFilter != null && t.transferAccountId === accountFilter
@@ -1164,14 +1192,10 @@ export const TransactionsView = memo(function TransactionsView({
                   const hasMatchingChild =
                     queryIdSet != null &&
                     (children?.some((c) => queryIdSet.has(c.id)) ?? false);
-                  const isChildSelected = selectedId != null && (children?.some((c) => c.id === selectedId) ?? false);
-                  const isChildInMultiSelect = Array.from(selectedIds).some((id) => children?.some((c) => c.id === id) ?? false);
                   const isParentSelected = selectedId === t.id || selectedIds.has(t.id);
                   const isExpanded =
                     expandedSplitIds.has(t.id) ||
                     isParentSelected ||
-                    isChildSelected ||
-                    isChildInMultiSelect ||
                     hasMatchingChild;
 
                   return (
@@ -1196,17 +1220,22 @@ export const TransactionsView = memo(function TransactionsView({
                       <td
                         style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}
                         className="text-center"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          if (!isChildRow) toggleRowSelect(t.id, e);
+                          else e.stopPropagation();
+                        }}
                       >
-                        <input
-                          type="checkbox"
-                          aria-label={`Select transaction ${t.payee || t.id}`}
-                          checked={isChecked}
-                          onChange={() => {}}
-                          onClick={(e) => toggleRowSelect(t.id, e)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle inline-block"
-                          style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
-                        />
+                        {!isChildRow && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select transaction ${t.payee || t.id}`}
+                            checked={isChecked}
+                            onChange={() => {}}
+                            onClick={(e) => toggleRowSelect(t.id, e)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle inline-block"
+                            style={{ verticalAlign: "middle", margin: "0 auto", display: "inline-block" }}
+                          />
+                        )}
                       </td>
                       {hasFlagColumn && (
                         <td className="text-center" onClick={(e) => e.stopPropagation()}>
@@ -1569,22 +1598,14 @@ export const TransactionsView = memo(function TransactionsView({
                         <td
                           style={{ width: 34, minWidth: 34, textAlign: "center", padding: "4px 6px" }}
                           className="text-center"
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => toggleRecurringRowSelect(r.id, e)}
                         >
                           <input
                             type="checkbox"
                             aria-label={`Select scheduled transaction ${r.payee || r.id}`}
                             checked={isScheduledSelected}
                             onChange={() => {}}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedRecurringIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(r.id)) next.delete(r.id);
-                                else next.add(r.id);
-                                return next;
-                              });
-                            }}
+                            onClick={(e) => toggleRecurringRowSelect(r.id, e)}
                             className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
                           />
                         </td>

@@ -1717,7 +1717,7 @@ input.y-inline-amt {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 0 0 1px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset;
   vertical-align: middle;
 }
 .y-flag--empty {
@@ -1761,7 +1761,7 @@ input.y-inline-amt {
 }
 .y-flag-swatch.is-active {
   outline: 2px solid var(--y-ink, #1e293b);
-  outline-offset: 1px;
+  outline-offset: 0;
 }
 .y-flag-clear {
   width: 16px;

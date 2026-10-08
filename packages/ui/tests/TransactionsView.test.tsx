@@ -1345,5 +1345,303 @@ describe("TransactionsView", () => {
     expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /merge/i })).not.toBeInTheDocument();
   });
+
+  it("does not allow selecting subtransactions, only parent transactions", () => {
+    const data = makeSeedBudgetData();
+    const splitParent = {
+      id: 9001,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Combined run",
+      amount: "-15000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    const splitChild1 = {
+      id: 9002,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Groceries part",
+      amount: "-10000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+    const splitChild2 = {
+      id: 9003,
+      accountId: 1,
+      categoryId: 2,
+      date: "2026-07-15",
+      payee: "Costco Wholesale Split",
+      memo: "Electronics part",
+      amount: "-5000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: 9001,
+    };
+    const otherParent = {
+      id: 9004,
+      accountId: 1,
+      categoryId: 1,
+      date: "2026-07-16",
+      payee: "Regular Grocer",
+      memo: "",
+      amount: "-2000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+    };
+    data.transactions = [splitParent, splitChild1, splitChild2, otherParent];
+
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /expand split sub-transactions/i }));
+
+    const parentRow = container.querySelector('tr[data-txn-id="9001"]');
+    const childRow1 = container.querySelector('tr[data-txn-id="9002"]');
+    const childRow2 = container.querySelector('tr[data-txn-id="9003"]');
+    expect(parentRow).not.toBeNull();
+    expect(childRow1).not.toBeNull();
+    expect(childRow2).not.toBeNull();
+    expect(within(parentRow as HTMLElement).queryByRole("checkbox")).not.toBeNull();
+    expect(within(childRow1 as HTMLElement).queryByRole("checkbox")).toBeNull();
+    expect(within(childRow2 as HTMLElement).queryByRole("checkbox")).toBeNull();
+
+    // Select-all covers parents only.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all transactions" }));
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    expect(within(parentRow as HTMLElement).getByRole("checkbox")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: /deselect all/i }));
+
+    // Keyboard navigation skips sub-rows: 9004 -> 9001 -> wrap to 9004.
+    const scrollContainer = container.querySelector(".y-scroll")!;
+    const selectedTxnId = () =>
+      container.querySelector("tr.y-row--selected")?.getAttribute("data-txn-id");
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
+    expect(selectedTxnId()).toBe("9004");
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
+    expect(selectedTxnId()).toBe("9001");
+    fireEvent.keyDown(scrollContainer, { key: "ArrowDown" });
+    expect(selectedTxnId()).toBe("9004");
+    fireEvent.keyDown(scrollContainer, { key: "ArrowUp" });
+    expect(selectedTxnId()).toBe("9001");
+  });
+
+  it("selects the parent when focusTransaction targets a subtransaction", () => {
+    const data = makeSeedBudgetData();
+    data.transactions = [
+      {
+        id: 9001,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-15",
+        payee: "Costco Wholesale Split",
+        memo: "Combined run",
+        amount: "-15000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      },
+      {
+        id: 9002,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-15",
+        payee: "Costco Wholesale Split",
+        memo: "Groceries part",
+        amount: "-10000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: 9001,
+      },
+    ];
+
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        focusTransaction={{ id: 9002, nonce: 1 }}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // The split expands so the child is visible, but selection lands on the parent.
+    expect(screen.getByText("Groceries part")).toBeInTheDocument();
+    const parentRow = container.querySelector('tr[data-txn-id="9001"]');
+    const childRow = container.querySelector('tr[data-txn-id="9002"]');
+    expect(parentRow!.classList.contains("is-sel")).toBe(true);
+    expect(childRow!.classList.contains("is-sel")).toBe(false);
+    expect(within(parentRow as HTMLElement).getByRole("checkbox")).toBeChecked();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+  });
+
+  it("keeps incoming split transfer legs selectable on the destination account", () => {
+    const data = makeSeedBudgetData();
+    data.transactions = [
+      {
+        id: 9100,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-20",
+        payee: "Expense & Visa Transfer",
+        memo: "Combined",
+        amount: "-10000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      },
+      {
+        id: 9101,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-20",
+        payee: "Expense & Visa Transfer",
+        memo: "Expense part",
+        amount: "-6000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: 9100,
+      },
+      {
+        id: 9102,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-20",
+        payee: "Transfer : Scotia Passport Visa",
+        memo: "Visa transfer part",
+        amount: "-4000",
+        status: "c" as const,
+        transferAccountId: 6,
+        parentId: 9100,
+      },
+    ];
+
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={6}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    // The incoming leg renders as a top-level transfer row, not a ↳ sub-row,
+    // so it stays selectable like any other top-level row.
+    const row = container.querySelector('tr[data-txn-id="9102"]');
+    expect(row).not.toBeNull();
+    expect(row!.classList.contains("y-subrow")).toBe(false);
+    fireEvent.click(within(row as HTMLElement).getByRole("checkbox"));
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+  });
+
+  it("toggles row selection when the checkbox cell is clicked, without opening the editor", () => {
+    const data = makeSeedBudgetData();
+    data.transactions = [
+      {
+        id: 9501,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-15",
+        payee: "Cell Click Grocer",
+        memo: "",
+        amount: "-2000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      },
+    ];
+    const onEdit = vi.fn();
+    const { container } = render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    const row = container.querySelector('tr[data-txn-id="9501"]') as HTMLElement;
+    const cell = within(row).getByRole("checkbox").closest("td") as HTMLElement;
+    fireEvent.click(cell);
+    expect(within(row).getByRole("checkbox")).toBeChecked();
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+
+    fireEvent.click(cell);
+    expect(within(row).getByRole("checkbox")).not.toBeChecked();
+    expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("toggles scheduled row selection when the checkbox cell is clicked, without opening the editor", () => {
+    const data = makeSeedBudgetData();
+    data.recurring = [
+      {
+        id: 9601,
+        accountId: 1,
+        categoryId: null,
+        payee: "SCHED Cell Click",
+        memo: "",
+        amount: "-5000",
+        frequency: "monthly",
+        nextDate: "2026-08-01",
+        active: true,
+        transferAccountId: null,
+        subTransactions: [],
+      },
+    ];
+    const onEditRecurring = vi.fn();
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+        onEditRecurring={onEditRecurring}
+      />
+    );
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Select scheduled transaction SCHED Cell Click",
+    });
+    const cell = checkbox.closest("td") as HTMLElement;
+    fireEvent.click(cell);
+    expect(checkbox).toBeChecked();
+    expect(screen.getByText(/1 scheduled selected/i)).toBeInTheDocument();
+    expect(onEditRecurring).not.toHaveBeenCalled();
+
+    fireEvent.click(cell);
+    expect(checkbox).not.toBeChecked();
+    expect(screen.queryByText(/1 scheduled selected/i)).not.toBeInTheDocument();
+    expect(onEditRecurring).not.toHaveBeenCalled();
+  });
 });
 
