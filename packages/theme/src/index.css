@@ -143,19 +143,22 @@ body::after {
   overflow: hidden;
 }
 
-/* ---------- logo badge (sidebar) ---------- */
+/* ---------- logo badge (sidebar): green tile + white FA seedling ---------- */
 .y-logo {
   width: 22px;
   height: 22px;
-  border-radius: 3px;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 900;
-  color: #fff;
+  box-sizing: border-box;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  border-radius: 5px;
   background: linear-gradient(var(--y-green-lt), var(--y-green-dk));
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
-  border: 1px solid #43701d;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1;
 }
 
 /* ---------- dropdown menu item ---------- */

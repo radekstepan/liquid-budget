@@ -19,6 +19,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1",
     "@ynab/logic": "workspace:*",
     "@ynab/server": "workspace:*",
     "@ynab/ui": "workspace:*",

@@ -267,7 +267,9 @@ export const Sidebar = memo(function Sidebar({
     >
       <div className="px-3 pt-3 pb-2">
         <div className="flex items-center gap-2">
-          <div className="y-logo">L</div>
+          <div className="y-logo">
+            <i className="fa-solid fa-seedling" aria-hidden="true" />
+          </div>
           <div className="leading-none">
             <div className="text-[13px] font-bold text-white tracking-wide">LIQUID</div>
             <div className="text-[9px] tracking-[.14em]" style={{ color: "var(--y-side-ink-dim)" }}>
