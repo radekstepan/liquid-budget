@@ -25,6 +25,7 @@ export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
 export * from "./duplicates.js";
 export * from "./rename-rules.js";
+export * from "./rename-suggest.js";
 export * from "./search.js";
 export * from "./searchQuery.js";
 

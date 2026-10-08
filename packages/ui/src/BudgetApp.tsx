@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -233,6 +233,12 @@ export type BudgetAppApi = {
   updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   deleteRenameRule?: (id: number) => Promise<void>;
   applyRenameRule?: (id: number) => Promise<{ updated: number; skippedLocked: number }>;
+  getRenameSuggestStatus?: () => Promise<RenameSuggestStatusResponse>;
+  suggestRenameRules?: (offset: number, limit: number) => Promise<RenameSuggestResponse>;
+  acceptRenameSuggestions?: (
+    suggestions: { sourcePattern: string; targetPayee: string }[],
+    applyToExisting: boolean
+  ) => Promise<{ updated: number; skippedLocked: number; generalised: boolean }>;
   ensurePayee?: (name: string) => Promise<number>;
   renamePayee?: (id: number, name: string) => Promise<void>;
   setPayeeDefaultCategory?: (id: number, categoryId: number | null) => Promise<void>;
@@ -833,13 +839,27 @@ export function BudgetApp({
     }
   }, [api]);
 
+  const [renameSuggestStatus, setRenameSuggestStatus] =
+    useState<RenameSuggestStatusResponse | null>(null);
+
+  const refreshRenameSuggestStatus = useCallback(async () => {
+    if (!api.getRenameSuggestStatus) return;
+    try {
+      setRenameSuggestStatus(await api.getRenameSuggestStatus());
+    } catch {
+      // Status is best-effort: a failure just hides the AI button.
+      setRenameSuggestStatus(null);
+    }
+  }, [api]);
+
   const openSettings = useCallback(
     (page: "rename" | "payees" | "menu" | "snapshots") => {
       setSettingsPage(page);
       setShowSettingsOverlay(true);
       if (page === "snapshots") void refreshSnapshots();
+      if (page === "rename") void refreshRenameSuggestStatus();
     },
-    [refreshSnapshots]
+    [refreshSnapshots, refreshRenameSuggestStatus]
   );
 
   const handleToggleNav = useCallback(
@@ -1373,6 +1393,21 @@ export function BudgetApp({
                       await api.deleteRenameRule?.(id);
                     }}
                     onApply={api.applyRenameRule}
+                    suggestStatus={renameSuggestStatus}
+                    onSuggestRules={api.suggestRenameRules}
+                    onAcceptSuggestions={
+                      api.acceptRenameSuggestions
+                        ? async (suggestions, applyToExisting) => {
+                            const res = await api.acceptRenameSuggestions!(
+                              suggestions,
+                              applyToExisting
+                            );
+                            // Counts changed: refresh the uncovered-payee total.
+                            await refreshRenameSuggestStatus();
+                            return res;
+                          }
+                        : undefined
+                    }
                   />
                 )}
               </div>

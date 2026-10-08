@@ -367,6 +367,34 @@ export const RenameRuleApplySchema = z
   })
   .strict();
 
+export const RenameSuggestionSchema = z
+  .object({
+    sourcePattern: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }),
+    targetPayee: z.string().min(1).max(255).refine(notTransferPayee, {
+      message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
+    }),
+  })
+  .strict();
+
+export type RenameSuggestionInput = z.output<typeof RenameSuggestionSchema>;
+
+/**
+ * Accept AI-generated rename suggestions as rules. Each suggestion is
+ * folded through the standard rule learner (so `BCF1` + `BCF2` still
+ * generalise into `BCF[N]`); `applyToExisting` additionally rewrites
+ * already-stored transactions, like applying a rule by hand.
+ */
+export const RenameSuggestAcceptSchema = z
+  .object({
+    suggestions: z.array(RenameSuggestionSchema).min(1).max(200),
+    applyToExisting: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type RenameSuggestAcceptInput = z.output<typeof RenameSuggestAcceptSchema>;
+
 export const PayeePatchSchema = z
   .object({
     id: z.number().int().positive(),
@@ -853,6 +881,7 @@ export const TransactionResponseSchema = z.looseObject({
   reconciliationId: z.number().int().nullable().optional(),
   transferReconciledAt: z.string().nullable().optional(),
   transferReconciliationId: z.number().int().nullable().optional(),
+  needsReview: z.boolean().optional(),
 });
 
 export const RecurringSubTransactionResponseSchema = z.looseObject({
@@ -888,6 +917,106 @@ export const RenameRuleResponseSchema = z.looseObject({
   createdAt: z.string(),
   updatedAt: z.string().nullable().optional(),
 });
+
+export const RenameSuggestStatusResponseSchema = z.looseObject({
+  enabled: z.boolean(),
+  candidates: z.array(
+    z.looseObject({
+      payee: z.string(),
+      count: z.number(),
+    })
+  ),
+  totalUnique: z.number(),
+  truncated: z.boolean(),
+});
+
+export type RenameSuggestStatusResponse = z.output<typeof RenameSuggestStatusResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `GET /api/rename-rules/suggest`
+ * JSON) against the response contract. Throws a descriptive Error on
+ * mismatch. Emits no console output so it is safe in tested fetch paths.
+ */
+export function parseRenameSuggestStatusResponse(data: unknown): RenameSuggestStatusResponse {
+  const result = RenameSuggestStatusResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid rename suggest status response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
+/**
+ * One page of uncovered payees. The client walks the queue in
+ * `RENAME_SUGGEST_BATCH_SIZE` steps; omitting the body (or both fields)
+ * keeps the legacy single-shot behavior up to the configured cap.
+ */
+export const RenameSuggestBatchSchema = z
+  .object({
+    offset: z.number().int().min(0).optional(),
+    limit: z.number().int().min(1).optional(),
+  })
+  .strict();
+
+export type RenameSuggestBatchInput = z.output<typeof RenameSuggestBatchSchema>;
+
+export const RenameSuggestResponseSchema = z.looseObject({
+  suggestions: z.array(
+    z.looseObject({
+      sourcePattern: z.string(),
+      targetPayee: z.string(),
+      count: z.number(),
+    })
+  ),
+  skipped: z.array(
+    z.looseObject({
+      source: z.string(),
+      reason: z.string(),
+    })
+  ),
+  model: z.string(),
+  /** Distinct payees actually sent to the LLM for this batch. */
+  processed: z.number().int().min(0),
+});
+
+export type RenameSuggestResponse = z.output<typeof RenameSuggestResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `POST /api/rename-rules/suggest`
+ * JSON) against the response contract. Throws a descriptive Error on
+ * mismatch. Emits no console output so it is safe in tested fetch paths.
+ */
+export function parseRenameSuggestResponse(data: unknown): RenameSuggestResponse {
+  const result = RenameSuggestResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid rename suggest response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
+export const RenameSuggestAcceptResponseSchema = z.looseObject({
+  rules: z.array(RenameRuleResponseSchema),
+  applied: z.looseObject({
+    updated: z.number(),
+    skippedLocked: z.number(),
+  }),
+  generalised: z.boolean(),
+});
+
+export type RenameSuggestAcceptResponse = z.output<typeof RenameSuggestAcceptResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `POST
+ * /api/rename-rules/suggest?action=accept` JSON) against the response
+ * contract. Throws a descriptive Error on mismatch. Emits no console
+ * output so it is safe in tested fetch paths.
+ */
+export function parseRenameSuggestAcceptResponse(data: unknown): RenameSuggestAcceptResponse {
+  const result = RenameSuggestAcceptResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid rename suggest accept response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
 
 export const PayeeResponseSchema = z.looseObject({
   ...LooseIdEntity,

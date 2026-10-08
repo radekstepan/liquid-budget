@@ -775,6 +775,9 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     p.incomeMonth = patch.incomeMonth ? assertValidISOMonth(patch.incomeMonth, "incomeMonth") : null;
   }
   if (patch.isIncome !== undefined) p.isIncome = patch.isIncome;
+  // Any user edit through this path counts as reviewing the row: a
+  // freshly imported (bold) transaction stops needing review.
+  p.needsReview = false;
 
   let shouldLearnRenameRule = false;
   let oldPayee = "";
@@ -1093,6 +1096,9 @@ export async function updateSplit(
       pf.reconciliationId = null;
     }
     if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
+    // Rewriting a split counts as reviewing the parent (fresh children
+    // are inserted unflagged by column default).
+    pf.needsReview = false;
     if (oldChildren.length === 0) {
       pf.transferAccountId = null;
       pf.transferStatus = null;
@@ -1691,6 +1697,8 @@ export async function bulkUpdateTransactions(
       }
 
       if (Object.keys(setFields).length > 0) {
+        // A bulk edit counts as reviewing each touched row.
+        setFields.needsReview = false;
         const [row] = await db
           .update(transactions)
           .set(setFields)

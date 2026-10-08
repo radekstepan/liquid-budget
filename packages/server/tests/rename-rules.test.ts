@@ -435,6 +435,7 @@ describe("applyRenameRuleToExisting", () => {
       status?: string;
       transferAccountId?: number | null;
       parentId?: number | null;
+      needsReview?: boolean;
     } = {}
   ) {
     const {
@@ -443,6 +444,7 @@ describe("applyRenameRuleToExisting", () => {
       status = "c",
       transferAccountId = null,
       parentId = null,
+      needsReview = false,
     } = over;
     const row = db
       .insert(schema.transactions)
@@ -461,6 +463,7 @@ describe("applyRenameRuleToExisting", () => {
         parentId,
         isIncome: false,
         incomeMonth: null,
+        needsReview,
       })
       .returning()
       .get();
@@ -575,5 +578,28 @@ describe("applyRenameRuleToExisting", () => {
 
   it("returns null for an unknown rule", async () => {
     await expect(applyRenameRuleToExisting(db, 4242)).resolves.toBeNull();
+  });
+
+  it("leaves the imported (needsReview) flag untouched on rewritten rows", async () => {
+    const accountId = await seedAccount();
+    const flagged = insertTx(accountId, { payee: "BCF1", needsReview: true });
+    const unflagged = insertTx(accountId, { payee: "BCF2", needsReview: false });
+    const rule = await createRenameRule(db, {
+      sourcePattern: "BCF[N]",
+      targetPayee: "BC Ferries",
+    });
+
+    const res = await applyRenameRuleToExisting(db, rule.id);
+
+    expect(res).toMatchObject({ updated: 2, skippedLocked: 0 });
+    // A rule backfill is automatic, not a user review: imported rows stay
+    // bold until the user approves, edits, or reconciles them.
+    const rows = db
+      .select({ id: schema.transactions.id, needsReview: schema.transactions.needsReview })
+      .from(schema.transactions)
+      .where(eq(schema.transactions.accountId, accountId))
+      .all();
+    expect(rows.find((r) => r.id === flagged)?.needsReview).toBe(true);
+    expect(rows.find((r) => r.id === unflagged)?.needsReview).toBe(false);
   });
 });

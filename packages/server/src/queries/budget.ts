@@ -59,6 +59,7 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       // createdAt is already a text string in SQLite
       createdAt: t.createdAt,
       isIncome: Boolean(t.isIncome),
+      needsReview: Boolean(t.needsReview),
       reconciledAt: t.reconciledAt,
       reconciliationId: t.reconciliationId,
       transferReconciledAt: t.transferReconciledAt,

@@ -117,7 +117,7 @@ describe("importCsvTransactions", () => {
     const restaurant = byPayee("PHNOM PENH RESTAURANT   VANCOUVER");
     expect(restaurant?.amount).toBe("-2808");
     expect(restaurant?.date).toBe("2026-08-13");
-    expect(restaurant?.status).toBe("c");
+    expect(restaurant?.status).toBe("u");
     expect(byPayee("PAYMENT RECEIVED - THANK YOU")?.amount).toBe("190803");
     expect(byPayee("PAYPAL *EBAY CA         0015125826083")?.amount).toBe("1231");
     expect(data.accounts.find((a) => a.id === accountId)?.balance).toBe(

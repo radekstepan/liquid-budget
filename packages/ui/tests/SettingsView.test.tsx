@@ -129,4 +129,17 @@ describe("SettingsView", () => {
       screen.getByRole("button", { name: /apply rule UBER to existing transactions/i })
     ).toBeDisabled();
   });
+
+  it("keeps the rules list in its own scroll region inside the overlay", () => {
+    renderView({
+      existingPayees: [],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+    });
+    // The settings overlay clips its content, so the list must scroll
+    // internally (like the payees manager) instead of growing past it.
+    const scroller = screen.getByTestId("rules-scroll");
+    expect(within(scroller).getByRole("table")).toBeInTheDocument();
+    expect(scroller.className).toContain("overflow-auto");
+    expect(scroller.className).toContain("min-h-0");
+  });
 });
