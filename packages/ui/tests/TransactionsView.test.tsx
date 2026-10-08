@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { TransactionsView } from "../src/TransactionsView.js";
-import { pickFromOpenDropdownByValue } from "./dropdown.js";
 import { makeSeedBudgetData, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
@@ -1115,21 +1114,8 @@ describe("TransactionsView", () => {
     });
   });
 
-  it("offers split-with-template for a selected single transaction", () => {
+  it("shows no split-template UI when a single transaction is selected", () => {
     const data = makeSeedBudgetData();
-    const parentIds = new Set(
-      data.transactions.filter((t) => t.parentId != null).map((t) => t.parentId)
-    );
-    const single = data.transactions.find(
-      (t) =>
-        t.parentId == null &&
-        t.transferAccountId == null &&
-        !parentIds.has(t.id) &&
-        t.status !== "r" &&
-        t.transferStatus !== "r"
-    );
-    expect(single).toBeDefined();
-    const onApplySplitTemplate = vi.fn();
     const { container } = render(
       <TransactionsView
         data={data}
@@ -1139,33 +1125,17 @@ describe("TransactionsView", () => {
         onDelete={() => {}}
         onReconcile={() => {}}
         onCycleStatus={() => {}}
-        splitTemplates={[{ id: 99, name: "Susie 85/15", legs: [] }]}
-        onApplySplitTemplate={onApplySplitTemplate}
       />
     );
-    // The register virtualizes rows: pick a convertible single among the
-    // rendered ones.
     const renderedIds = Array.from(container.querySelectorAll("tr[data-txn-id]")).map((r) =>
       Number(r.getAttribute("data-txn-id"))
     );
-    const renderedSingle = renderedIds
-      .map((id) => data.transactions.find((t) => t.id === id))
-      .find(
-        (t) =>
-          t != null &&
-          t.parentId == null &&
-          t.transferAccountId == null &&
-          !parentIds.has(t.id) &&
-          t.status !== "r" &&
-          t.transferStatus !== "r"
-      );
-    expect(renderedSingle).toBeDefined();
-    const row = container.querySelector(`tr[data-txn-id="${renderedSingle!.id}"]`);
+    expect(renderedIds.length).toBeGreaterThan(0);
+    const row = container.querySelector(`tr[data-txn-id="${renderedIds[0]}"]`);
     expect(row).not.toBeNull();
     fireEvent.click(within(row as HTMLElement).getByRole("checkbox"));
     expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
-    pickFromOpenDropdownByValue(/split with template/i, "99");
-    expect(onApplySplitTemplate).toHaveBeenCalledWith(renderedSingle!.id, 99);
+    expect(screen.queryByLabelText(/split with template/i)).not.toBeInTheDocument();
   });
 
   it("renders freshly imported rows bold until they are reviewed", () => {
