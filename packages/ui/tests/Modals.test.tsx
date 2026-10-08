@@ -360,6 +360,24 @@ describe("TransactionModal", () => {
     expect(dateInput.type).toBe("date");
   });
 
+  it("shows Memo beside Payee in single mode", () => {
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={1}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    const memoInput = screen.getByPlaceholderText("Optional notes");
+    const payeeInput = openSearchlistByPlaceholder("e.g. Whole Foods");
+    // Same grid row, above the Account selector.
+    expect(memoInput.closest("div.grid-cols-2")).toBe(payeeInput.closest("div.grid-cols-2"));
+    const accountTrigger = screen.getByRole("button", { name: /account/i });
+    expect(memoInput.compareDocumentPosition(accountTrigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("hides category picker and saves categoryId null when account is off-budget", () => {
     const onSave = vi.fn();
     render(
@@ -831,6 +849,22 @@ describe("TransactionModal", () => {
       fireEvent.change(input, { target: { value: "cre" } });
       const visible = within(list).getAllByRole("option");
       expect(visible.map((o) => o.textContent)).toEqual(["Credit"]);
+    });
+
+    it("shows Memo beside Payee in transfer mode", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={1}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^transfer$/i }));
+      const memoInput = screen.getByPlaceholderText("Optional notes");
+      const transferPayee = screen.getByLabelText("Payee");
+      expect(memoInput.closest("div.grid-cols-2")).toBe(transferPayee.closest("div.grid-cols-2"));
     });
 
     it("does not allow selecting the 'Select account…' placeholder", () => {
@@ -1418,6 +1452,181 @@ describe("TransactionModal", () => {
       expect(payload.subTransactions).toHaveLength(2);
     });
 
+    it("copies the parent memo/payee into sub-rows when converting a single transaction to a split", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-07-01",
+        payee: "Costco",
+        memo: "Weekly shop",
+        amount: "-10000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      // Convert to split: both sub-row memos default from the parent.
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+      expect(memoInputs).toHaveLength(2);
+      expect(memoInputs[0]!.value).toBe("Weekly shop");
+      expect(memoInputs[1]!.value).toBe("Weekly shop");
+
+      // The copied memo stays editable per sub-row.
+      fireEvent.change(memoInputs[1]!, { target: { value: "Supplies" } });
+
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
+      fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
+
+      const saveBtn = screen.getByRole("button", { name: /save changes/i });
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        subTransactions: { memo?: string; payee?: string }[];
+      };
+      expect(payload.subTransactions).toHaveLength(2);
+      expect(payload.subTransactions[0]).toMatchObject({ memo: "Weekly shop", payee: "Costco" });
+      expect(payload.subTransactions[1]).toMatchObject({ memo: "Supplies", payee: "Costco" });
+    });
+
+    it("leaves sub-row memos blank when converting a transaction with neither memo nor payee", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-07-01",
+        payee: "",
+        memo: "",
+        amount: "-10000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+      expect(memoInputs).toHaveLength(2);
+      expect(memoInputs[0]!.value).toBe("");
+      expect(memoInputs[1]!.value).toBe("");
+    });
+
+    it("copies the parent payee into sub-row memos when the parent memo is empty", () => {
+      const onSave = vi.fn();
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-07-01",
+        payee: "Costco",
+        memo: "",
+        amount: "-10000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={onSave}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+      expect(memoInputs).toHaveLength(2);
+      expect(memoInputs[0]!.value).toBe("Costco");
+      expect(memoInputs[1]!.value).toBe("Costco");
+
+      const allZeros = screen.getAllByPlaceholderText("0.00") as HTMLInputElement[];
+      const subAmounts = allZeros.slice(1) as HTMLInputElement[];
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:10");
+      pickPlaceholderSearchableByIndexByValue(/category or transfer…/i, 0, "category:11");
+      fireEvent.change(subAmounts[0]!, { target: { value: "-60" } });
+      fireEvent.change(subAmounts[1]!, { target: { value: "-40" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const payload = onSave.mock.calls[0]![0] as {
+        subTransactions: { memo?: string; payee?: string }[];
+      };
+      expect(payload.subTransactions[0]).toMatchObject({ memo: "Costco", payee: "Costco" });
+      expect(payload.subTransactions[1]).toMatchObject({ memo: "Costco", payee: "Costco" });
+    });
+
+    it("shows the parent Memo with Payee above the sub-transactions in split mode", () => {
+      const initial: Transaction = {
+        id: 1,
+        accountId: 1,
+        categoryId: 10,
+        date: "2026-07-01",
+        payee: "Costco",
+        memo: "Weekly shop",
+        amount: "-10000",
+        cleared: true,
+      };
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          initial={initial}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      // Exactly one parent Memo field, rendered before the sub-rows.
+      const memoInputs = screen.getAllByPlaceholderText("Optional notes") as HTMLInputElement[];
+      expect(memoInputs).toHaveLength(1);
+      const subHeading = screen.getByText("Sub-transactions");
+      expect(
+        memoInputs[0]!.compareDocumentPosition(subHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it("defaults added sub-rows from the parent memo", () => {
+      render(
+        <TransactionModal
+          accounts={accounts}
+          categories={categories}
+          defaultAccountId={null}
+          onClose={() => {}}
+          onSave={() => {}}
+        />
+      );
+      fireEvent.change(screen.getByPlaceholderText("Optional notes"), {
+        target: { value: "Trip" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /add sub-transaction/i }));
+      const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+      expect(memoInputs).toHaveLength(3);
+      expect(memoInputs[2]!.value).toBe("Trip");
+    });
+
     it("disables Save button when amount evaluates to zero (BUG-21)", () => {
       const onSave = vi.fn();
       render(
@@ -1998,6 +2207,30 @@ describe("RecurringModal", () => {
     expect(payload.subTransactions).toHaveLength(2);
     expect(payload.subTransactions[0]).toMatchObject({ categoryId: 10, amount: -12000, memo: "Weekly food" });
     expect(payload.subTransactions[1]).toMatchObject({ categoryId: 11, amount: -8000, memo: "Supplies" });
+  });
+
+  it("copies the parent memo into sub-rows when converting a schedule to a split", () => {
+    render(
+      <RecurringModal
+        accounts={accounts}
+        categories={categories}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    fireEvent.change(screen.getByPlaceholderText("Optional notes"), {
+      target: { value: "Weekly shop" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^split$/i }));
+    const memoInputs = screen.getAllByPlaceholderText("Memo") as HTMLInputElement[];
+    expect(memoInputs).toHaveLength(2);
+    expect(memoInputs[0]!.value).toBe("Weekly shop");
+    expect(memoInputs[1]!.value).toBe("Weekly shop");
+
+    // The copied memo stays editable per sub-row.
+    fireEvent.change(memoInputs[0]!, { target: { value: "Edited" } });
+    expect(memoInputs[0]!.value).toBe("Edited");
+    expect(memoInputs[1]!.value).toBe("Weekly shop");
   });
 
   it("re-uses transferAccountId and subTransactions when editing", () => {
