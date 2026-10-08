@@ -11,7 +11,9 @@ import {
   parseMonthKey,
   monthKey,
   previousMonthKey,
+  resolveSplitTemplatePresets,
   round2,
+  SPLIT_TEMPLATE_PRESETS,
   todayISO,
   countDueRecurring,
   isValidISOMonth,
@@ -57,7 +59,7 @@ import { ErrorBoundary } from "./ErrorBoundary.js";
 export type ModalState =
   | { kind: "none" }
   | { kind: "addTransaction"; defaultDate?: string; mode?: "single" | "transfer" }
-  | { kind: "editTransaction"; transactionId: number }
+  | { kind: "editTransaction"; transactionId: number; applySplitTemplateId?: number }
   | { kind: "bulkEditTransactions"; transactionIds: number[] }
   | { kind: "recurring"; mode?: "single" | "transfer" }
   | { kind: "editRecurring"; recurringId: number }
@@ -1169,6 +1171,13 @@ export function BudgetApp({
     [data.accounts, accountFilter]
   );
 
+  // Split templates are code configuration (see SPLIT_TEMPLATE_PRESETS):
+  // resolved against this budget's accounts by name.
+  const splitTemplates = useMemo(
+    () => resolveSplitTemplatePresets(SPLIT_TEMPLATE_PRESETS, data.accounts),
+    [data.accounts]
+  );
+
   return (
     <div className="flex h-screen w-screen overflow-hidden" style={{ background: "var(--y-canvas)" }}>
       <Sidebar
@@ -1241,6 +1250,10 @@ export function BudgetApp({
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
+              splitTemplates={splitTemplates}
+              onApplySplitTemplate={(id, templateId) =>
+                setModal({ kind: "editTransaction", transactionId: id, applySplitTemplateId: templateId })
+              }
               onBulkEdit={(ids) => setModal({ kind: "bulkEditTransactions", transactionIds: ids })}
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
@@ -1421,6 +1434,7 @@ export function BudgetApp({
           defaultDate={modal.defaultDate}
           initialMode={modal.mode}
           allTransactions={data.transactions}
+          splitTemplates={splitTemplates}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
             const { id: _ignored, ...rest } = t;
@@ -1438,6 +1452,8 @@ export function BudgetApp({
           defaultAccountId={accountFilter}
           initial={editingTransaction}
           allTransactions={data.transactions}
+          splitTemplates={splitTemplates}
+          initialSplitTemplateId={modal.applySplitTemplateId}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
             const { id, ...rest } = t;

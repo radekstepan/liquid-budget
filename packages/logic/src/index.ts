@@ -4,6 +4,7 @@ export * from "./action-payloads.js";
 export * from "./payload-builders.js";
 export * from "./format.js";
 export * from "./split.js";
+export * from "./split-templates.js";
 export * from "./recurring.js";
 export * from "./csv-import.js";
 export * from "./reconcile.js";

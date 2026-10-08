@@ -101,6 +101,46 @@ export type RenameRule = {
   updatedAt?: string | null;
 };
 
+/**
+ * One leg of a split template. Exactly one of `categoryId` /
+ * `transferAccountId` is set (mirrors `SubTransaction`):
+ *
+ *   - `kind: "category"` — the leg stays on the source account and posts
+ *     to `categoryId` for `shareBps` / 10000 of the parent total.
+ *   - `kind: "transfer"` — the leg moves `shareBps` / 10000 of the parent
+ *     total to `transferAccountId` (e.g. a cost-share with another person).
+ */
+export type SplitTemplateLeg = {
+  id?: number;
+  kind: "category" | "transfer";
+  /**
+   * The preset category for `category` legs — null means "choose when
+   * applying". For `transfer` legs this is the boundary category, only
+   * needed when the transfer crosses the budget boundary as an outflow
+   * (the editor prompts for it at apply time).
+   */
+  categoryId: number | null;
+  transferAccountId: number | null;
+  /** Share of the parent total in basis points (8500 = 85%). Legs sum to 10000. */
+  shareBps: number;
+  payee?: string;
+  memo?: string;
+};
+
+/**
+ * A named, reusable recipe for splitting a transaction. Applying a
+ * template to a parent total yields balanced sub-transactions (see
+ * `applySplitTemplate`); the last leg absorbs penny rounding so the
+ * children always sum to the parent to the cent.
+ */
+export type SplitTemplate = {
+  id: number;
+  name: string;
+  legs: SplitTemplateLeg[];
+  createdAt?: string;
+  updatedAt?: string | null;
+};
+
 export type Payee = {
   id: number;
   entityId?: string | null;
