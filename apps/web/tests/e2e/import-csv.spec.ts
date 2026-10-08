@@ -57,7 +57,9 @@ test("POST /api/import/csv imports the sample file and updates the account", asy
   );
   expect(payee).toBeTruthy();
   expect(payee.amount).toBe("-2808");
-  expect(payee.status).toBe("c");
+  // Imports land Uncleared ("u") so the user approves each row via the
+  // C column; approving (u -> c) clears the row's needsReview flag.
+  expect(payee.status).toBe("u");
   const chequingAfter = after.accounts.find(
     (a: { name: string }) => a.name === "TD Unlimited Chequing"
   );
