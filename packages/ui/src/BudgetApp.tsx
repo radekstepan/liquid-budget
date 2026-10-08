@@ -25,8 +25,15 @@ import {
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
 import { Sidebar, type View } from "./Sidebar.js";
-import type { SearchListOption } from "@ynab/theme";
-import { Icon, Tooltip } from "@ynab/theme";
+import type { SearchListOption, ThemeId } from "@ynab/theme";
+import {
+  Icon,
+  Tooltip,
+  THEME_STORAGE_KEY,
+  DEFAULT_THEME_ID,
+  isThemeId,
+  applyThemeId,
+} from "@ynab/theme";
 import type { GlobalSearchJump } from "./GlobalSearch.js";
 import { GlobalSearchModal } from "./GlobalSearchModal.js";
 import { Inspector } from "./Inspector.js";
@@ -35,6 +42,7 @@ import { TransactionsView } from "./TransactionsView.js";
 import { ReportsView } from "./ReportsView.js";
 import { SettingsView } from "./SettingsView.js";
 import { MenuSettingsView } from "./MenuSettingsView.js";
+import { ThemesView } from "./ThemesView.js";
 import { PayeesView } from "./PayeesView.js";
 import { SnapshotsView, type SnapshotSummary } from "./SnapshotsView.js";
 import {
@@ -405,7 +413,14 @@ export function BudgetApp({
   // register's applied filter when editing it from the toolbar.
   const [searchInitialQuery, setSearchInitialQuery] = useState<Query | null>(null);
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<"rename" | "payees" | "menu" | "snapshots">("rename");
+  const [settingsPage, setSettingsPage] = useState<
+    "rename" | "payees" | "menu" | "snapshots" | "themes"
+  >("rename");
+  const [themeId, setThemeId] = useLocalStorage<ThemeId>(
+    THEME_STORAGE_KEY,
+    DEFAULT_THEME_ID,
+    isThemeId
+  );
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
   const [snapshotSuggestion, setSnapshotSuggestion] = useState("");
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
@@ -862,8 +877,15 @@ export function BudgetApp({
     }
   }, [api]);
 
+  // Point <html data-theme> at the persisted theme. A pre-paint script
+  // in the web layout applies the stored value before first paint; this
+  // keeps it in sync afterwards (and covers the no-script fallback).
+  useEffect(() => {
+    applyThemeId(themeId);
+  }, [themeId]);
+
   const openSettings = useCallback(
-    (page: "rename" | "payees" | "menu" | "snapshots") => {
+    (page: "rename" | "payees" | "menu" | "snapshots" | "themes") => {
       setSettingsPage(page);
       setShowSettingsOverlay(true);
       if (page === "snapshots") void refreshSnapshots();
@@ -1394,6 +1416,8 @@ export function BudgetApp({
                       await refreshSnapshots();
                     }}
                   />
+                ) : settingsPage === "themes" ? (
+                  <ThemesView themeId={themeId} onSelect={setThemeId} />
                 ) : (
                   <SettingsView
                     rules={data.renameRules ?? []}
@@ -1461,6 +1485,7 @@ export function BudgetApp({
           onOpenPayees={() => openSettings("payees")}
           onOpenPageVisibility={() => openSettings("menu")}
           onOpenSnapshots={() => openSettings("snapshots")}
+          onOpenThemes={() => openSettings("themes")}
         />
       </ErrorBoundary>
 

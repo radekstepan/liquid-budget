@@ -6,6 +6,7 @@ export { ReportsView } from "./ReportsView.js";
 export { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 export { SettingsView } from "./SettingsView.js";
 export { MenuSettingsView } from "./MenuSettingsView.js";
+export { ThemesView } from "./ThemesView.js";
 export { PayeesView, type PayeeManagerEntry } from "./PayeesView.js";
 export {
   SnapshotsView,

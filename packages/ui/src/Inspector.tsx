@@ -36,6 +36,7 @@ export const Inspector = memo(function Inspector({
   onOpenPayees,
   onOpenPageVisibility,
   onOpenSnapshots,
+  onOpenThemes,
 }: {
   groups: GroupRow[];
   summary?: { assigned: number; outflow: number; available: number; totalAvailable: number };
@@ -64,6 +65,7 @@ export const Inspector = memo(function Inspector({
   onOpenPayees?: () => void;
   onOpenPageVisibility?: () => void;
   onOpenSnapshots?: () => void;
+  onOpenThemes?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -191,6 +193,17 @@ export const Inspector = memo(function Inspector({
                   className="y-menu-item"
                 >
                   <Icon name="eyeOff" size={12} /> Page Visibility
+                </button>
+              )}
+              {onOpenThemes && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenThemes();
+                  }}
+                  className="y-menu-item"
+                >
+                  <Icon name="drop" size={12} /> Themes
                 </button>
               )}
               {onOpenSnapshots && (
