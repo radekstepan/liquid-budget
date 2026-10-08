@@ -166,7 +166,6 @@ export function TransactionModal({
   allTransactions,
   initial,
   splitTemplates,
-  initialSplitTemplateId,
   onClose,
   onSave,
   onDelete,
@@ -184,13 +183,6 @@ export function TransactionModal({
   initial?: Transaction;
   /** Named split templates offered in split mode to pre-fill sub-rows. */
   splitTemplates?: SplitTemplate[];
-  /**
-   * When set while editing a single transaction, the modal opens in split
-   * mode with this template applied to the transaction total (one-click
-   * convert, e.g. from the register). Ignored for splits, transfers,
-   * children, and reconciled rows.
-   */
-  initialSplitTemplateId?: number | null;
   onClose: () => void;
   onSave: (t: TransactionSavePayload) => void;
   /** Edit-only. Triggers a two-step confirm panel; the caller wires the actual API call. */
@@ -213,21 +205,6 @@ export function TransactionModal({
     initialChildren.length > 0;
 
   const isEdit = !!initial;
-  // One-click convert: a template chosen in the register opens the modal in
-  // split mode with the template applied. Only valid when editing a plain
-  // single transaction; splits, transfers, children, and reconciled
-  // (locked) rows ignore it.
-  const openTemplate =
-    initialSplitTemplateId != null
-      ? splitTemplates?.find((t) => t.id === initialSplitTemplateId)
-      : undefined;
-  const isConvertibleSingle =
-    isEdit &&
-    !isInitialTransfer &&
-    !isInitialSplit &&
-    initial?.parentId == null &&
-    initial?.status !== "r";
-  const applyAtOpen = isConvertibleSingle && openTemplate != null;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingUnreconcile, setConfirmingUnreconcile] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -239,7 +216,7 @@ export function TransactionModal({
   }, [initial?.id]);
 
   const [mode, setMode] = useState<"single" | "transfer" | "split">(
-    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : applyAtOpen ? "split" : (initialMode ?? "single")
+    isInitialTransfer ? "transfer" : isInitialSplit ? "split" : (initialMode ?? "single")
   );
 
   const availableAccounts = useMemo(() => {
@@ -325,19 +302,10 @@ export function TransactionModal({
           amount: (num(c.amount) / 100).toFixed(2),
           memo: c.memo ?? "",
         }))
-      : applyAtOpen && initial && openTemplate
-        ? fillSubRowDefaults(
-            templateToSubRows(openTemplate, num(initial.amount)) ?? [
-              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-            ],
-            initial.memo ?? "",
-            initial.payee ?? ""
-          )
-        : [
-            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-          ]
+      : [
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+          { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+        ]
   );
 
   const [templateNotice, setTemplateNotice] = useState<string | null>(null);

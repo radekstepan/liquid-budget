@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TransactionModal } from "../src/Modals.js";
-import type { Account, Category, SplitTemplate, Transaction } from "@ynab/logic";
+import type { Account, Category, SplitTemplate } from "@ynab/logic";
 import { openSearchlistByPlaceholder } from "./dropdown.js";
 
 const accounts: Account[] = [
@@ -22,56 +22,7 @@ const susieTemplate: SplitTemplate = {
   ],
 };
 
-const single: Transaction = {
-  id: 5,
-  accountId: 1,
-  categoryId: 10,
-  date: "2026-09-01",
-  payee: "Costco",
-  memo: "",
-  amount: "-10000",
-  status: "c",
-  parentId: null,
-  transferAccountId: null,
-};
-
 describe("TransactionModal split templates", () => {
-  it("opens a single transaction in split mode with the template applied", () => {
-    const onSave = vi.fn();
-    render(
-      <TransactionModal
-        accounts={accounts}
-        categories={categories}
-        defaultAccountId={1}
-        initial={single}
-        allTransactions={[single]}
-        splitTemplates={[susieTemplate]}
-        initialSplitTemplateId={1}
-        onClose={() => {}}
-        onSave={onSave}
-      />
-    );
-
-    // Already in split mode: no need to touch the mode toggle.
-    expect(screen.getByText("Sub-transactions")).toBeInTheDocument();
-    expect(screen.getByLabelText("Sub-transaction 1 amount")).toHaveValue("-85.00");
-    expect(screen.getByLabelText("Sub-transaction 2 amount")).toHaveValue("-15.00");
-
-    const saveBtn = screen.getByRole("button", { name: /save changes/i });
-    expect(saveBtn).not.toBeDisabled();
-    fireEvent.click(saveBtn);
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave.mock.calls[0]![0]).toMatchObject({
-      mode: "split",
-      id: 5,
-      amount: -10000,
-      subTransactions: [
-        { categoryId: 10, transferAccountId: null, amount: -8500 },
-        { categoryId: null, transferAccountId: 4, amount: -1500 },
-      ],
-    });
-  });
-
   it("enters blank split mode from the main Split button", () => {
     render(
       <TransactionModal

@@ -59,7 +59,7 @@ import { ErrorBoundary } from "./ErrorBoundary.js";
 export type ModalState =
   | { kind: "none" }
   | { kind: "addTransaction"; defaultDate?: string; mode?: "single" | "transfer" }
-  | { kind: "editTransaction"; transactionId: number; applySplitTemplateId?: number }
+  | { kind: "editTransaction"; transactionId: number }
   | { kind: "bulkEditTransactions"; transactionIds: number[] }
   | { kind: "recurring"; mode?: "single" | "transfer" }
   | { kind: "editRecurring"; recurringId: number }
@@ -1271,10 +1271,6 @@ export function BudgetApp({
               onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
               onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
               onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
-              splitTemplates={splitTemplates}
-              onApplySplitTemplate={(id, templateId) =>
-                setModal({ kind: "editTransaction", transactionId: id, applySplitTemplateId: templateId })
-              }
               onBulkEdit={(ids) => setModal({ kind: "bulkEditTransactions", transactionIds: ids })}
               onDelete={api.deleteTransaction}
               onReconcile={openReconcile}
@@ -1490,7 +1486,6 @@ export function BudgetApp({
           initial={editingTransaction}
           allTransactions={data.transactions}
           splitTemplates={splitTemplates}
-          initialSplitTemplateId={modal.applySplitTemplateId}
           onClose={() => setModal({ kind: "none" })}
           onSave={async (t) => {
             const { id, ...rest } = t;
