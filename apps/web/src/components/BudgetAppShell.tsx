@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, MergeableTransaction, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameRuleResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -1877,15 +1877,25 @@ export function BudgetAppShell({
       );
     },
     addRenameRule: async (sourcePattern, targetPayee) => {
+      // Rule CRUD touches no transactions, so the returned row is patched
+      // into local state instead of reloading the whole budget.
       return withSync(() =>
         runMutation(
           async () => {
-            return await jsonReq("/api/rename-rules", {
-              method: "POST",
-              body: JSON.stringify({ sourcePattern, targetPayee }),
-            });
+            const row = parseRenameRuleResponse(
+              await jsonReq<unknown>("/api/rename-rules", {
+                method: "POST",
+                body: JSON.stringify({ sourcePattern, targetPayee }),
+              })
+            );
+            setData((prev) =>
+              prev
+                ? { ...prev, renameRules: [...(prev.renameRules ?? []), row], budgetIndex: undefined }
+                : prev
+            );
           },
-          { success: "Rename rule created.", failure: "Failed to save rename rule.", notifyFailure: false }
+          { success: "Rename rule created.", failure: "Failed to save rename rule.", notifyFailure: false },
+          { skipReload: true }
         )
       );
     },
@@ -1893,22 +1903,55 @@ export function BudgetAppShell({
       return withSync(() =>
         runMutation(
           async () => {
-            return await jsonReq("/api/rename-rules", {
-              method: "PATCH",
-              body: JSON.stringify({ id, sourcePattern, targetPayee }),
-            });
+            const row = parseRenameRuleResponse(
+              await jsonReq<unknown>("/api/rename-rules", {
+                method: "PATCH",
+                body: JSON.stringify({ id, sourcePattern, targetPayee }),
+              })
+            );
+            setData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    renameRules: (prev.renameRules ?? []).map((r) => (r.id === id ? row : r)),
+                    budgetIndex: undefined,
+                  }
+                : prev
+            );
           },
-          { success: "Rename rule updated.", failure: "Failed to save rename rule.", notifyFailure: false }
+          { success: "Rename rule updated.", failure: "Failed to save rename rule.", notifyFailure: false },
+          { skipReload: true }
         )
       );
     },
     deleteRenameRule: async (id) => {
+      const prevRules = dataRef.current?.renameRules;
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              renameRules: (prev.renameRules ?? []).filter((r) => r.id !== id),
+              budgetIndex: undefined,
+            }
+          : prev
+      );
       return withSync(() =>
         runMutation(
           async () => {
             return await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
           },
-          { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false }
+          { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false },
+          {
+            onRollback: () => {
+              if (prevRules) {
+                setData((current) =>
+                  current ? { ...current, renameRules: prevRules, budgetIndex: undefined } : current
+                );
+              }
+              reload().catch(() => {});
+            },
+            skipReload: true,
+          }
         )
       );
     },

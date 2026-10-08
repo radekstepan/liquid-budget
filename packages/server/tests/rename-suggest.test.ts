@@ -269,7 +269,12 @@ describe("suggestRenameRules", () => {
     expect(sentUserPrompt).toContain("downtown store");
     expect(sentUserPrompt).not.toContain("Covered");
     expect(res.suggestions).toEqual([
-      { sourcePattern: "WONKY 123", targetPayee: "Wonky", count: 1 },
+      {
+        sourcePattern: "WONKY 123",
+        targetPayee: "Wonky",
+        count: 1,
+        memos: ["downtown store"],
+      },
     ]);
     expect(res.skipped).toEqual([]);
     expect(res.model).toBe("test-model");

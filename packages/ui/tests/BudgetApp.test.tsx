@@ -173,6 +173,32 @@ describe("BudgetApp", () => {
     });
   });
 
+  it("jumps from a rename rule source link to the register filtered to its matches", async () => {
+    const { api } = makeApi();
+    const seed = makeSeedBudgetData();
+    render(
+      <BudgetApp
+        data={{
+          ...seed,
+          renameRules: [
+            { id: 7, sourcePattern: "Superstore", targetPayee: "Real Canadian Superstore", createdAt: "" },
+          ],
+        }}
+        api={api}
+      />
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: /settings/i })[0]!);
+    fireEvent.click(screen.getByText("Rename Rules"));
+    fireEvent.click(screen.getByRole("button", { name: "Show transactions matching Superstore" }));
+
+    // The overlay closes and the register shows a Payee filter chip.
+    await waitFor(() => {
+      expect(screen.queryByText("Payee Rename Rules")).not.toBeInTheDocument();
+    });
+    const chip = screen.getByRole("button", { name: "Edit Payee filter" });
+    expect(within(chip).getByText("Superstore")).toBeInTheDocument();
+  });
+
   it("navigates to the Settings view from the Inspector gear menu", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);

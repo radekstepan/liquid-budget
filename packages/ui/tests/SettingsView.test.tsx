@@ -13,6 +13,9 @@ function renderView(over: Partial<Parameters<typeof SettingsView>[0]> = {}) {
   const onAdd = vi.fn().mockResolvedValue(undefined);
   const onUpdate = vi.fn().mockResolvedValue(undefined);
   const onDelete = vi.fn().mockResolvedValue(undefined);
+  // Links are wired by default; pass `onViewMatches: undefined` explicitly
+  // to render the table without them.
+  const onViewMatches = "onViewMatches" in over ? over.onViewMatches : vi.fn();
   const view = render(
     <SettingsView
       rules={over.rules ?? rules}
@@ -21,9 +24,10 @@ function renderView(over: Partial<Parameters<typeof SettingsView>[0]> = {}) {
       onDelete={over.onDelete ?? onDelete}
       existingPayees={over.existingPayees}
       onApply={over.onApply}
+      onViewMatches={onViewMatches}
     />
   );
-  return { view, onAdd, onUpdate, onDelete };
+  return { view, onAdd, onUpdate, onDelete, onViewMatches };
 }
 
 describe("SettingsView", () => {
@@ -92,15 +96,16 @@ describe("SettingsView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows per-rule existing match counts", () => {
+  it("shows per-rule match counts", () => {
     renderView({
       existingPayees: ["BCF1", "BCF9", "BC Ferries", "UBER TRIP"],
       onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
     });
+    expect(screen.getByRole("columnheader", { name: "Matches" })).toBeInTheDocument();
     // BCF1 (exact) matches 1; BCF[N] matches BCF1 + BCF9; UBER matches none.
-    expect(screen.getByLabelText("1 existing transactions match BCF1")).toBeInTheDocument();
-    expect(screen.getByLabelText("2 existing transactions match BCF[N]")).toBeInTheDocument();
-    expect(screen.getByLabelText("0 existing transactions match UBER")).toBeInTheDocument();
+    expect(screen.getByLabelText("1 transaction matches BCF1")).toBeInTheDocument();
+    expect(screen.getByLabelText("2 transactions match BCF[N]")).toBeInTheDocument();
+    expect(screen.getByLabelText("0 transactions match UBER")).toBeInTheDocument();
   });
 
   it("applies a rule and reports the result", async () => {
@@ -141,5 +146,70 @@ describe("SettingsView", () => {
     expect(within(scroller).getByRole("table")).toBeInTheDocument();
     expect(scroller.className).toContain("overflow-auto");
     expect(scroller.className).toContain("min-h-0");
+  });
+
+  it("filters the list by source or target text", () => {
+    renderView();
+    const table = () => within(screen.getByRole("table"));
+    expect(table().getByText("UBER")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter rename rules"), {
+      target: { value: "ferr" },
+    });
+    expect(table().getByText("BCF1")).toBeInTheDocument();
+    expect(table().getByText("BCF[N]")).toBeInTheDocument();
+    expect(table().queryByText("UBER")).not.toBeInTheDocument();
+    expect(screen.getByText("2 of 3 rules")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter rename rules"), {
+      target: { value: "uber" },
+    });
+    expect(table().queryByText("BCF1")).not.toBeInTheDocument();
+    expect(table().getByText("UBER")).toBeInTheDocument();
+  });
+
+  it("shows a no-matches empty state for a filter with no hits", () => {
+    renderView();
+    fireEvent.change(screen.getByLabelText("Filter rename rules"), {
+      target: { value: "zzz-no-such-rule" },
+    });
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText("No matches")).toBeInTheDocument();
+    expect(screen.getByText('No rules match "zzz-no-such-rule".')).toBeInTheDocument();
+  });
+
+  it("links a source with matches to the transaction register", () => {
+    const { onViewMatches } = renderView({
+      existingPayees: ["BCF1", "BCF9"],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+    });
+    const link = screen.getByRole("button", { name: "Show transactions matching BCF[N]" });
+    fireEvent.click(link);
+    expect(onViewMatches).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, sourcePattern: "BCF[N]" })
+    );
+  });
+
+  it("leaves sources with zero matches as plain text", () => {
+    renderView({
+      existingPayees: ["BC Ferries"],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+    });
+    expect(
+      screen.queryByRole("button", { name: "Show transactions matching UBER" })
+    ).not.toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("UBER")).toBeInTheDocument();
+  });
+
+  it("leaves sources as plain text when no match viewer is wired", () => {
+    renderView({
+      existingPayees: ["BCF1"],
+      onApply: vi.fn().mockResolvedValue({ updated: 0, skippedLocked: 0 }),
+      onViewMatches: undefined,
+    });
+    expect(
+      screen.queryByRole("button", { name: /show transactions matching/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("1 transaction matches BCF1")).toBeInTheDocument();
   });
 });

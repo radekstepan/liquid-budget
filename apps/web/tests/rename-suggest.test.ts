@@ -126,7 +126,12 @@ describe("Rename suggest API routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.suggestions).toEqual([
-      { sourcePattern: "WONKY SMOKE 999", targetPayee: "Wonky Smoke", count: 1 },
+      {
+        sourcePattern: "WONKY SMOKE 999",
+        targetPayee: "Wonky Smoke",
+        count: 1,
+        memos: ["downtown store"],
+      },
     ]);
     // The covered payee never leaves the server; the uncovered one does,
     // with its memo as disambiguation context.

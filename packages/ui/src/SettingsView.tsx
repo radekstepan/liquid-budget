@@ -7,9 +7,9 @@ import type {
   RenameSuggestStatusResponse,
 } from "@ynab/logic";
 import {
+  countRenameRuleMatches,
   isPatternRule,
-  matchesRenameRule,
-  normalizeRenameText,
+  renameRulePayeeFilter,
   RENAME_SUGGEST_BATCH_SIZE,
 } from "@ynab/logic";
 import { Checkbox, Icon, Notice, Button, Tooltip } from "@ynab/theme";
@@ -51,6 +51,7 @@ export function SettingsView({
   onDelete,
   existingPayees,
   onApply,
+  onViewMatches,
   suggestStatus,
   onSuggestRules,
   onAcceptSuggestions,
@@ -63,6 +64,11 @@ export function SettingsView({
   existingPayees?: string[];
   /** Rewrite stored transactions matching a rule; enables the Apply button. */
   onApply?: (id: number) => Promise<ApplyRuleResult>;
+  /**
+   * Jump to the transaction register filtered to a rule's matches; enables
+   * the Source link (only rendered when the rule matches something).
+   */
+  onViewMatches?: (rule: RenameRule) => void;
   /**
    * AI suggestion availability + uncovered payees. The AI button is hidden
    * unless this is present, `enabled`, and `onSuggestRules` is set — the
@@ -93,31 +99,29 @@ export function SettingsView({
   const [suggestResult, setSuggestResult] = useState<SuggestRulesResult | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [acceptResult, setAcceptResult] = useState<AcceptSuggestionsResult | null>(null);
+  const [filter, setFilter] = useState("");
 
   const sorted = useMemo(
     () => [...rules].sort((a, b) => a.sourcePattern.localeCompare(b.sourcePattern)),
     [rules]
   );
 
-  // Rows this rule would rewrite: matching stored payees not already at
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(
+      (r) =>
+        r.sourcePattern.toLowerCase().includes(q) ||
+        r.targetPayee.toLowerCase().includes(q)
+    );
+  }, [sorted, filter]);
+
+  // Rows each rule would rewrite: matching stored payees not already at
   // the target (mirrors the server's apply semantics). Unknown without
   // existingPayees, in which case no count is shown.
   const matchCounts = useMemo(() => {
-    const counts = new Map<number, number>();
-    if (!existingPayees) return counts;
-    for (const r of sorted) {
-      let n = 0;
-      for (const payee of existingPayees) {
-        if (
-          matchesRenameRule(r, payee) &&
-          normalizeRenameText(payee) !== normalizeRenameText(r.targetPayee)
-        ) {
-          n++;
-        }
-      }
-      counts.set(r.id, n);
-    }
-    return counts;
+    if (!existingPayees) return new Map<number, number>();
+    return countRenameRuleMatches(sorted, existingPayees);
   }, [sorted, existingPayees]);
 
   const applyRule = async (r: RenameRule) => {
@@ -309,6 +313,24 @@ export function SettingsView({
           </div>
         </div>
 
+        {sorted.length > 0 && (
+          <div className="flex items-center gap-2 mt-3">
+            <input
+              className={inputCls}
+              style={{ maxWidth: 260 }}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter rules"
+              aria-label="Filter rename rules"
+            />
+            {filter.trim() && (
+              <span className="y-hint text-[11px]">
+                {visible.length} of {sorted.length} rule{sorted.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+        )}
+
         {error && (
           <Notice tone="danger" title={error.title} className="mt-3">
             {error.message}
@@ -348,6 +370,12 @@ export function SettingsView({
               keep future imports tidy.
             </Notice>
           </div>
+        ) : visible.length === 0 ? (
+          <div className="mt-1">
+            <Notice tone="info" title="No matches">
+              {`No rules match "${filter.trim()}".`}
+            </Notice>
+          </div>
         ) : (
           <div
             data-testid="rules-scroll"
@@ -357,24 +385,51 @@ export function SettingsView({
             <table className="y-table w-full text-left">
               <thead className="y-thead--sticky">
                 <tr>
-                  <th>Source (matches)</th>
+                  <th>Source</th>
                   <th>Renamed to</th>
-                  <th className="w-[84px]">Existing</th>
+                  <th className="w-[84px]">Matches</th>
                   <th className="w-[92px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r) => {
+                {visible.map((r) => {
                   const matches = matchCounts.get(r.id);
+                  const canView =
+                    onViewMatches != null &&
+                    matches != null &&
+                    matches > 0 &&
+                    renameRulePayeeFilter(r.sourcePattern) != null;
                   return (
                     <tr key={r.id} className="y-row">
-                      <td className="y-num whitespace-nowrap">{r.sourcePattern}</td>
+                      <td className="y-num whitespace-nowrap">
+                        {canView ? (
+                          <Tooltip tip="Show matching transactions">
+                            <button
+                              type="button"
+                              className="hover:underline cursor-pointer"
+                              style={{ color: "var(--y-blue)" }}
+                              onClick={() => onViewMatches!(r)}
+                              aria-label={`Show transactions matching ${r.sourcePattern}`}
+                            >
+                              {r.sourcePattern}
+                            </button>
+                          </Tooltip>
+                        ) : (
+                          r.sourcePattern
+                        )}
+                      </td>
                       <td className="truncate">{r.targetPayee}</td>
                       <td className="y-num">
                         {matches == null ? (
                           <span className="y-hint">—</span>
                         ) : (
-                          <span aria-label={`${matches} existing transactions match ${r.sourcePattern}`}>
+                          <span
+                            aria-label={
+                              matches === 1
+                                ? `1 transaction matches ${r.sourcePattern}`
+                                : `${matches} transactions match ${r.sourcePattern}`
+                            }
+                          >
                             {matches}
                           </span>
                         )}
@@ -524,7 +579,7 @@ function RuleFormModal({
         </>
       }
     >
-      <Field label="Source (matches)">
+      <Field label="Source">
         <input
           className={inputCls}
           value={sourcePattern}
@@ -565,6 +620,7 @@ type SuggestRow = {
   sourcePattern: string;
   targetPayee: string;
   count: number;
+  memos: string[];
   selected: boolean;
 };
 
@@ -583,7 +639,7 @@ function SuggestRulesModal({
   ) => void;
 }) {
   const [rows, setRows] = useState<SuggestRow[]>(() =>
-    result.suggestions.map((s) => ({ ...s, selected: true }))
+    result.suggestions.map((s) => ({ ...s, memos: s.memos ?? [], selected: true }))
   );
   const [applyToExisting, setApplyToExisting] = useState(true);
 
@@ -659,7 +715,15 @@ function SuggestRulesModal({
                         onChange={(v) => setRow(i, { selected: v })}
                       />
                     </td>
-                    <td className="y-num whitespace-nowrap">{r.sourcePattern}</td>
+                    <td className="y-num">
+                      <div className="whitespace-nowrap">{r.sourcePattern}</div>
+                      {r.memos.length > 0 && (
+                        <div className="y-hint text-[11px] font-normal max-w-[300px] whitespace-normal break-words">
+                          Memo{r.memos.length === 1 ? "" : "s"}:{" "}
+                          {r.memos.map((m) => `“${m}”`).join(" · ")}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <input
                         className={inputCls}

@@ -925,6 +925,21 @@ export const RenameRuleResponseSchema = z.looseObject({
   updatedAt: z.string().nullable().optional(),
 });
 
+export type RenameRuleResponse = z.output<typeof RenameRuleResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `POST /api/rename-rules` JSON)
+ * against the single-rule response contract. Throws a descriptive Error
+ * on mismatch. Emits no console output so it is safe in tested fetch paths.
+ */
+export function parseRenameRuleResponse(data: unknown): RenameRuleResponse {
+  const result = RenameRuleResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid rename rule response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
 export const RenameSuggestStatusResponseSchema = z.looseObject({
   enabled: z.boolean(),
   candidates: z.array(
@@ -972,6 +987,8 @@ export const RenameSuggestResponseSchema = z.looseObject({
       sourcePattern: z.string(),
       targetPayee: z.string(),
       count: z.number(),
+      /** Review evidence: the memos the AI saw for this payee, when any. */
+      memos: z.array(z.string()).optional(),
     })
   ),
   skipped: z.array(

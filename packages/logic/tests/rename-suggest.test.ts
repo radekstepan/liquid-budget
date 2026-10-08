@@ -259,6 +259,37 @@ describe("parseRenameSuggestions", () => {
     }
   });
 
+  it("carries candidate memos into suggestions as review evidence", () => {
+    const withMemos = [
+      {
+        payee: "PAYPAL *4821",
+        count: 2,
+        transactionIds: [1, 2],
+        memos: ["Spotify Premium", "order #42"],
+      },
+      { payee: "PLAIN", count: 1, transactionIds: [3], memos: [] },
+    ];
+    const { suggestions } = parseRenameSuggestions(
+      JSON.stringify({
+        renames: [
+          { source: "PAYPAL *4821", target: "Spotify" },
+          { source: "PLAIN", target: "Plain Shop" },
+        ],
+      }),
+      withMemos
+    );
+    expect(suggestions).toEqual([
+      {
+        sourcePattern: "PAYPAL *4821",
+        targetPayee: "Spotify",
+        count: 2,
+        memos: ["Spotify Premium", "order #42"],
+      },
+      { sourcePattern: "PLAIN", targetPayee: "Plain Shop", count: 1 },
+    ]);
+    expect("memos" in suggestions[1]!).toBe(false);
+  });
+
   it("ignores braces inside strings when extracting embedded JSON", () => {
     const raw = `Note: use {"renames": [...]} format.\n${JSON.stringify({
       renames: [{ source: "BCF1", target: "BC Ferries (see {map})" }],
