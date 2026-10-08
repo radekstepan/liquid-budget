@@ -630,7 +630,9 @@ export async function createSplitWithChildren(
           categoryId,
           date: parent.date,
           payee,
-          memo: c.memo ?? "",
+          // Children inherit the parent's memo unless they have their own
+          // (mirrors updateSplit; an explicit "" stays empty).
+          memo: c.memo ?? parent.memo ?? "",
           amount: childAmount,
           status: parentStatus,
           transferStatus: transferAccountId ? (c.transferStatus ?? parentStatus) : null,

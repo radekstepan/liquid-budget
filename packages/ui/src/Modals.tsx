@@ -93,6 +93,54 @@ function templateToSubRows(template: SplitTemplate, totalCents: number): DraftSu
 }
 
 /**
+ * The default sub-row memo when converting to a split: the parent's
+ * memo when it has one, otherwise the parent's payee so the row still
+ * shows where it came from. Every row stays editable.
+ */
+function defaultSubMemo(parentMemo: string, parentPayee: string): string {
+  if (parentMemo.trim()) return parentMemo;
+  if (parentPayee.trim()) return parentPayee;
+  return "";
+}
+
+/**
+ * A fresh split sub-row defaulted from the parent transaction: the
+ * memo falls back to the parent payee when the parent has no memo,
+ * and the payee is carried over. Every row stays editable.
+ */
+function blankSubRow(parentMemo: string, parentPayee: string): DraftSubRow {
+  const row: DraftSubRow = {
+    categoryId: null,
+    transferAccountId: null,
+    amount: "",
+    memo: defaultSubMemo(parentMemo, parentPayee),
+  };
+  if (parentPayee.trim()) row.payee = parentPayee;
+  return row;
+}
+
+/**
+ * Copy the parent's memo/payee into sub-rows that don't have their own
+ * yet (fresh blanks or template legs without them). Rows that already
+ * have a value — typed or from a template leg — are left untouched.
+ */
+function fillSubRowDefaults(
+  rows: DraftSubRow[],
+  parentMemo: string,
+  parentPayee: string
+): DraftSubRow[] {
+  const memo = defaultSubMemo(parentMemo, parentPayee);
+  const payee = parentPayee.trim() ? parentPayee : "";
+  if (!memo && !payee) return rows;
+  return rows.map((r) => {
+    const next: DraftSubRow = { ...r };
+    if (!next.memo && memo) next.memo = memo;
+    if (!next.payee && payee) next.payee = payee;
+    return next;
+  });
+}
+
+/**
  * The single transaction entry point. Supports three modes that the user
  * picks via a segmented toggle:
  *
@@ -278,10 +326,14 @@ export function TransactionModal({
           memo: c.memo ?? "",
         }))
       : applyAtOpen && initial && openTemplate
-        ? (templateToSubRows(openTemplate, num(initial.amount)) ?? [
-            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-            { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-          ])
+        ? fillSubRowDefaults(
+            templateToSubRows(openTemplate, num(initial.amount)) ?? [
+              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
+            ],
+            initial.memo ?? "",
+            initial.payee ?? ""
+          )
         : [
             { categoryId: null, transferAccountId: null, amount: "", memo: "" },
             { categoryId: null, transferAccountId: null, amount: "", memo: "" },
@@ -321,7 +373,7 @@ export function TransactionModal({
     }
     setTemplateNotice(null);
     if (mode !== "split") switchingMode("split");
-    setSubRows(rows);
+    setSubRows(fillSubRowDefaults(rows, memo, payee));
   };
 
   const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
@@ -367,14 +419,16 @@ export function TransactionModal({
     } else {
       setTransferAccountId("");
       setCategoryId("");
-      setSubRows((prev) =>
-        prev.length >= 2
-          ? prev
-          : [
-              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-              { categoryId: null, transferAccountId: null, amount: "", memo: "" },
-            ]
-      );
+      const converting = mode !== "split";
+      setSubRows((prev) => {
+        const rows =
+          prev.length >= 2
+            ? prev
+            : [blankSubRow(memo, payee), blankSubRow(memo, payee)];
+        // Converting to a split defaults blank sub-rows from the parent's
+        // memo/payee; re-clicking Split leaves existing rows untouched.
+        return converting ? fillSubRowDefaults(rows, memo, payee) : rows;
+      });
     }
   };
 
@@ -637,16 +691,26 @@ export function TransactionModal({
           </div>
 
           {mode !== "transfer" && (
-            <Field label="Payee">
-              <SearchList
-                value={payee}
-                onChange={setPayee}
-                options={payees}
-                allowCreate
-                placeholder="e.g. Whole Foods"
-                className={inputClass}
-              />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Payee">
+                <SearchList
+                  value={payee}
+                  onChange={setPayee}
+                  options={payees}
+                  allowCreate
+                  placeholder="e.g. Whole Foods"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Memo">
+                <TextField
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  placeholder="Optional notes"
+                  className={inputClass}
+                />
+              </Field>
+            </div>
           )}
 
           <div className={mode === "single" && isOffBudget ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
@@ -769,24 +833,34 @@ export function TransactionModal({
           )}
 
           {mode === "transfer" && (
-            <Field label="Payee (auto-generated, override optional)">
-              <SearchList
-                value={
-                  payee.startsWith("Transfer : ")
-                    ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
-                    : payee
-                }
-                onChange={setPayee}
-                options={payees}
-                allowCreate
-                placeholder={
-                  transferAccountId
-                    ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
-                    : "Transfer : <other account>"
-                }
-                className={inputClass}
-              />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Payee">
+                <SearchList
+                  value={
+                    payee.startsWith("Transfer : ")
+                      ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                      : payee
+                  }
+                  onChange={setPayee}
+                  options={payees}
+                  allowCreate
+                  placeholder={
+                    transferAccountId
+                      ? `Transfer : ${otherAccounts.find((a) => a.id === Number(transferAccountId))?.name ?? ""}`
+                      : "Transfer : <other account>"
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Memo">
+                <TextField
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  placeholder="Optional notes"
+                  className={inputClass}
+                />
+              </Field>
+            </div>
           )}
 
           {mode === "split" && (
@@ -961,7 +1035,7 @@ export function TransactionModal({
                 <Button
                   size="sm"
                   onClick={() =>
-                    setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: "", memo: "" }])
+                    setSubRows((rs) => [...rs, blankSubRow(memo, payee)])
                   }
                 >
                   + Add sub-transaction
@@ -989,15 +1063,6 @@ export function TransactionModal({
               )}
             </div>
           )}
-
-          <Field label="Memo">
-            <TextField
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              placeholder="Optional notes"
-              className={inputClass}
-            />
-          </Field>
 
           <div className="pt-1">
             <Checkbox
@@ -1436,6 +1501,17 @@ export function RecurringModal({
     } else {
       setTransferAccountId("");
       setCategoryId("");
+      if (mode !== "split") {
+        // Converting to a split defaults blank sub-rows from the parent's
+        // memo/payee; re-clicking Split leaves existing rows untouched.
+        setSubRows((prev) =>
+          fillSubRowDefaults(
+            prev.length >= 2 ? prev : [blankSubRow(memo, payee), blankSubRow(memo, payee)],
+            memo,
+            payee
+          )
+        );
+      }
     }
   };
 
@@ -1658,7 +1734,7 @@ export function RecurringModal({
       )}
 
       {mode === "transfer" && (
-        <Field label="Payee (auto-generated, override optional)">
+        <Field label="Payee">
           <SearchList
             value={payee}
             onChange={setPayee}
@@ -1846,7 +1922,7 @@ export function RecurringModal({
             <Button
               size="sm"
               onClick={() =>
-                setSubRows((rs) => [...rs, { categoryId: null, transferAccountId: null, amount: "", memo: "" }])
+                setSubRows((rs) => [...rs, blankSubRow(memo, payee)])
               }
             >
               + Add sub-transaction

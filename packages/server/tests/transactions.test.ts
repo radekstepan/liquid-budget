@@ -758,6 +758,38 @@ describe("transactions queries", () => {
       expect(inserts[2]?.values).toMatchObject({ parentId: 1, categoryId: 12, payee: "Costco" });
     });
 
+    it("inherits the parent memo for children without their own memo", async () => {
+      mock.respondWithNth("insert:transactions", 1, [
+        { id: 1, accountId: 7, categoryId: null, date: "2026-07-01", payee: "Costco", memo: "Weekly shop", amount: -10000, status: "c", parentId: null, transferAccountId: null },
+      ]);
+      mock.respondWithNth("insert:transactions", 2, [{ id: 2 }]);
+      mock.respondWithNth("insert:transactions", 3, [{ id: 3 }]);
+      mock.respondWithNth("insert:transactions", 4, [{ id: 4 }]);
+      mock.respondWith("update:accounts", [{}, {}, {}]);
+
+      await createSplitWithChildren(
+        mock.db,
+        {
+          accountId: 7,
+          date: "2026-07-01",
+          payee: "Costco",
+          memo: "Weekly shop",
+          amount: -10000,
+        },
+        [
+          { categoryId: 11, amount: -6000 },
+          { categoryId: 12, amount: -3000, memo: "Supplies" },
+          { categoryId: 12, amount: -1000, memo: "" },
+        ]
+      );
+
+      const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts[1]?.values).toMatchObject({ parentId: 1, memo: "Weekly shop" });
+      expect(inserts[2]?.values).toMatchObject({ parentId: 1, memo: "Supplies" });
+      // An explicit "" stays empty (mirrors updateSplit).
+      expect(inserts[3]?.values).toMatchObject({ parentId: 1, memo: "" });
+    });
+
     it("rounds parent and child float amounts on insert", async () => {
       mock.respondWithNth("insert:transactions", 1, [
         { id: 1, accountId: 7, categoryId: null, date: "2026-07-01", payee: "Costco", memo: "", amount: -10000, status: "c", parentId: null, transferAccountId: null },
