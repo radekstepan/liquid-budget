@@ -277,6 +277,177 @@ describe("mergeTransactions", () => {
     expect(err.status).toBe(422);
   });
 
+  it("applies user overrides to the merged fields", async () => {
+    const db = openMigratedDb();
+    const { accountId, groceriesId } = await seedTestData(db);
+
+    const manual = await createTransaction(db, {
+      accountId,
+      categoryId: groceriesId,
+      date: "2026-08-02",
+      payee: "Whole Foods",
+      memo: "weekly shop",
+      amount: -4999,
+      status: "c",
+    });
+    const imported = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "WHOLE FOODS #24",
+      amount: -5000,
+      status: "c",
+    });
+    await markImported(db, imported.id);
+
+    const { merged, deletedId } = await mergeTransactions(db, [manual.id, imported.id], {
+      date: "2026-08-03",
+      payee: "Whole Foods Market",
+      memo: "edited memo",
+      amount: -5100,
+      status: "c",
+      flagColor: "green",
+    });
+
+    // The survivor is still the imported row; only the edited fields change.
+    expect(merged.id).toBe(imported.id);
+    expect(deletedId).toBe(manual.id);
+    expect(merged.date).toBe("2026-08-03");
+    expect(merged.payee).toBe("Whole Foods Market");
+    expect(merged.memo).toBe("edited memo");
+    expect(merged.amount).toBe(-5100);
+    expect(merged.status).toBe("c");
+    expect(merged.flagColor).toBe("green");
+    // Untouched resolution survives.
+    expect(merged.categoryId).toBe(groceriesId);
+    expect(merged.needsReview).toBe(true);
+
+    const remaining = await db.select().from(schema.transactions);
+    expect(remaining).toHaveLength(1);
+    expect(await balanceOf(db, accountId)).toBe(-5100);
+  });
+
+  it("moves the merged row to another account and rebalances both", async () => {
+    const db = openMigratedDb();
+    const { accountId, savingsId } = await seedTestData(db);
+
+    const first = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "Cafe",
+      amount: -300,
+      status: "c",
+    });
+    const second = await createTransaction(db, {
+      accountId,
+      date: "2026-08-02",
+      payee: "Cafe Nero",
+      amount: -350,
+      status: "c",
+    });
+
+    const { merged } = await mergeTransactions(db, [first.id, second.id], {
+      accountId: savingsId,
+    });
+    expect(merged.id).toBe(first.id);
+    expect(merged.accountId).toBe(savingsId);
+    expect(await balanceOf(db, accountId)).toBe(0);
+    expect(await balanceOf(db, savingsId)).toBe(-300);
+  });
+
+  it("recomputes income from category and amount overrides", async () => {
+    const db = openMigratedDb();
+    const { accountId, groceriesId } = await seedTestData(db);
+
+    const first = await createTransaction(db, {
+      accountId,
+      categoryId: groceriesId,
+      date: "2026-08-01",
+      payee: "Refund A",
+      amount: -5000,
+      status: "c",
+    });
+    const second = await createTransaction(db, {
+      accountId,
+      date: "2026-08-02",
+      payee: "Refund B",
+      amount: -5000,
+      status: "c",
+    });
+
+    const { merged } = await mergeTransactions(db, [first.id, second.id], {
+      categoryId: null,
+      amount: 5000,
+      incomeMonth: "2026-09",
+    });
+    expect(merged.categoryId).toBeNull();
+    expect(merged.amount).toBe(5000);
+    expect(merged.isIncome).toBe(true);
+    expect(merged.incomeMonth).toBe("2026-09");
+    expect(await balanceOf(db, accountId)).toBe(5000);
+  });
+
+  it("rejects bad overrides without touching the DB", async () => {
+    const db = openMigratedDb();
+    const { accountId } = await seedTestData(db);
+    const one = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "A",
+      amount: -100,
+    });
+    const two = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "B",
+      amount: -100,
+    });
+    const countBefore = (await db.select().from(schema.transactions)).length;
+
+    const bad: { patch: Parameters<typeof mergeTransactions>[2]; match: RegExp }[] = [
+      { patch: { accountId: 9999 }, match: /account 9999 not found/i },
+      { patch: { transferAccountId: 9999 }, match: /account 9999 not found/i },
+      { patch: { categoryId: 9999 }, match: /category 9999 not found/i },
+      { patch: { date: "not-a-date" }, match: /invalid calendar date/i },
+      { patch: { amount: 0 }, match: /cannot be zero/i },
+      { patch: { status: "r" }, match: /only the reconcile flow/i },
+      { patch: { transferAccountId: accountId, accountId }, match: /same|source/i },
+    ];
+    for (const { patch, match } of bad) {
+      await expect(mergeTransactions(db, [one.id, two.id], patch)).rejects.toThrow(match);
+    }
+
+    expect((await db.select().from(schema.transactions)).length).toBe(countBefore);
+    expect(await balanceOf(db, accountId)).toBe(-200);
+  });
+
+  it("blocks moving the merged row onto a closed account", async () => {
+    const db = openMigratedDb();
+    const { accountId, savingsId } = await seedTestData(db);
+    const one = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "A",
+      amount: -100,
+    });
+    const two = await createTransaction(db, {
+      accountId,
+      date: "2026-08-01",
+      payee: "B",
+      amount: -100,
+    });
+    await db
+      .update(schema.accounts)
+      .set({ archived: true })
+      .where(eq(schema.accounts.id, savingsId));
+
+    const err = await mergeTransactions(db, [one.id, two.id], {
+      accountId: savingsId,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(TransactionError);
+    expect(err.status).toBe(422);
+    expect((await db.select().from(schema.transactions)).length).toBe(2);
+  });
+
   it("refuses to merge split parents and split children", async () => {
     const db = openMigratedDb();
     const { accountId, groceriesId } = await seedTestData(db);

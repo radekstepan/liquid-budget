@@ -1236,7 +1236,7 @@ describe("TransactionsView", () => {
 
     // Confirming merges and leaves the surviving row selected.
     fireEvent.click(screen.getByRole("button", { name: "Merge transactions" }));
-    await waitFor(() => expect(onMergeTransactions).toHaveBeenCalledWith([firstId, secondId]));
+    await waitFor(() => expect(onMergeTransactions).toHaveBeenCalledWith([firstId, secondId], {}));
     await waitFor(() => expect(screen.queryByTestId("merge-result")).not.toBeInTheDocument());
     expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
     const survivorId = Math.min(firstId!, secondId!);

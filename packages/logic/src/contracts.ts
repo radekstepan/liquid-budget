@@ -231,10 +231,27 @@ export const TransactionBulkUpdateSchema = z
   })
   .strict();
 
+export const TransactionMergePatchSchema = z
+  .object({
+    accountId: z.number().int().positive().optional(),
+    transferAccountId: z.number().int().positive().nullable().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    date: ISODateSchema.optional(),
+    payee: z.string().max(255).optional(),
+    memo: z.string().max(1000).nullable().optional(),
+    amount: z.number().int().refine((n) => n !== 0, { message: "Amount cannot be zero" }).optional(),
+    status: z.enum(["u", "c"]).optional(),
+    transferStatus: z.enum(["u", "c"]).nullable().optional(),
+    flagColor: TransactionFlagSchema.nullable().optional(),
+    incomeMonth: ISOMonthSchema.nullable().optional(),
+  })
+  .strict();
+
 export const TransactionMergeSchema = z
   .object({
     action: z.literal("merge").optional(),
     ids: z.array(z.number().int().positive()).length(2),
+    patch: TransactionMergePatchSchema.optional(),
   })
   .strict();
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, RenameRule, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, Query, RenameRule, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -128,7 +128,7 @@ export type BudgetAppApi = {
     ids: number[],
     patch: BulkUpdateTransactionPatch
   ) => Promise<void>;
-  mergeTransactions?: (ids: number[]) => Promise<void>;
+  mergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void>;
   addRecurring: (v: RecurringSavePayload | {
     accountId: number;
     categoryId?: number | null;
@@ -1304,6 +1304,7 @@ export function BudgetApp({
               onBulkDelete={api.bulkDeleteTransactions}
               onBulkUpdate={api.bulkUpdateTransactions}
               onMergeTransactions={api.mergeTransactions}
+              payees={payeeOptions}
               onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
               onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}
               onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}

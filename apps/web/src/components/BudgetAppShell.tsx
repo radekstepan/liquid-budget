@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
-import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, MergeableTransaction, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameRuleResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
+import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, MergeableTransaction, MergeOverrides, ReconcileState, Transaction } from "@ynab/logic";
+import { applyMergeOverrides, invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameRuleResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -1152,12 +1152,13 @@ export function BudgetAppShell({
         )
       );
     },
-    mergeTransactions: async (ids: number[]) => {
+    mergeTransactions: async (ids: number[], overrides?: MergeOverrides) => {
       const current = dataRef.current;
       const pair = (current?.transactions ?? []).filter((tx) => ids.includes(tx.id));
       if (pair.length !== 2 || pair[0] == null || pair[1] == null) {
         throw new Error("Select exactly two transactions to merge.");
       }
+      const patch = overrides ?? {};
       const toMergeable = (tx: Transaction): MergeableTransaction => ({
         ...tx,
         transferAccountId: tx.transferAccountId ?? null,
@@ -1170,11 +1171,24 @@ export function BudgetAppShell({
         primary.transferAccountId != null
           ? current?.accounts.find((a) => a.id === primary.transferAccountId)
           : null;
-      const mergedFields = resolveMergedTransaction({
+      const resolved = resolveMergedTransaction({
         primary,
         secondary,
         sourceAccount: { onBudget: srcAcc?.onBudget ?? true, kind: srcAcc?.kind ?? "liquid" },
         destAccount: destAcc ? { onBudget: destAcc.onBudget } : null,
+      });
+      const finalSrc =
+        patch.accountId != null
+          ? (current?.accounts.find((a) => a.id === patch.accountId) ?? srcAcc)
+          : srcAcc;
+      const finalDestId =
+        patch.transferAccountId !== undefined ? patch.transferAccountId : resolved.transferAccountId;
+      const finalDest =
+        finalDestId != null ? (current?.accounts.find((a) => a.id === finalDestId) ?? null) : null;
+      const mergedFields = applyMergeOverrides(resolved, patch, {
+        sourceAccount: { onBudget: finalSrc?.onBudget ?? true, kind: finalSrc?.kind ?? "liquid" },
+        destAccount: finalDest ? { onBudget: finalDest.onBudget } : null,
+        destAccountName: finalDest?.name ?? null,
       });
 
       const prevAffectedTxs = [{ ...pair[0] }, { ...pair[1] }];
@@ -1230,7 +1244,9 @@ export function BudgetAppShell({
           async () => {
             return await jsonReq("/api/transactions?action=merge", {
               method: "POST",
-              body: JSON.stringify({ ids }),
+              body: JSON.stringify(
+                Object.keys(patch).length > 0 ? { ids, patch } : { ids }
+              ),
             });
           },
           { success: "Merged 2 transactions into one.", failure: "Failed to merge transactions." },
