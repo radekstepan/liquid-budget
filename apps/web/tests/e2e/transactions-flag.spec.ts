@@ -60,6 +60,29 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await expect(page.locator("table.y-table:not(.y-scheduled-table) thead th", { hasText: /^F$/ })).toHaveCount(0);
 });
 
+test("applying a flag in the transaction modal does not increase row height", async ({ page }) => {
+  await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
+  const modal = page.locator(".y-modal").last();
+  await expect(modal).toBeVisible();
+  const picker = modal.getByRole("radiogroup", { name: "Transaction flag color" });
+  await expect(picker).toBeVisible();
+
+  const pickerBefore = await picker.boundingBox();
+  const modalBefore = await modal.boundingBox();
+  expect(pickerBefore).not.toBeNull();
+  expect(modalBefore).not.toBeNull();
+
+  // The clear (×) button appears only once a flag is set; it must not make
+  // the picker — and therefore the modal — any taller.
+  await picker.getByRole("radio", { name: "Red" }).click();
+  await expect(modal.getByRole("button", { name: "Clear flag" })).toBeVisible();
+
+  const pickerAfter = await picker.boundingBox();
+  const modalAfter = await modal.boundingBox();
+  expect(pickerAfter?.height).toBe(pickerBefore?.height);
+  expect(modalAfter?.height).toBe(modalBefore?.height);
+});
+
 test("renders the duplicate marker as a read-only D badge that cannot be changed", async ({ page }) => {
   await resetToDemo();
 
