@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useRef, useEffect } from "react";
-import type { Account } from "@ynab/logic";
+import type { Account, AppView } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
 import { Button, Icon, Tooltip, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
@@ -23,10 +23,7 @@ export function isCollapsedSections(v: unknown): v is Record<string, boolean> {
   );
 }
 
-export type View =
-  | "budget"
-  | "reports"
-  | "transactions";
+export type View = AppView;
 
 type NavItem = { key: View; label: string; icon: string; color: string };
 // YNAB4-style nav palette: bright friendly hues, lifted to pastel tints so

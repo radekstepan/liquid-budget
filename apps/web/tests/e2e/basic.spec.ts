@@ -14,7 +14,8 @@ import { test, expect } from "@playwright/test";
 test("home page loads and renders the budget app", async ({ page }) => {
   await page.goto("/");
 
-  // Document title comes from apps/web/src/app/layout.tsx:5-8.
+  // Document title comes from [[...slug]]/page.tsx generateMetadata on a
+  // full load, then tracks client-side navigation via BudgetApp.
   await expect(page).toHaveTitle(/Liquid/);
 
   // Loading state from BudgetAppShell.tsx:208-223 must clear before
