@@ -1167,5 +1167,42 @@ describe("TransactionsView", () => {
     pickFromOpenDropdownByValue(/split with template/i, "99");
     expect(onApplySplitTemplate).toHaveBeenCalledWith(renderedSingle!.id, 99);
   });
+
+  it("renders freshly imported rows bold until they are reviewed", () => {
+    const data = makeSeedBudgetData();
+    const props = {
+      data,
+      accountFilter: null as number | null,
+      onAdd: () => {},
+      onEdit: () => {},
+      onDelete: () => {},
+      onReconcile: () => {},
+      onCycleStatus: () => {},
+    };
+    const { container, rerender } = render(<TransactionsView {...props} />);
+    // The register virtualizes rows: flag two ids known to be rendered.
+    const renderedIds = Array.from(container.querySelectorAll("tr[data-txn-id]")).map((r) =>
+      Number(r.getAttribute("data-txn-id"))
+    );
+    expect(renderedIds.length).toBeGreaterThanOrEqual(2);
+    const [flaggedId, plainId] = renderedIds;
+    rerender(
+      <TransactionsView
+        {...props}
+        data={{
+          ...data,
+          transactions: data.transactions.map((t) =>
+            t.id === flaggedId ? { ...t, needsReview: true } : t
+          ),
+        }}
+      />
+    );
+    const flagged = container.querySelector(`tr[data-txn-id="${flaggedId}"]`);
+    expect(flagged).not.toBeNull();
+    expect(flagged!.classList.contains("font-bold")).toBe(true);
+    const plain = container.querySelector(`tr[data-txn-id="${plainId}"]`);
+    expect(plain).not.toBeNull();
+    expect(plain!.classList.contains("font-bold")).toBe(false);
+  });
 });
 

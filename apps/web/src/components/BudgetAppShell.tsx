@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, ReconcileState, Transaction } from "@ynab/logic";
-import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseSnapshotsResponse, parseTransactionMutationResult } from "@ynab/logic";
+import { invalidateBudgetIndex, num, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -840,6 +840,10 @@ export function BudgetAppShell({
             ...(t.flagColor !== undefined ? { flagColor: t.flagColor ?? null } : {}),
             ...(nextIsIncome !== undefined ? { isIncome: nextIsIncome } : {}),
             ...(nextIncomeMonth !== undefined ? { incomeMonth: nextIncomeMonth } : {}),
+            // Mirror the server: any edit reviews the row. Required here
+            // (not just on refetch) because status/flag/payee/memo-only
+            // edits skip the reload below.
+            needsReview: false,
           };
         });
         return { ...prev, accounts, transactions, budgetIndex: undefined };
@@ -1815,6 +1819,44 @@ export function BudgetAppShell({
             return { updated: res.updated, skippedLocked: res.skippedLocked };
           },
           { success: "Rename rule applied to existing transactions.", failure: "Failed to apply rename rule.", notifyFailure: false }
+        )
+      );
+    },
+    getRenameSuggestStatus: async () => {
+      return parseRenameSuggestStatusResponse(await jsonReq<unknown>("/api/rename-rules/suggest"));
+    },
+    suggestRenameRules: async (offset: number, limit: number) => {
+      return withSync(async () =>
+        parseRenameSuggestResponse(
+          await jsonReq<unknown>("/api/rename-rules/suggest", {
+            method: "POST",
+            body: JSON.stringify({ offset, limit }),
+          })
+        )
+      );
+    },
+    acceptRenameSuggestions: async (suggestions, applyToExisting) => {
+      const noun = suggestions.length === 1 ? "rule" : "rules";
+      return withSync(() =>
+        runMutation(
+          async () => {
+            const res = parseRenameSuggestAcceptResponse(
+              await jsonReq<unknown>("/api/rename-rules/suggest?action=accept", {
+                method: "POST",
+                body: JSON.stringify({ suggestions, applyToExisting }),
+              })
+            );
+            return {
+              updated: res.applied.updated,
+              skippedLocked: res.applied.skippedLocked,
+              generalised: res.generalised,
+            };
+          },
+          {
+            success: `Created ${suggestions.length} AI rename ${noun}.`,
+            failure: "Failed to create AI rename rules.",
+            notifyFailure: false,
+          }
         )
       );
     },

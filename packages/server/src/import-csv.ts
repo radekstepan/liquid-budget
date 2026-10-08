@@ -271,12 +271,20 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
           payeeId: payeeRow.id,
           memo: row.memo ?? "",
           amount,
-          status: "c",
+          // Imports land Uncleared so the user approves each row via the
+          // C column — the same concept as scheduled transactions, which
+          // also post as "u". Approving (u -> c) counts as reviewing the
+          // row and clears its needsReview flag.
+          status: "u",
           flagColor: null,
           transferAccountId: null,
           parentId: null,
           isIncome,
           incomeMonth: null,
+          // Freshly imported rows need user review (shown bold, YNAB4-style)
+          // until any user edit, payee-manager cascade, or reconcile clears
+          // the flag. Automatic rename-rule backfills leave it untouched.
+          needsReview: true,
         })
         .returning();
       created.push(inserted!.id);

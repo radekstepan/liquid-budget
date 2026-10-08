@@ -108,6 +108,7 @@ describe("Drizzle migrations", () => {
     expect(transactionsCols).toContain("transfer_reconciled_at");
     expect(transactionsCols).toContain("entity_id");
     expect(transactionsCols).toContain("transfer_entity_id");
+    expect(transactionsCols).toContain("needs_review");
 
     const recurringCols = tableInfo(ctx.raw, "recurring").map((c) => c.name);
     expect(recurringCols).toContain("transfer_account_id");

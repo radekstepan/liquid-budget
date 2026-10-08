@@ -125,6 +125,14 @@ export const transactions = sqliteTable(
     transferStatus: text("transfer_status", { enum: ["u", "c", "r"] }).default("c"),
     isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
     incomeMonth: text("income_month"),
+    /**
+     * True for rows freshly added by a CSV import that the user has not
+     * reviewed yet (YNAB4 shows these bold). Cleared by any user edit,
+     * payee-manager cascade, or reconcile — automatic rename-rule and AI
+     * backfills leave it untouched. Only flagged rows are eligible for
+     * AI rename suggestions.
+     */
+    needsReview: integer("needs_review", { mode: "boolean" }).notNull().default(false),
     reconciledAt: text("reconciled_at"),
     reconciliationId: integer("reconciliation_id").references((): AnySQLiteColumn => reconciliations.id, {
       onDelete: "set null",

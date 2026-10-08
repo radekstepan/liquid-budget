@@ -172,6 +172,12 @@ export type Transaction = {
   reconciliationId?: number | null;
   transferReconciledAt?: string | null;
   transferReconciliationId?: number | null;
+  /**
+   * True for rows freshly added by a CSV import that the user has not
+   * reviewed yet (rendered bold, YNAB4-style). Only flagged rows are
+   * eligible for AI rename suggestions.
+   */
+  needsReview?: boolean;
 };
 
 export type BulkUpdateTransactionPatch = {

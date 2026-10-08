@@ -1171,6 +1171,9 @@ export const TransactionsView = memo(function TransactionsView({
                       className={cx(
                         "group y-row",
                         isChildRow && "y-subrow bg-slate-50/50 text-[11px]",
+                        // Freshly imported rows render bold until reviewed,
+                        // matching YNAB4's unapproved-import look.
+                        !isChildRow && t.needsReview && "font-bold",
                         isSelected && "y-row--selected is-sel",
                         globalIndex % 2 === 1 && !isSelected && "alt"
                       )}

@@ -181,7 +181,7 @@ export async function reconcileAccount(
     // Exclude split parents so only balance-contributing child transactions are counted and flipped.
     const flipSource = await db
       .update(transactions)
-      .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
+      .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id, needsReview: false })
       .where(
         and(
           eq(transactions.accountId, input.accountId),
@@ -199,6 +199,7 @@ export async function reconcileAccount(
         transferStatus: "r",
         transferReconciledAt: today,
         transferReconciliationId: rec!.id,
+        needsReview: false,
       })
       .where(
         and(
@@ -216,7 +217,7 @@ export async function reconcileAccount(
     // Also flip split parents on this account to reconciled if all their children are reconciled
     await db
       .update(transactions)
-      .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id })
+      .set({ status: "r", reconciledAt: today, reconciliationId: rec!.id, needsReview: false })
       .where(
         and(
           eq(transactions.accountId, input.accountId),

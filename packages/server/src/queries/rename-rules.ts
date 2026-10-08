@@ -164,7 +164,10 @@ export type ApplyRenameRuleResult = {
  * same guard the payee-rename cascade uses — and reconciled rows are
  * counted as `skippedLocked` instead of edited. Rewritten rows are
  * relinked to the target payee entity (created when missing), mirroring
- * CSV import linkage.
+ * CSV import linkage. The imported (`needsReview`) flag is left
+ * untouched: a rule backfill is automatic, not a user review, so
+ * renamed rows stay bold until the user approves, edits, or
+ * reconciles them.
  */
 export async function applyRenameRuleToExisting(
   db: Db,

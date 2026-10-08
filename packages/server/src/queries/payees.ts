@@ -153,7 +153,7 @@ export async function updatePayee(
         : eq(transactions.payeeId, id);
 
       db.update(transactions)
-        .set({ payee: newName })
+        .set({ payee: newName, needsReview: false })
         .where(txCondition)
         .run();
 
@@ -241,7 +241,7 @@ export async function mergePayees(
         : eq(transactions.payeeId, source.id);
 
       db.update(transactions)
-        .set({ payee: target.name, payeeId: target.id })
+        .set({ payee: target.name, payeeId: target.id, needsReview: false })
         .where(txCondition)
         .run();
 
