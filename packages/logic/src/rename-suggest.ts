@@ -1,6 +1,7 @@
 import {
+  compileRenameRules,
   isTransferPayee,
-  matchesRenameRule,
+  matchesCompiledRule,
   normalizeRenameText,
   type RenameRuleInput,
 } from "./rename-rules.js";
@@ -108,6 +109,10 @@ export function selectRenameCandidates(
   const maxPayees = Math.max(1, Math.floor(opts?.maxPayees ?? DEFAULT_MAX_SUGGEST_PAYEES));
   const grouped = new Map<string, RenameCandidate>();
   const targets = new Set(rules.map((r) => normalizeRenameText(r.targetPayee)));
+  // Rules are compiled once (pattern regexes built once) and each payee is
+  // normalized once — the naive per-row loop recompiles every pattern for
+  // every transaction.
+  const compiled = compileRenameRules(rules);
   for (const row of rows) {
     if (!row.needsReview) continue;
     if (row.parentId != null) continue;
@@ -116,8 +121,8 @@ export function selectRenameCandidates(
     const payee = row.payee.trim();
     if (!payee) continue;
     if (isTransferPayee(payee)) continue;
-    if (rules.some((r) => matchesRenameRule(r, payee))) continue;
     const key = normalizeRenameText(payee);
+    if (compiled.some((c) => matchesCompiledRule(c, key))) continue;
     if (targets.has(key)) continue;
     const memo = row.memo?.trim() ? row.memo.trim() : "";
     const existing = grouped.get(key);
@@ -191,6 +196,11 @@ export function buildRenameSuggestMessages(candidates: RenameCandidate[]): LlmCh
 export type RenameSuggestion = RenameRuleInput & {
   /** How many stored transactions carry the raw payee. */
   count: number;
+  /**
+   * The distinct memos the AI saw alongside this payee (review evidence).
+   * Present only when the candidate had memos; absent means "none".
+   */
+  memos?: string[];
 };
 
 export type RenameSuggestionSkipped = {
@@ -357,11 +367,15 @@ export function parseRenameSuggestions(
       continue;
     }
     seen.add(key);
-    suggestions.push({
+    const suggestion: RenameSuggestion = {
       sourcePattern: candidate.payee,
       targetPayee: target,
       count: candidate.count,
-    });
+    };
+    // Carry the memos the AI saw into review so a target that only makes
+    // sense with its memo (e.g. "PAYPAL *4821" -> "Spotify") can be judged.
+    if (candidate.memos.length > 0) suggestion.memos = [...candidate.memos];
+    suggestions.push(suggestion);
   }
   return { suggestions, skipped };
 }

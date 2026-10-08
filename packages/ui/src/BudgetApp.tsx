@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, Query, RenameRule, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
 import {
   computeBudget,
   computeCashFlow,
@@ -11,6 +11,7 @@ import {
   parseMonthKey,
   monthKey,
   previousMonthKey,
+  renameRulePayeeFilter,
   resolveSplitTemplatePresets,
   round2,
   SPLIT_TEMPLATE_PRESETS,
@@ -533,6 +534,13 @@ export function BudgetApp({
     return names.map((n) => ({ value: n, label: n }));
   }, [data]);
 
+  // Stored payee names for the rename-rules match counts. Memoized so a
+  // fresh array (and a full match-count rescan) isn't built on every render.
+  const existingPayees = useMemo(
+    () => data.transactions.map((t) => t.payee),
+    [data.transactions]
+  );
+
   // Quick-fill: last month's budgeted per category (only computed for budget view)
   const lastMonthAssignments = useMemo(() => {
     if (!isBudgetView) return new Map<number, number>();
@@ -973,6 +981,23 @@ export function BudgetApp({
     [updateUrl, month, accountFilter]
   );
 
+  // A rename rule's Source link jumps to the register filtered to the rows
+  // the rule likely matches (exact source, or longest literal fragment of
+  // a pattern). Mirrors the global-search payee jump.
+  const handleViewRuleMatches = useCallback(
+    (rule: RenameRule) => {
+      const payee = renameRulePayeeFilter(rule.sourcePattern);
+      if (!payee) return;
+      startTransition(() => {
+        setShowSettingsOverlay(false);
+        setView("transactions");
+        setRegisterFilter({ payee, categoryId: null, nonce: Date.now() });
+        updateUrl("transactions", accountFilter, month);
+      });
+    },
+    [updateUrl, month, accountFilter]
+  );
+
   // ⌘K / Ctrl+K and "/" open the search modal from anywhere except while
   // typing in a field. Escape is handled by the modal itself.
   useEffect(() => {
@@ -1380,7 +1405,7 @@ export function BudgetApp({
                 ) : (
                   <SettingsView
                     rules={data.renameRules ?? []}
-                    existingPayees={data.transactions.map((t) => t.payee)}
+                    existingPayees={existingPayees}
                     onAdd={async (sourcePattern, targetPayee) => {
                       await api.addRenameRule?.(sourcePattern, targetPayee);
                     }}
@@ -1391,6 +1416,7 @@ export function BudgetApp({
                       await api.deleteRenameRule?.(id);
                     }}
                     onApply={api.applyRenameRule}
+                    onViewMatches={handleViewRuleMatches}
                     suggestStatus={renameSuggestStatus}
                     onSuggestRules={api.suggestRenameRules}
                     onAcceptSuggestions={

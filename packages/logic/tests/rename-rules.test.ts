@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   applyRenameRules,
+  compileRenameRules,
+  countRenameRuleMatches,
   inferRenameRule,
   isPatternRule,
   isTransferPayee,
   learnRenameRule,
+  matchesCompiledRule,
   matchesRenameRule,
   normalizeRenameText,
   renamePatternToRegExp,
+  renameRulePayeeFilter,
   type RenameRule,
 } from "../src/rename-rules.js";
 
@@ -486,5 +490,86 @@ describe("learnRenameRule generalised families", () => {
       { ...rule(2, "AMZN [X]", "Amazon Refs"), createdAt: "2026-01-02T00:00:00.000Z" },
     ];
     expect(applyRenameRules(rules, "AMZN 123")).toBe("Amazon Refs");
+  });
+});
+
+describe("compiled rule matching", () => {
+  it("matches the same payees as matchesRenameRule", () => {
+    const rules = [
+      rule(1, "BCF1", "BC Ferries"),
+      rule(2, "BCF[N]", "BC Ferries"),
+      rule(3, "AMZN Mktp US*[X]", "Amazon"),
+    ];
+    const compiled = compileRenameRules(rules);
+    const payees = [
+      "BCF1",
+      "bcf1",
+      "BCF9",
+      "BCF10",
+      "BCF1X",
+      "BC Ferries",
+      "AMZN Mktp US*RT3ABCD12",
+      "amzn mktp us*xy9zz",
+      "AMZN Mktp US*",
+      "Whole Foods",
+      "",
+      "   ",
+    ];
+    for (const r of rules) {
+      const c = compiled.find((x) => x.rule.id === r.id)!;
+      for (const payee of payees) {
+        const expected = payee.trim() ? matchesRenameRule(r, payee) : false;
+        expect(matchesCompiledRule(c, normalizeRenameText(payee))).toBe(expected);
+      }
+    }
+  });
+});
+
+describe("countRenameRuleMatches", () => {
+  const rules = [
+    rule(1, "BCF1", "BC Ferries"),
+    rule(2, "BCF[N]", "BC Ferries"),
+    rule(3, "UBER", "Uber"),
+  ];
+
+  it("counts matching rows per rule, excluding rows already at the target", () => {
+    const counts = countRenameRuleMatches(rules, [
+      "BCF1",
+      "bcf1", // same payee, different casing — still counts
+      "BCF9",
+      "BC Ferries", // already at the target — excluded
+      "UBER TRIP", // no rule matches
+      "",
+    ]);
+    expect(counts.get(1)).toBe(2);
+    expect(counts.get(2)).toBe(3);
+    expect(counts.get(3)).toBe(0);
+  });
+
+  it("returns zero counts for every rule when nothing matches", () => {
+    const counts = countRenameRuleMatches(rules, ["Whole Foods"]);
+    expect(counts.get(1)).toBe(0);
+    expect(counts.get(2)).toBe(0);
+    expect(counts.get(3)).toBe(0);
+  });
+});
+
+describe("renameRulePayeeFilter", () => {
+  it("returns the source itself for exact rules", () => {
+    expect(renameRulePayeeFilter("BCF1")).toBe("BCF1");
+    expect(renameRulePayeeFilter("  AMZN Mktp  ")).toBe("AMZN Mktp");
+  });
+
+  it("returns the longest literal fragment for pattern rules", () => {
+    expect(renameRulePayeeFilter("BCF[N]")).toBe("BCF");
+    expect(renameRulePayeeFilter("AMZN Mktp US*[X]")).toBe("AMZN Mktp US*");
+    expect(renameRulePayeeFilter("STORE #[N] - SEATTLE")).toBe("- SEATTLE");
+  });
+
+  it("returns null when there is no literal text to filter on", () => {
+    expect(renameRulePayeeFilter("")).toBeNull();
+    expect(renameRulePayeeFilter("   ")).toBeNull();
+    expect(renameRulePayeeFilter("[N]")).toBeNull();
+    expect(renameRulePayeeFilter("[N][X]")).toBeNull();
   });
 });

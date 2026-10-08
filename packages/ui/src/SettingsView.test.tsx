@@ -103,6 +103,46 @@ describe("SettingsView AI suggestions", () => {
     await waitFor(() => expect(screen.getByText("AI rules created")).not.toBeNull());
   });
 
+  it("shows the memos the AI saw under each suggestion that had any", async () => {
+    const onSuggestRules = vi.fn(async () => ({
+      suggestions: [
+        {
+          sourcePattern: "PAYPAL *4821",
+          targetPayee: "Spotify",
+          count: 2,
+          memos: ["Spotify Premium", "order #42"],
+        },
+        { sourcePattern: "BCF1", targetPayee: "BC Ferries", count: 1 },
+      ],
+      skipped: [],
+      model: "test-model",
+      processed: 2,
+    }));
+    render(
+      <SettingsView
+        rules={[]}
+        onAdd={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        suggestStatus={{
+          enabled: true,
+          candidates: [{ payee: "PAYPAL *4821", count: 2 }],
+          totalUnique: 2,
+          truncated: false,
+        }}
+        onSuggestRules={onSuggestRules}
+        onAcceptSuggestions={async () => ({ updated: 0, skippedLocked: 0, generalised: false })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /suggest rename rules with ai/i }));
+    await waitFor(() => expect(screen.getByText("PAYPAL *4821")).not.toBeNull());
+    expect(screen.getByText(/Spotify Premium/)).toBeInTheDocument();
+    expect(screen.getByText(/order #42/)).toBeInTheDocument();
+    // The memo-less row shows no memo line.
+    expect(screen.getAllByText(/Memos:/)).toHaveLength(1);
+  });
+
   it("shows suggest errors inline instead of opening the modal", async () => {
     const onSuggestRules = vi.fn(async () => {
       throw new Error("The AI service returned an error (HTTP 500).");

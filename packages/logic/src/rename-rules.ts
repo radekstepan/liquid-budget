@@ -118,6 +118,99 @@ export function renamePatternToRegExp(sourcePattern: string): RegExp | null {
   return new RegExp(`^${body}$`, "i");
 }
 
+/**
+ * A rename rule compiled for bulk matching: the target is normalized once
+ * and each pattern regex is built once instead of once per payee.
+ */
+export type CompiledRenameRule = {
+  rule: RenameRule;
+  normalizedTarget: string;
+  /** Set for exact rules: normalized source text for O(1) comparison. */
+  normalizedSource?: string;
+  /** Set for pattern rules with a valid regex; absent means "never matches". */
+  regex?: RegExp;
+};
+
+export function compileRenameRules(rules: RenameRule[]): CompiledRenameRule[] {
+  return rules.map((rule) => {
+    const pattern = rule.sourcePattern.trim();
+    const normalizedTarget = normalizeRenameText(rule.targetPayee);
+    if (isPatternRule(pattern)) {
+      const regex = renamePatternToRegExp(pattern);
+      return regex ? { rule, normalizedTarget, regex } : { rule, normalizedTarget };
+    }
+    return { rule, normalizedTarget, normalizedSource: normalizeRenameText(pattern) };
+  });
+}
+
+/**
+ * Match an already-normalized payee against a compiled rule. Mirrors
+ * {@link matchesRenameRule}, including its empty-payee behaviour.
+ */
+export function matchesCompiledRule(
+  compiled: CompiledRenameRule,
+  normalizedPayee: string
+): boolean {
+  if (!normalizedPayee) return false;
+  if (compiled.regex) return compiled.regex.test(normalizedPayee);
+  if (compiled.normalizedSource !== undefined) {
+    return compiled.normalizedSource === normalizedPayee;
+  }
+  return false;
+}
+
+/**
+ * Per-rule counts of stored payees the rule would rewrite: matching rows
+ * not already at the target (mirrors the server's apply semantics).
+ *
+ * Stored payees are normalized once and grouped by distinct text, so this
+ * is O(distinct payees × rules) with each pattern regex compiled once —
+ * the naive per-row loop is O(rows × rules) with a regex build per cell.
+ */
+export function countRenameRuleMatches(
+  rules: RenameRule[],
+  payees: string[]
+): Map<number, number> {
+  const counts = new Map<number, number>();
+  const byNormalized = new Map<string, number>();
+  for (const payee of payees) {
+    if (!payee.trim()) continue;
+    const key = normalizeRenameText(payee);
+    byNormalized.set(key, (byNormalized.get(key) ?? 0) + 1);
+  }
+  for (const compiled of compileRenameRules(rules)) {
+    let n = 0;
+    for (const [normalized, count] of byNormalized) {
+      if (normalized === compiled.normalizedTarget) continue;
+      if (matchesCompiledRule(compiled, normalized)) n += count;
+    }
+    counts.set(compiled.rule.id, n);
+  }
+  return counts;
+}
+
+/**
+ * Substring for filtering the transaction register down to rows a rule
+ * likely matches. Exact rules filter on the source text itself; pattern
+ * rules filter on the longest literal fragment (`BCF[N]` → `BCF`).
+ * Returns null when a pattern has no literal text to filter on.
+ */
+export function renameRulePayeeFilter(sourcePattern: string): string | null {
+  const trimmed = sourcePattern.trim();
+  if (!trimmed) return null;
+  if (!isPatternRule(trimmed)) return trimmed;
+  const fragments = trimmed
+    .split(/\[[nx]\]/gi)
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0);
+  if (fragments.length === 0) return null;
+  let longest = fragments[0]!;
+  for (const f of fragments) {
+    if (f.length > longest.length) longest = f;
+  }
+  return longest;
+}
+
 /** Does a raw payee match this rule? Exact rules compare normalized text. */
 export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
   const raw = payee.trim();
