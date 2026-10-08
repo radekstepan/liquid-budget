@@ -12,9 +12,12 @@ import {
   isTransferPayee,
   isValidISODate,
   isValidISOMonth,
+  pickMergePrimary,
+  resolveMergedTransaction,
   TRANSACTION_DUPLICATE_FLAG,
   TRANSACTION_FLAG_COLORS,
   TransactionError,
+  type MergeableTransaction,
 } from "@ynab/logic";
 import {
   assertEntityInvariants,
@@ -1475,6 +1478,140 @@ export async function bulkDeleteTransactions(db: Database, ids: number[]) {
       }
     }
     return deleted;
+  });
+}
+
+export type MergeTransactionsResult = {
+  merged: typeof transactions.$inferSelect;
+  deletedId: number;
+};
+
+/**
+ * Merge exactly two transactions into one (YNAB4-style).
+ *
+ * The imported row (fresh CSV import or YNAB4 backup row) survives and
+ * the other is deleted; field-level priority is resolved by
+ * `resolveMergedTransaction` — imported bank data wins every field it
+ * carries, manual curation fills the gaps. Both old balance effects are
+ * reversed and the merged effect applied, so merging a duplicate leaves
+ * exactly one balance impact.
+ *
+ * Reconciled (locked) rows and split parents/children are rejected, like
+ * the delete/edit paths.
+ */
+export async function mergeTransactions(db: Database, ids: number[]): Promise<MergeTransactionsResult> {
+  if (
+    !Array.isArray(ids) ||
+    ids.length !== 2 ||
+    !ids.every((id) => Number.isInteger(id) && (id as number) > 0)
+  ) {
+    throw new TransactionError("merge requires exactly two transaction ids", 400);
+  }
+  const [firstId, secondId] = ids as [number, number];
+  if (firstId === secondId) {
+    throw new TransactionError("cannot merge a transaction with itself", 400);
+  }
+
+  return withTransaction(db, async () => {
+    const [first] = await db.select().from(transactions).where(eq(transactions.id, firstId));
+    const [second] = await db.select().from(transactions).where(eq(transactions.id, secondId));
+    const missingId = first == null ? firstId : second == null ? secondId : null;
+    if (missingId != null || first == null || second == null) {
+      throw new TransactionError(`transaction ${missingId} not found`, 404);
+    }
+
+    for (const row of [first, second]) {
+      if (row.status === "r" || row.transferStatus === "r") {
+        throw new TransactionError(
+          `Transaction ${row.id} is reconciled and locked. Unreconcile before merging.`,
+          422
+        );
+      }
+      if (row.parentId != null) {
+        throw new TransactionError(
+          `Transaction ${row.id} is a split sub-transaction and cannot be merged`,
+          400
+        );
+      }
+      if ((await childCount(db, row.id)) > 0) {
+        throw new TransactionError(
+          `Transaction ${row.id} is a split transaction and cannot be merged`,
+          400
+        );
+      }
+    }
+
+    const toMergeable = (row: typeof first): MergeableTransaction => ({
+      id: row.id,
+      accountId: row.accountId,
+      transferAccountId: row.transferAccountId,
+      categoryId: row.categoryId,
+      date: row.date,
+      payee: row.payee,
+      payeeId: row.payeeId,
+      memo: row.memo ?? "",
+      amount: Number(row.amount),
+      status: row.status as ClearedStatus,
+      transferStatus: (row.transferStatus as ClearedStatus | null) ?? null,
+      flagColor: sanitizeFlagState(row.flagColor),
+      needsReview: Boolean(row.needsReview),
+      entityId: row.entityId,
+      transferEntityId: row.transferEntityId,
+      isIncome: Boolean(row.isIncome),
+      incomeMonth: row.incomeMonth,
+    });
+    const [primary, secondary] = pickMergePrimary(toMergeable(first), toMergeable(second));
+
+    const srcInfo = await getAccountInfo(db, primary.accountId);
+    const destInfo =
+      primary.transferAccountId != null
+        ? await getTransferTargetInfo(db, primary.transferAccountId)
+        : null;
+    const merged = resolveMergedTransaction({
+      primary,
+      secondary,
+      sourceAccount: { onBudget: srcInfo?.onBudget ?? true, kind: srcInfo?.kind ?? "liquid" },
+      destAccount: destInfo ? { onBudget: destInfo.onBudget } : null,
+    });
+
+    await applyBalance(db, first.accountId, -Number(first.amount));
+    if (first.transferAccountId != null) {
+      await applyBalance(db, first.transferAccountId, Number(first.amount));
+    }
+    await applyBalance(db, second.accountId, -Number(second.amount));
+    if (second.transferAccountId != null) {
+      await applyBalance(db, second.transferAccountId, Number(second.amount));
+    }
+    await applyBalance(db, merged.accountId, merged.amount);
+    if (merged.transferAccountId != null) {
+      await applyBalance(db, merged.transferAccountId, -merged.amount);
+    }
+
+    const [updated] = await db
+      .update(transactions)
+      .set({
+        accountId: merged.accountId,
+        categoryId: merged.categoryId,
+        transferAccountId: merged.transferAccountId,
+        date: merged.date,
+        payee: merged.payee,
+        payeeId: merged.payeeId,
+        memo: merged.memo,
+        amount: merged.amount,
+        status: merged.status,
+        transferStatus: merged.transferStatus,
+        flagColor: merged.flagColor,
+        isIncome: merged.isIncome,
+        incomeMonth: merged.incomeMonth,
+        needsReview: merged.needsReview,
+        entityId: merged.entityId,
+        transferEntityId: merged.transferEntityId,
+      })
+      .where(eq(transactions.id, primary.id))
+      .returning();
+    await db.delete(transactions).where(eq(transactions.id, secondary.id));
+
+    return { merged: updated!, deletedId: secondary.id };
   });
 }
 

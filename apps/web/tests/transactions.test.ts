@@ -276,6 +276,44 @@ describe("PATCH /api/transactions (BUG-19)", () => {
       expect(json.ok).toBe(true);
       expect(json.count).toBe(1);
     });
+
+    it("merges two transactions with action=merge and rejects other id counts", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const tx1 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "Store A",
+      });
+      const tx2 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "STORE A #1",
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/transactions?action=merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [tx1!.id, tx2!.id] }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.merged.id).toBe(tx1!.id);
+      expect(json.deletedId).toBe(tx2!.id);
+
+      const bad = new NextRequest("http://localhost:3000/api/transactions?action=merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [tx1!.id] }),
+      });
+      const badRes = await POST(bad);
+      expect(badRes.status).toBe(400);
+    });
   });
 
   describe("Parametrized State-Transition Tests", () => {

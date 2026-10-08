@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, Query, SplitTemplate, Transaction, TransactionFlagColor } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, MergeableTransaction, Query, SplitTemplate, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
   applyQuery,
   buildSearchCtx,
@@ -10,11 +10,13 @@ import {
   filterLabel,
   frequencyLabel,
   num,
+  pickMergePrimary,
   recurringFlavour,
 } from "@ynab/logic";
 import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Select, Tooltip, money, cx } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
+import { MergePreviewModal } from "./MergePreviewModal.js";
 
 type Txn = Omit<Transaction, "amount"> & { amount: number; runningBalance: number | null };
 
@@ -171,6 +173,7 @@ export const TransactionsView = memo(function TransactionsView({
   onFlag,
   onBulkDelete,
   onBulkUpdate,
+  onMergeTransactions,
   onAddRecurring,
   onAddRecurringTransfer,
   onEditRecurring,
@@ -208,6 +211,7 @@ export const TransactionsView = memo(function TransactionsView({
   onFlag: (id: number, color: TransactionFlagColor | null) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
   onBulkUpdate?: (ids: number[], patch: BulkUpdateTransactionPatch) => Promise<void> | void;
+  onMergeTransactions?: (ids: number[]) => Promise<void> | void;
   onAddRecurring?: () => void;
   onAddRecurringTransfer?: () => void;
   onEditRecurring?: (id: number) => void;
@@ -252,8 +256,33 @@ export const TransactionsView = memo(function TransactionsView({
     if (appliedQuery.filters.length === 0) clearAppliedQuery();
     else setAppliedQuery({ ...appliedQuery, text: "" });
   }, [appliedQuery, clearAppliedQuery]);
+
+  // Confirm a merge preview: run the merge, then leave the surviving
+  // (merged) row selected. On failure the modal stays open with the
+  // error and the selection is untouched.
+  const confirmMergePreview = useCallback(
+    async (ids: number[]) => {
+      if (!onMergeTransactions) return;
+      await onMergeTransactions(ids);
+      const [a, b] = ids.map((id) => data.transactions.find((t) => t.id === id));
+      if (a && b) {
+        const toMergeable = (t: Transaction): MergeableTransaction => ({
+          ...t,
+          transferAccountId: t.transferAccountId ?? null,
+          amount: num(t.amount),
+        });
+        const [survivor] = pickMergePrimary(toMergeable(a), toMergeable(b));
+        setSelectedIds(new Set([survivor.id]));
+      } else {
+        setSelectedIds(new Set());
+      }
+      setMergePreviewIds(null);
+    },
+    [data.transactions, onMergeTransactions]
+  );
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [mergePreviewIds, setMergePreviewIds] = useState<number[] | null>(null);
   const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
   const [sort, setSort] = useLocalStorage<SortState>(
     "ynab:transactions:sort",
@@ -965,6 +994,18 @@ export const TransactionsView = memo(function TransactionsView({
                 />
               );
             })()}
+            {selectedIds.size === 2 && onMergeTransactions && (
+              <Tooltip tip="Merge the two selected transactions into one (imported data wins)">
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="!py-0.5 !px-2 text-[11px]"
+                  onClick={() => setMergePreviewIds(Array.from(selectedIds))}
+                >
+                  Merge (2)
+                </Button>
+              </Tooltip>
+            )}
             <Button
               variant="danger"
               size="sm"
@@ -1653,6 +1694,20 @@ export const TransactionsView = memo(function TransactionsView({
           </div>
         </div>
       )}
+
+      {mergePreviewIds != null &&
+        mergePreviewIds.length === 2 &&
+        mergePreviewIds.every((id) => data.transactions.some((t) => t.id === id)) &&
+        onMergeTransactions && (
+          <MergePreviewModal
+            accounts={data.accounts}
+            categories={data.categories}
+            transactions={data.transactions}
+            ids={mergePreviewIds}
+            onClose={() => setMergePreviewIds(null)}
+            onConfirm={confirmMergePreview}
+          />
+        )}
     </div>
   );
 });

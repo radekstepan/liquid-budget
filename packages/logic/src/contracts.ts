@@ -231,6 +231,13 @@ export const TransactionBulkUpdateSchema = z
   })
   .strict();
 
+export const TransactionMergeSchema = z
+  .object({
+    action: z.literal("merge").optional(),
+    ids: z.array(z.number().int().positive()).length(2),
+  })
+  .strict();
+
 export const AccountCreateSchema = z
   .object({
     name: z.string().min(1).max(255),

@@ -127,6 +127,7 @@ export type BudgetAppApi = {
     ids: number[],
     patch: BulkUpdateTransactionPatch
   ) => Promise<void>;
+  mergeTransactions?: (ids: number[]) => Promise<void>;
   addRecurring: (v: RecurringSavePayload | {
     accountId: number;
     categoryId?: number | null;
@@ -1281,6 +1282,7 @@ export function BudgetApp({
               onFlag={setFlag}
               onBulkDelete={api.bulkDeleteTransactions}
               onBulkUpdate={api.bulkUpdateTransactions}
+              onMergeTransactions={api.mergeTransactions}
               onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
               onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}
               onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}
