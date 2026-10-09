@@ -1596,8 +1596,11 @@ input.y-inline-amt {
   outline-offset: 1px;
 }
 .y-flag-clear {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 3px;
   background: transparent;
