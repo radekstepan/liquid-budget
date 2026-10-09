@@ -191,9 +191,8 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     const editModal = page.locator(".y-modal").last();
     await expect(editModal.locator(".y-modal-head")).toHaveText("Edit Transaction");
 
-    // 2. Uncheck the "Cleared" checkbox.
-    const clearedCheckboxLabel = editModal.locator("label").filter({ hasText: "Cleared (bank has processed this)" });
-    await clearedCheckboxLabel.click();
+    // 2. Toggle the "Cleared" flag off.
+    await editModal.getByRole("button", { name: "Cleared", exact: true }).click();
 
     // 3. Verify confirmation modal appears: "Unreconcile Transaction? Unreconciling a transaction will affect past reconciliation rounds."
     await expect(editModal.locator(".y-modal-head")).toHaveText("Unreconcile Transaction?");
@@ -209,8 +208,7 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     const dateInput = editModal.locator('input[type="date"]').first();
     await expect(amountInput).toBeEnabled();
     await expect(dateInput).toBeEnabled();
-    const clearedInput = editModal.locator('input[type="checkbox"]').first();
-    await expect(clearedInput).not.toBeChecked();
+    await expect(editModal.getByRole("button", { name: "Uncleared", exact: true })).toHaveText("U");
 
     // 6. Update amount and save changes.
     await amountInput.fill("45.00");
