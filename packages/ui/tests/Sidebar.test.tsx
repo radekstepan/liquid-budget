@@ -557,6 +557,78 @@ describe("Sidebar", () => {
     expect(newBadge).toHaveClass("y-badge--new");
   });
 
+  it("calls onBadgeClick with the account and kind when a badge is clicked", () => {
+    const onBadgeClick = vi.fn();
+    const onSelectAccount = vi.fn();
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={onSelectAccount}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+        duplicatesByAccount={{ 1: 3 }}
+        onBadgeClick={onBadgeClick}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 duplicates in Cash" }));
+    expect(onBadgeClick).toHaveBeenCalledWith(1, "duplicates");
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 new in Cash" }));
+    expect(onBadgeClick).toHaveBeenCalledWith(1, "new");
+    // Badge clicks never toggle the row itself.
+    expect(onSelectAccount).not.toHaveBeenCalled();
+  });
+
+  it("activates badges with Enter and Space without toggling the row", () => {
+    const onBadgeClick = vi.fn();
+    const onSelectAccount = vi.fn();
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={onSelectAccount}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+        duplicatesByAccount={{ 1: 3 }}
+        onBadgeClick={onBadgeClick}
+      />
+    );
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Show 3 duplicates in Cash" }), { key: "Enter" });
+    expect(onBadgeClick).toHaveBeenCalledWith(1, "duplicates");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Show 2 new in Cash" }), { key: " " });
+    expect(onBadgeClick).toHaveBeenCalledWith(1, "new");
+    expect(onSelectAccount).not.toHaveBeenCalled();
+  });
+
+  it("renders plain non-interactive badges when onBadgeClick is omitted", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+        duplicatesByAccount={{ 1: 3 }}
+      />
+    );
+
+    const cashBtn = screen.getByRole("button", { name: /cash/i });
+    const badges = cashBtn.querySelectorAll(".y-badge");
+    expect(badges).toHaveLength(2);
+    for (const badge of badges) {
+      expect(badge.getAttribute("role")).toBeNull();
+      expect(badge).not.toHaveClass("y-badge--clickable");
+    }
+  });
+
   it("renders no badge column when no account has new items or duplicates", () => {
     const { container } = render(
       <Sidebar

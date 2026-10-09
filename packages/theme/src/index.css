@@ -687,6 +687,17 @@ body::after {
   background: linear-gradient(#82bd4d, #558329);
   border-color: #3f6620;
 }
+/* Sidebar badges that open the filtered register on click. */
+.y-badge--clickable {
+  cursor: pointer;
+}
+.y-badge--clickable:hover {
+  filter: brightness(1.1);
+}
+.y-badge--clickable:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
 /* Badge group right of sidebar account names: duplicates first, new
    second, right-aligned with a fixed gap. Rendered on every row (empty
    when zero) whenever any account has new items or duplicates; one

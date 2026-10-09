@@ -934,6 +934,28 @@ export function BudgetApp({
     [updateUrl, month, accountFilter]
   );
 
+  // Sidebar badge click: open the account's register pre-filtered to the
+  // badge kind (unreviewed rows for "new", marker rows for "duplicates").
+  // Unlike row clicks this never toggles the account off.
+  const handleBadgeClick = useCallback(
+    (accountId: number, kind: "new" | "duplicates") => {
+      startTransition(() => {
+        setAccountFilter(accountId);
+        setView("transactions");
+        setShowSettingsOverlay(false);
+        setRegisterFilter({
+          query: {
+            filters: [{ kind: "is", value: kind === "duplicates" ? "duplicate" : "new" }],
+            text: "",
+          },
+          nonce: Date.now(),
+        });
+        updateUrl("transactions", accountId, month);
+      });
+    },
+    [updateUrl, month]
+  );
+
   const handleSelectTransactionFromReport = useCallback(
     (t: Transaction) => {
       const parentTxn = t.parentId != null ? data.transactions.find((x) => x.id === t.parentId) : null;
@@ -1257,6 +1279,7 @@ export function BudgetApp({
         onReorderAccount={api.reorderAccount}
         newByAccount={newByAccount}
         duplicatesByAccount={duplicatesByAccount}
+        onBadgeClick={handleBadgeClick}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>

@@ -78,6 +78,8 @@ describe("searchQuery parsing", () => {
   it("builds filters from raw key/value", () => {
     expect(filterFromRaw("payee", "whole")).toEqual({ kind: "payee", value: "whole" });
     expect(filterFromRaw("is", "flagged")).toEqual({ kind: "is", value: "flagged" });
+    expect(filterFromRaw("is", "new")).toEqual({ kind: "is", value: "new" });
+    expect(filterFromRaw("is", "duplicate")).toEqual({ kind: "is", value: "duplicate" });
     expect(filterFromRaw("is", "nope")).toBeNull();
   });
 });
@@ -104,6 +106,23 @@ describe("searchQuery matching (cents, numeric ids, flags)", () => {
     expect(matchesFilter(d.transactions[2]!, { kind: "is", value: "flagged" }, ctx)).toBe(true);
     expect(matchesFilter(d.transactions[3]!, { kind: "is", value: "transfer" }, ctx)).toBe(true);
     expect(matchesFilter(d.transactions[3]!, { kind: "is", value: "uncategorized" }, ctx)).toBe(false);
+  });
+
+  it("matches is:new on unreviewed rows and is:duplicate on the duplicate marker", () => {
+    const d = data();
+    const ctx = buildSearchCtx(d);
+    const fresh = t({ accountId: 1, payee: "Fresh Import", amount: "-100", date: "2026-09-05", needsReview: true });
+    const reviewed = t({ accountId: 1, payee: "Old Row", amount: "-100", date: "2026-09-05" });
+    const dupe = t({ accountId: 1, payee: "Fresh Import", amount: "-100", date: "2026-09-05", flagColor: "duplicate" });
+    const flagged = t({ accountId: 1, payee: "Flagged Row", amount: "-100", date: "2026-09-05", flagColor: "red" });
+    expect(matchesFilter(fresh, { kind: "is", value: "new" }, ctx)).toBe(true);
+    expect(matchesFilter(reviewed, { kind: "is", value: "new" }, ctx)).toBe(false);
+    expect(matchesFilter(dupe, { kind: "is", value: "new" }, ctx)).toBe(false);
+    expect(matchesFilter(dupe, { kind: "is", value: "duplicate" }, ctx)).toBe(true);
+    expect(matchesFilter(flagged, { kind: "is", value: "duplicate" }, ctx)).toBe(false);
+    expect(matchesFilter(reviewed, { kind: "is", value: "duplicate" }, ctx)).toBe(false);
+    // The duplicate marker is not a user flag: is:flagged still excludes it.
+    expect(matchesFilter(dupe, { kind: "is", value: "flagged" }, ctx)).toBe(false);
   });
 
   it("applies combined query with scope", () => {

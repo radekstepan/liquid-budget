@@ -12,7 +12,9 @@ export type StatusValue =
   | "inflow"
   | "outflow"
   | "transfer"
-  | "uncategorized";
+  | "uncategorized"
+  | "new"
+  | "duplicate";
 
 export type Filter =
   | { kind: "payee"; value: string; exact?: boolean }
@@ -100,6 +102,8 @@ export const STATUS_OPTIONS: { value: StatusValue; label: string; hint: string }
   { value: "inflow", label: "Inflow", hint: "Money coming in" },
   { value: "transfer", label: "Transfer", hint: "Between your accounts" },
   { value: "uncategorized", label: "Uncategorized", hint: "Needs a category" },
+  { value: "new", label: "New", hint: "Not yet reviewed" },
+  { value: "duplicate", label: "Duplicate", hint: "Flagged as a possible duplicate" },
 ];
 
 // ---------- input parsing ----------
@@ -468,6 +472,10 @@ export function matchesFilter(tx: Transaction, f: Filter, ctx: SearchCtx): boole
           return tx.transferAccountId != null;
         case "uncategorized":
           return tx.categoryId == null && tx.transferAccountId == null;
+        case "new":
+          return tx.needsReview === true;
+        case "duplicate":
+          return tx.flagColor === "duplicate";
       }
       break;
     }

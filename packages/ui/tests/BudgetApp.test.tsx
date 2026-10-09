@@ -199,6 +199,41 @@ describe("BudgetApp", () => {
     expect(within(chip).getByText("Superstore")).toBeInTheDocument();
   });
 
+  it("opens the account register filtered to duplicates or new rows when a sidebar badge is clicked", async () => {
+    const { api } = makeApi();
+    const seed = makeSeedBudgetData();
+    render(
+      <BudgetApp
+        data={{
+          ...seed,
+          transactions: [
+            ...seed.transactions,
+            { id: 90001, accountId: 2, categoryId: null, date: "2026-09-05", payee: "BadgeDupe Payee", memo: "", amount: "-100", status: "c", parentId: null, transferAccountId: null, flagColor: "duplicate" },
+            { id: 90002, accountId: 2, categoryId: null, date: "2026-09-05", payee: "BadgeNew Payee", memo: "", amount: "-200", status: "c", parentId: null, transferAccountId: null, needsReview: true },
+          ],
+        }}
+        api={api}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 duplicate in EQ Bank" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Is filter" })).toBeInTheDocument();
+    });
+    const dupeChip = screen.getByRole("button", { name: "Edit Is filter" });
+    expect(within(dupeChip).getByText("Duplicate")).toBeInTheDocument();
+    expect(screen.getAllByText("BadgeDupe Payee").length).toBeGreaterThan(0);
+    expect(screen.queryByText("BadgeNew Payee")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /show \d+ new in eq bank/i }));
+    await waitFor(() => {
+      expect(screen.getAllByText("BadgeNew Payee").length).toBeGreaterThan(0);
+    });
+    const newChip = screen.getByRole("button", { name: "Edit Is filter" });
+    expect(within(newChip).getByText("New")).toBeInTheDocument();
+    expect(screen.queryByText("BadgeDupe Payee")).not.toBeInTheDocument();
+  });
+
   it("navigates to the Settings view from the Inspector gear menu", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);

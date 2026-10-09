@@ -78,26 +78,88 @@ function badgeWidthFor(maxCount: number): number {
 }
 
 /**
+ * One sidebar badge. Badges live inside the account row button, so a
+ * clickable badge is a span with button semantics (a nested <button> would
+ * be invalid HTML); clicks and keys stop propagation so the row itself
+ * never toggles.
+ */
+function Badge({
+  count,
+  label,
+  tip,
+  className,
+  onActivate,
+}: {
+  count: number;
+  /** Accessible name, e.g. "Show 3 duplicates in Cash". */
+  label: string;
+  /** Hover tooltip text. */
+  tip: string;
+  className: string;
+  onActivate?: () => void;
+}) {
+  const badgeStyle = { minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" };
+  const badge = (
+    <span
+      className={className}
+      style={badgeStyle}
+      role={onActivate ? "button" : undefined}
+      tabIndex={onActivate ? 0 : undefined}
+      aria-label={onActivate ? label : undefined}
+      onClick={
+        onActivate
+          ? (e) => {
+              e.stopPropagation();
+              onActivate();
+            }
+          : undefined
+      }
+      onKeyDown={
+        onActivate
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onActivate();
+              }
+            }
+          : undefined
+      }
+    >
+      {count}
+    </span>
+  );
+  return <Tooltip tip={tip}>{badge}</Tooltip>;
+}
+
+/**
  * Badge group right of the account name: the red duplicates badge first
  * (higher priority), then the green new-count badge, always separated by
- * the same gap. The group hugs the amount inside one shared min-width, so
+ * the same gap. Clicking a badge opens the account's register filtered to
+ * that kind. The group hugs the amount inside one shared min-width, so
  * leftover space lands before the badges (after the name) — never between
  * them — while amounts stay aligned across rows.
  */
 function BadgeCell({
+  accountId,
+  accountName,
   dupCount,
   newCount,
   showDup,
   showNew,
   minWidth,
+  onBadgeClick,
 }: {
+  accountId: number;
+  accountName: string;
   dupCount: number;
   newCount: number;
   showDup: boolean;
   showNew: boolean;
   minWidth: number;
+  onBadgeClick?: (accountId: number, kind: "new" | "duplicates") => void;
 }) {
-  const badgeStyle = { minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" };
+  const clickable = onBadgeClick ? " y-badge--clickable" : "";
   return (
     <span
       className="y-side-newcol"
@@ -105,18 +167,22 @@ function BadgeCell({
       aria-hidden={dupCount === 0 && newCount === 0 ? true : undefined}
     >
       {showDup && dupCount > 0 && (
-        <Tooltip tip={`${dupCount} duplicate${dupCount === 1 ? "" : "s"}`}>
-          <span className="y-badge" style={badgeStyle}>
-            {dupCount}
-          </span>
-        </Tooltip>
+        <Badge
+          count={dupCount}
+          label={`Show ${dupCount} duplicate${dupCount === 1 ? "" : "s"} in ${accountName}`}
+          tip={`Show ${dupCount} duplicate${dupCount === 1 ? "" : "s"}`}
+          className={`y-badge${clickable}`}
+          onActivate={onBadgeClick ? () => onBadgeClick(accountId, "duplicates") : undefined}
+        />
       )}
       {showNew && newCount > 0 && (
-        <Tooltip tip={`${newCount} new`}>
-          <span className="y-badge y-badge--new" style={badgeStyle}>
-            {newCount}
-          </span>
-        </Tooltip>
+        <Badge
+          count={newCount}
+          label={`Show ${newCount} new in ${accountName}`}
+          tip={`Show ${newCount} new`}
+          className={`y-badge y-badge--new${clickable}`}
+          onActivate={onBadgeClick ? () => onBadgeClick(accountId, "new") : undefined}
+        />
       )}
     </span>
   );
@@ -133,6 +199,7 @@ export const Sidebar = memo(function Sidebar({
   onReorderAccount,
   newByAccount,
   duplicatesByAccount,
+  onBadgeClick,
   visibleViews,
 }: {
   view: View;
@@ -147,6 +214,8 @@ export const Sidebar = memo(function Sidebar({
   newByAccount?: Record<number, number>;
   /** Per-account count of rows still carrying the duplicate marker. */
   duplicatesByAccount?: Record<number, number>;
+  /** Badge click: open the account's register filtered to "new" or "duplicates". */
+  onBadgeClick?: (accountId: number, kind: "new" | "duplicates") => void;
   /** Per-view menu visibility. Omitted views (or an omitted map) stay visible. */
   visibleViews?: Partial<Record<View, boolean>>;
 }) {
@@ -441,11 +510,14 @@ export const Sidebar = memo(function Sidebar({
                         ) : null}
                         {showBadgeCol && (
                           <BadgeCell
+                            accountId={a.id}
+                            accountName={a.name}
                             dupCount={accDupCount}
                             newCount={accNewCount}
                             showDup={showDupCol}
                             showNew={showNewCol}
                             minWidth={badgeMinWidth}
+                            onBadgeClick={onBadgeClick}
                           />
                         )}
                         <span
@@ -545,11 +617,14 @@ export const Sidebar = memo(function Sidebar({
                       ) : null}
                       {showBadgeCol && (
                         <BadgeCell
+                          accountId={a.id}
+                          accountName={a.name}
                           dupCount={accDupCount}
                           newCount={accNewCount}
                           showDup={showDupCol}
                           showNew={showNewCol}
                           minWidth={badgeMinWidth}
+                          onBadgeClick={onBadgeClick}
                         />
                       )}
                       <span
