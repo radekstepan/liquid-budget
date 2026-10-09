@@ -1,11 +1,12 @@
 // apps/web/tests/e2e/due-badges.spec.ts
 //
-// YNAB4-style red new-count badge over accounts with overnight coverage:
+// YNAB4-style new-count badge over accounts with overnight coverage:
 //
 //   - a "new" item — a scheduled transaction due today (or overdue), or
-//     an unreviewed import/post — shows a red `.y-badge` on its account
-//     row (Sidebar per-account badge, derived in BudgetApp.tsx via
-//     countNewByAccount with `nextDate <= today` for the scheduled half)
+//     an unreviewed import/post — shows a green `.y-badge.y-badge--new`
+//     on its account row (Sidebar per-account badge, derived in
+//     BudgetApp.tsx via countNewByAccount with `nextDate <= today` for
+//     the scheduled half; red is reserved for duplicates)
 //   - when the app stays open across local midnight, the badge appears
 //     without a manual reload: `useTodayISO` ticks over via its midnight
 //     timeout (+ visibility/focus re-check) and `BudgetAppShell` re-runs
@@ -89,7 +90,7 @@ async function accountBadgeCount(accountBtn: Locator): Promise<number> {
 }
 
 test.describe("new-count badges", () => {
-  test("overdue scheduled transaction shows a red badge on its account", async ({
+  test("overdue scheduled transaction shows a badge on its account", async ({
     page,
   }) => {
     await resetToDemo(page);

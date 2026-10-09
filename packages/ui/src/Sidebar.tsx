@@ -63,17 +63,58 @@ function amtWidthFor(list: Account[]): string {
     .toFixed(2)}ch`;
 }
 
-/** New-count cell right of the account name: badge when > 0, empty gutter otherwise. */
-function NewCountCell({ count }: { count: number }) {
+/** Gap between the duplicates and new-count badges. */
+const BADGE_GAP = 4;
+
+/**
+ * Estimated rendered width of a badge showing `maxCount`. Badges render at
+ * 9px with 3px side padding, so one digit fits the 14px min-width and each
+ * extra digit adds ~6px. Used only as a min-width (see BadgeCell), so a
+ * small miss degrades gracefully: that row grows a pixel or two.
+ */
+function badgeWidthFor(maxCount: number): number {
+  const digits = String(Math.max(0, Math.floor(maxCount))).length;
+  return Math.max(16, 9 + digits * 6);
+}
+
+/**
+ * Badge group right of the account name: the red duplicates badge first
+ * (higher priority), then the green new-count badge, always separated by
+ * the same gap. The group hugs the amount inside one shared min-width, so
+ * leftover space lands before the badges (after the name) — never between
+ * them — while amounts stay aligned across rows.
+ */
+function BadgeCell({
+  dupCount,
+  newCount,
+  showDup,
+  showNew,
+  minWidth,
+}: {
+  dupCount: number;
+  newCount: number;
+  showDup: boolean;
+  showNew: boolean;
+  minWidth: number;
+}) {
+  const badgeStyle = { minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" };
   return (
-    <span className="y-side-newcol" aria-hidden={count === 0 ? true : undefined}>
-      {count > 0 && (
-        <Tooltip tip={`${count} new`}>
-          <span
-            className="y-badge"
-            style={{ minWidth: 14, height: 14, fontSize: 9, padding: "0 3px" }}
-          >
-            {count}
+    <span
+      className="y-side-newcol"
+      style={{ minWidth, gap: BADGE_GAP }}
+      aria-hidden={dupCount === 0 && newCount === 0 ? true : undefined}
+    >
+      {showDup && dupCount > 0 && (
+        <Tooltip tip={`${dupCount} duplicate${dupCount === 1 ? "" : "s"}`}>
+          <span className="y-badge" style={badgeStyle}>
+            {dupCount}
+          </span>
+        </Tooltip>
+      )}
+      {showNew && newCount > 0 && (
+        <Tooltip tip={`${newCount} new`}>
+          <span className="y-badge y-badge--new" style={badgeStyle}>
+            {newCount}
           </span>
         </Tooltip>
       )}
@@ -91,6 +132,7 @@ export const Sidebar = memo(function Sidebar({
   onEditAccount,
   onReorderAccount,
   newByAccount,
+  duplicatesByAccount,
   visibleViews,
 }: {
   view: View;
@@ -103,15 +145,27 @@ export const Sidebar = memo(function Sidebar({
   onReorderAccount?: (id: number, sort: number) => Promise<void> | void;
   /** Per-account "new" count: unreviewed imports/posts plus still-due scheduled. */
   newByAccount?: Record<number, number>;
+  /** Per-account count of rows still carrying the duplicate marker. */
+  duplicatesByAccount?: Record<number, number>;
   /** Per-view menu visibility. Omitted views (or an omitted map) stay visible. */
   visibleViews?: Partial<Record<View, boolean>>;
 }) {
   const isNavVisible = (key: View) => visibleViews?.[key] ?? true;
   const activeAccounts = accounts.filter((a) => !a.archived);
   const archivedAccounts = accounts.filter((a) => !!a.archived);
-  // The new-count column shows on every account row once at least one
-  // account has new items, keeping the badges in one aligned column.
+  // The badge column shows on every account row once at least one account
+  // has new items or duplicates, keeping the badges in aligned columns.
   const showNewCol = accounts.some((a) => (newByAccount?.[a.id] ?? 0) > 0);
+  const showDupCol = accounts.some((a) => (duplicatesByAccount?.[a.id] ?? 0) > 0);
+  const showBadgeCol = showNewCol || showDupCol;
+  // One shared badge-group width, sized to the largest counts so every
+  // row reserves the same space and amounts stay aligned.
+  const maxDupCount = accounts.reduce((m, a) => Math.max(m, duplicatesByAccount?.[a.id] ?? 0), 0);
+  const maxNewCount = accounts.reduce((m, a) => Math.max(m, newByAccount?.[a.id] ?? 0), 0);
+  const badgeMinWidth =
+    (showDupCol ? badgeWidthFor(maxDupCount) : 0) +
+    (showDupCol && showNewCol ? BADGE_GAP : 0) +
+    (showNewCol ? badgeWidthFor(maxNewCount) : 0);
 
   // Group ordering: discover all groupLabels, prioritizing budget accounts first, sorted by account sort indices
   const seen = Array.from(new Set(activeAccounts.map((a) => a.groupLabel)));
@@ -362,6 +416,7 @@ export const Sidebar = memo(function Sidebar({
                   const isDropTarget = accOverId === a.id;
                   const hasActions = Boolean(onEditAccount);
                   const accNewCount = newByAccount?.[a.id] ?? 0;
+                  const accDupCount = duplicatesByAccount?.[a.id] ?? 0;
                   return (
                     <div
                       key={a.id}
@@ -384,7 +439,15 @@ export const Sidebar = memo(function Sidebar({
                             </span>
                           </Tooltip>
                         ) : null}
-                        {showNewCol && <NewCountCell count={accNewCount} />}
+                        {showBadgeCol && (
+                          <BadgeCell
+                            dupCount={accDupCount}
+                            newCount={accNewCount}
+                            showDup={showDupCol}
+                            showNew={showNewCol}
+                            minWidth={badgeMinWidth}
+                          />
+                        )}
                         <span
                           className="y-side-amt"
                           style={{
@@ -454,6 +517,7 @@ export const Sidebar = memo(function Sidebar({
                 const isDropTarget = accOverId === a.id;
                 const hasActions = Boolean(onEditAccount);
                 const accNewCount = newByAccount?.[a.id] ?? 0;
+                const accDupCount = duplicatesByAccount?.[a.id] ?? 0;
                 return (
                   <div
                     key={a.id}
@@ -479,7 +543,15 @@ export const Sidebar = memo(function Sidebar({
                           </span>
                         </Tooltip>
                       ) : null}
-                      {showNewCol && <NewCountCell count={accNewCount} />}
+                      {showBadgeCol && (
+                        <BadgeCell
+                          dupCount={accDupCount}
+                          newCount={accNewCount}
+                          showDup={showDupCol}
+                          showNew={showNewCol}
+                          minWidth={badgeMinWidth}
+                        />
+                      )}
                       <span
                         className="y-side-amt"
                         style={{

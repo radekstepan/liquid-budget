@@ -680,21 +680,35 @@ body::after {
   margin-left: auto;
   letter-spacing: 0;
 }
-/* Fixed-width "new" count column right of sidebar account names.
-   Rendered on every row (empty when zero) whenever any account has new
-   items, so the badges form one aligned column next to the amounts. */
+/* Green variant of the sidebar badge: "new" counts. Red stays reserved
+   for duplicates (higher priority). Green reads as fresh arrivals and
+   stays distinct from the blue sidebar field. */
+.y-badge--new {
+  background: linear-gradient(#82bd4d, #558329);
+  border-color: #3f6620;
+}
+/* Badge group right of sidebar account names: duplicates first, new
+   second, right-aligned with a fixed gap. Rendered on every row (empty
+   when zero) whenever any account has new items or duplicates; one
+   shared min-width keeps the amounts aligned across rows. */
 .y-side-newcol {
-  width: 22px;
+  min-width: 22px;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 4px;
   margin-left: auto;
   /* Hug the amount: badge right edges align, one small gap before it. */
   margin-right: -2px;
 }
 .y-side-newcol .y-badge {
   margin-left: 0;
+}
+/* Tooltip wrappers are the flex items: never shrink a badge. */
+.y-side-newcol > .y-tip-wrap {
+  flex: none;
+  display: inline-flex;
 }
 .y-side-newcol + .y-side-amt {
   margin-left: 0;
