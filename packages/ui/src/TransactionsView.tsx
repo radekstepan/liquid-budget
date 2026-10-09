@@ -1550,11 +1550,15 @@ export const TransactionsView = memo(function TransactionsView({
                           ? "Transfer"
                           : catName;
 
+                    const isDue = r.active && r.nextDate <= today;
                     return (
                       <tr
                         key={r.id}
                         className={cx(
                           "y-row hover:bg-blue-50/60 cursor-pointer",
+                          // Due scheduled rows render bold like unreviewed
+                          // imports: both mean "new" and share one count.
+                          isDue && "font-bold",
                           isScheduledSelected && "y-row--selected is-sel",
                           idx % 2 === 1 && !isScheduledSelected && "alt"
                         )}
@@ -1596,7 +1600,6 @@ export const TransactionsView = memo(function TransactionsView({
                           <span
                             style={{
                               color: isOverdue ? "var(--y-red)" : isDueToday ? "var(--y-orange-dk)" : undefined,
-                              fontWeight: isOverdue || isDueToday ? 700 : 400,
                             }}
                           >
                             {r.nextDate}

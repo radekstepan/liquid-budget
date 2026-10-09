@@ -16,7 +16,7 @@ import {
   round2,
   SPLIT_TEMPLATE_PRESETS,
   todayISO,
-  countDueRecurring,
+  countNewByAccount,
   isValidISOMonth,
   DEMO_MONTH,
   type TransactionFlagColor,
@@ -1159,27 +1159,9 @@ export function BudgetApp({
   // overnight. `todayISO()` alone would freeze inside the memos below.
   const todayDay = useTodayISO();
 
-  const dueBadgeCount = useMemo(() => {
-    return countDueRecurring(data.recurring, todayDay);
-  }, [data.recurring, todayDay]);
-
-  const dueByAccount = useMemo(() => {
-    const map: Record<number, number> = {};
-    for (const r of data.recurring) {
-      if (r.active && r.nextDate <= todayDay) {
-        map[r.accountId] = (map[r.accountId] ?? 0) + 1;
-        if (r.transferAccountId != null) {
-          map[r.transferAccountId] = (map[r.transferAccountId] ?? 0) + 1;
-        }
-        for (const c of r.subTransactions ?? []) {
-          if (c.transferAccountId != null) {
-            map[c.transferAccountId] = (map[c.transferAccountId] ?? 0) + 1;
-          }
-        }
-      }
-    }
-    return map;
-  }, [data.recurring, todayDay]);
+  const newByAccount = useMemo(() => {
+    return countNewByAccount(data.transactions, data.recurring, todayDay);
+  }, [data.transactions, data.recurring, todayDay]);
 
   // Single-click entry: resume a paused rule on the fly so posting never
   // takes two clicks. This performs exactly the resume-then-post the user
@@ -1236,8 +1218,7 @@ export function BudgetApp({
         onAddAccount={() => setModal({ kind: "account" })}
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onReorderAccount={api.reorderAccount}
-        dueBadgeCount={dueBadgeCount}
-        dueByAccount={dueByAccount}
+        newByAccount={newByAccount}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>

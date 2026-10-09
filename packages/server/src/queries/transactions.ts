@@ -64,6 +64,11 @@ export type CreateTransactionInput = {
   skipBalance?: boolean;
   isIncome?: boolean;
   incomeMonth?: string | null;
+  /**
+   * Flag the row as freshly arrived (rendered bold until reviewed).
+   * Set by scheduled posting and CSV import; manual entry leaves it false.
+   */
+  needsReview?: boolean;
 };
 
 export type UpdateTransactionInput = {
@@ -411,6 +416,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         parentId: input.parentId ?? null,
         isIncome,
         incomeMonth,
+        needsReview: input.needsReview ?? false,
       })
       .returning();
 
@@ -503,6 +509,7 @@ export async function createTransfer(
         parentId: baseInput.parentId ?? null,
         isIncome,
         incomeMonth,
+        needsReview: baseInput.needsReview ?? false,
       })
       .returning();
 
@@ -528,6 +535,7 @@ export async function createSplitWithChildren(
     amount: number;
     status?: ClearedStatus;
     flagColor?: TransactionFlagColor | null;
+    needsReview?: boolean;
   },
   children: SubTransactionInput[]
 ) {
@@ -580,6 +588,7 @@ export async function createSplitWithChildren(
         transferAccountId: null,
         parentId: null,
         isIncome: false,
+        needsReview: parent.needsReview ?? false,
       })
       .returning();
 

@@ -307,6 +307,63 @@ export function countDueRecurring(
   return recurring.filter((r) => r.active && r.nextDate <= asOfDate).length;
 }
 
+export type NewCountTransaction = {
+  id: number;
+  accountId: number;
+  transferAccountId?: number | null;
+  parentId?: number | null;
+  needsReview?: boolean | null;
+};
+
+export type NewCountRecurring = {
+  active: boolean;
+  nextDate: string;
+  accountId: number;
+  transferAccountId?: number | null;
+  subTransactions?: { transferAccountId?: number | null }[] | null;
+};
+
+/**
+ * Per-account count of "new" items: unreviewed register rows
+ * (top-level `needsReview`, mirrored to the transfer side) plus
+ * still-unposted due scheduled rules. When a due rule posts, it moves
+ * from the scheduled half to the review half, keeping the total stable
+ * until the user reviews the row.
+ */
+export function countNewByAccount(
+  transactions: NewCountTransaction[],
+  recurring: NewCountRecurring[],
+  asOfDate: string = todayISO()
+): Record<number, number> {
+  const map: Record<number, number> = {};
+  const bump = (id: number) => {
+    map[id] = (map[id] ?? 0) + 1;
+  };
+  for (const r of recurring) {
+    if (!r.active || r.nextDate > asOfDate) continue;
+    bump(r.accountId);
+    if (r.transferAccountId != null) bump(r.transferAccountId);
+    for (const c of r.subTransactions ?? []) {
+      if (c.transferAccountId != null) bump(c.transferAccountId);
+    }
+  }
+  const childTransferByParent = new Map<number, number[]>();
+  for (const t of transactions) {
+    if (t.parentId != null && t.transferAccountId != null) {
+      const list = childTransferByParent.get(t.parentId) ?? [];
+      list.push(t.transferAccountId);
+      childTransferByParent.set(t.parentId, list);
+    }
+  }
+  for (const t of transactions) {
+    if (!t.needsReview || t.parentId != null) continue;
+    bump(t.accountId);
+    if (t.transferAccountId != null) bump(t.transferAccountId);
+    for (const dest of childTransferByParent.get(t.id) ?? []) bump(dest);
+  }
+  return map;
+}
+
 /**
  * Returns an ISO date shifted by `days` days.
  */

@@ -509,7 +509,7 @@ body::after {
   min-width: 17px;
   height: 17px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: 4px;
   background: linear-gradient(#e05341, #bf3726);
   border: 1px solid #972b1d;
   color: #fff;
@@ -520,6 +520,25 @@ body::after {
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4);
   margin-left: auto;
   letter-spacing: 0;
+}
+/* Fixed-width "new" count column right of sidebar account names.
+   Rendered on every row (empty when zero) whenever any account has new
+   items, so the badges form one aligned column next to the amounts. */
+.y-side-newcol {
+  width: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
+  /* Hug the amount: badge right edges align, one small gap before it. */
+  margin-right: -2px;
+}
+.y-side-newcol .y-badge {
+  margin-left: 0;
+}
+.y-side-newcol + .y-side-amt {
+  margin-left: 0;
 }
 
 /* ---------- keyboard hint ---------- */
@@ -599,6 +618,7 @@ body::after {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-align: right;
   transition: opacity 0.12s ease;
 }
 .y-side-edit-btn {

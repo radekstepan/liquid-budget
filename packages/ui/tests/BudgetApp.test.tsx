@@ -665,8 +665,8 @@ describe("BudgetApp", () => {
 
     render(<BudgetApp data={customData} api={api} />);
 
-    // Click on Chequing account in sidebar
-    fireEvent.click(screen.getByRole("button", { name: /^Chequing/ }));
+    // Click on Chequing account in sidebar (name may be prefixed by the new-count badge)
+    fireEvent.click(screen.getByRole("button", { name: /^(\d+ )?Chequing / }));
 
     // Click Reconcile button in register footer
     fireEvent.click(screen.getByRole("button", { name: /^reconcile$/i }));
@@ -682,7 +682,7 @@ describe("BudgetApp", () => {
     window.history.pushState(null, "", "/transactions/1");
     render(<BudgetApp data={makeSeedBudgetData()} api={api} initialView="transactions" initialAccount={1} />);
 
-    const acctBtn = screen.getByRole("button", { name: /^TD Unlimited Chequing/ });
+    const acctBtn = screen.getByRole("button", { name: /^(\d+ )?TD Unlimited Chequing / });
     expect(acctBtn.className).toContain("is-sel");
 
     // Simulate popstate navigation to /transactions (no account ID).
@@ -830,7 +830,7 @@ describe("BudgetApp", () => {
     );
 
     // Verify currently in Account 1
-    const acct1Btn = screen.getByRole("button", { name: /^TD Unlimited Chequing/ });
+    const acct1Btn = screen.getByRole("button", { name: /^(\d+ )?TD Unlimited Chequing / });
     expect(acct1Btn.className).toContain("is-sel");
 
     // Find the transfer jump button in the category cell
@@ -844,7 +844,7 @@ describe("BudgetApp", () => {
     fireEvent.click(transferBtn!);
 
     // Should switch to Account 2
-    const acct2Btn = screen.getByRole("button", { name: /^EQ Bank/ });
+    const acct2Btn = screen.getByRole("button", { name: /^(\d+ )?EQ Bank / });
     expect(acct2Btn.className).toContain("is-sel");
 
     // In Account 2's register, transaction 550 should be selected and checked

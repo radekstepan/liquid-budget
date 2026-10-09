@@ -1,11 +1,11 @@
 // apps/web/tests/e2e/due-badges.spec.ts
 //
-// YNAB4-style red due-count badge over accounts with overnight coverage:
+// YNAB4-style red new-count badge over accounts with overnight coverage:
 //
-//   - a scheduled transaction due today (or overdue) shows a red `.y-badge`
-//     on its account row and on the Transactions nav row
-//     (Sidebar.tsx:240-246 per-account 313-322, derived in
-//     BudgetApp.tsx via countDueRecurring with `nextDate <= today`)
+//   - a "new" item — a scheduled transaction due today (or overdue), or
+//     an unreviewed import/post — shows a red `.y-badge` on its account
+//     row (Sidebar per-account badge, derived in BudgetApp.tsx via
+//     countNewByAccount with `nextDate <= today` for the scheduled half)
 //   - when the app stays open across local midnight, the badge appears
 //     without a manual reload: `useTodayISO` ticks over via its midnight
 //     timeout (+ visibility/focus re-check) and `BudgetAppShell` re-runs
@@ -88,7 +88,7 @@ async function accountBadgeCount(accountBtn: Locator): Promise<number> {
   return parseInt((await badge.first().textContent()) ?? "0", 10) || 0;
 }
 
-test.describe("due-count badges", () => {
+test.describe("new-count badges", () => {
   test("overdue scheduled transaction shows a red badge on its account", async ({
     page,
   }) => {
@@ -107,7 +107,6 @@ test.describe("due-count badges", () => {
       timeout: 15_000,
     });
     expect(await accountBadgeCount(accountBtn)).toBeGreaterThanOrEqual(1);
-    await expect(page.getByLabel(/^\d+ due$/).first()).toBeVisible();
   });
 
   test("badge appears overnight without reload and rollover refires auto-post + reload", async ({

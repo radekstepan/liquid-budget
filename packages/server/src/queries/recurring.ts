@@ -531,6 +531,9 @@ export async function postRecurringTransaction(
       .orderBy(recurringSubTransactions.sort);
 
     let postedTxn;
+    // Scheduled occurrences enter as Uncleared + needsReview so they
+    // stand out in the register (bold, counted as "new") exactly like
+    // freshly imported rows, until the user reviews them.
     if (r.transferAccountId != null) {
       postedTxn = await createTransaction(db, {
         accountId: r.accountId,
@@ -539,9 +542,8 @@ export async function postRecurringTransaction(
         payee: r.payee,
         memo: r.memo || "",
         amount: Number(r.amount),
-        // Scheduled occurrences enter as Uncleared so they stand out
-        // in the register until the bank has seen them.
         status: "u",
+        needsReview: true,
         transferAccountId: r.transferAccountId,
         flagColor: sanitizeFlagColor(r.flagColor),
       });
@@ -555,6 +557,7 @@ export async function postRecurringTransaction(
           memo: r.memo || "",
           amount: Number(r.amount),
           status: "u",
+          needsReview: true,
           flagColor: sanitizeFlagColor(r.flagColor),
         },
         children.map((c) => ({
@@ -573,6 +576,7 @@ export async function postRecurringTransaction(
         memo: r.memo || "",
         amount: Number(r.amount),
         status: "u",
+        needsReview: true,
         transferAccountId: null,
         flagColor: sanitizeFlagColor(r.flagColor),
       });

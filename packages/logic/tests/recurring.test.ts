@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDaysISO,
   countDueRecurring,
+  countNewByAccount,
   frequencyLabel,
   frequencyMonthlyMultiplier,
   getRecurringChildren,
@@ -13,6 +14,7 @@ import {
   recurringFlavour,
 } from "../src/recurring.js";
 import { assertSplitsBalanced } from "../src/split.js";
+import type { NewCountRecurring, NewCountTransaction } from "../src/recurring.js";
 import type { Recurring, RecurringSubTransaction } from "../src/types.js";
 
 const base = (overrides: Partial<Recurring> = {}): Recurring => ({
@@ -341,6 +343,61 @@ describe("countDueRecurring", () => {
     expect(countDueRecurring(list, "2026-06-01")).toBe(1);
     expect(countDueRecurring(list, "2026-05-31")).toBe(0);
     expect(countDueRecurring(list, "2026-06-30")).toBe(3);
+  });
+});
+
+describe("countNewByAccount", () => {
+  const tx = (overrides: Partial<NewCountTransaction> = {}): NewCountTransaction => ({
+    id: 1,
+    accountId: 1,
+    transferAccountId: null,
+    parentId: null,
+    needsReview: true,
+    ...overrides,
+  });
+  const rule = (overrides: Partial<NewCountRecurring> = {}): NewCountRecurring => ({
+    active: true,
+    nextDate: "2026-06-01",
+    accountId: 1,
+    transferAccountId: null,
+    subTransactions: [],
+    ...overrides,
+  });
+  const TODAY = "2026-06-15";
+
+  it("combines unreviewed rows and due rules into one per-account count", () => {
+    const transactions = [
+      tx({ id: 1, accountId: 1 }), // +1 acct 1
+      tx({ id: 2, accountId: 2, needsReview: false }), // reviewed: skipped
+      tx({ id: 3, accountId: 1, parentId: 99 }), // child row: skipped
+      tx({ id: 4, accountId: 1, transferAccountId: 2 }), // +1 acct 1, +1 acct 2
+    ];
+    const recurring = [
+      rule({ accountId: 2, nextDate: "2026-06-15" }), // due: +1 acct 2
+      rule({ accountId: 2, nextDate: "2026-06-20" }), // future: skipped
+      rule({ accountId: 1, nextDate: "2026-06-01", active: false }), // paused: skipped
+      rule({ accountId: 3, nextDate: "2026-06-01", transferAccountId: 1 }), // +1 acct 3, +1 acct 1
+    ];
+    expect(countNewByAccount(transactions, recurring, TODAY)).toEqual({ 1: 3, 2: 2, 3: 1 });
+  });
+
+  it("mirrors split transfer legs to the destination account", () => {
+    const transactions = [
+      tx({ id: 10, accountId: 1 }),
+      tx({ id: 11, accountId: 1, parentId: 10, transferAccountId: 2, needsReview: false }),
+    ];
+    const recurring = [
+      rule({
+        accountId: 1,
+        nextDate: "2026-06-01",
+        subTransactions: [{ transferAccountId: 2 }],
+      }),
+    ];
+    expect(countNewByAccount(transactions, recurring, TODAY)).toEqual({ 1: 2, 2: 2 });
+  });
+
+  it("returns empty when nothing is new", () => {
+    expect(countNewByAccount([], [], TODAY)).toEqual({});
   });
 });
 
