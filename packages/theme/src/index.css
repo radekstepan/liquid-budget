@@ -43,6 +43,10 @@
   --y-blue: #2f7fb0;
   --y-blue-dark: #1f5c85;
   --y-blue-pale: #d7e8f3;
+  /* Accent gradient stops derived from the brand hue (blue buttons, pills,
+     checkboxes, badges). Themes override these alongside --y-blue-*. */
+  --y-accent-top: #4092c2;
+  --y-accent-edge: #17527a;
 
   --y-green: #7cb342;
   --y-green-lt: #96c95c;
@@ -71,6 +75,149 @@
   --y-num: "Lucida Grande", "Segoe UI", Tahoma, Helvetica, Arial, sans-serif;
 }
 
+/* ============================================================
+   THEMES — sidebar field + coordinated accent. Applied via
+   `data-theme` on <html> (see themes.ts). `classic` is the
+   :root default above, so it needs no block. Content surfaces
+   stay light in every theme; only the sidebar field, selection
+   tints and the accent hue change.
+   ============================================================ */
+[data-theme="midnight"] {
+  --y-side-top: #3d4f63;
+  --y-side-bot: #2c3b4d;
+  --y-side-edge: #141c26;
+  --y-side-ink: #e6ebf1;
+  --y-side-ink-dim: #b9c6d4;
+  --y-side-sel-top: #6b8cae;
+  --y-side-sel-bot: #3d5a7a;
+  --y-blue: #3a6ea5;
+  --y-blue-dark: #274a6b;
+  --y-blue-pale: #d9e5f0;
+  --y-accent-top: #4a7fb5;
+  --y-accent-edge: #1f3c5c;
+  --y-row-sel: #cfdce9;
+  --y-row-hover: #eef3f8;
+}
+
+[data-theme="ocean"] {
+  --y-side-top: #2a7f7c;
+  --y-side-bot: #226664;
+  --y-side-edge: #16302f;
+  --y-side-ink: #e4efec;
+  --y-side-ink-dim: #b3cdc7;
+  --y-side-sel-top: #5aa8a3;
+  --y-side-sel-bot: #2f8a85;
+  --y-blue: #2b7a76;
+  --y-blue-dark: #1f5a57;
+  --y-blue-pale: #d7e9e6;
+  --y-accent-top: #3a918c;
+  --y-accent-edge: #174443;
+  --y-row-sel: #cde4e1;
+  --y-row-hover: #edf6f5;
+}
+
+[data-theme="forest"] {
+  --y-side-top: #3f7d4c;
+  --y-side-bot: #356a40;
+  --y-side-edge: #1d3324;
+  --y-side-ink: #e6f0e4;
+  --y-side-ink-dim: #bccfc0;
+  --y-side-sel-top: #6faf7f;
+  --y-side-sel-bot: #3a7d4e;
+  --y-blue: #3d7a52;
+  --y-blue-dark: #2b5a3c;
+  --y-blue-pale: #d9e9dc;
+  --y-accent-top: #4f9468;
+  --y-accent-edge: #1f4a2e;
+  --y-row-sel: #d3e6d5;
+  --y-row-hover: #eef6ee;
+}
+
+[data-theme="ember"] {
+  --y-side-top: #8f5340;
+  --y-side-bot: #7a4433;
+  --y-side-edge: #3a2118;
+  --y-side-ink: #f3e8e2;
+  --y-side-ink-dim: #d9c2b4;
+  --y-side-sel-top: #d08a68;
+  --y-side-sel-bot: #a05a40;
+  --y-blue: #9a5a33;
+  --y-blue-dark: #6f3f20;
+  --y-blue-pale: #f2e3d3;
+  --y-accent-top: #b4713f;
+  --y-accent-edge: #5a3218;
+  --y-row-sel: #eed7c6;
+  --y-row-hover: #faf1e8;
+}
+
+[data-theme="wine"] {
+  --y-side-top: #7c3340;
+  --y-side-bot: #682a36;
+  --y-side-edge: #3a1a20;
+  --y-side-ink: #f2e6e7;
+  --y-side-ink-dim: #d6b8bd;
+  --y-side-sel-top: #b25a68;
+  --y-side-sel-bot: #8a3a46;
+  --y-blue: #93343f;
+  --y-blue-dark: #6e2530;
+  --y-blue-pale: #f0d9dc;
+  --y-accent-top: #a84452;
+  --y-accent-edge: #571d26;
+  --y-row-sel: #ecd2d6;
+  --y-row-hover: #faf0f1;
+}
+
+[data-theme="mocha"] {
+  --y-side-top: #6b5847;
+  --y-side-bot: #584739;
+  --y-side-edge: #332820;
+  --y-side-ink: #f0e9e1;
+  --y-side-ink-dim: #d3c4b2;
+  --y-side-sel-top: #a08668;
+  --y-side-sel-bot: #7d6549;
+  --y-blue: #7a6248;
+  --y-blue-dark: #5a4834;
+  --y-blue-pale: #e9e0d2;
+  --y-accent-top: #8d7355;
+  --y-accent-edge: #453627;
+  --y-row-sel: #e6dac5;
+  --y-row-hover: #f7f2e8;
+}
+
+[data-theme="graphite"] {
+  --y-side-top: #5a6167;
+  --y-side-bot: #484e54;
+  --y-side-edge: #23262a;
+  --y-side-ink: #eceef0;
+  --y-side-ink-dim: #c3c9ce;
+  --y-side-sel-top: #8b949c;
+  --y-side-sel-bot: #5f686f;
+  --y-blue: #54687a;
+  --y-blue-dark: #3d4d5a;
+  --y-blue-pale: #dde4ea;
+  --y-accent-top: #6b7f91;
+  --y-accent-edge: #2f3a44;
+  --y-row-sel: #d6dde2;
+  --y-row-hover: #f0f3f5;
+}
+
+[data-theme="onyx"] {
+  --y-side-top: #33373c;
+  --y-side-bot: #26292d;
+  --y-side-edge: #141619;
+  --y-side-ink: #e9ebed;
+  --y-side-ink-dim: #b9bfc5;
+  --y-side-sel-top: #7d868f;
+  --y-side-sel-bot: #565e66;
+  --y-blue: #3f4a55;
+  --y-blue-dark: #2f3740;
+  --y-blue-pale: #d8dee3;
+  --y-accent-top: #5a6673;
+  --y-accent-edge: #232930;
+  --y-row-sel: #d3d9de;
+  --y-row-hover: #eff2f4;
+}
+
 html,
 body,
 #root {
@@ -88,10 +235,11 @@ body {
   font-family: var(--y-font);
   font-size: 1rem; /* = 12px */
   color: var(--y-ink);
-  /* Page-wide YNAB4 cyan-blue field; the linen weave lives on
-     ::before / ::after so it stays put when content scrolls. */
-  background-color: #2b95c4;
-  background-image: linear-gradient(180deg, #2e99c7 0%, #2b95c4 100%);
+  /* Page-wide sidebar field (classic: YNAB4 cyan-blue); the linen weave
+     lives on ::before / ::after so it stays put when content scrolls.
+     Var-driven so themes recolor the whole field. */
+  background-color: var(--y-side-bot);
+  background-image: linear-gradient(180deg, var(--y-side-top) 0%, var(--y-side-bot) 100%);
   /* Lucida Grande renders best with subpixel AA, matching YNAB4 */
   -webkit-font-smoothing: subpixel-antialiased;
 }
@@ -225,7 +373,10 @@ body::after {
   z-index: 12;
 }
 .y-table-th--month-label.y-table-th--month-current {
-  background: linear-gradient(#f6f9fc, #d8e6f1);
+  background: linear-gradient(
+    color-mix(in srgb, var(--y-blue-pale) 30%, white),
+    var(--y-blue-pale)
+  );
   color: var(--y-blue);
   font-weight: 700;
   border-top: 3px solid var(--y-blue) !important;
@@ -234,7 +385,10 @@ body::after {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
 }
 .y-thead-sub th.y-thead-sub--current {
-  background: linear-gradient(#f4f8fb, #e5eef5);
+  background: linear-gradient(
+    color-mix(in srgb, var(--y-blue-pale) 30%, white),
+    color-mix(in srgb, var(--y-blue-pale) 72%, white)
+  );
   color: var(--y-blue-dark);
   font-weight: 700;
 }
@@ -272,7 +426,7 @@ body::after {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #fff;
-  background: linear-gradient(#4092c2, var(--y-blue));
+  background: linear-gradient(var(--y-accent-top), var(--y-blue));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 1px 2px rgba(0, 0, 0, 0.15);
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
   line-height: normal;
@@ -443,7 +597,7 @@ body::after {
   border-radius: 1px;
   background: linear-gradient(180deg, var(--y-side-sel-top), var(--y-side-sel-bot));
   box-shadow:
-    0 0 6px rgba(78, 170, 213, 0.55),
+    0 0 6px color-mix(in srgb, var(--y-side-sel-top) 55%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .y-side-head {
@@ -586,7 +740,7 @@ body::after {
   width: 100%;
 }
 .y-side-row.is-drop-target {
-  background: rgba(78, 170, 213, 0.2);
+  background: color-mix(in srgb, var(--y-side-sel-top) 20%, transparent);
 }
 .y-side-row.is-drop-target::before {
   content: "";
@@ -595,9 +749,9 @@ body::after {
   left: 0;
   right: 0;
   height: 2px;
-  background: #4eaad5;
+  background: var(--y-side-sel-top);
   z-index: 10;
-  box-shadow: 0 0 4px rgba(78, 170, 213, 0.8);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--y-side-sel-top) 80%, transparent);
 }
 .y-side-actions {
   position: absolute;
@@ -744,16 +898,19 @@ body::after {
 .y-btn--blue {
   color: #fff;
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.35);
-  border-color: #17527a;
-  background: linear-gradient(#4092c2, var(--y-blue));
+  border-color: var(--y-accent-edge);
+  background: linear-gradient(var(--y-accent-top), var(--y-blue));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 1px 1px rgba(0, 0, 0, 0.12);
 }
 .y-btn--blue:hover {
-  background: linear-gradient(#54a2cf, #3688b8);
+  background: linear-gradient(
+    color-mix(in srgb, var(--y-accent-top) 82%, white),
+    color-mix(in srgb, var(--y-blue) 88%, white)
+  );
 }
 .y-btn--blue:active,
 .y-btn--blue.is-on {
-  background: linear-gradient(var(--y-blue-dark), #17527a);
+  background: linear-gradient(var(--y-blue-dark), var(--y-accent-edge));
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.28) inset;
   color: #fff;
 }
@@ -855,7 +1012,7 @@ body::after {
 .y-input:focus,
 .y-select:focus {
   border-color: var(--y-blue);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.28);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px color-mix(in srgb, var(--y-blue) 28%, transparent);
 }
 .y-select-trigger {
   display: inline-flex;
@@ -922,7 +1079,7 @@ body::after {
 .y-select--lg:focus {
   background: #fff;
   border-color: var(--y-blue);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.28);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px color-mix(in srgb, var(--y-blue) 28%, transparent);
 }
 .y-select-wrap > .y-select-trigger.y-select--lg {
   background-image: none;
@@ -937,7 +1094,7 @@ body::after {
 .y-select-wrap[data-open="true"] > .y-select-trigger.y-select--lg {
   background: #fff;
   border-color: var(--y-blue);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.28);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px color-mix(in srgb, var(--y-blue) 28%, transparent);
 }
 
 /* ---------- custom dropdown popover ---------- */
@@ -975,7 +1132,10 @@ body::after {
 .y-dropdown-item.is-sel {
   color: var(--y-ink);
   font-weight: 700;
-  background: linear-gradient(#eaf2f8, #cfe3f2);
+  background: linear-gradient(
+    color-mix(in srgb, var(--y-row-sel) 45%, white),
+    var(--y-row-sel)
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .y-dropdown-item.is-disabled {
@@ -1065,11 +1225,11 @@ body::after {
    stronger on focus so its state is unmistakable in a dense sidebar. */
 .y-search:hover {
   border-color: #7e858a;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px color-mix(in srgb, var(--y-blue) 15%, transparent);
 }
 .y-search:focus {
   border-color: var(--y-blue);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 3px rgba(47, 127, 176, 0.38);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 3px color-mix(in srgb, var(--y-blue) 38%, transparent);
 }
 
 /* ---------- chip search box (wraps committed filter chips + input) ---------- */
@@ -1091,7 +1251,7 @@ body::after {
 }
 .y-searchbox:focus-within {
   border-color: var(--y-blue);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px rgba(47, 127, 176, 0.28);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.13) inset, 0 0 0 2px color-mix(in srgb, var(--y-blue) 28%, transparent);
 }
 
 /* ---------- filter chips (committed structured filters) ---------- */
@@ -1125,7 +1285,7 @@ body::after {
   color: inherit;
 }
 .y-chip-edit:hover {
-  background: rgba(47, 127, 176, 0.12);
+  background: color-mix(in srgb, var(--y-blue) 12%, transparent);
 }
 .y-chip-key {
   color: var(--y-ink-soft);
@@ -1158,9 +1318,9 @@ body::after {
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  border: 1px solid #17527a;
+  border: 1px solid var(--y-accent-edge);
   border-radius: 3px;
-  background: linear-gradient(#4092c2, var(--y-blue));
+  background: linear-gradient(var(--y-accent-top), var(--y-blue));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 1px 1px rgba(0, 0, 0, 0.12);
   color: #fff;
   font-size: 12px;
@@ -1189,8 +1349,8 @@ body::after {
   vertical-align: middle;
 }
 .y-check.is-on {
-  background: linear-gradient(#4092c2, var(--y-blue-dark));
-  border-color: #17527a;
+  background: linear-gradient(var(--y-accent-top), var(--y-blue-dark));
+  border-color: var(--y-accent-edge);
 }
 .y-check.is-on::after {
   content: "";
@@ -1251,7 +1411,7 @@ button.y-pill:hover {
   background: linear-gradient(#c3cacd, var(--y-grey-pill));
 }
 .y-pill--blue {
-  background: linear-gradient(#4092c2, var(--y-blue));
+  background: linear-gradient(var(--y-accent-top), var(--y-blue));
 }
 
 /* ---------- tables ---------- */
@@ -1368,7 +1528,7 @@ button.y-pill:hover {
   background: var(--y-row-alt);
 }
 .y-row:hover td {
-  background: #eef6fb;
+  background: var(--y-row-hover);
 }
 .y-row:hover td:first-child {
   box-shadow: inset 3px 0 0 var(--y-blue);
@@ -1382,7 +1542,7 @@ button.y-pill:hover {
 .y-row.is-sel td,
 .y-row.is-sel:hover td {
   background: var(--y-row-sel);
-  border-bottom-color: #b3cee2;
+  border-bottom-color: color-mix(in srgb, var(--y-blue) 36%, white);
 }
 .y-row td.num {
   text-align: right;
@@ -1393,7 +1553,7 @@ button.y-pill:hover {
 }
 .y-row.is-drop-target td {
   box-shadow: inset 0 2px 0 0 var(--y-blue) !important;
-  background: #eef6fb !important;
+  background: var(--y-row-hover) !important;
 }
 .y-master td {
   background: var(--y-master);
@@ -1541,7 +1701,10 @@ input.y-inline-amt {
   text-shadow: none;
 }
 .y-cleared--r {
-  background: linear-gradient(#5aa5d0, var(--y-blue-dark));
+  background: linear-gradient(
+    color-mix(in srgb, var(--y-accent-top) 78%, white),
+    var(--y-blue-dark)
+  );
 }
 /* Internal duplicate marker — a warning yellow/orange status badge that
    matches the C/U language (square, letter inside) rather than a circle. */
@@ -1722,7 +1885,7 @@ input.y-inline-amt {
   background: linear-gradient(var(--y-red-lt), var(--y-red));
 }
 .y-bar-fill--blue {
-  background: linear-gradient(#4092c2, var(--y-blue));
+  background: linear-gradient(var(--y-accent-top), var(--y-blue));
 }
 
 /* ---------- modal ---------- */
@@ -1921,7 +2084,7 @@ input.y-inline-amt {
   outline: none;
 }
 .y-btn:focus-visible {
-  box-shadow: 0 0 0 2px rgba(47, 127, 176, 0.45), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--y-blue) 45%, transparent), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
 }
 .y-side-item:focus-visible,
 .y-side-nav:focus-visible {
@@ -1959,7 +2122,7 @@ input.y-inline-amt {
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-thumb:active {
-  background: rgba(47, 127, 176, 0.6);
+  background: color-mix(in srgb, var(--y-blue) 60%, transparent);
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-corner {
@@ -1981,7 +2144,7 @@ input.y-inline-amt {
   background-clip: padding-box;
 }
 .y-scroll--dark::-webkit-scrollbar-thumb:active {
-  background: rgba(47, 127, 176, 0.7);
+  background: color-mix(in srgb, var(--y-blue) 70%, transparent);
   background-clip: padding-box;
 }
 .y-scroll--dark::-webkit-scrollbar-corner {
@@ -2162,7 +2325,7 @@ input.y-inline-amt {
   background: rgba(0, 0, 0, 0.08);
 }
 .y-table-th--month-current .y-month-qb-btn:hover {
-  background: rgba(47, 127, 176, 0.15);
+  background: color-mix(in srgb, var(--y-blue) 15%, transparent);
 }
 .y-month-qb-menu {
   position: absolute;

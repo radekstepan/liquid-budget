@@ -1,4 +1,5 @@
 export * from "./primitives.js";
+export * from "./themes.js";
 export {
   MathCell,
   MonthNav,
