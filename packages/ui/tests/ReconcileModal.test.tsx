@@ -221,6 +221,16 @@ describe("ReconcileModal", () => {
     expect(labels).toEqual(["Groceries", "Rent"]);
   });
 
+  it("aligns the arm button with the category field bottom edge", () => {
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "1000" },
+    });
+    // The row uses items-end and Field carries mb-3: without a matching
+    // bottom margin the button sinks a full label-margin below the select.
+    expect(screen.getByRole("button", { name: /mark for adjustment/i })).toHaveClass("mb-3");
+  });
+
   it("shows 'No categories available' and disables arming when no eligible category exists", () => {
     renderModal({ categories: [categories[2]!] });
     fireEvent.change(screen.getByPlaceholderText("0.00"), {

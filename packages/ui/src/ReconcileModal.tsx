@@ -341,6 +341,9 @@ export function ReconcileModal({
               variant={armed ? "primary" : "default"}
               onClick={() => setArmed(true)}
               disabled={adjustmentCategoryId === "" || balanced}
+              // Match Field's mb-3 so items-end aligns the button with the
+              // category select instead of sinking it below the input.
+              className="mb-3"
             >
               {armed ? "Will create adjustment" : "Mark for adjustment"}
             </Button>
