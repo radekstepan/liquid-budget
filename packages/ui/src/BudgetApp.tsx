@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, Query, RenameRule, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
 import {
+  buildPageTitle,
   computeBudget,
   computeCashFlow,
   computeTrailingNetWorth,
@@ -1198,6 +1199,15 @@ export function BudgetApp({
     () => data.accounts.find((a) => a.id === accountFilter) ?? null,
     [data.accounts, accountFilter]
   );
+
+  // The tab title tracks the URL-driven view. Nice-URL navigation is
+  // pushState-only, so Next metadata can't refresh it after the full load.
+  useEffect(() => {
+    document.title = buildPageTitle(view, {
+      month,
+      accountName: view === "transactions" ? (activeAccount?.name ?? null) : null,
+    });
+  }, [view, month, activeAccount]);
 
   // Split templates are code configuration (see SPLIT_TEMPLATE_PRESETS):
   // resolved against this budget's accounts by name.

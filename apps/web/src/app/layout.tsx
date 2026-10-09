@@ -5,7 +5,7 @@ import "@fortawesome/fontawesome-free/css/solid.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Liquid — Budget",
+  title: "Budget - Liquid",
   description: "A zero-based envelope budgeting app. A YNAB4 alternative.",
 };
 

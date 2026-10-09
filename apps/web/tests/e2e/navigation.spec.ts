@@ -39,6 +39,33 @@ for (const { label, match, viewToolbar } of NAV_ITEMS) {
   });
 }
 
+test("document title follows the URL-driven view", async ({ page }) => {
+  // Full-load title comes from generateMetadata ([[...slug]]/page.tsx);
+  // client-side pushState navigation refreshes it via BudgetApp's title
+  // effect. The budget month is today's, so match the prefix only.
+  await expect(page).toHaveTitle(/Budget - Liquid/);
+
+  await page.getByRole("button", { name: "Reports", exact: true }).click();
+  await expect(page).toHaveTitle("Reports - Liquid");
+
+  await page.getByRole("button", { name: /^Transactions/ }).click();
+  await expect(page).toHaveTitle("All Transactions - Liquid");
+});
+
+test("deep-linked budget month renders its title", async ({ page }) => {
+  await page.goto("/budget/2026-01");
+  await waitForReady(page);
+  await expect(page).toHaveTitle("January 2026 Budget - Liquid");
+});
+
+test("document title names the account on an account deep-link", async ({ page }) => {
+  const accountBtn = page.getByRole("button", { name: /TD Unlimited Chequing/ });
+  await accountBtn.first().click();
+  await expect(page).toHaveTitle(
+    "TD Unlimited Chequing Transactions - Liquid"
+  );
+});
+
 test("clicking a sidebar account deep-links to its transaction filter", async ({ page }) => {
   // Sidebar lists the first on-budget account as a button (Sidebar.tsx:118-127).
   // TD Unlimited Chequing is the first one in the seed (seed.ts:114).
