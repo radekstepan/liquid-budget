@@ -3,15 +3,16 @@ import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
 import { accounts, categories, reconciliations, transactions } from "../schema.js";
 import { assertValidISODate, TransactionError } from "./transactions.js";
-import { todayISO, type ReconcileState } from "@ynab/logic";
+import { RECONCILE_ADJUSTMENT_MEMO, todayISO, type ReconcileState } from "@ynab/logic";
 
 /**
  * Sentinel memo used on the auto-generated adjustment row that
  * `reconcileAccount` creates when the user's statement balance does
- * not match the working balance. `unreconcileAccount` looks for this
- * exact string to identify the synthetic row to delete.
+ * not match the working balance. Defined in `@ynab/logic` and
+ * re-exported here so the server and the client's optimistic
+ * reconcile preview share one source of truth.
  */
-export const RECONCILE_ADJUSTMENT_MEMO = "Reconciliation balance";
+export { RECONCILE_ADJUSTMENT_MEMO };
 
 export type { ReconcileState };
 

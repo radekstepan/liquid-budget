@@ -8,6 +8,14 @@
 import { num, todayISO } from "./format.js";
 import type { Account, Transaction } from "./types.js";
 
+/**
+ * Sentinel payee/memo used on the auto-generated adjustment row that
+ * `reconcileAccount` creates when the statement balance does not match
+ * the working balance. Single-sourced here so the server and the
+ * client's optimistic reconcile preview agree byte-for-byte.
+ */
+export const RECONCILE_ADJUSTMENT_MEMO = "Reconciliation balance";
+
 export type ReconcileState = {
   accountId: number;
   accountName: string;
@@ -120,4 +128,83 @@ export function computeReconcileState(
     lastReconciledAt: account.lastReconciledAt ?? null,
     lastReconciledBalance,
   };
+}
+
+/**
+ * Optimistically flip an account's in-scope Cleared rows to Reconciled,
+ * mirroring the server `reconcileAccount` flip predicates exactly:
+ *
+ *   1. Source rows (`t.accountId === accountId`, `status === "c"`,
+ *      `date <= statementDate`, not a split parent) flip `status` to "r".
+ *   2. Inbound transfer legs (`t.transferAccountId === accountId`,
+ *      `transferStatus === "c"` — or `transferStatus == null` with
+ *      `status === "c"` — `date <= statementDate`, not a split parent)
+ *      flip `transferStatus` to "r".
+ *   3. Split parents on the account flip `status` to "r" only when every
+ *      child is "r" after steps 1–2 (children win over the parent's own
+ *      status, same as the server's post-flip parent sweep).
+ *
+ * Flipped rows also clear `needsReview`, matching the server. Server-stamped
+ * fields (`reconciledAt`, `reconciliationId`, …) are left untouched — the
+ * round id is only known after the POST, and the confirming reload fills
+ * them in. Rows outside the predicates are returned by reference, so
+ * callers can diff by identity to find the affected set.
+ */
+export function applyOptimisticReconcileFlips(
+  transactions: Transaction[],
+  accountId: number,
+  statementDate: string
+): Transaction[] {
+  const parentIds = new Set<number>();
+  for (const t of transactions) {
+    if (t.parentId != null) {
+      parentIds.add(t.parentId);
+    }
+  }
+
+  const flipped = transactions.map((t) => {
+    if (parentIds.has(t.id)) {
+      return t;
+    }
+    if (t.date > statementDate) {
+      return t;
+    }
+    if (t.accountId === accountId && t.status === "c") {
+      return { ...t, status: "r" as const, needsReview: false };
+    }
+    if (
+      t.transferAccountId === accountId &&
+      (t.transferStatus === "c" || (t.transferStatus == null && t.status === "c"))
+    ) {
+      return { ...t, transferStatus: "r" as const, needsReview: false };
+    }
+    return t;
+  });
+
+  const statusById = new Map<number, Transaction["status"]>();
+  for (const t of flipped) {
+    statusById.set(t.id, t.status);
+  }
+  const childrenByParent = new Map<number, number[]>();
+  for (const t of flipped) {
+    if (t.parentId != null) {
+      const list = childrenByParent.get(t.parentId) ?? [];
+      list.push(t.id);
+      childrenByParent.set(t.parentId, list);
+    }
+  }
+
+  return flipped.map((t) => {
+    if (!parentIds.has(t.id)) {
+      return t;
+    }
+    if (t.accountId !== accountId || t.status !== "c" || t.date > statementDate) {
+      return t;
+    }
+    const children = childrenByParent.get(t.id) ?? [];
+    if (children.length > 0 && children.every((id) => statusById.get(id) === "r")) {
+      return { ...t, status: "r" as const, needsReview: false };
+    }
+    return t;
+  });
 }
