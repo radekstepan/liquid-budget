@@ -143,21 +143,23 @@ body::after {
   overflow: hidden;
 }
 
-/* ---------- logo badge (sidebar): green tile + white FA seedling ---------- */
+/* ---------- logo badge (sidebar): brand-green tile + white FA seedling ----------
+   The original brand gradient, kept flat — no gloss or halo. A darker
+   edge and a single soft shadow keep it crisp on the cyan-blue sidebar. */
 .y-logo {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  position: relative;
-  border-radius: 5px;
+  border-radius: 6px;
   background: linear-gradient(var(--y-green-lt), var(--y-green-dk));
+  border: 1px solid #4d7c26;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
   color: #ffffff;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
 }
 

@@ -268,8 +268,19 @@ export const Sidebar = memo(function Sidebar({
             <i className="fa-solid fa-seedling" aria-hidden="true" />
           </div>
           <div className="leading-none">
-            <div className="text-[13px] font-bold text-white tracking-wide">LIQUID</div>
-            <div className="text-[9px] tracking-[.14em]" style={{ color: "var(--y-side-ink-dim)" }}>
+            <div
+              className="text-[13px] font-bold text-white tracking-wide"
+              style={{ textShadow: "0 1px 1px rgba(0, 0, 0, 0.45)" }}
+            >
+              LIQUID
+            </div>
+            <div
+              className="text-[9px] tracking-[.14em]"
+              style={{
+                color: "var(--y-side-ink-dim)",
+                textShadow: "0 1px 1px rgba(0, 0, 0, 0.35)",
+              }}
+            >
               MY BUDGET
             </div>
           </div>
