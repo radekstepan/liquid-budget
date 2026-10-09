@@ -9,11 +9,10 @@
 //     leaves exactly one balance impact
 //   - API: merge validates its input (exactly two distinct existing ids,
 //     no splits) without touching the DB
-//   - UI: selecting two rows shows a "Merge (2)" action that opens a
-//     preview (result + Kept/Removed constituents) and merges on confirm
+//   - UI: selecting two rows shows a "Merge (2)" action that opens an
+//     editable preview (result form + both source rows) and merges on confirm
 //   - UI: the Merge action only appears when exactly two rows are selected
-//   - UI: a manual + imported pair is tagged Manual/Imported in the
-//     preview, with the imported data winning
+//   - UI: a manual + imported pair previews with the imported data winning
 //
 // Like import.spec.ts this mutates a shared test DB, so it is serial
 // and resets to the demo baseline around every test.
@@ -241,10 +240,17 @@ test("selecting two rows previews the merge and combines them into one", async (
   await expect(modal.locator(".y-modal-head")).toHaveText("Merge transactions");
   await expect(modal.getByTestId("merge-result")).toBeVisible();
   await expect(modal.getByTestId("merge-constituents")).toBeVisible();
-  await expect(modal.getByText("Kept", { exact: true })).toBeVisible();
-  await expect(modal.getByText("Removed", { exact: true })).toBeVisible();
-  // The preview names the surviving payee.
-  await expect(modal.getByTestId("merge-result").getByText(payeeA)).toBeVisible();
+  // The editable result is prepopulated with the surviving payee,
+  // and the constituents table shows both source rows.
+  const result = modal.getByTestId("merge-result");
+  await expect(result.getByDisplayValue(payeeA)).toBeVisible();
+  const constituents = modal.getByTestId("merge-constituents");
+  await expect(constituents.getByText(payeeA)).toBeVisible();
+  await expect(constituents.getByText(payeeB)).toBeVisible();
+
+  // Edits to the result are saved on the merged row.
+  const editedMemo = `PW merged memo ${stamp}`;
+  await result.getByPlaceholderText("Optional notes").fill(editedMemo);
 
   await modal.getByRole("button", { name: "Merge transactions", exact: true }).click();
   await expect(modal).toBeHidden();
@@ -257,6 +263,7 @@ test("selecting two rows previews the merge and combines them into one", async (
   const survivors = after.transactions.filter((t: Tx) => t.payee === payeeA);
   expect(survivors).toHaveLength(1);
   expect(survivors[0].amount).toBe("-2000");
+  expect(survivors[0].memo).toBe(editedMemo);
 
   await resetToDemo(request);
 });
@@ -300,7 +307,7 @@ test("the Merge action only appears when exactly two rows are selected", async (
   await resetToDemo(request);
 });
 
-test("a manual + imported pair previews as Manual/Imported with the import winning", async ({
+test("a manual + imported pair previews with the import winning", async ({
   page,
   request,
 }) => {
@@ -348,16 +355,14 @@ test("a manual + imported pair previews as Manual/Imported with the import winni
 
   const modal = page.locator(".y-modal").last();
   await expect(modal.locator(".y-modal-head")).toHaveText("Merge transactions");
-  await expect(modal.getByText("Imported").first()).toBeVisible();
-  await expect(modal.getByText("Manual").first()).toBeVisible();
-  // The Kept constituent is the imported row.
+  // The editable result shows the imported bank data with the manual
+  // curation filled in, and both source rows below.
+  const result = modal.getByTestId("merge-result");
+  await expect(result.getByDisplayValue(importedPayee)).toBeVisible();
+  await expect(result.getByDisplayValue("curated memo")).toBeVisible();
   const constituents = modal.getByTestId("merge-constituents");
-  await expect(constituents.getByRole("row").filter({ hasText: "Kept" })).toContainText(
-    importedPayee
-  );
-  await expect(constituents.getByRole("row").filter({ hasText: "Removed" })).toContainText(
-    manualPayee
-  );
+  await expect(constituents.getByText(manualPayee)).toBeVisible();
+  await expect(constituents.getByText(importedPayee)).toBeVisible();
 
   await modal.getByRole("button", { name: "Merge transactions", exact: true }).click();
   await expect(modal).toBeHidden();

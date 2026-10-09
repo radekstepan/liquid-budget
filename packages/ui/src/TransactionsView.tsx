@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, MergeableTransaction, Query, Transaction, TransactionFlagColor } from "@ynab/logic";
+import type { BudgetData, BulkUpdateTransactionPatch, MergeableTransaction, MergeOverrides, Query, Transaction, TransactionFlagColor } from "@ynab/logic";
 import {
   applyQuery,
   buildSearchCtx,
@@ -13,7 +13,7 @@ import {
   pickMergePrimary,
   recurringFlavour,
 } from "@ynab/logic";
-import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Tooltip, money, cx } from "@ynab/theme";
+import { Icon, ClearedFlag, FlagCell, Toolbar, ToolbarSep, Button, Tooltip, money, cx, type SearchListOption } from "@ynab/theme";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
 import { MergePreviewModal } from "./MergePreviewModal.js";
@@ -172,6 +172,7 @@ export const TransactionsView = memo(function TransactionsView({
   onBulkDelete,
   onBulkUpdate,
   onMergeTransactions,
+  payees,
   onAddRecurring,
   onAddRecurringTransfer,
   onEditRecurring,
@@ -205,7 +206,9 @@ export const TransactionsView = memo(function TransactionsView({
   onFlag: (id: number, color: TransactionFlagColor | null) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
   onBulkUpdate?: (ids: number[], patch: BulkUpdateTransactionPatch) => Promise<void> | void;
-  onMergeTransactions?: (ids: number[]) => Promise<void> | void;
+  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void> | void;
+  /** Existing payee names for the searchable payee field in the merge preview. */
+  payees?: SearchListOption[];
   onAddRecurring?: () => void;
   onAddRecurringTransfer?: () => void;
   onEditRecurring?: (id: number) => void;
@@ -255,9 +258,9 @@ export const TransactionsView = memo(function TransactionsView({
   // (merged) row selected. On failure the modal stays open with the
   // error and the selection is untouched.
   const confirmMergePreview = useCallback(
-    async (ids: number[]) => {
+    async (ids: number[], overrides: MergeOverrides) => {
       if (!onMergeTransactions) return;
-      await onMergeTransactions(ids);
+      await onMergeTransactions(ids, overrides);
       const [a, b] = ids.map((id) => data.transactions.find((t) => t.id === id));
       if (a && b) {
         const toMergeable = (t: Transaction): MergeableTransaction => ({
@@ -1668,6 +1671,8 @@ export const TransactionsView = memo(function TransactionsView({
           <MergePreviewModal
             accounts={data.accounts}
             categories={data.categories}
+            groups={data.groups}
+            payees={payees}
             transactions={data.transactions}
             ids={mergePreviewIds}
             onClose={() => setMergePreviewIds(null)}

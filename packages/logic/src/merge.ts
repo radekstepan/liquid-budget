@@ -52,6 +52,27 @@ export type MergeAccountInfo = {
   kind: string;
 };
 
+/**
+ * User edits to the resolved merged row, from the merge preview modal.
+ * Every field is optional; absent fields keep the resolved value.
+ * Category/income stay derived (like the edit path): the caller passes
+ * the picked category + income month and `applyMergeOverrides`
+ * recomputes `isIncome` from the final account/amount.
+ */
+export type MergeOverrides = {
+  accountId?: number;
+  transferAccountId?: number | null;
+  categoryId?: number | null;
+  date?: string;
+  payee?: string;
+  memo?: string | null;
+  amount?: number;
+  status?: ClearedStatus;
+  transferStatus?: ClearedStatus | null;
+  flagColor?: TransactionFlagColor | null;
+  incomeMonth?: string | null;
+};
+
 export type MergedTransactionFields = {
   accountId: number;
   transferAccountId: number | null;
@@ -199,5 +220,104 @@ export function resolveMergedTransaction(args: {
     needsReview: p.needsReview === true,
     entityId: p.entityId ?? null,
     transferEntityId: isTransfer ? (p.transferEntityId ?? null) : null,
+  };
+}
+
+/**
+ * Overlay user edits onto a resolved merged row (see
+ * {@link resolveMergedTransaction}).
+ *
+ * Plain fields (date, payee, memo, amount, status, account legs) take
+ * the override when present, otherwise the resolved value. Derived
+ * fields are recomputed from the final shape, mirroring the edit
+ * path (`updateTransaction`): transfers reclassify through
+ * `classifyBoundaryTransfer`, off-budget rows stay uncategorized,
+ * credit rows are never income, and only uncategorized positive
+ * liquid inflows count as income. A blank transfer payee falls back
+ * to `Transfer : <destination>`, and gaining a transfer leg defaults
+ * its status from the row status. `payeeId` is left as resolved (the
+ * edit path likewise never rewrites it).
+ */
+export function applyMergeOverrides(
+  merged: MergedTransactionFields,
+  overrides: MergeOverrides,
+  accounts: {
+    sourceAccount: MergeAccountInfo;
+    destAccount: Pick<MergeAccountInfo, "onBudget"> | null;
+    destAccountName?: string | null;
+  }
+): MergedTransactionFields {
+  const { sourceAccount, destAccount } = accounts;
+  const accountId = overrides.accountId ?? merged.accountId;
+  const transferAccountId =
+    overrides.transferAccountId !== undefined ? overrides.transferAccountId : merged.transferAccountId;
+  const isTransfer = transferAccountId != null;
+  const amount = overrides.amount ?? merged.amount;
+
+  let payee = overrides.payee ?? merged.payee;
+  if (isTransfer && payee.trim() === "") {
+    payee = `Transfer : ${accounts.destAccountName ?? "Unknown"}`;
+  }
+
+  const finalCatId = overrides.categoryId !== undefined ? overrides.categoryId : merged.categoryId;
+  const finalIncMonth =
+    overrides.incomeMonth !== undefined ? overrides.incomeMonth : merged.incomeMonth;
+
+  let categoryId: number | null;
+  let isIncome: boolean;
+  let incomeMonth: string | null;
+  if (isTransfer) {
+    const classification = classifyBoundaryTransfer({
+      srcOnBudget: sourceAccount.onBudget,
+      destOnBudget: destAccount?.onBudget ?? true,
+      amount,
+      categoryId: finalCatId,
+      incomeMonth: finalIncMonth,
+    });
+    categoryId = classification.categoryId;
+    isIncome = classification.isIncome;
+    incomeMonth = classification.incomeMonth;
+  } else if (!sourceAccount.onBudget) {
+    categoryId = null;
+    isIncome = false;
+    incomeMonth = null;
+  } else if (sourceAccount.kind === "credit") {
+    categoryId = finalCatId;
+    isIncome = false;
+    incomeMonth = null;
+  } else {
+    // A transfer converted into a regular row drops the transfer's
+    // boundary category unless the user picked one (edit-path parity).
+    categoryId =
+      merged.transferAccountId != null && overrides.categoryId === undefined ? null : finalCatId;
+    isIncome = categoryId == null && amount > 0;
+    incomeMonth = isIncome ? finalIncMonth : null;
+  }
+
+  let transferStatus: ClearedStatus | null;
+  if (!isTransfer) {
+    transferStatus = null;
+  } else if (overrides.transferStatus !== undefined) {
+    transferStatus = overrides.transferStatus;
+  } else if (merged.transferAccountId == null) {
+    transferStatus = overrides.status ?? merged.status;
+  } else {
+    transferStatus = merged.transferStatus;
+  }
+
+  return {
+    ...merged,
+    accountId,
+    transferAccountId,
+    categoryId,
+    date: overrides.date ?? merged.date,
+    payee,
+    memo: overrides.memo !== undefined ? (overrides.memo ?? "") : merged.memo,
+    amount,
+    status: overrides.status ?? merged.status,
+    transferStatus,
+    flagColor: overrides.flagColor !== undefined ? overrides.flagColor : merged.flagColor,
+    isIncome,
+    incomeMonth,
   };
 }

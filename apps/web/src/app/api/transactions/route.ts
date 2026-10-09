@@ -53,7 +53,11 @@ export async function POST(req: Request) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }
     try {
-      const { merged, deletedId } = await mergeTransactions(db, parseResult.data.ids);
+      const { merged, deletedId } = await mergeTransactions(
+        db,
+        parseResult.data.ids,
+        parseResult.data.patch ?? {}
+      );
       return Response.json({ ok: true, merged, deletedId });
     } catch (e) {
       return apiErrorResponse(e);

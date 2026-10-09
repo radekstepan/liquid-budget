@@ -1,54 +1,77 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import type { Account, Category, MergeableTransaction, Transaction } from "@ynab/logic";
+import { useMemo, useState } from "react";
+import type {
+  Account,
+  Category,
+  CategoryGroup,
+  MergeableTransaction,
+  MergedTransactionFields,
+  MergeOverrides,
+  Transaction,
+  TransactionFlagColor,
+} from "@ynab/logic";
 import {
-  isImportedTransaction,
+  adjustDateShortcut,
+  dollarsToCents,
+  evalAmount,
+  isValidISODate,
+  nextMonthKey,
   num,
   pickMergePrimary,
   resolveMergedTransaction,
+  validateAmountInput,
 } from "@ynab/logic";
-import { Notice, money } from "@ynab/theme";
-import { Modal, Btn } from "./ui.js";
+import { Checkbox, FlagPicker, Notice, SearchList, Select, TextField, money, type SearchListOption } from "@ynab/theme";
+import { Modal, Btn, Field } from "./ui.js";
+import { AmountPreview, AmountFieldError } from "./AmountInput.js";
 
 function toMergeable(t: Transaction): MergeableTransaction {
   return { ...t, transferAccountId: t.transferAccountId ?? null, amount: num(t.amount) };
 }
 
-/** Which constituent a merged field value came from ("both" when they agree). */
-function fieldSource(
-  primaryVal: unknown,
-  secondaryVal: unknown,
-  mergedVal: unknown
-): "primary" | "secondary" | "both" {
-  const primaryEq = primaryVal === mergedVal;
-  const secondaryEq = secondaryVal === mergedVal;
-  if (primaryEq && secondaryEq) return "both";
-  if (secondaryEq) return "secondary";
-  return "primary";
+function DateFieldError({ value }: { value: string }) {
+  if (isValidISODate(value)) return null;
+  return (
+    <div role="alert" className="mt-1 text-[11px]" style={{ color: "var(--y-red)" }}>
+      Enter a valid date.
+    </div>
+  );
 }
 
+const inputClass = "w-full py-[3px]";
+
+type CategorySelect = number | "" | "__deferred__";
+
 /**
- * Read-only preview of the transaction a merge will create, laid out like
- * the split editor: the resulting transaction on top (like the split
- * parent) and its two constituents below (like sub-transactions), each
- * result field tagged with the side it came from.
+ * Merge preview laid out like the split editor: the resulting
+ * transaction on top (editable like a single transaction,
+ * prepopulated from the resolution) and its two constituents below
+ * (like sub-transactions).
  */
-export function MergePreviewModal({
+function MergeEditorModal({
   accounts,
   categories,
-  transactions,
+  groups,
+  payees,
   ids,
+  primary,
+  secondary,
+  merged,
   onClose,
   onConfirm,
 }: {
   accounts: Account[];
   categories: Category[];
-  transactions: Transaction[];
-  /** Exactly two transaction ids to merge. */
+  groups?: CategoryGroup[];
+  /** Existing payee names for the searchable payee field. */
+  payees?: SearchListOption[];
   ids: number[];
+  primary: MergeableTransaction;
+  secondary: MergeableTransaction;
+  merged: MergedTransactionFields;
   onClose: () => void;
-  onConfirm: (ids: number[]) => Promise<void> | void;
+  onConfirm: (ids: number[], overrides: MergeOverrides) => Promise<void> | void;
 }) {
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,92 +82,160 @@ export function MergePreviewModal({
     [categories]
   );
 
-  const preview = useMemo(() => {
-    if (ids.length !== 2) return null;
-    const first = transactions.find((t) => t.id === ids[0]);
-    const second = transactions.find((t) => t.id === ids[1]);
-    if (!first || !second) return null;
-    const [primary, secondary] = pickMergePrimary(toMergeable(first), toMergeable(second));
-    const src = accountById.get(primary.accountId);
-    const dest =
-      primary.transferAccountId != null ? accountById.get(primary.transferAccountId) : null;
-    const merged = resolveMergedTransaction({
-      primary,
-      secondary,
-      sourceAccount: { onBudget: src?.onBudget ?? true, kind: src?.kind ?? "liquid" },
-      destAccount: dest ? { onBudget: dest.onBudget } : null,
-    });
-    return { primary, secondary, merged };
-  }, [accounts, accountById, ids, transactions]);
+  // The merged shape is fixed: no switching between single and
+  // transfer here, only editing the resolved fields.
+  const isTransfer = merged.transferAccountId != null;
 
-  if (!preview) return null;
-  const { primary, secondary, merged } = preview;
+  const initialCategorySelect: CategorySelect =
+    merged.categoryId != null
+      ? merged.categoryId
+      : merged.incomeMonth && merged.incomeMonth > merged.date.slice(0, 7)
+        ? "__deferred__"
+        : "";
+  const initialIncomeMonth = merged.incomeMonth ?? nextMonthKey(merged.date.slice(0, 7));
+
+  const [date, setDate] = useState(merged.date);
+  const [amount, setAmount] = useState((merged.amount / 100).toFixed(2));
+  const [payee, setPayee] = useState(merged.payee);
+  const [memo, setMemo] = useState(merged.memo);
+  const [accountId, setAccountId] = useState(merged.accountId);
+  const [categoryId, setCategoryId] = useState<CategorySelect>(initialCategorySelect);
+  const [incomeMonth, setIncomeMonth] = useState(initialIncomeMonth);
+  const [cleared, setCleared] = useState(merged.status === "c");
+  const [flagColor, setFlagColor] = useState<TransactionFlagColor | null>(merged.flagColor);
+  const [transferAccountId, setTransferAccountId] = useState<number | "">(
+    merged.transferAccountId ?? ""
+  );
+
+  const selectedAccount = accountById.get(accountId);
+  const isOffBudget = selectedAccount ? !selectedAccount.onBudget : false;
+  const transferDestAccount =
+    transferAccountId !== "" ? (accountById.get(transferAccountId) ?? null) : null;
+  const isTransferBoundary =
+    isTransfer &&
+    transferDestAccount != null &&
+    Boolean(selectedAccount?.onBudget) !== Boolean(transferDestAccount.onBudget);
+
+  const transferAmountCents = dollarsToCents(evalAmount(amount));
+  const srcOnBudget = Boolean(selectedAccount?.onBudget);
+  const destOnBudget = Boolean(transferDestAccount?.onBudget);
+  const transferNetOnBudgetDelta = isTransferBoundary
+    ? (srcOnBudget ? transferAmountCents : 0) + (destOnBudget ? -transferAmountCents : 0)
+    : 0;
+  const isBoundaryOutflow = isTransferBoundary && transferNetOnBudgetDelta <= 0;
+
+  // Category is hidden for off-budget rows and same-boundary
+  // transfers (the server forces it to null there anyway).
+  const showCategory = isTransfer ? isTransferBoundary : !isOffBudget;
+
+  const amountValidation = validateAmountInput(amount);
+  const amountCents = amountValidation.cents;
+  const canSave =
+    isValidISODate(date) &&
+    amountValidation.status === "valid" &&
+    (!isTransfer || transferAccountId !== "") &&
+    (!isBoundaryOutflow || typeof categoryId === "number");
+
+  const dateDirty = date !== merged.date;
+  const amountDirty = amountCents != null && amountCents !== merged.amount;
+  const payeeDirty = payee !== merged.payee;
+  const memoDirty = memo !== merged.memo;
+  const accountDirty = accountId !== merged.accountId;
+  const clearedDirty = cleared !== (merged.status === "c");
+  const flagDirty = flagColor !== merged.flagColor;
+  const transferDirty =
+    isTransfer && transferAccountId !== "" && transferAccountId !== merged.transferAccountId;
+  const categorySelectDirty = categoryId !== initialCategorySelect;
+  const deferredMonthDirty = categoryId === "__deferred__" && incomeMonth !== initialIncomeMonth;
+  const categoryDirty = showCategory && (categorySelectDirty || deferredMonthDirty);
 
   const doMerge = async () => {
-    if (merging) return;
+    if (merging || !canSave) return;
+    const overrides: MergeOverrides = {};
+    if (dateDirty) overrides.date = date;
+    if (amountDirty && amountCents != null) overrides.amount = amountCents;
+    if (payeeDirty) overrides.payee = payee;
+    if (memoDirty) overrides.memo = memo;
+    if (accountDirty) overrides.accountId = accountId;
+    if (clearedDirty) overrides.status = cleared ? "c" : "u";
+    if (flagDirty) overrides.flagColor = flagColor;
+    if (transferDirty) {
+      overrides.transferAccountId = transferAccountId as number;
+    }
+    if (categoryDirty) {
+      overrides.categoryId =
+        categoryId === "" || categoryId === "__deferred__" ? null : categoryId;
+      overrides.incomeMonth = categoryId === "__deferred__" ? incomeMonth || null : null;
+    }
     setMerging(true);
     setError(null);
     try {
-      await onConfirm(ids);
+      await onConfirm(ids, overrides);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
       setMerging(false);
     }
   };
 
-  const sourceTag = (row: MergeableTransaction) => (isImportedTransaction(row) ? "Imported" : "Manual");
+  const availableAccounts = useMemo(
+    () => accounts.filter((a) => !a.archived || a.id === merged.accountId),
+    [accounts, merged.accountId]
+  );
+  const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
+
+  const changeTransferDestination = (next: number) => {
+    setTransferAccountId(next);
+    // A "Transfer : <old>" payee follows the destination so the saved
+    // row never names the wrong account.
+    if (payee.startsWith("Transfer : ")) {
+      const dest = accountById.get(next);
+      setPayee(`Transfer : ${dest?.name ?? ""}`);
+    }
+  };
+
+  const payeeDisplay =
+    isTransfer && payee.startsWith("Transfer : ")
+      ? `Transfer : ${transferDestAccount?.name ?? ""}`
+      : payee;
+
+  const categoryOptions = (allowIncome: boolean) => (
+    <>
+      {allowIncome ? (
+        <>
+          <option value="">Income: Available this month</option>
+          <option value="__deferred__">Income: Available next month</option>
+        </>
+      ) : (
+        <option value="" disabled>
+          Select category…
+        </option>
+      )}
+      {groups && groups.length > 0 ? (
+        groups.map((g) => (
+          <optgroup key={g.id} label={g.name}>
+            {categories
+              .filter((c) => c.groupId === g.id)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </optgroup>
+        ))
+      ) : (
+        categories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))
+      )}
+    </>
+  );
+
   const categoryName = (id: number | null) =>
     id == null ? null : (categoryById.get(id)?.name ?? "Unknown category");
 
-  const mergedCategory = merged.transferAccountId != null ? "Transfer" : (categoryName(merged.categoryId) ?? "—");
-  const fields: { label: string; value: ReactNode; source: "primary" | "secondary" | "both" }[] = [
-    { label: "Date", value: merged.date, source: fieldSource(primary.date, secondary.date, merged.date) },
-    {
-      label: "Account",
-      value: accountById.get(merged.accountId)?.name ?? "Unknown account",
-      source: fieldSource(primary.accountId, secondary.accountId, merged.accountId),
-    },
-    {
-      label: "Payee",
-      value: merged.payee || <span className="y-hint">—</span>,
-      source: fieldSource(primary.payee, secondary.payee, merged.payee),
-    },
-    {
-      label: "Category",
-      value: mergedCategory,
-      source:
-        merged.transferAccountId != null
-          ? "primary"
-          : fieldSource(primary.categoryId, secondary.categoryId, merged.categoryId),
-    },
-    {
-      label: "Memo",
-      value: merged.memo || <span className="y-hint">—</span>,
-      source: fieldSource(primary.memo, secondary.memo, merged.memo),
-    },
-    {
-      label: "Amount",
-      value: money(merged.amount),
-      source: fieldSource(primary.amount, secondary.amount, merged.amount),
-    },
-    {
-      label: "Cleared",
-      value: merged.status === "c" ? "Cleared" : "Uncleared",
-      source: fieldSource(primary.status, secondary.status, merged.status),
-    },
-  ];
-  if (merged.transferAccountId != null) {
-    fields.push({
-      label: "Transfer to",
-      value: accountById.get(merged.transferAccountId)?.name ?? "Unknown account",
-      source: "primary",
-    });
-  }
-
-  const rows = [
-    { row: primary, role: "Kept" },
-    { row: secondary, role: "Removed" },
-  ];
+  const constituents = [primary, secondary];
 
   return (
     <Modal
@@ -159,7 +250,7 @@ export function MergePreviewModal({
             </Btn>
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            <Btn variant="primary" onClick={doMerge} disabled={merging}>
+            <Btn variant="primary" onClick={doMerge} disabled={!canSave || merging}>
               {merging ? "Merging" : "Merge transactions"}
             </Btn>
           </div>
@@ -172,26 +263,158 @@ export function MergePreviewModal({
         </Notice>
       )}
       <p className="y-hint text-[12px] leading-relaxed mb-3">
-        These 2 transactions will be combined into one. Imported data wins; manual details fill
-        the gaps.
+        These 2 transactions will be combined into one. Review and edit the result — imported data
+        wins; manual details fill the gaps.
       </p>
 
       <div data-testid="merge-result">
         <div className="y-label mb-1.5 block">Resulting transaction</div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2 mb-4">
-          {fields.map((f) => (
-            <div key={f.label}>
-              <span className="y-label mb-0.5 block">{f.label}</span>
-              <span className="text-[12.5px]" style={{ color: "var(--y-ink)" }}>
-                {f.value}
-              </span>
-              {f.source !== "both" && (
-                <span className="y-hint text-[11px] ml-1.5">
-                  {sourceTag(f.source === "primary" ? primary : secondary)}
-                </span>
-              )}
-            </div>
-          ))}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Date">
+            <TextField
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              onKeyDown={(e) => {
+                const adjusted = adjustDateShortcut(date, e.key);
+                if (adjusted) {
+                  e.preventDefault();
+                  setDate(adjusted);
+                }
+              }}
+              className={inputClass}
+              aria-invalid={!isValidISODate(date)}
+            />
+            <DateFieldError value={date} />
+          </Field>
+          <Field label="Amount">
+            <TextField
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              inputMode="decimal"
+              className={inputClass}
+            />
+            <AmountPreview value={amount} />
+            <AmountFieldError value={amount} />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Payee">
+            <SearchList
+              value={payeeDisplay}
+              onChange={setPayee}
+              options={payees}
+              allowCreate
+              placeholder={
+                isTransfer
+                  ? `Transfer : ${transferDestAccount?.name ?? "<other account>"}`
+                  : "e.g. Whole Foods"
+              }
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Memo">
+            <TextField
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              placeholder="Optional notes"
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        <div
+          className={isTransfer || showCategory ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}
+        >
+          <Field label="Account">
+            <Select
+              value={accountId}
+              onChange={(v) => setAccountId(Number(v))}
+              className="w-full"
+              searchable
+              disabled={isTransfer}
+            >
+              {availableAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {isTransfer ? (
+            <Field label="Transfer to">
+              <Select
+                value={transferAccountId}
+                onChange={(v) => {
+                  if (v !== "") changeTransferDestination(Number(v));
+                }}
+                className="w-full"
+                searchable
+              >
+                <option value="" disabled>
+                  Select account…
+                </option>
+                {otherAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            showCategory && (
+              <Field label="Category">
+                <Select
+                  value={categoryId}
+                  onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
+                  className="w-full"
+                  searchable
+                >
+                  {categoryOptions(true)}
+                </Select>
+              </Field>
+            )
+          )}
+        </div>
+
+        {isTransferBoundary && (
+          <Field label={isBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
+            <Select
+              value={categoryId}
+              onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
+              className="w-full"
+              searchable
+            >
+              {categoryOptions(!isBoundaryOutflow)}
+            </Select>
+          </Field>
+        )}
+
+        {showCategory && categoryId === "__deferred__" && (
+          <Field label="Deferred to month">
+            <TextField
+              type="month"
+              value={incomeMonth}
+              onChange={(e) => setIncomeMonth(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        )}
+
+        <div className="pt-1">
+          <Checkbox
+            checked={cleared}
+            onChange={setCleared}
+            label="Cleared (bank has processed this)"
+          />
+        </div>
+
+        <div className="pt-1 mb-3 flex items-center gap-2">
+          <span className="y-label">Flag</span>
+          <FlagPicker value={flagColor} onChange={setFlagColor} />
         </div>
       </div>
 
@@ -201,7 +424,6 @@ export function MergePreviewModal({
           <table className="y-table w-full text-left">
             <thead>
               <tr>
-                <th aria-label="Merge role" style={{ width: 130 }} />
                 <th>Date</th>
                 <th>Payee</th>
                 <th>Category</th>
@@ -210,14 +432,8 @@ export function MergePreviewModal({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ row, role }) => (
+              {constituents.map((row) => (
                 <tr key={row.id} className="y-row y-subrow">
-                  <td className="whitespace-nowrap">
-                    <span className="font-semibold text-[12px]" style={{ color: "var(--y-ink)" }}>
-                      {role}
-                    </span>{" "}
-                    <span className="y-hint text-[11px]">· {sourceTag(row)}</span>
-                  </td>
                   <td className="y-num whitespace-nowrap">{row.date}</td>
                   <td>{row.payee || <span className="y-hint">—</span>}</td>
                   <td>
@@ -234,5 +450,63 @@ export function MergePreviewModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+export function MergePreviewModal({
+  accounts,
+  categories,
+  groups,
+  payees,
+  transactions,
+  ids,
+  onClose,
+  onConfirm,
+}: {
+  accounts: Account[];
+  categories: Category[];
+  groups?: CategoryGroup[];
+  /** Existing payee names for the searchable payee field. */
+  payees?: SearchListOption[];
+  transactions: Transaction[];
+  /** Exactly two transaction ids to merge. */
+  ids: number[];
+  onClose: () => void;
+  onConfirm: (ids: number[], overrides: MergeOverrides) => Promise<void> | void;
+}) {
+  const preview = useMemo(() => {
+    if (ids.length !== 2) return null;
+    const first = transactions.find((t) => t.id === ids[0]);
+    const second = transactions.find((t) => t.id === ids[1]);
+    if (!first || !second) return null;
+    const [primary, secondary] = pickMergePrimary(toMergeable(first), toMergeable(second));
+    const accountById = new Map(accounts.map((a) => [a.id, a] as const));
+    const src = accountById.get(primary.accountId);
+    const dest =
+      primary.transferAccountId != null ? accountById.get(primary.transferAccountId) : null;
+    const merged = resolveMergedTransaction({
+      primary,
+      secondary,
+      sourceAccount: { onBudget: src?.onBudget ?? true, kind: src?.kind ?? "liquid" },
+      destAccount: dest ? { onBudget: dest.onBudget } : null,
+    });
+    return { primary, secondary, merged };
+  }, [accounts, ids, transactions]);
+
+  if (!preview) return null;
+
+  return (
+    <MergeEditorModal
+      accounts={accounts}
+      categories={categories}
+      groups={groups}
+      payees={payees}
+      ids={ids}
+      primary={preview.primary}
+      secondary={preview.secondary}
+      merged={preview.merged}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
   );
 }

@@ -314,6 +314,49 @@ describe("PATCH /api/transactions (BUG-19)", () => {
       const badRes = await POST(bad);
       expect(badRes.status).toBe(400);
     });
+
+    it("merges with a patch payload carrying the user's field edits", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const tx1 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "Store A",
+      });
+      const tx2 = await createTransaction(db, {
+        accountId: account!.id,
+        amount: -1000,
+        date: "2026-08-01",
+        payee: "STORE A #1",
+      });
+
+      const req = new NextRequest("http://localhost:3000/api/transactions?action=merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: [tx1!.id, tx2!.id],
+          patch: { payee: "Store A (edited)", memo: "curated", amount: -1200 },
+        }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.merged.id).toBe(tx1!.id);
+      expect(json.deletedId).toBe(tx2!.id);
+      expect(json.merged.payee).toBe("Store A (edited)");
+      expect(json.merged.memo).toBe("curated");
+      expect(json.merged.amount).toBe(-1200);
+
+      const badPatch = new NextRequest("http://localhost:3000/api/transactions?action=merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [tx1!.id, tx2!.id], patch: { amount: 0 } }),
+      });
+      expect((await POST(badPatch)).status).toBe(400);
+    });
   });
 
   describe("Parametrized State-Transition Tests", () => {

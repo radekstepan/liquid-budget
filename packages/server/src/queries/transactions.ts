@@ -7,6 +7,7 @@ import type {
   TransactionFlagState,
 } from "@ynab/logic";
 import {
+  applyMergeOverrides,
   assertSplitsBalanced,
   classifyBoundaryTransfer,
   isTransferPayee,
@@ -18,6 +19,7 @@ import {
   TRANSACTION_FLAG_COLORS,
   TransactionError,
   type MergeableTransaction,
+  type MergeOverrides,
 } from "@ynab/logic";
 import {
   assertEntityInvariants,
@@ -26,7 +28,7 @@ import {
 } from "../invariants.js";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { accounts, transactions } from "../schema.js";
+import { accounts, categories, transactions } from "../schema.js";
 import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
 export type CreateTransactionInput = {
@@ -1492,14 +1494,20 @@ export type MergeTransactionsResult = {
  * The imported row (fresh CSV import or YNAB4 backup row) survives and
  * the other is deleted; field-level priority is resolved by
  * `resolveMergedTransaction` — imported bank data wins every field it
- * carries, manual curation fills the gaps. Both old balance effects are
- * reversed and the merged effect applied, so merging a duplicate leaves
- * exactly one balance impact.
+ * carries, manual curation fills the gaps. `overrides` (user edits from
+ * the merge preview modal) win over the resolution, with
+ * category/income recomputed from the final shape like the edit path.
+ * Both old balance effects are reversed and the merged effect applied,
+ * so merging a duplicate leaves exactly one balance impact.
  *
  * Reconciled (locked) rows and split parents/children are rejected, like
  * the delete/edit paths.
  */
-export async function mergeTransactions(db: Database, ids: number[]): Promise<MergeTransactionsResult> {
+export async function mergeTransactions(
+  db: Database,
+  ids: number[],
+  overrides: MergeOverrides = {}
+): Promise<MergeTransactionsResult> {
   if (
     !Array.isArray(ids) ||
     ids.length !== 2 ||
@@ -1510,6 +1518,9 @@ export async function mergeTransactions(db: Database, ids: number[]): Promise<Me
   const [firstId, secondId] = ids as [number, number];
   if (firstId === secondId) {
     throw new TransactionError("cannot merge a transaction with itself", 400);
+  }
+  if (overrides.status === "r" || overrides.transferStatus === "r") {
+    throw new TransactionError("cannot set status to 'r'; only the reconcile flow may set 'r'");
   }
 
   return withTransaction(db, async () => {
@@ -1567,11 +1578,62 @@ export async function mergeTransactions(db: Database, ids: number[]): Promise<Me
       primary.transferAccountId != null
         ? await getTransferTargetInfo(db, primary.transferAccountId)
         : null;
-    const merged = resolveMergedTransaction({
+    const resolved = resolveMergedTransaction({
       primary,
       secondary,
       sourceAccount: { onBudget: srcInfo?.onBudget ?? true, kind: srcInfo?.kind ?? "liquid" },
       destAccount: destInfo ? { onBudget: destInfo.onBudget } : null,
+    });
+
+    // User edits win over the resolution. Referenced rows are checked
+    // up front so a bad id fails with a 404 instead of a FK error, and
+    // moving the merged row onto a closed account is blocked like the
+    // edit path (untouched legs stay allowed for history fixes).
+    if (overrides.accountId !== undefined) {
+      const info = await getAccountInfo(db, overrides.accountId);
+      if (!info) throw new TransactionError(`account ${overrides.accountId} not found`, 404);
+    }
+    const finalAccountId = overrides.accountId ?? resolved.accountId;
+    const finalTransferAccountId =
+      overrides.transferAccountId !== undefined
+        ? overrides.transferAccountId
+        : resolved.transferAccountId;
+    if (finalTransferAccountId != null) {
+      const info = await getTransferTargetInfo(db, finalTransferAccountId);
+      if (!info) throw new TransactionError(`account ${finalTransferAccountId} not found`, 404);
+    }
+    if (overrides.categoryId !== undefined && overrides.categoryId != null) {
+      const [cat] = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.id, overrides.categoryId));
+      if (!cat) throw new TransactionError(`category ${overrides.categoryId} not found`, 404);
+    }
+    if (overrides.date !== undefined) assertValidISODate(overrides.date);
+    if (overrides.amount !== undefined) assertValidAmount(overrides.amount);
+    if (overrides.incomeMonth !== undefined && overrides.incomeMonth != null) {
+      assertValidISOMonth(overrides.incomeMonth, "incomeMonth");
+    }
+    assertEntityInvariants({
+      accountId: finalAccountId,
+      transferAccountId: finalTransferAccountId,
+    });
+    if (
+      finalAccountId !== primary.accountId ||
+      finalTransferAccountId !== primary.transferAccountId
+    ) {
+      await assertTargetAccountsOpen(db, [finalAccountId, finalTransferAccountId]);
+    }
+
+    const finalSrc = await getAccountInfo(db, finalAccountId);
+    const finalDest =
+      finalTransferAccountId != null
+        ? await getTransferTargetInfo(db, finalTransferAccountId)
+        : null;
+    const merged = applyMergeOverrides(resolved, overrides, {
+      sourceAccount: { onBudget: finalSrc?.onBudget ?? true, kind: finalSrc?.kind ?? "liquid" },
+      destAccount: finalDest ? { onBudget: finalDest.onBudget } : null,
+      destAccountName: finalDest?.name ?? null,
     });
 
     await applyBalance(db, first.accountId, -Number(first.amount));
@@ -1600,7 +1662,7 @@ export async function mergeTransactions(db: Database, ids: number[]): Promise<Me
         amount: merged.amount,
         status: merged.status,
         transferStatus: merged.transferStatus,
-        flagColor: merged.flagColor,
+        flagColor: sanitizeFlagColor(merged.flagColor),
         isIncome: merged.isIncome,
         incomeMonth: merged.incomeMonth,
         needsReview: merged.needsReview,
