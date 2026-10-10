@@ -1,4 +1,4 @@
-# YNAB4 Alternative
+# Liquid Budget
 
 **Your money, your machine.** A fast, local-first envelope budgeting app — give every dollar a job, track spending against your plan, and keep your data on your own computer. Miss YNAB4? Import your `.y4backup` and feel right at home.
 
