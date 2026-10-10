@@ -341,7 +341,32 @@ export function TransactionModal({
     }
     setTemplateNotice(null);
     if (mode !== "split") switchingMode("split");
-    setSubRows(fillSubRowDefaults(rows, memo, payee));
+    // Smart apply: when already editing a split with the same number of
+    // rows, a category or memo the user already set is kept instead of
+    // being cleared by a template leg that leaves it unset ("choose when
+    // applying"). The template still supplies the amounts (the split
+    // ratio), transfer destinations, and any preset categories or memos.
+    const merged =
+      mode === "split" && subRows.length === rows.length
+        ? rows.map((row, i) => {
+            const prev = subRows[i]!;
+            let next = row;
+            if (next.categoryId == null) {
+              const prevCategory = prev.categoryId;
+              if (prevCategory != null && prevCategory !== "") {
+                next = { ...next, categoryId: prevCategory };
+              }
+            }
+            if (!next.memo) {
+              const prevMemo = prev.memo;
+              if (prevMemo != null && prevMemo !== "") {
+                next = { ...next, memo: prevMemo };
+              }
+            }
+            return next;
+          })
+        : rows;
+    setSubRows(fillSubRowDefaults(merged, memo, payee));
   };
 
   const otherAccounts = availableAccounts.filter((a) => a.id !== accountId);
