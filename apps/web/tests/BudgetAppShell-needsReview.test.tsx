@@ -89,8 +89,12 @@ describe("BudgetAppShell (needsReview: approving an import clears bold without r
     const row = await openRegisterOnSap();
     const getsBefore = budgetGets;
 
+    // Unreviewed rows show "N" (New) in the C column until approved.
+    const badge = within(row).getByRole("button", { name: "New" });
+    expect(badge.textContent).toBe("N");
+
     await act(async () => {
-      fireEvent.click(within(row).getByRole("button", { name: "Uncleared" }));
+      fireEvent.click(badge);
     });
 
     await waitFor(() => {
@@ -102,6 +106,7 @@ describe("BudgetAppShell (needsReview: approving an import clears bold without r
     await waitFor(() => {
       const updated = screen.getAllByText("SAP Concur")[0]!.closest("tr")!;
       expect(updated.classList.contains("font-bold")).toBe(false);
+      expect(within(updated).getByRole("button", { name: "Cleared" }).textContent).toBe("C");
     });
   });
 

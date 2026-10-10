@@ -1736,6 +1736,11 @@ input.y-inline-amt {
 .y-cleared--duplicate {
   background: linear-gradient(#f0b559, var(--y-orange-dk));
 }
+/* New/unreviewed marker — bright informational blue, distinct from the
+   darker reconciled blue. Same square-letter language as C/U/R. */
+.y-cleared--n {
+  background: linear-gradient(#6fc1ec, var(--y-blue));
+}
 
 .y-flag {
   display: inline-block;
