@@ -30,6 +30,7 @@ export * from "./rename-rules.js";
 export * from "./rename-suggest.js";
 export * from "./search.js";
 export * from "./searchQuery.js";
+export * from "./privacy.js";
 
 /**
  * YNAB4's six flag colours, in canonical display order.
