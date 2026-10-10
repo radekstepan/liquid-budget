@@ -120,8 +120,9 @@ export const ReportsView = memo(function ReportsView({
     if (eY < yMin) yMin = eY;
     if (eY > yMax && eY <= thisYear) yMax = eY;
 
+    // Newest year first so the current year is at the top of the dropdown.
     const list: number[] = [];
-    for (let y = yMin; y <= yMax; y++) list.push(y);
+    for (let y = yMax; y >= yMin; y--) list.push(y);
     return list;
   }, [data.transactions, minYear, maxYear, startMonth, endMonth]);
 

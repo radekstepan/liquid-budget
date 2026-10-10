@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { SpendingTrendsReport } from "../src/SpendingTrendsReport.js";
+import { colorAt } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 
 class MockResizeObserver {
@@ -764,6 +765,67 @@ describe("SpendingTrendsReport", () => {
       const rect = g.querySelector("rect")!;
       expect(rect.getAttribute("fill-opacity")).toBe("0.88");
     });
+  });
+
+  it("renders equal-dollar segments at equal heights when a month mixes positive and negative segments", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 0 },
+      ],
+      groups: [
+        { id: 1, name: "Housing", sort: 0, isCreditCardPayments: false },
+        { id: 2, name: "Needs", sort: 1, isCreditCardPayments: false },
+      ],
+      categories: [
+        { id: 10, groupId: 1, name: "Rent", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 20, groupId: 2, name: "Groceries", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+      ],
+      assignments: [],
+      transactions: [
+        // April: Housing $1,000, Needs -$300 (a $500 refund outweighs $200 spending)
+        { id: 1, accountId: 1, categoryId: 10, date: "2026-04-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        { id: 2, accountId: 1, categoryId: 20, date: "2026-04-05", payee: "Grocer", memo: "", amount: "-20000", status: "c" },
+        { id: 3, accountId: 1, categoryId: 20, date: "2026-04-10", payee: "Refund", memo: "", amount: "50000", status: "c" },
+        // May: identical Housing $1,000, Needs +$300 (all-positive month)
+        { id: 4, accountId: 1, categoryId: 10, date: "2026-05-01", payee: "Landlord", memo: "", amount: "-100000", status: "c" },
+        { id: 5, accountId: 1, categoryId: 20, date: "2026-05-05", payee: "Grocer", memo: "", amount: "-30000", status: "c" },
+      ],
+      recurring: [],
+    };
+
+    render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-05" />);
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }));
+
+    const svg = document.querySelector("svg.overflow-visible")!;
+    const zeroY = parseFloat(
+      svg.querySelector('line[stroke="#b6b6b1"]')!.getAttribute("y1") || "0"
+    );
+
+    // Segment rects carry fill-opacity; clip/selection rects do not.
+    const segRects = Array.from(svg.querySelectorAll("rect[fill-opacity]"));
+    // Constituents sort by total desc: Housing ($2,000) first, Needs ($0) second.
+    const housingFill = colorAt(0).toLowerCase();
+    const needsFill = colorAt(1).toLowerCase();
+    const housingRects = segRects.filter(
+      (r) => r.getAttribute("fill")?.toLowerCase() === housingFill
+    );
+    expect(housingRects.length).toBe(2);
+
+    // Identical $1,000 Housing spending must render at identical heights.
+    const heights = housingRects.map((r) => parseFloat(r.getAttribute("height") || "0"));
+    expect(Math.abs(heights[0]! - heights[1]!)).toBeLessThan(0.01);
+
+    // The negative Needs slice in April stacks downward from the zero line.
+    const needsRects = segRects.filter(
+      (r) => r.getAttribute("fill")?.toLowerCase() === needsFill
+    );
+    expect(needsRects.length).toBe(2);
+    const aprilX = Math.min(...segRects.map((r) => parseFloat(r.getAttribute("x") || "0")));
+    const aprilNeeds = needsRects.find(
+      (r) => parseFloat(r.getAttribute("x") || "0") === aprilX
+    )!;
+    expect(parseFloat(aprilNeeds.getAttribute("y") || "0")).toBeGreaterThanOrEqual(zeroY - 0.75);
+    expect(parseFloat(aprilNeeds.getAttribute("height") || "0")).toBeGreaterThan(1);
   });
 
   it("highlights subcategory segments when hovering over subcategory row in drilled group view", () => {

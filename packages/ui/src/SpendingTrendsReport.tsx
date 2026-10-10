@@ -47,6 +47,8 @@ interface SegmentLayout {
   width: number;
   height: number;
   color: string;
+  neg: boolean;
+  truncated: boolean;
 }
 
 interface MonthBarLayout {
@@ -54,7 +56,6 @@ interface MonthBarLayout {
   monthTotal: number;
   totalH: number;
   barTopY: number;
-  truncated: boolean;
   cx: number;
   barX: number;
   barW: number;
@@ -199,7 +200,6 @@ const StaticChart = memo(function StaticChart({
       <g mask={chart.hasBreak ? `url(#${gid}-break)` : undefined}>
         {chart.monthBars.map((mBar, mIdx) => {
         const isMonthSelected = selectedMonth === mBar.month;
-        const isNeg = mBar.monthTotal < 0;
 
         return (
           <g key={mBar.month}>
@@ -215,8 +215,8 @@ const StaticChart = memo(function StaticChart({
             )}
 
             <g clipPath={`url(#${gid}-bar-${mIdx})`}>
-              {mBar.segments.map((seg, sIdx) => {
-              const segTruncated = mBar.truncated && sIdx === mBar.segments.length - 1;
+              {mBar.segments.map((seg) => {
+              const segTruncated = seg.truncated;
               const isDimmed = hoveredConstituentId != null && seg.id !== hoveredConstituentId;
               const isHighlight = hoveredConstituentId != null && seg.id === hoveredConstituentId;
               return (
@@ -247,18 +247,18 @@ const StaticChart = memo(function StaticChart({
                       {chart.barW >= 8 ? (
                         <TruncMarker
                           x={seg.x}
-                          y={isNeg ? mBar.barTopY + mBar.totalH : mBar.barTopY}
+                          y={seg.neg ? seg.y + seg.height : seg.y}
                           width={seg.width}
                           fill={seg.color}
                           hatchId={`url(#${gid}-hatch)`}
-                          dir={isNeg ? "down" : "up"}
+                          dir={seg.neg ? "down" : "up"}
                           rx={chart.cornerRadius}
                         />
                       ) : (
                         <rect
                           data-testid="trunc-cap"
                           x={seg.x}
-                          y={isNeg ? mBar.barTopY + mBar.totalH - TRUNC_CAP_H : mBar.barTopY}
+                          y={seg.neg ? seg.y + seg.height - TRUNC_CAP_H : seg.y}
                           width={seg.width}
                           height={TRUNC_CAP_H}
                           rx={1}
@@ -713,16 +713,31 @@ export function SpendingTrendsReport({
     const innerW = Math.max(1, W - padL - padR);
     const innerH = Math.max(1, H - padT - padB);
 
-    const hasNegData = trends.minMonthSpend < 0;
-    const hasPosData = trends.maxMonthSpend > 0;
+    // Diverging stacks: positive segments stack upward from zero and negative
+    // segments downward, so equal dollars render at equal heights. Axis extents
+    // follow stack sums (not net totals) so every stack fits in the chart.
+    const stackSums = trends.months.map((m) => {
+      let pos = 0;
+      let neg = 0;
+      for (const s of m.segments) {
+        if (s.amount < 0) neg += s.amount;
+        else pos += s.amount;
+      }
+      return { pos, neg };
+    });
+    const maxPosStack = Math.max(0, ...stackSums.map((s) => s.pos));
+    const maxNegStack = Math.max(0, ...stackSums.map((s) => -s.neg));
+
+    const hasNegData = maxNegStack > 0;
+    const hasPosData = maxPosStack > 0;
 
     const isLog = scaleMode === "log";
     const posBreak = isLog
       ? NO_BREAK
-      : computeOutlierBreak(trends.months.map((m) => m.total).filter((v) => v > 0));
+      : computeOutlierBreak(stackSums.map((s) => s.pos).filter((v) => v > 0));
     const negBreak = isLog
       ? NO_BREAK
-      : computeOutlierBreak(trends.months.map((m) => -m.total).filter((v) => v > 0));
+      : computeOutlierBreak(stackSums.map((s) => -s.neg).filter((v) => v > 0));
     const hasBreak = posBreak.hasBreak || negBreak.hasBreak;
 
     const MIN_SIDE = 0.22;
@@ -730,8 +745,8 @@ export function SpendingTrendsReport({
     let y: (v: number) => number;
     let zeroY: number;
 
-    const posTopVal = Math.max(1, trends.maxMonthSpend);
-    const negTopVal = Math.max(1, Math.abs(trends.minMonthSpend));
+    const posTopVal = Math.max(1, maxPosStack);
+    const negTopVal = Math.max(1, maxNegStack);
 
     let posShare = hasNegData ? posTopVal / (posTopVal + negTopVal) : 1;
     if (hasNegData) {
@@ -768,8 +783,8 @@ export function SpendingTrendsReport({
 
     if (isLog) {
       if (hasNegData) {
-        const minVal = trends.minMonthSpend;
-        const maxVal = trends.maxMonthSpend;
+        const minVal = -maxNegStack;
+        const maxVal = maxPosStack;
         const rawTicks = symlogTicks(minVal, maxVal);
         ticks = rawTicks.map((v) => ({ v, grid: true }));
 
@@ -792,7 +807,7 @@ export function SpendingTrendsReport({
           return zeroY;
         };
       } else {
-        const maxVal = Math.max(1000, trends.maxMonthSpend);
+        const maxVal = Math.max(1000, maxPosStack);
         const rawTicks = symlogTicks(0, maxVal);
         ticks = rawTicks.filter((t) => t >= 0).map((v) => ({ v, grid: true }));
         if (!ticks.some((t) => t.v === 0)) ticks.unshift({ v: 0, grid: true });
@@ -835,8 +850,8 @@ export function SpendingTrendsReport({
     } else {
       // Linear scale without outlier break
       if (hasNegData) {
-        const posPt = Math.max(100, trends.maxMonthSpend * 1.1);
-        const negPt = Math.max(100, Math.abs(trends.minMonthSpend) * 1.1);
+        const posPt = Math.max(100, maxPosStack * 1.1);
+        const negPt = Math.max(100, maxNegStack * 1.1);
         let linearPosShare = posPt / (posPt + negPt);
         if (linearPosShare < MIN_SIDE) linearPosShare = MIN_SIDE;
         if (linearPosShare > 1 - MIN_SIDE) linearPosShare = 1 - MIN_SIDE;
@@ -871,7 +886,7 @@ export function SpendingTrendsReport({
           return zeroY;
         };
       } else {
-        const maxVal = Math.max(100, trends.maxMonthSpend * 1.1);
+        const maxVal = Math.max(100, maxPosStack * 1.1);
         const rawTicks = niceTicks(0, maxVal, 4);
         ticks = rawTicks
           .filter((t) => t >= 0 && t <= maxVal * 1.05)
@@ -902,67 +917,78 @@ export function SpendingTrendsReport({
 
     const cornerRadius = Math.min(3, Math.max(1, Math.floor(barW / 3)));
 
-    // Bars scale against the largest month so the tallest bar always reaches
-    // the visual cap; the axis keeps its own ticks computed from maxMonthSpend.
-    const barScaleMax = Math.max(1, trends.maxMonthSpend);
-    const barScaleNegMax = Math.max(1, Math.abs(trends.minMonthSpend));
+    // Stacks scale against the largest stack so the tallest stack always reaches
+    // the visual cap; the axis keeps its own ticks computed from stack extents.
+    const barScaleMax = Math.max(1, maxPosStack);
+    const barScaleNegMax = Math.max(1, maxNegStack);
     const maxBarH = (zeroY - padT) * TRUNC_RATIO;
     const maxBarHNeg = (padT + innerH - zeroY) * TRUNC_RATIO;
 
     const monthBars = trends.months.map((mPoint, i) => {
       const cx = padL + colW * (i + 0.5);
       const barX = cx - barW / 2;
-      const isNeg = mPoint.total < 0;
-      const isPos = mPoint.total > 0;
+      const posSum = stackSums[i]?.pos ?? 0;
+      const negSum = stackSums[i]?.neg ?? 0;
+      const hasPos = posSum > 0;
+      const hasNeg = negSum < 0;
 
       const useBreakBars = hasBreak;
-      const truncated =
-        !useBreakBars &&
-        ((isPos && mPoint.total >= barScaleMax * TRUNC_RATIO) ||
-          (isNeg && Math.abs(mPoint.total) >= barScaleNegMax * TRUNC_RATIO));
+      const truncUp =
+        !useBreakBars && hasPos && posSum >= barScaleMax * TRUNC_RATIO;
+      const truncDown =
+        !useBreakBars && hasNeg && -negSum >= barScaleNegMax * TRUNC_RATIO;
 
-      let totalH = 0;
-      let barTopY = zeroY;
+      let upH = 0;
+      let downH = 0;
 
-      if (isPos) {
+      if (hasPos) {
         if (useBreakBars) {
-          totalH = Math.max(0, zeroY - y(mPoint.total));
+          upH = Math.max(0, zeroY - y(posSum));
         } else if (isLog) {
           const maxLog = symlog(Math.max(1000, barScaleMax));
-          totalH = Math.max(0, (zeroY - padT) * (maxLog > 0 ? symlog(mPoint.total) / maxLog : 0));
+          upH = Math.max(0, (zeroY - padT) * (maxLog > 0 ? symlog(posSum) / maxLog : 0));
         } else {
-          totalH = Math.max(0, maxBarH * (mPoint.total / barScaleMax));
+          upH = Math.max(0, maxBarH * (posSum / barScaleMax));
         }
-        barTopY = zeroY - totalH;
-      } else if (isNeg) {
+      }
+      if (hasNeg) {
         if (useBreakBars) {
-          totalH = Math.max(0, y(mPoint.total) - zeroY);
+          downH = Math.max(0, y(negSum) - zeroY);
         } else if (isLog) {
           const minLog = symlog(Math.max(1000, barScaleNegMax));
-          totalH = Math.max(0, (padT + innerH - zeroY) * (minLog > 0 ? symlog(Math.abs(mPoint.total)) / minLog : 0));
+          downH = Math.max(0, (padT + innerH - zeroY) * (minLog > 0 ? symlog(-negSum) / minLog : 0));
         } else {
-          totalH = Math.max(0, maxBarHNeg * (Math.abs(mPoint.total) / barScaleNegMax));
+          downH = Math.max(0, maxBarHNeg * (-negSum / barScaleNegMax));
         }
-        barTopY = zeroY;
       }
 
-      const denom =
-        mPoint.segments.reduce((acc, s) => acc + Math.abs(s.amount), 0) ||
-        Math.abs(mPoint.total) ||
-        1;
+      const barTopY = zeroY - upH;
+      const totalH = upH + downH;
 
-      let currentOffset = zeroY;
+      // Truncation markers sit on the outermost segment of each capped stack.
+      let lastPosIdx = -1;
+      let lastNegIdx = -1;
+      mPoint.segments.forEach((s, idx) => {
+        if (s.amount < 0) lastNegIdx = idx;
+        else lastPosIdx = idx;
+      });
+
+      let upOffset = zeroY;
+      let downOffset = zeroY;
       const renderedSegments = mPoint.segments.map((seg, sIdx) => {
-        const segRatio = Math.abs(seg.amount) / denom;
-        const segHeight = Math.max(0, totalH * segRatio);
+        const isSegNeg = seg.amount < 0;
+        const stackTotal = isSegNeg ? -negSum : posSum;
+        const stackH = isSegNeg ? downH : upH;
+        const segHeight =
+          stackTotal > 0 ? Math.max(0, stackH * (Math.abs(seg.amount) / stackTotal)) : 0;
 
         let segY = zeroY;
-        if (isPos) {
-          segY = currentOffset - segHeight;
-          currentOffset = segY;
-        } else if (isNeg) {
-          segY = currentOffset;
-          currentOffset = segY + segHeight;
+        if (!isSegNeg) {
+          segY = upOffset - segHeight;
+          upOffset = segY;
+        } else {
+          segY = downOffset;
+          downOffset = segY + segHeight;
         }
 
         const color = colorMap.get(seg.id) ?? colorAt(sIdx);
@@ -976,6 +1002,8 @@ export function SpendingTrendsReport({
           width: barW,
           height: segHeight,
           color,
+          neg: isSegNeg,
+          truncated: (truncUp && sIdx === lastPosIdx) || (truncDown && sIdx === lastNegIdx),
         };
       });
 
@@ -984,7 +1012,6 @@ export function SpendingTrendsReport({
         monthTotal: mPoint.total,
         totalH,
         barTopY,
-        truncated,
         cx,
         barX,
         barW,
@@ -1117,7 +1144,9 @@ export function SpendingTrendsReport({
           <div className="mt-1 border-t border-[rgba(255,255,255,0.15)] pt-1 space-y-[2px]">
             {mPoint.segments.map((s, idx) => {
               const color = colorMap.get(s.id) ?? colorAt(idx);
-              const denom = Math.abs(mPoint.total);
+              const denom =
+                mPoint.segments.reduce((acc, seg) => acc + Math.abs(seg.amount), 0) ||
+                Math.abs(mPoint.total);
               const pct = denom > 0 ? `${Math.round((Math.abs(s.amount) / denom) * 100)}%` : "0%";
               return (
                 <div

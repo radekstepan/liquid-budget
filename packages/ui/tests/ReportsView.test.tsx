@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
-import { pickFromOpenDropdownByValue } from "./dropdown.js";
+import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
 
 class MockResizeObserver {
   cb: () => void;
@@ -387,6 +387,24 @@ describe("ReportsView", () => {
     expect(
       screen.getByText("No spending data for this timeframe and filter selection.")
     ).toBeInTheDocument();
+  });
+
+  it("lists years newest-first in the year selectors", () => {
+    const data: BudgetData = {
+      ...makeData(),
+      transactions: [
+        txn("2024-05", 1, "Groceries", -50, 10),
+        txn("2025-06", 1, "Groceries", -50, 10),
+        txn("2026-04", 1, "Groceries", -50, 10),
+      ],
+    };
+    renderView({ data });
+
+    openDropdown(/from year/i);
+    const labels = within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((o) => o.textContent?.trim());
+    expect(labels).toEqual(["2026", "2025", "2024"]);
   });
 
   it("does not include future years beyond the dataset/current year in the year selector", () => {
