@@ -800,6 +800,30 @@ export function parseDuplicateAnalysisResponse(data: unknown): DuplicateAnalysis
   return result.data as DuplicateAnalysisResult;
 }
 
+/** Confirm a duplicate group is legitimate: the analyzer will skip it afterwards. */
+export const DuplicateDismissSchema = z.looseObject({
+  fingerprint: z.string().min(1),
+});
+
+export const DuplicateDismissResponseSchema = z.looseObject({
+  dismissed: z.boolean(),
+  /** Rows in the group whose internal duplicate marker was cleared. */
+  clearedCount: z.number().int().nonnegative(),
+});
+
+export type DuplicateDismissResponse = {
+  dismissed: boolean;
+  clearedCount: number;
+};
+
+export function parseDuplicateDismissResponse(data: unknown): DuplicateDismissResponse {
+  const result = DuplicateDismissResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid dismiss-duplicates response: ${formatZodError(result.error)}`);
+  }
+  return result.data as DuplicateDismissResponse;
+}
+
 const CreatedTransactionResponseSchema = z.looseObject({
   id: z.number().int(),
   amount: FlexibleMoneyString.optional(),

@@ -184,3 +184,50 @@ test("POST /api/duplicates leaves a manual yellow flag untouched", async ({ requ
 
   await resetToDemo();
 });
+
+test("POST /api/duplicates/dismiss clears markers and survives re-analysis", async ({ request }) => {
+  await resetToDemo();
+
+  const budget = await (await request.get("/api/budget")).json();
+  const account =
+    budget.accounts.find((a: { name: string }) => a.name === "EQ Bank") ??
+    budget.accounts.find((a: { kind: string }) => a.kind === "liquid");
+  const category = budget.categories[0];
+
+  const payload = {
+    accountId: account.id,
+    categoryId: category.id,
+    date: "2026-06-19",
+    payee: "Duplicate Dismiss Payee",
+    memo: "",
+    amount: -654,
+    cleared: true,
+  };
+  await request.post("/api/transactions", { data: payload });
+  await request.post("/api/transactions", { data: payload });
+
+  const first = await (await request.post("/api/duplicates")).json();
+  expect(first.flaggedCount).toBe(1);
+  expect(first.groups).toHaveLength(1);
+
+  const dismissRes = await request.post("/api/duplicates/dismiss", {
+    data: { fingerprint: first.groups[0].fingerprint },
+  });
+  expect(dismissRes.status()).toBe(200);
+  const dismissBody = await dismissRes.json();
+  expect(dismissBody.dismissed).toBe(true);
+  expect(dismissBody.clearedCount).toBe(1);
+
+  const after = await (await request.get("/api/budget")).json();
+  const rows = after.transactions.filter(
+    (t: { payee: string }) => t.payee === "Duplicate Dismiss Payee"
+  );
+  expect(rows).toHaveLength(2);
+  expect(rows.every((t: { flagColor: string | null }) => t.flagColor !== "duplicate")).toBe(true);
+
+  const second = await (await request.post("/api/duplicates")).json();
+  expect(second.duplicateCount).toBe(0);
+  expect(second.flaggedCount).toBe(0);
+
+  await resetToDemo();
+});

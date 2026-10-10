@@ -241,6 +241,7 @@ export type BudgetAppApi = {
   importYnab4?: (file: File) => Promise<ImportSummary | void>;
   importCsv?: (input: { accountId: number; swap: boolean; dateFormat?: "auto" | "dmy" | "mdy"; csv: string }) => Promise<any>;
   analyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
+  dismissDuplicateGroup?: (fingerprint: string) => Promise<void>;
   addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
   updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
   deleteRenameRule?: (id: number) => Promise<void>;
@@ -1356,6 +1357,7 @@ export function BudgetApp({
               onBulkDelete={api.bulkDeleteTransactions}
               onBulkUpdate={api.bulkUpdateTransactions}
               onMergeTransactions={api.mergeTransactions}
+              onDismissDuplicateGroup={api.dismissDuplicateGroup}
               payees={payeeOptions}
               onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
               onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}

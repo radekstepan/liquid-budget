@@ -1437,13 +1437,16 @@ export const FlagPicker: React.FC<{
  * The internal "duplicate" marker renders as a square "D" status badge (same
  * language as the C/U cleared flags) and is read-only — the user cannot
  * change or clear it; they must remove the duplicate and rerun the duplicate
- * check. Disabled when the row is reconciled (locked).
+ * check. When `onDuplicateClick` is set the badge becomes a button that
+ * reveals the matching transactions. Disabled when the row is reconciled
+ * (locked).
  */
 export const FlagCell: React.FC<{
   color: FlagColor | TransactionDuplicateFlag | null;
   onChange: (color: FlagColor | null) => void;
   disabled?: boolean;
-}> = ({ color, onChange, disabled }) => {
+  onDuplicateClick?: () => void;
+}> = ({ color, onChange, disabled, onDuplicateClick }) => {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -1500,8 +1503,26 @@ export const FlagCell: React.FC<{
   const isDuplicate = color === "duplicate";
 
   // The duplicate marker is analyzer-owned and read-only: no popover, no
-  // way to switch away from it.
+  // way to switch away from it. With a handler it becomes a button that
+  // reveals the other matching transactions.
   if (isDuplicate) {
+    if (onDuplicateClick) {
+      return (
+        <Tooltip tip="Show the matching duplicate transactions">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicateClick();
+            }}
+            aria-label="Show duplicate transactions"
+            className="y-flag-cell cursor-pointer"
+          >
+            <span className="y-cleared y-cleared--duplicate">D</span>
+          </button>
+        </Tooltip>
+      );
+    }
     return (
       <Tooltip tip="Duplicate transaction — remove one of the matching transactions and rerun the duplicate check">
         <span className="y-flag-cell" aria-label="Flag: Duplicate">

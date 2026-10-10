@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
-import { analyzeUnflaggedDuplicates } from "../src/queries/duplicates.js";
+import { analyzeUnflaggedDuplicates, dismissDuplicateGroup } from "../src/queries/duplicates.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
@@ -222,6 +222,68 @@ describe("analyzeUnflaggedDuplicates", () => {
     const reconciledRow = data.transactions.find((t) => t.id === reconciledId)!;
     expect(mutableRow.flagColor).toBe("duplicate");
     expect(reconciledRow.flagColor).toBeNull();
+  });
+});
+
+describe("dismissDuplicateGroup", () => {
+  let db: Db;
+
+  beforeEach(async () => {
+    db = openMigratedDb();
+    await seedAccount(db);
+  });
+
+  it("clears the group's markers and keeps future analyses from re-flagging it", async () => {
+    await insertTx(db, { payee: "Store" });
+    await insertTx(db, { payee: "Store" });
+
+    const first = await analyzeUnflaggedDuplicates(db);
+    expect(first.flaggedCount).toBe(1);
+    const fingerprint = first.groups[0]!.fingerprint;
+
+    const dismissed = await dismissDuplicateGroup(db, fingerprint);
+    expect(dismissed).toEqual({ dismissed: true, clearedCount: 1 });
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.every((t) => t.flagColor !== "duplicate")).toBe(true);
+
+    const second = await analyzeUnflaggedDuplicates(db);
+    expect(second.groups).toHaveLength(0);
+    expect(second.duplicateCount).toBe(0);
+    expect(second.flaggedCount).toBe(0);
+  });
+
+  it("leaves manual flags untouched and skips the whole group afterwards", async () => {
+    await insertTx(db, { payee: "Store" });
+    await insertTx(db, { payee: "Store" });
+    await insertTx(db, { payee: "Store", flagColor: "red" });
+
+    const first = await analyzeUnflaggedDuplicates(db);
+    const fingerprint = first.groups[0]!.fingerprint;
+    await dismissDuplicateGroup(db, fingerprint);
+
+    const data = await getBudgetData(db);
+    expect(data.transactions.find((t) => t.flagColor === "red")).toBeDefined();
+    expect(data.transactions.filter((t) => t.flagColor === "duplicate")).toHaveLength(0);
+
+    const second = await analyzeUnflaggedDuplicates(db);
+    expect(second.groups).toHaveLength(0);
+    expect(second.duplicateCount).toBe(0);
+  });
+
+  it("is idempotent and accepts unknown fingerprints", async () => {
+    await insertTx(db, { payee: "Store" });
+    await insertTx(db, { payee: "Store" });
+    const first = await analyzeUnflaggedDuplicates(db);
+    const fingerprint = first.groups[0]!.fingerprint;
+
+    expect(await dismissDuplicateGroup(db, fingerprint)).toEqual({ dismissed: true, clearedCount: 1 });
+    expect(await dismissDuplicateGroup(db, fingerprint)).toEqual({ dismissed: true, clearedCount: 0 });
+    expect(await dismissDuplicateGroup(db, "[]")).toEqual({ dismissed: true, clearedCount: 0 });
+  });
+
+  it("rejects an empty fingerprint", async () => {
+    await expect(dismissDuplicateGroup(db, "  ")).rejects.toThrow(/fingerprint/);
   });
 });
 
