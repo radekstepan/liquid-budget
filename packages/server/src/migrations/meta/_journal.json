@@ -176,6 +176,13 @@
       "when": 1791641377607,
       "tag": "0024_dizzy_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791644487000,
+      "tag": "0025_align_split_leg_status",
+      "breakpoints": true
     }
   ]
 }
