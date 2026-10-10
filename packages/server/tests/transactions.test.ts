@@ -2484,6 +2484,144 @@ describe("transactions queries", () => {
       });
     });
 
+    describe("split transfer legs follow the parent status when the split is cleared", () => {
+      async function seedSecondAccount(db: ReturnType<typeof openMigratedDb>) {
+        const [account] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            balance: 0,
+            onBudget: true,
+            sort: 1,
+          })
+          .returning();
+        return account!.id;
+      }
+
+      async function seedSplitWithLeg(
+        db: ReturnType<typeof openMigratedDb>,
+        status: "u" | "c"
+      ) {
+        const { accountId, cat1Id } = await seedTestData(db);
+        const destId = await seedSecondAccount(db);
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Split",
+            memo: "",
+            amount: -5000,
+            status,
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { transferAccountId: destId, amount: -2000, memo: "Leg" },
+          ]
+        );
+        return { accountId, destId, split };
+      }
+
+      async function familyRows(db: ReturnType<typeof openMigratedDb>, parentId: number) {
+        return db
+          .select()
+          .from(schema.transactions)
+          .where(
+            or(
+              eq(schema.transactions.id, parentId),
+              eq(schema.transactions.parentId, parentId)
+            )
+          );
+      }
+
+      it("updateTransaction: clearing a split parent clears its transfer legs", async () => {
+        const db = openMigratedDb();
+        const { split } = await seedSplitWithLeg(db, "u");
+
+        await updateTransaction(db, split.parent.id, { status: "c" });
+
+        const rows = await familyRows(db, split.parent.id);
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("c");
+        }
+        const leg = rows.find((r) => r.transferAccountId != null)!;
+        expect(leg.transferStatus).toBe("c");
+      });
+
+      it("updateTransaction: clearing a split child clears its sibling transfer legs", async () => {
+        const db = openMigratedDb();
+        const { split } = await seedSplitWithLeg(db, "u");
+
+        const catChild = split.children[0]!;
+        await updateTransaction(db, catChild.id, { status: "c" });
+
+        const rows = await familyRows(db, split.parent.id);
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("c");
+        }
+        const leg = rows.find((r) => r.transferAccountId != null)!;
+        expect(leg.transferStatus).toBe("c");
+      });
+
+      it("updateTransaction: toggling a split never overwrites a reconciled destination leg", async () => {
+        const db = openMigratedDb();
+        const { split } = await seedSplitWithLeg(db, "c");
+
+        // Simulate the destination account having reconciled the leg.
+        const legId = split.children[1]!.id;
+        await db
+          .update(schema.transactions)
+          .set({ transferStatus: "r", transferReconciledAt: "2026-09-01" })
+          .where(eq(schema.transactions.id, legId));
+
+        // Unclear a sibling child: the source side reopens atomically...
+        await updateTransaction(db, split.children[0]!.id, { status: "u" });
+
+        const rows = await familyRows(db, split.parent.id);
+        for (const row of rows) {
+          expect(row.status).toBe("u");
+        }
+        // ...but the destination's reconcile stands.
+        const leg = rows.find((r) => r.id === legId)!;
+        expect(leg.transferStatus).toBe("r");
+      });
+
+      it("bulkUpdateTransactions: clearing a split parent clears its transfer legs", async () => {
+        const db = openMigratedDb();
+        const { split } = await seedSplitWithLeg(db, "u");
+
+        await bulkUpdateTransactions(db, [split.parent.id], { status: "c" });
+
+        const rows = await familyRows(db, split.parent.id);
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("c");
+        }
+        const leg = rows.find((r) => r.transferAccountId != null)!;
+        expect(leg.transferStatus).toBe("c");
+      });
+
+      it("reconcileAccount: reconciling a split keeps destination legs cleared, not reconciled", async () => {
+        const db = openMigratedDb();
+        const { accountId, split } = await seedSplitWithLeg(db, "c");
+
+        await reconcileAccount(db, { accountId, statementBalance: -5000 });
+
+        const rows = await familyRows(db, split.parent.id);
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          expect(row.status).toBe("r");
+        }
+        // The destination leg still needs its own reconcile; it stays cleared.
+        const leg = rows.find((r) => r.transferAccountId != null)!;
+        expect(leg.transferStatus).toBe("c");
+      });
+    });
+
     describe("Bug 2.3: transfers and split parents force categoryId to null", () => {
       it("forces categoryId to null on internal transfer insertion", async () => {
         const db = openMigratedDb();

@@ -1,4 +1,4 @@
-import { eq, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type {
   BulkUpdateTransactionPatch,
   ClearedStatus,
@@ -973,14 +973,52 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         .update(transactions)
         .set({ status: p.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
         .where(eq(transactions.parentId, id));
+      // Transfer legs follow the parent too, so the destination side never
+      // shows uncleared under a cleared split. Legs the destination account
+      // already reconciled keep their state: only that account may move them.
+      await db
+        .update(transactions)
+        .set({
+          transferStatus: p.status as ClearedStatus,
+          transferReconciledAt: null,
+          transferReconciliationId: null,
+        })
+        .where(
+          and(
+            eq(transactions.parentId, id),
+            sql`${transactions.transferAccountId} IS NOT NULL`,
+            or(sql`${transactions.transferStatus} IS NULL`, ne(transactions.transferStatus, "r"))
+          )
+        );
     }
 
     // If this row is a child of a split and status changed, propagate status to parent and siblings
     if (current.parentId != null && "status" in p && p.status != null) {
+      const familyFilter = or(
+        eq(transactions.id, current.parentId),
+        eq(transactions.parentId, current.parentId)
+      );
       await db
         .update(transactions)
         .set({ status: p.status as ClearedStatus, reconciledAt: null, reconciliationId: null })
-        .where(or(eq(transactions.id, current.parentId), eq(transactions.parentId, current.parentId)));
+        .where(familyFilter);
+      // Sibling transfer legs follow as well (the parent itself is never a
+      // transfer, so the leg filter only matches siblings). Reconciled
+      // destination legs are left untouched — see above.
+      await db
+        .update(transactions)
+        .set({
+          transferStatus: p.status as ClearedStatus,
+          transferReconciledAt: null,
+          transferReconciliationId: null,
+        })
+        .where(
+          and(
+            familyFilter,
+            sql`${transactions.transferAccountId} IS NOT NULL`,
+            or(sql`${transactions.transferStatus} IS NULL`, ne(transactions.transferStatus, "r"))
+          )
+        );
     }
 
     // Learn an automatic rename rule from a deliberate payee rename on a
@@ -1958,6 +1996,23 @@ export async function bulkUpdateTransactions(
           .update(transactions)
           .set({ status: intent.status, reconciledAt: null, reconciliationId: null })
           .where(familyFilter);
+        // Transfer legs follow the family status, same rule as
+        // updateTransaction. Bulk edits already refuse families containing a
+        // reconciled leg, so the 'r' guard below is defense in depth.
+        await db
+          .update(transactions)
+          .set({
+            transferStatus: intent.status,
+            transferReconciledAt: null,
+            transferReconciliationId: null,
+          })
+          .where(
+            and(
+              familyFilter,
+              sql`${transactions.transferAccountId} IS NOT NULL`,
+              or(sql`${transactions.transferStatus} IS NULL`, ne(transactions.transferStatus, "r"))
+            )
+          );
       }
     }
 
