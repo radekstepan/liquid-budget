@@ -3,24 +3,29 @@
 ## Overview
 
 Two-layer strategy: unit/component tests with Vitest, end-to-end tests with
-Playwright. Turbo orchestrates per-workspace runs; `apps/web` is the primary
-tested surface (`vitest.config.ts`, `playwright.config.ts`, `tests/`,
-`test-results/` all live there).
+Playwright. Turbo orchestrates per-workspace runs; every workspace has its own
+`vitest.config.ts`, and `@ynab/web` additionally owns the Playwright suite
+(`playwright.config.ts`, specs in `tests/e2e/`, output in `test-results/`).
 
 ## Test stack
 
 | Layer | Tool | Location |
 |---|---|---|
-| Unit / component | Vitest 2.1.9 (root devDependency) | `*.test.tsx` colocated per `AGENTS.md`; `apps/web/vitest.config.ts` |
-| E2E | Playwright | `apps/web/playwright.config.ts`, specs in `apps/web/tests/`, output in `apps/web/test-results/` |
+| Unit / component | Vitest 2.1.9 (logic/server/ui) and ^4.1.10 (`apps/web` — note major-version drift) | Per-package `vitest.config.ts`; web config aliases `@` → `src` |
+| E2E | Playwright | `apps/web/playwright.config.ts`, ~36 specs in `apps/web/tests/e2e/`, output in `apps/web/test-results/` |
 | Orchestration | Turborepo (`test`, `coverage`, `test:watch` tasks) | Root `package.json`, `turbo.json` |
 | Type safety net | `typecheck` (TS strict + `noUncheckedIndexedAccess`) | Per-package `tsconfig.json` extending `tsconfig.base.json` |
+| Hygiene gate | `check:artifacts` | `scripts/check-artifacts.mjs` — fails if DB/backup artifacts are git-tracked |
 
 ## Coverage
 
 - `turbo.json` wires `test` and `coverage` tasks with `outputs: ["coverage/**"]` (Turbo-cached).
 - Root `yarn coverage` runs `turbo run coverage` across workspaces.
 - `test` tasks declare `dependsOn: ["^build"]` — tests run against built dependencies.
+- Coverage thresholds are enforced per package and fail the run when missed:
+  - `logic`: statements/lines/functions 90, branches 85
+  - `server`: statements/lines 85, branches/functions 70
+  - `ui`: statements/lines 85, branches 80, functions 50
 
 ## How to run
 
@@ -29,8 +34,8 @@ yarn test         # full suite across all workspaces (turbo run test)
 yarn test:watch   # watch mode (uncached, persistent)
 yarn coverage     # coverage reports (coverage/ per workspace)
 
-# E2E (web app only)
-yarn e2e          # headless Playwright run
+# E2E (web app only; boots production `next start` on port 3100 — build first)
+yarn e2e          # headless Playwright run (frees port 3100 first via e2e:clean)
 yarn e2e:headed   # headed run
 yarn e2e:ui       # interactive Playwright UI
 yarn e2e:install  # install browser binaries (first-time setup)
@@ -38,9 +43,19 @@ yarn e2e:install  # install browser binaries (first-time setup)
 
 ## Naming and placement
 
-- Name test files `*.test.tsx` (repo convention per `AGENTS.md`).
-- Unit tests live next to the code they cover; E2E specs live in `apps/web/tests/`.
-- Never commit `test-results/` or `coverage/` output (build artifacts).
+- Name tests `*.test.ts` (node) or `*.test.tsx` (components); web also accepts both. E2E specs are `*.spec.ts` in `apps/web/tests/e2e/`.
+- Placement: `apps/web` keeps unit tests in `tests/` (excluding `tests/e2e/`, which Vitest ignores); `logic`/`server` accept `src/**/*.test.ts` and `tests/**/*.test.ts`; `ui` accepts both `src/` and `tests/` in `.ts` and `.tsx`.
+- Never commit `test-results/` or `coverage/` output (build artifacts; git-ignored).
+
+## Gotchas / constraints
+
+- **No console output**: every Vitest config throws on any `console.*` call (`onConsoleLog`). Silence code under test or the suite fails.
+- **No parallelism in web unit tests** (`fileParallelism: false`) and **serial E2E** (`workers: 1`): suites mutate a shared DB, so parallel runs race and corrupt absolute-value assertions.
+- **E2E never touches the dev DB**: it runs with `DATABASE_URL=../../budget.test.db` on port 3100; unit tests use `DATABASE_URL=:memory:`. The dev `budget.db` on port 3000 is only for manual development.
+- **Always run E2E via root `yarn e2e`**: Playwright's `reuseExistingServer` silently reuses a stale server on port 3100 (stale bundle, dirty DB handle); `e2e:clean` kills it first.
+- **`/api/reset` needs `RESET_ENABLED=true`** (set by the Playwright `webServer` command); without it the route returns 403 and the E2E `global-setup`/import specs fail.
+- **`E2E_TESTING=true` is currently read by nothing** — a seam for future MSW-style mocking, not an active behavior switch.
+- **Vitest version drift**: `@ynab/web` runs Vitest 4 while the other packages run 2.1.9. Check the local config before assuming shared behavior/plugins.
 
 ## Notes / gaps
 
