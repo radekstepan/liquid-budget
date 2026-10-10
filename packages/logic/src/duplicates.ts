@@ -1,4 +1,9 @@
-import type { ClearedStatus, RenameRule, TransactionFlagState } from "./types.js";
+import type {
+  ClearedStatus,
+  RenameRule,
+  TransactionDuplicateFlag,
+  TransactionFlagState,
+} from "./types.js";
 import { applyRenameRules } from "./rename-rules.js";
 
 /**
@@ -35,6 +40,29 @@ export type DuplicateGroup = {
   /** The remaining entries; these are the duplicates. */
   duplicates: DuplicateEntry[];
 };
+
+export type DuplicateCountTransaction = {
+  accountId: number;
+  flagColor?: TransactionFlagState;
+};
+
+const DUPLICATE_FLAG: TransactionDuplicateFlag = "duplicate";
+
+/**
+ * Per-account count of rows still carrying the internal duplicate marker.
+ * The analyzer only flags plain regular rows (never transfers or split
+ * legs), so each flagged row counts toward its own account only.
+ */
+export function countDuplicatesByAccount(
+  transactions: DuplicateCountTransaction[]
+): Record<number, number> {
+  const map: Record<number, number> = {};
+  for (const t of transactions) {
+    if (t.flagColor !== DUPLICATE_FLAG) continue;
+    map[t.accountId] = (map[t.accountId] ?? 0) + 1;
+  }
+  return map;
+}
 
 export type DuplicateAnalysisResult = {
   groups: DuplicateGroup[];

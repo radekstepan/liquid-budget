@@ -5,6 +5,7 @@ import {
   findDuplicateGroups,
   buildExistingImportFingerprints,
   identifyImportDuplicates,
+  countDuplicatesByAccount,
   type DuplicateEntry,
 } from "../src/duplicates.js";
 
@@ -322,5 +323,25 @@ describe("buildExistingImportFingerprints and identifyImportDuplicates (BUG-21, 
     const result = identifyImportDuplicates(1, fps, incoming);
     expect(result.duplicateRowNumbers.size).toBe(0);
     expect(result.duplicates).toHaveLength(0);
+  });
+});
+
+describe("countDuplicatesByAccount", () => {
+  it("counts only rows carrying the internal duplicate marker, grouped by account", () => {
+    expect(
+      countDuplicatesByAccount([
+        { accountId: 1, flagColor: "duplicate" },
+        { accountId: 1, flagColor: "duplicate" },
+        { accountId: 2, flagColor: "duplicate" },
+        { accountId: 1, flagColor: "red" },
+        { accountId: 1, flagColor: null },
+        { accountId: 2 },
+      ])
+    ).toEqual({ 1: 2, 2: 1 });
+  });
+
+  it("returns empty when nothing is flagged as a duplicate", () => {
+    expect(countDuplicatesByAccount([])).toEqual({});
+    expect(countDuplicatesByAccount([{ accountId: 1, flagColor: null }])).toEqual({});
   });
 });

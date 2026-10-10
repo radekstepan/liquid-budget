@@ -440,6 +440,139 @@ describe("Sidebar", () => {
     expect(container.querySelectorAll(".y-side-newcol")).toHaveLength(0);
   });
 
+  it("renders the red duplicates badge first and the new-count badge second", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+        duplicatesByAccount={{ 1: 3 }}
+      />
+    );
+
+    const cashBtn = screen.getByRole("button", { name: /cash/i });
+    const col = cashBtn.querySelector(".y-side-newcol")!;
+    const badges = col.querySelectorAll(".y-badge");
+    expect(badges).toHaveLength(2);
+
+    // Duplicates first (plain red badge), new count second (green variant).
+    const dupBadge = badges[0]!;
+    expect(dupBadge).toHaveTextContent("3");
+    expect(dupBadge).not.toHaveClass("y-badge--new");
+    const newBadge = badges[1]!;
+    expect(newBadge).toHaveTextContent("2");
+    expect(newBadge).toHaveClass("y-badge--new");
+    expect(dupBadge.compareDocumentPosition(newBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // One shared group width plus a fixed gap between the badges.
+    expect(col.style.minWidth).toBe("36px");
+    expect(col.style.gap).toBe("4px");
+
+    // Rows without counts reserve the same space so amounts stay aligned.
+    const checkingBtn = screen.getByRole("button", { name: /checking/i });
+    const checkingCol = checkingBtn.querySelector(".y-side-newcol")!;
+    expect(checkingCol.style.minWidth).toBe("36px");
+    expect(checkingCol.querySelector(".y-badge")).toBeNull();
+  });
+
+  it("keeps one fixed gap between badges for wide counts", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 169, 2: 59 }}
+        duplicatesByAccount={{ 1: 1, 2: 5 }}
+      />
+    );
+
+    // Both rows share the group width (sized to the 3-digit count) and the
+    // same fixed gap — the "5 / 59" row shows no wider a gap than "1 / 169".
+    for (const name of [/cash/i, /checking/i]) {
+      const btn = screen.getByRole("button", { name });
+      const col = btn.querySelector(".y-side-newcol")!;
+      expect(col.style.minWidth).toBe("47px");
+      expect(col.style.gap).toBe("4px");
+      expect(col.querySelectorAll(".y-badge")).toHaveLength(2);
+    }
+    const cashBadges = screen
+      .getByRole("button", { name: /cash/i })
+      .querySelectorAll(".y-side-newcol .y-badge");
+    expect(cashBadges[0]).toHaveTextContent("1");
+    expect(cashBadges[1]).toHaveTextContent("169");
+  });
+
+  it("renders only the duplicates badge when no account has new items", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        duplicatesByAccount={{ 2: 1 }}
+      />
+    );
+
+    const checkingBtn = screen.getByRole("button", { name: /checking/i });
+    const col = checkingBtn.querySelector(".y-side-newcol")!;
+    expect(col.style.minWidth).toBe("16px");
+    const dupBadge = col.querySelector(".y-badge")!;
+    expect(dupBadge).toHaveTextContent("1");
+    expect(dupBadge).not.toHaveClass("y-badge--new");
+
+    // Other rows reserve the same space but render no badge.
+    const cashBtn = screen.getByRole("button", { name: /cash/i });
+    const cashCol = cashBtn.querySelector(".y-side-newcol")!;
+    expect(cashCol.style.minWidth).toBe("16px");
+    expect(cashCol.querySelector(".y-badge")).toBeNull();
+  });
+
+  it("renders the new-count badge with the green variant when no duplicates exist", () => {
+    render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{ 1: 2 }}
+      />
+    );
+
+    const cashBtn = screen.getByRole("button", { name: /cash/i });
+    const col = cashBtn.querySelector(".y-side-newcol")!;
+    expect(col.style.minWidth).toBe("16px");
+    const newBadge = col.querySelector(".y-badge")!;
+    expect(newBadge).toHaveTextContent("2");
+    expect(newBadge).toHaveClass("y-badge--new");
+  });
+
+  it("renders no badge column when no account has new items or duplicates", () => {
+    const { container } = render(
+      <Sidebar
+        view="budget"
+        setView={() => {}}
+        accounts={accounts}
+        selectedAccountId={null}
+        onSelectAccount={() => {}}
+        onAddAccount={() => {}}
+        newByAccount={{}}
+        duplicatesByAccount={{}}
+      />
+    );
+    expect(container.querySelectorAll(".y-side-newcol")).toHaveLength(0);
+  });
+
   it("shows a note indicator with the note as tooltip when an account has notes", () => {
     const notedAccounts: Account[] = [
       { id: 20, name: "Noted Checking", kind: "liquid", groupLabel: "Liquid", balance: "1000", onBudget: true, sort: 0, notes: "Closed after refinance" },

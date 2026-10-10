@@ -17,6 +17,7 @@ import {
   round2,
   SPLIT_TEMPLATE_PRESETS,
   todayISO,
+  countDuplicatesByAccount,
   countNewByAccount,
   isValidISOMonth,
   DEMO_MONTH,
@@ -1186,6 +1187,10 @@ export function BudgetApp({
     return countNewByAccount(data.transactions, data.recurring, todayDay);
   }, [data.transactions, data.recurring, todayDay]);
 
+  const duplicatesByAccount = useMemo(() => {
+    return countDuplicatesByAccount(data.transactions);
+  }, [data.transactions]);
+
   // Single-click entry: resume a paused rule on the fly so posting never
   // takes two clicks. This performs exactly the resume-then-post the user
   // would otherwise do manually, with no new server capabilities.
@@ -1251,6 +1256,7 @@ export function BudgetApp({
         onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
         onReorderAccount={api.reorderAccount}
         newByAccount={newByAccount}
+        duplicatesByAccount={duplicatesByAccount}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
