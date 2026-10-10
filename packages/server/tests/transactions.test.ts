@@ -1200,8 +1200,6 @@ describe("transactions queries", () => {
       mock.respondWith("update:accounts", [{}, {}]);
       mock.respondWith("delete:transactions", [{}]);
       mock.respondWith("update:transactions", [{}]);
-      mock.respondWithNth("insert:transactions", 1, [{ id: 10 }]);
-      mock.respondWithNth("insert:transactions", 2, [{ id: 11 }]);
       mock.respondWith("update:accounts", [{}, {}]);
       mock.respondWith("select:rename_rules", []);
       mock.respondWith("insert:rename_rules", [{ id: 1, rule: "Amazon", replacement: "Amazon.com" }]);
@@ -1216,11 +1214,16 @@ describe("transactions queries", () => {
         ]
       );
 
-      const inserts = mock.calls.filter((c) => c.op === "insert");
+      // Id-matched children update in place (no delete+insert): updates[0]
+      // is the parent, updates[1..2] are the children in incoming order.
+      // (The rename_rules insert from the parent payee change is unrelated.)
+      const updates = mock.calls.filter((c) => c.op === "update" && c.table === "transactions");
+      expect(mock.calls.filter((c) => c.op === "insert" && c.table === "transactions")).toHaveLength(0);
+      expect(mock.calls.filter((c) => c.op === "delete")).toHaveLength(0);
       // Child 1 preserves its custom payee "Amazon Seller A"
-      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -6000, payee: "Amazon Seller A" });
+      expect(updates[1]?.set).toMatchObject({ parentId: 1, amount: -6000, payee: "Amazon Seller A" });
       // Child 2 had parent's old payee "Amazon", so it gets updated to "Amazon.com"
-      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon.com" });
+      expect(updates[2]?.set).toMatchObject({ parentId: 1, amount: -4000, payee: "Amazon.com" });
     });
 
     it("BUG-20: updates child payee when explicitly specified in updateSplit subTransactions", async () => {
@@ -1264,8 +1267,6 @@ describe("transactions queries", () => {
       mock.respondWith("update:accounts", [{}, {}]);
       mock.respondWith("delete:transactions", [{}]);
       mock.respondWith("update:transactions", [{}]);
-      mock.respondWithNth("insert:transactions", 1, [{ id: 201 }]);
-      mock.respondWithNth("insert:transactions", 2, [{ id: 202 }]);
       mock.respondWith("update:accounts", [{}, {}]);
 
       // Reverse order: child 102 comes first, child 101 comes second
@@ -1279,9 +1280,13 @@ describe("transactions queries", () => {
         ]
       );
 
-      const inserts = mock.calls.filter((c) => c.op === "insert");
-      expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
-      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller A" });
+      // Id-matched children update in place: updates[0] is the parent,
+      // updates[1..2] follow the incoming (reversed) order.
+      const updates = mock.calls.filter((c) => c.op === "update" && c.table === "transactions");
+      expect(mock.calls.filter((c) => c.op === "insert")).toHaveLength(0);
+      expect(mock.calls.filter((c) => c.op === "delete")).toHaveLength(0);
+      expect(updates[1]?.set).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
+      expect(updates[2]?.set).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller A" });
     });
 
     it("BUG-34: new child without id inherits parent payee and does not steal old child's custom payee by position", async () => {
@@ -1310,9 +1315,14 @@ describe("transactions queries", () => {
         ]
       );
 
+      // Position 0 has no id, so it inserts; id 102 updates in place; the
+      // unclaimed old child 101 is deleted.
       const inserts = mock.calls.filter((c) => c.op === "insert");
+      expect(inserts).toHaveLength(1);
       expect(inserts[0]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Amazon" });
-      expect(inserts[1]?.values).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
+      const updates = mock.calls.filter((c) => c.op === "update" && c.table === "transactions");
+      expect(updates[1]?.set).toMatchObject({ parentId: 1, amount: -5000, payee: "Seller B" });
+      expect(mock.calls.filter((c) => c.op === "delete")).toHaveLength(1);
     });
 
     it("converts a single transaction that has no children into a split (BUG-02)", async () => {
@@ -2619,6 +2629,127 @@ describe("transactions queries", () => {
         // The destination leg still needs its own reconcile; it stays cleared.
         const leg = rows.find((r) => r.transferAccountId != null)!;
         expect(leg.transferStatus).toBe("c");
+      });
+    });
+
+    describe("updateSplit preserves child identity so same-day order never jumps", () => {
+      async function seedSecondAccount(db: ReturnType<typeof openMigratedDb>) {
+        const [account] = await db
+          .insert(schema.accounts)
+          .values({
+            name: "Savings",
+            kind: "liquid",
+            groupLabel: "Budget Accounts",
+            balance: 0,
+            onBudget: true,
+            sort: 1,
+          })
+          .returning();
+        return account!.id;
+      }
+
+      async function balanceOf(db: ReturnType<typeof openMigratedDb>, accountId: number) {
+        const [acct] = await db
+          .select()
+          .from(schema.accounts)
+          .where(eq(schema.accounts.id, accountId));
+        return Number(acct?.balance);
+      }
+
+      it("status-only rewrite keeps child ids while statuses follow the parent", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id } = await seedTestData(db);
+        const destId = await seedSecondAccount(db);
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Split",
+            memo: "",
+            amount: -5000,
+            status: "u",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { transferAccountId: destId, amount: -2000, memo: "Leg" },
+          ]
+        );
+        const catId = split.children[0]!.id;
+        const legId = split.children[1]!.id;
+
+        // Mirror the edit modal: full rewrite with child ids, only status changed.
+        const result = await updateSplit(
+          db,
+          split.parent.id,
+          { status: "c" },
+          [
+            { id: catId, payee: "Split", categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { id: legId, payee: "Split", transferAccountId: destId, amount: -2000, memo: "Leg" },
+          ]
+        );
+
+        expect(result.children.map((c) => c.id).sort()).toEqual([catId, legId].sort());
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.parentId, split.parent.id));
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.status).toBe("c");
+        }
+        const leg = rows.find((r) => r.id === legId)!;
+        expect(leg.transferAccountId).toBe(destId);
+        expect(leg.transferStatus).toBe("c");
+        // Balances are unchanged by a status-only rewrite.
+        expect(await balanceOf(db, accountId)).toBe(-5000);
+        expect(await balanceOf(db, destId)).toBe(2000);
+      });
+
+      it("structural rewrite reuses kept ids, deletes removed, inserts added", async () => {
+        const db = openMigratedDb();
+        const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+        const destId = await seedSecondAccount(db);
+        const split = await createSplitWithChildren(
+          db,
+          {
+            accountId,
+            date: "2026-08-01",
+            payee: "Split",
+            memo: "",
+            amount: -5000,
+            status: "c",
+          },
+          [
+            { categoryId: cat1Id, amount: -3000, memo: "Groceries" },
+            { transferAccountId: destId, amount: -2000, memo: "Leg" },
+          ]
+        );
+        const catId = split.children[0]!.id;
+        const legId = split.children[1]!.id;
+
+        // Drop the category child, keep the leg by id, add a fresh child.
+        await updateSplit(
+          db,
+          split.parent.id,
+          {},
+          [
+            { id: legId, payee: "Split", transferAccountId: destId, amount: -2000, memo: "Leg" },
+            { payee: "Split", categoryId: cat2Id, amount: -3000, memo: "New" },
+          ]
+        );
+
+        const rows = await db
+          .select()
+          .from(schema.transactions)
+          .where(eq(schema.transactions.parentId, split.parent.id));
+        expect(rows).toHaveLength(2);
+        expect(rows.some((r) => r.id === legId)).toBe(true);
+        expect(rows.some((r) => r.id === catId)).toBe(false);
+        const added = rows.find((r) => r.id !== legId)!;
+        expect(added.memo).toBe("New");
+        expect(await balanceOf(db, accountId)).toBe(-5000);
+        expect(await balanceOf(db, destId)).toBe(2000);
       });
     });
 
