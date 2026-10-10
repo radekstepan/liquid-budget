@@ -500,10 +500,9 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     await expect(row05.locator("td.y-num").last()).toHaveText("$800.00");
     await expect(row01.locator("td.y-num").last()).toHaveText("$1,000.00");
 
-    // 4. Click "Transactions" in sidebar. The account filter persists, so the
-    // register stays scoped — toggle the account off to reach All Transactions.
+    // 4. Click "Transactions" in sidebar: the account selection clears and
+    // the register returns to All Transactions.
     await page.getByRole("button", { name: /^Transactions/ }).click();
-    await accountRow.click();
     await expect(page.getByText("All Transactions", { exact: true }).first()).toBeVisible();
 
     // 5. Switch back to account view and sort table by Payee: verify running balance values stay anchored to chronological dates.

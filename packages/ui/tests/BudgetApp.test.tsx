@@ -712,7 +712,7 @@ describe("BudgetApp", () => {
     expect(screen.getByText("Balanced — ready to reconcile")).toBeInTheDocument();
   });
 
-  it("BUG-46 (persisted filter): popstate to /transactions keeps the last account filter", () => {
+  it("BUG-46: popstate to /transactions clears the account filter", () => {
     const { api } = makeApi();
     window.history.pushState(null, "", "/transactions/1");
     render(<BudgetApp data={makeSeedBudgetData()} api={api} initialView="transactions" initialAccount={1} />);
@@ -721,17 +721,17 @@ describe("BudgetApp", () => {
     expect(acctBtn.className).toContain("is-sel");
 
     // Simulate popstate navigation to /transactions (no account ID).
-    // The account filter is persisted now: a bare transactions URL leaves
-    // the last selection alone instead of clearing it (old BUG-46 behavior).
+    // The transactions URL is the source of truth: a bare path clears to
+    // All Transactions instead of keeping the last selection.
     act(() => {
       window.history.pushState(null, "", "/transactions");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    // Account stays selected -> main Transactions button is not selected
+    // Account cleared -> main Transactions button is selected
     const txBtn = screen.getByRole("button", { name: /^transactions/i });
-    expect(txBtn.className).not.toContain("is-sel");
-    expect(acctBtn.className).toContain("is-sel");
+    expect(txBtn.className).toContain("is-sel");
+    expect(acctBtn.className).not.toContain("is-sel");
   });
 
   it("BUG-46: popstate with invalid month /budget/2026-99 does not set invalid month", () => {
@@ -993,6 +993,40 @@ describe("BudgetApp", () => {
       ).toBeInTheDocument();
     } finally {
       window.localStorage.removeItem("ynab:nav:visible");
+    }
+  });
+
+  it("clicking the Transactions nav clears any selected account", () => {
+    window.localStorage.removeItem("ynab:transactions:accountFilter");
+    window.history.pushState(null, "", "/");
+    try {
+      const { api } = makeApi();
+      render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+
+      const accountBtns = screen.getAllByRole("button", {
+        name: /td unlimited chequing/i,
+      });
+      const accountRow = accountBtns.find(
+        (b) => b.getAttribute("aria-label") == null
+      )!;
+      fireEvent.click(accountRow);
+      expect(window.location.pathname).toBe("/transactions/1");
+
+      const navAll = screen.getByRole("button", { name: /^transactions/i });
+      expect(navAll.className).not.toMatch(/\bis-sel\b/);
+
+      fireEvent.click(navAll);
+
+      const navAfter = screen.getByRole("button", { name: /^transactions/i });
+      const rowAfter = screen
+        .getAllByRole("button", { name: /td unlimited chequing/i })
+        .find((b) => b.getAttribute("aria-label") == null)!;
+      expect(navAfter.className).toMatch(/\bis-sel\b/);
+      expect(rowAfter.className).not.toMatch(/\bis-sel\b/);
+      expect(window.location.pathname).toBe("/transactions");
+      expect(screen.getByText("All Transactions")).toBeInTheDocument();
+    } finally {
+      window.localStorage.removeItem("ynab:transactions:accountFilter");
     }
   });
 });

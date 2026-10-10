@@ -392,8 +392,9 @@ export function BudgetApp({
     isStoredAccountFilter
   );
   // Active filter: the persisted selection, unless it points at an account
-  // that no longer exists. View switches deliberately leave this alone so
-  // returning to the register restores the last account.
+  // that no longer exists. Budget/Reports switches leave this alone, but
+  // the Transactions nav clears it so the register always opens on All
+  // Transactions.
   const accountFilter = useMemo(
     () => resolveAccountFilter(storedAccountFilter, data.accounts),
     [storedAccountFilter, data.accounts]
@@ -469,13 +470,17 @@ export function BudgetApp({
         setView("budget");
       }
 
-      // The account filter is persisted: a transactions URL with an id sets
-      // it explicitly, while any other path leaves the last selection alone
-      // so the register restores it on return.
-      if (segments[0] === "transactions" && segments[1]) {
-        const accId = Number(segments[1]);
-        if (!Number.isNaN(accId)) {
-          setAccountFilter(accId);
+      // The transactions URL is the source of truth for the account
+      // filter: an id selects that account, a bare /transactions clears to
+      // All Transactions. Any other path leaves the selection alone.
+      if (segments[0] === "transactions") {
+        if (segments[1]) {
+          const accId = Number(segments[1]);
+          if (!Number.isNaN(accId)) {
+            setAccountFilter(accId);
+          }
+        } else {
+          setAccountFilter(null);
         }
       }
 
@@ -844,7 +849,12 @@ export function BudgetApp({
           setReportsResetKey((k) => k + 1);
         }
         setShowSettingsOverlay(false);
-        updateUrl(v, accountFilter, month);
+        if (v === "transactions") {
+          setAccountFilter(null);
+          updateUrl(v, null, month);
+        } else {
+          updateUrl(v, accountFilter, month);
+        }
       });
     },
     [updateUrl, month, accountFilter]

@@ -76,13 +76,14 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(allRows).toHaveCount(totalBefore);
 });
 
-test("selecting a sidebar account marks the row and scopes the register; Transactions nav keeps the persisted filter", async ({ page }) => {
+test("selecting a sidebar account marks the row and scopes the register; Transactions nav clears the filter", async ({ page }) => {
   // The toolbar title (a <span>) shows "All Transactions" by default
   // and the account name when an account row is selected
   // (TransactionsView.tsx).
   const toolbarTitle = page.locator(".y-toolbar span.text-\\[13px\\]").first();
   await expect(toolbarTitle).toHaveText("All Transactions");
 
+  const transactionsNav = page.getByRole("button", { name: /^Transactions/ });
   const accountRow = page.getByRole("button", { name: /TD Unlimited Chequing/ }).first();
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
@@ -98,18 +99,14 @@ test("selecting a sidebar account marks the row and scopes the register; Transac
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
-  // Re-select, then click the top-level "Transactions" nav: the persisted
-  // filter keeps the register scoped (it used to clear here).
+  // Re-select, then click the top-level "Transactions" nav: the account
+  // selection clears and the register returns to All Transactions.
   await accountRow.click();
   await expect(accountRow).toHaveClass(/is-sel/);
-  await page.getByRole("button", { name: /^Transactions/ }).click();
-  await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
-  await expect(accountRow).toHaveClass(/is-sel/);
-
-  // Toggling the same account off returns to All Transactions.
-  await accountRow.click();
+  await transactionsNav.click();
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
+  await expect(transactionsNav).toHaveClass(/is-sel/);
 });
 
 test("clicking a row opens the edit modal pre-filled with the payee", async ({ page }) => {
