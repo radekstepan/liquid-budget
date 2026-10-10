@@ -98,6 +98,28 @@ function SortableTh({
 const ROW_HEIGHT = 27;
 const OVERSCAN = 15;
 
+export const SCHEDULED_HEIGHT_STORAGE_KEY = "ynab:transactions:scheduledHeight";
+const MIN_SCHEDULED_HEIGHT = 120;
+const MAX_SCHEDULED_HEIGHT = 720;
+
+export function isScheduledHeights(v: unknown): v is Record<string, number> {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.values(v).every(
+      (x) =>
+        typeof x === "number" &&
+        Number.isFinite(x) &&
+        x >= MIN_SCHEDULED_HEIGHT &&
+        x <= MAX_SCHEDULED_HEIGHT
+    )
+  );
+}
+
+const clampScheduledHeight = (h: number) =>
+  Math.min(MAX_SCHEDULED_HEIGHT, Math.max(MIN_SCHEDULED_HEIGHT, Math.round(h)));
+
 function RegisterEmptyState({
   hasTransactions,
   hasSearch,
@@ -326,6 +348,67 @@ export const TransactionsView = memo(function TransactionsView({
 
   const toggleScheduledDrawer = () => {
     setShowScheduledDrawer((prev) => !prev);
+  };
+
+  // Resizable scheduled drawer height, remembered per account ("all" for
+  // the unfiltered register). No stored value means auto height. While
+  // dragging the live value stays local and only the final height is
+  // persisted — mirroring the sidebar width resize.
+  const [scheduledHeights, setScheduledHeights] = useLocalStorage<Record<string, number>>(
+    SCHEDULED_HEIGHT_STORAGE_KEY,
+    {},
+    isScheduledHeights
+  );
+  const scheduledHeightKey = accountFilter == null ? "all" : String(accountFilter);
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const isScheduledResizing = useRef(false);
+
+  useEffect(() => {
+    setDragHeight(null);
+  }, [accountFilter]);
+
+  const scheduledHeight = dragHeight ?? scheduledHeights[scheduledHeightKey] ?? null;
+
+  const startScheduledResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const key = scheduledHeightKey;
+    const startY = e.clientY;
+    const startHeight = drawerRef.current?.getBoundingClientRect().height ?? MIN_SCHEDULED_HEIGHT;
+    isScheduledResizing.current = true;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isScheduledResizing.current) return;
+      setDragHeight(clampScheduledHeight(startHeight + (startY - moveEvent.clientY)));
+    };
+
+    const onMouseUp = (upEvent: MouseEvent) => {
+      if (!isScheduledResizing.current) return;
+      isScheduledResizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      const finalHeight = clampScheduledHeight(startHeight + (startY - upEvent.clientY));
+      setDragHeight(null);
+      setScheduledHeights((prev) => ({ ...prev, [key]: finalHeight }));
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const resetScheduledHeight = () => {
+    const key = scheduledHeightKey;
+    setDragHeight(null);
+    setScheduledHeights((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   };
 
   const [expandedSplitIds, setExpandedSplitIds] = useState<Set<number>>(new Set());
@@ -1430,7 +1513,28 @@ export const TransactionsView = memo(function TransactionsView({
 
       {/* Scheduled Transactions Drawer (Bottom Table) */}
       {showScheduledDrawer && (
-        <div className="y-scheduled-drawer">
+        <div
+          ref={drawerRef}
+          className="y-scheduled-drawer"
+          style={
+            scheduledHeight != null
+              ? {
+                  height: scheduledHeight,
+                  minHeight: MIN_SCHEDULED_HEIGHT,
+                  maxHeight: "75%",
+                }
+              : undefined
+          }
+        >
+          {/* Horizontal Drag Resize Handle on the Top Edge */}
+          <div
+            onMouseDown={startScheduledResizing}
+            onDoubleClick={resetScheduledHeight}
+            className="y-scheduled-resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize scheduled transactions"
+          />
           {/* Drawer Header Bar / Bulk Actions Bar */}
           <div className="y-scheduled-header">
             {selectedRecurringIds.size > 0 ? (

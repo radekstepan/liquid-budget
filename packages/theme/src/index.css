@@ -2259,6 +2259,7 @@ input.y-inline-amt {
 
 /* ---------- Scheduled Transactions Drawer ---------- */
 .y-scheduled-drawer {
+  position: relative;
   display: flex;
   flex-direction: column;
   border-top: 1px solid #b6b6b1;
@@ -2267,6 +2268,35 @@ input.y-inline-amt {
   flex-shrink: 0;
   max-height: 48%;
   min-height: 160px;
+}
+/* ---------- scheduled drawer resize handle ---------- */
+.y-scheduled-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
+  z-index: 30;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.y-scheduled-resizer:hover,
+.y-scheduled-resizer:active {
+  opacity: 1;
+}
+.y-scheduled-resizer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--y-blue), var(--y-blue-dark));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--y-blue) 55%, transparent);
 }
 
 .y-scheduled-header {
