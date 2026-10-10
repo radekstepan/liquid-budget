@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { TransactionsView } from "../src/TransactionsView.js";
+import { SCHEDULED_HEIGHT_STORAGE_KEY, TransactionsView } from "../src/TransactionsView.js";
 import { addDaysISO, makeSeedBudgetData, todayISO, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
@@ -508,6 +508,59 @@ describe("TransactionsView", () => {
     // Click toggle button again to reopen
     fireEvent.click(drawerBtn);
     expect(screen.getByRole("button", { name: /schedule a new transaction/i })).toBeInTheDocument();
+  });
+
+  it("resizes the scheduled drawer height via the drag handle and remembers it per account", () => {
+    window.localStorage.removeItem(SCHEDULED_HEIGHT_STORAGE_KEY);
+    const data = makeSeedBudgetData();
+    const base = {
+      data,
+      onAdd: () => {},
+      onEdit: () => {},
+      onDelete: () => {},
+      onReconcile: () => {},
+      onCycleStatus: () => {},
+    };
+    const { rerender } = render(<TransactionsView {...base} accountFilter={1} />);
+    if (!screen.queryByLabelText("Resize scheduled transactions")) {
+      fireEvent.click(screen.getByRole("button", { name: /scheduled transactions/i }));
+    }
+    const drawer = document.querySelector(".y-scheduled-drawer") as HTMLElement;
+    expect(drawer).toBeInTheDocument();
+    // Auto height by default (no explicit inline height).
+    expect(drawer.style.height).toBe("");
+
+    const dragHandle = (clientY: number) => {
+      fireEvent.mouseDown(screen.getByLabelText("Resize scheduled transactions"), { clientY: 500 });
+      fireEvent.mouseMove(document, { clientY });
+      fireEvent.mouseUp(document, { clientY });
+    };
+
+    // jsdom reports no layout height, so the drag delta from clientY 500 sets the height.
+    dragHandle(300);
+    expect(drawer.style.height).toBe("200px");
+    expect(JSON.parse(window.localStorage.getItem(SCHEDULED_HEIGHT_STORAGE_KEY)!)).toEqual({ 1: 200 });
+
+    // Another account still uses auto height until resized itself.
+    rerender(<TransactionsView {...base} accountFilter={2} />);
+    expect(drawer.style.height).toBe("");
+    dragHandle(250);
+    expect(drawer.style.height).toBe("250px");
+    expect(JSON.parse(window.localStorage.getItem(SCHEDULED_HEIGHT_STORAGE_KEY)!)).toEqual({
+      1: 200,
+      2: 250,
+    });
+
+    // Switching back restores the first account's height.
+    rerender(<TransactionsView {...base} accountFilter={1} />);
+    expect(drawer.style.height).toBe("200px");
+
+    // Double-click resets to auto height and forgets that account's value.
+    fireEvent.doubleClick(screen.getByLabelText("Resize scheduled transactions"));
+    expect(drawer.style.height).toBe("");
+    expect(JSON.parse(window.localStorage.getItem(SCHEDULED_HEIGHT_STORAGE_KEY)!)).toEqual({ 2: 250 });
+
+    window.localStorage.removeItem(SCHEDULED_HEIGHT_STORAGE_KEY);
   });
 
   it("bolds due scheduled rows like unreviewed imports, leaving future rows plain", () => {
