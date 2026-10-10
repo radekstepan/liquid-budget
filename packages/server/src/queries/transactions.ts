@@ -1128,7 +1128,9 @@ export async function updateSplit(
           await applyBalance(db, c.transferAccountId, Number(c.amount));
         }
       }
-      await db.delete(transactions).where(eq(transactions.parentId, parentId));
+      // No delete-all here: children claimed by id below are updated in
+      // place (preserving register order); only unclaimed rows are
+      // deleted after the rewrite loop.
     } else {
       // Converting a single transaction or transfer to a split: reverse the old transaction's balance
       await applyBalance(db, parent.accountId, -Number(parent.amount));
@@ -1148,8 +1150,8 @@ export async function updateSplit(
       pf.reconciliationId = null;
     }
     if (parentFields.flagColor !== undefined) pf.flagColor = sanitizeFlagColor(parentFields.flagColor);
-    // Rewriting a split counts as reviewing the parent (fresh children
-    // are inserted unflagged by column default).
+    // Rewriting a split counts as reviewing the family: the parent here,
+    // fresh children by column default, matched children explicitly below.
     pf.needsReview = false;
     if (oldChildren.length === 0) {
       pf.transferAccountId = null;
@@ -1178,6 +1180,21 @@ export async function updateSplit(
 
     for (let i = 0; i < children.length; i++) {
       const c = children[i]!;
+      // Identity match: an incoming id naming one of this split's current
+      // children updates that row in place, preserving its id — and with
+      // it the row's same-day register position (order ties break on id).
+      // Unknown or duplicate ids fall through to plain inserts below.
+      let matchedOldChild: (typeof oldChildren)[0] | undefined;
+      if (c.id != null) {
+        const childId = Number(c.id);
+        const foundIdx = oldChildren.findIndex(
+          (oc, idx) => !usedOldIndices.has(idx) && oc.id === childId
+        );
+        if (foundIdx !== -1) {
+          usedOldIndices.add(foundIdx);
+          matchedOldChild = oldChildren[foundIdx];
+        }
+      }
       const childAmount = assertValidAmount(c.amount);
       let payee = newPayee;
       const transferAccountId = c.transferAccountId ? Number(c.transferAccountId) : null;
@@ -1206,19 +1223,7 @@ export async function updateSplit(
         if (c.payee !== undefined && c.payee !== null && c.payee !== "") {
           payee = String(c.payee);
         } else {
-          // Attempt to match with an existing child by client-supplied ID to preserve custom payee (BUG-34)
-          let matchedOldChild: (typeof oldChildren)[0] | undefined;
-          if (c.id != null) {
-            const childId = Number(c.id);
-            const foundIdx = oldChildren.findIndex(
-              (oc, idx) => !usedOldIndices.has(idx) && oc.id === childId
-            );
-            if (foundIdx !== -1) {
-              usedOldIndices.add(foundIdx);
-              matchedOldChild = oldChildren[foundIdx];
-            }
-          }
-
+          // Reuse the identity match above to preserve a custom payee (BUG-34)
           if (
             matchedOldChild &&
             matchedOldChild.transferAccountId == null &&
@@ -1242,28 +1247,45 @@ export async function updateSplit(
         }
       }
 
-      const [row] = await db
-        .insert(transactions)
-        .values({
-          accountId: parent.accountId,
-          categoryId,
-          date: newDate,
-          payee,
-          // Children inherit the parent's memo unless they have their own.
-          memo: c.memo ?? newMemo ?? "",
-          amount: childAmount,
-          status: newStatus,
-          transferStatus: transferAccountId ? (c.transferStatus ?? newStatus) : null,
-          transferAccountId,
-          parentId,
-          isIncome,
-        })
-        .returning();
+      const values = {
+        accountId: parent.accountId,
+        categoryId,
+        date: newDate,
+        payee,
+        // Children inherit the parent's memo unless they have their own.
+        memo: c.memo ?? newMemo ?? "",
+        amount: childAmount,
+        status: newStatus,
+        transferStatus: transferAccountId ? (c.transferStatus ?? newStatus) : null,
+        transferAccountId,
+        parentId,
+        isIncome,
+      };
+      if (matchedOldChild != null) {
+        // Identity-preserving update: the same values a fresh insert would
+        // carry, written onto the existing row. Columns the rewrite never
+        // sets (entity ids, flags, income month, created-at) survive.
+        await db
+          .update(transactions)
+          .set({ ...values, needsReview: false })
+          .where(eq(transactions.id, matchedOldChild.id));
+        newChildren.push({ ...matchedOldChild, ...values, needsReview: false });
+      } else {
+        const [row] = await db.insert(transactions).values(values).returning();
+        newChildren.push(row);
+      }
       await applyBalance(db, parent.accountId, childAmount);
       if (transferAccountId) {
         await applyBalance(db, transferAccountId, -childAmount);
       }
-      newChildren.push(row);
+    }
+
+    // Delete children the rewrite dropped: old rows no incoming child
+    // claimed by id. Their balances were already reversed above.
+    for (let idx = 0; idx < oldChildren.length; idx++) {
+      if (!usedOldIndices.has(idx)) {
+        await db.delete(transactions).where(eq(transactions.id, oldChildren[idx]!.id));
+      }
     }
 
     // Learn a rename rule when a split's display payee is changed.
