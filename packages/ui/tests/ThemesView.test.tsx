@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, fireEvent } from "@testing-library/react";
 import {
   THEMES,
@@ -74,6 +77,105 @@ describe("ThemesView", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Ember" }));
     expect(onSelect).toHaveBeenCalledWith("ember");
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("previews the linen check on the classic card only", () => {
+    render(<ThemesView themeId="classic" onSelect={() => {}} />);
+    for (const theme of THEMES) {
+      const radio = screen.getByRole("radio", { name: theme.label });
+      const previews = (radio as HTMLElement).querySelectorAll(
+        ".y-theme-pattern"
+      );
+      if (theme.id === "classic") {
+        expect(previews).toHaveLength(1);
+        expect(previews[0]?.classList.contains("y-theme-pattern--classic")).toBe(
+          true
+        );
+      } else {
+        expect(
+          previews.length,
+          `theme card "${theme.id}" should show a clean gradient with no pattern overlay`
+        ).toBe(0);
+      }
+    }
+  });
+});
+
+describe("theme sidebar patterns (theme CSS contract)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const css = readFileSync(
+    path.resolve(here, "../../theme/src/index.css"),
+    "utf8"
+  );
+
+  function themeBlock(id: string): string | null {
+    const start = css.indexOf(`[data-theme="${id}"]`);
+    if (start === -1) return null;
+    const open = css.indexOf("{", start);
+    // Theme blocks hold only flat custom-property declarations.
+    const close = css.indexOf("}", open);
+    return css.slice(open, close);
+  }
+
+  it("defines the classic pattern defaults on :root", () => {
+    const rootStart = css.indexOf(":root");
+    const rootOpen = css.indexOf("{", rootStart);
+    const rootClose = css.indexOf("}", rootOpen);
+    const root = css.slice(rootOpen, rootClose);
+    for (const v of [
+      "--y-pat1-img",
+      "--y-pat1-size",
+      "--y-pat1-repeat",
+      "--y-pat1-opacity",
+      "--y-pat1-blend",
+      "--y-pat2-img",
+      "--y-pat2-size",
+      "--y-pat2-repeat",
+      "--y-pat2-opacity",
+      "--y-pat2-blend",
+    ]) {
+      expect(root, `:root is missing ${v}`).toContain(v);
+    }
+  });
+
+  it("leaves every non-classic theme pattern-free (clean gradient)", () => {
+    for (const theme of THEMES) {
+      if (theme.id === "classic") continue;
+      const block = themeBlock(theme.id);
+      expect(block, `missing [data-theme="${theme.id}"] block`).not.toBeNull();
+      for (const v of ["--y-pat1-img: none", "--y-pat2-img: none"]) {
+        expect(
+          block!,
+          `[data-theme="${theme.id}"] should disable the pattern layer (${v})`
+        ).toContain(v);
+      }
+    }
+  });
+
+  it("renders the pattern layers from the theme vars", () => {
+    for (const layer of ["pat1", "pat2"] as const) {
+      for (const prop of ["img", "size", "repeat", "opacity", "blend"] as const) {
+        const cssProp =
+          prop === "img"
+            ? "background-image"
+            : prop === "size"
+              ? "background-size"
+              : prop === "repeat"
+                ? "background-repeat"
+                : prop === "blend"
+                  ? "mix-blend-mode"
+                  : prop;
+        expect(css).toContain(`${cssProp}: var(--y-${layer}-${prop})`);
+      }
+    }
+  });
+
+  it("defines a preview miniature for the classic linen only", () => {
+    expect(css).toContain(".y-theme-pattern--classic");
+    for (const theme of THEMES) {
+      if (theme.id === "classic") continue;
+      expect(css).not.toContain(`.y-theme-pattern--${theme.id}`);
+    }
   });
 });
 

@@ -13,21 +13,24 @@ function ThemePreview({ theme }: { theme: ThemeMeta }) {
       }}
     >
       <div
-        className="flex w-[42%] flex-col justify-center gap-[5px] px-2.5"
+        className="relative flex w-[42%] flex-col justify-center gap-[5px] px-2.5"
         style={{
           background: `linear-gradient(180deg, ${sideTop} 0%, ${sideBot} 100%)`,
         }}
       >
+        {theme.id === "classic" && (
+          <div className="y-theme-pattern y-theme-pattern--classic" />
+        )}
         <div
-          className="h-[5px] w-[70%] rounded-[2px]"
+          className="relative h-[5px] w-[70%] rounded-[2px]"
           style={{ background: "rgba(255,255,255,0.85)" }}
         />
         <div
-          className="h-[5px] w-[55%] rounded-[2px]"
+          className="relative h-[5px] w-[55%] rounded-[2px]"
           style={{ background: "rgba(255,255,255,0.45)" }}
         />
         <div
-          className="h-[5px] w-[62%] rounded-[2px]"
+          className="relative h-[5px] w-[62%] rounded-[2px]"
           style={{ background: "rgba(255,255,255,0.45)" }}
         />
       </div>
