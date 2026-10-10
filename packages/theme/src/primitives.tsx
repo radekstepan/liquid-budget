@@ -1313,12 +1313,13 @@ export const Panel: React.FC<{
 
 /* -------------------------------------------------- Cleared flag */
 export const ClearedFlag: React.FC<{
-  state: "c" | "u" | "r";
+  state: "c" | "u" | "r" | "n";
   onCycle?: () => void;
   disabled?: boolean;
 }> = ({ state, onCycle, disabled }) => {
   const interactive = !!onCycle && !disabled;
-  const label = state === "c" ? "Cleared" : state === "r" ? "Reconciled" : "Uncleared";
+  const label =
+    state === "c" ? "Cleared" : state === "r" ? "Reconciled" : state === "n" ? "New" : "Uncleared";
   const inner = (
     <Tooltip tip={label}>
       <span
@@ -1342,7 +1343,7 @@ export const ClearedFlag: React.FC<{
           : undefined
       }
     >
-      {state === "u" ? "U" : state === "r" ? "R" : "C"}
+      {state === "u" ? "U" : state === "r" ? "R" : state === "n" ? "N" : "C"}
       </span>
     </Tooltip>
   );

@@ -1169,6 +1169,10 @@ export const TransactionsView = memo(function TransactionsView({
                   const effAmt = isIncoming ? -t.amount : t.amount;
                   const effStatus = isIncoming ? (t.transferStatus ?? t.status) : t.status;
                   const isReconciled = effStatus === "r";
+                  // Unreviewed imports/posts show "N" (New) in the C column
+                  // until approved, alongside the bold row. Reconciled rows
+                  // are never unreviewed, but keep R authoritative anyway.
+                  const showNew = !isChildRow && t.needsReview === true && !isReconciled;
                   const outflow = effAmt < 0 ? -effAmt : 0;
                   const inflow = effAmt > 0 ? effAmt : 0;
                   const isSplit = splitParentIds.has(t.id);
@@ -1326,7 +1330,7 @@ export const TransactionsView = memo(function TransactionsView({
                       </td>
                       <td className="text-center" onClick={(e) => e.stopPropagation()}>
                         <ClearedFlag
-                          state={effStatus}
+                          state={showNew ? "n" : effStatus}
                           onCycle={() => onCycleStatus(t.id)}
                           disabled={isReconciled}
                         />

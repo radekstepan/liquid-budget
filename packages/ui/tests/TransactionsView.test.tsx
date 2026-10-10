@@ -1225,6 +1225,56 @@ describe("TransactionsView", () => {
     expect(plain!.classList.contains("font-bold")).toBe(false);
   });
 
+  it("shows unreviewed imports as New in the C column (clicking approves)", () => {
+    const data = makeSeedBudgetData();
+    const onCycleStatus = vi.fn();
+    const props = {
+      data,
+      accountFilter: null as number | null,
+      onAdd: () => {},
+      onEdit: () => {},
+      onDelete: () => {},
+      onReconcile: () => {},
+      onCycleStatus,
+    };
+    const { container, rerender } = render(<TransactionsView {...props} />);
+    // The register virtualizes rows: flag two ids known to be rendered.
+    const renderedIds = Array.from(container.querySelectorAll("tr[data-txn-id]")).map((r) =>
+      Number(r.getAttribute("data-txn-id"))
+    );
+    expect(renderedIds.length).toBeGreaterThanOrEqual(2);
+    const [flaggedId, plainId] = renderedIds;
+    rerender(
+      <TransactionsView
+        {...props}
+        data={{
+          ...data,
+          transactions: data.transactions.map((t) =>
+            t.id === flaggedId ? { ...t, status: "u" as const, needsReview: true } : t
+          ),
+        }}
+      />
+    );
+    const flagged = container.querySelector(`tr[data-txn-id="${flaggedId}"]`);
+    expect(flagged).not.toBeNull();
+    const flaggedBadge = flagged!.querySelector(".y-cleared");
+    expect(flaggedBadge).not.toBeNull();
+    expect(flaggedBadge!.textContent).toBe("N");
+    expect(flaggedBadge!.getAttribute("aria-label")).toBe("New");
+    // The row stays bold (YNAB4-style) alongside the C-column badge.
+    expect(flagged!.classList.contains("font-bold")).toBe(true);
+
+    const plain = container.querySelector(`tr[data-txn-id="${plainId}"]`);
+    expect(plain).not.toBeNull();
+    const plainBadge = plain!.querySelector(".y-cleared");
+    expect(plainBadge).not.toBeNull();
+    expect(plainBadge!.textContent).not.toBe("N");
+
+    // Clicking the New badge approves via the standard status cycle.
+    fireEvent.click(flaggedBadge!);
+    expect(onCycleStatus).toHaveBeenCalledWith(flaggedId);
+  });
+
   it("offers Merge only when exactly two transactions are selected", () => {
     const data = makeSeedBudgetData();
     const onMergeTransactions = vi.fn();
