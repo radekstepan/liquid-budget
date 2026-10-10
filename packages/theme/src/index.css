@@ -30,6 +30,21 @@
   --y-side-sel-bot: #2372a4;
   --y-side-neg: #ff9d8b;
 
+  /* --- sidebar pattern, layer 1 + 2 (classic: fine linen weave) ---
+     Only classic renders a pattern; every other theme sets both
+     images to `none` and lets its clean vertical gradient show.
+     The body's two fixed pseudo-elements render them (see below). */
+  --y-pat1-img: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-main' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.007 0.48' numOctaves='2' seed='17' stitchTiles='stitch' result='horizontal'/><feTurbulence type='fractalNoise' baseFrequency='0.44 0.009' numOctaves='2' seed='41' stitchTiles='stitch' result='vertical'/><feBlend in='horizontal' in2='vertical' mode='multiply' result='woven'/><feComponentTransfer in='woven'><feFuncR type='linear' slope='.52' intercept='.24'/><feFuncG type='linear' slope='.52' intercept='.24'/><feFuncB type='linear' slope='.52' intercept='.24'/></feComponentTransfer></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-main)'/></svg>");
+  --y-pat1-size: 100vw 100vh;
+  --y-pat1-repeat: no-repeat;
+  --y-pat1-opacity: 0.22;
+  --y-pat1-blend: soft-light;
+  --y-pat2-img: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-fine-filter' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.018 0.72' numOctaves='1' seed='8' result='a'/><feTurbulence type='fractalNoise' baseFrequency='0.68 0.020' numOctaves='1' seed='29' result='b'/><feBlend in='a' in2='b' mode='multiply'/></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-fine-filter)'/></svg>");
+  --y-pat2-size: 100vw 100vh;
+  --y-pat2-repeat: no-repeat;
+  --y-pat2-opacity: 0.085;
+  --y-pat2-blend: overlay;
+
   /* --- chart bars --- */
   --y-bar-track: #dcdcd8;
   --y-bar-track-border: #bcbfbe;
@@ -76,11 +91,12 @@
 }
 
 /* ============================================================
-   THEMES — sidebar field + coordinated accent. Applied via
-   `data-theme` on <html> (see themes.ts). `classic` is the
-   :root default above, so it needs no block. Content surfaces
-   stay light in every theme; only the sidebar field, selection
-   tints and the accent hue change.
+   THEMES — sidebar field + coordinated accent + sidebar pattern.
+   Applied via `data-theme` on <html> (see themes.ts). `classic`
+   is the :root default above, so it needs no block. Content
+   surfaces stay light in every theme; only the sidebar field,
+   its two pattern layers, the selection tints and the accent
+   hue change.
    ============================================================ */
 [data-theme="midnight"] {
   --y-side-top: #3d4f63;
@@ -97,6 +113,9 @@
   --y-accent-edge: #1f3c5c;
   --y-row-sel: #cfdce9;
   --y-row-hover: #eef3f8;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="ocean"] {
@@ -114,6 +133,9 @@
   --y-accent-edge: #174443;
   --y-row-sel: #cde4e1;
   --y-row-hover: #edf6f5;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="forest"] {
@@ -131,6 +153,9 @@
   --y-accent-edge: #1f4a2e;
   --y-row-sel: #d3e6d5;
   --y-row-hover: #eef6ee;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="ember"] {
@@ -148,6 +173,9 @@
   --y-accent-edge: #5a3218;
   --y-row-sel: #eed7c6;
   --y-row-hover: #faf1e8;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="wine"] {
@@ -165,6 +193,9 @@
   --y-accent-edge: #571d26;
   --y-row-sel: #ecd2d6;
   --y-row-hover: #faf0f1;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="mocha"] {
@@ -182,6 +213,9 @@
   --y-accent-edge: #453627;
   --y-row-sel: #e6dac5;
   --y-row-hover: #f7f2e8;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="graphite"] {
@@ -199,6 +233,9 @@
   --y-accent-edge: #2f3a44;
   --y-row-sel: #d6dde2;
   --y-row-hover: #f0f3f5;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 [data-theme="onyx"] {
@@ -216,6 +253,9 @@
   --y-accent-edge: #232930;
   --y-row-sel: #d3d9de;
   --y-row-hover: #eff2f4;
+  /* No pattern — the clean vertical gradient carries this theme. */
+  --y-pat1-img: none;
+  --y-pat2-img: none;
 }
 
 html,
@@ -235,9 +275,9 @@ body {
   font-family: var(--y-font);
   font-size: 1rem; /* = 12px */
   color: var(--y-ink);
-  /* Page-wide sidebar field (classic: YNAB4 cyan-blue); the linen weave
-     lives on ::before / ::after so it stays put when content scrolls.
-     Var-driven so themes recolor the whole field. */
+  /* Page-wide sidebar field (classic: YNAB4 cyan-blue); the pattern
+     layers live on ::before / ::after so they stay put when content
+     scrolls. Var-driven so themes recolor the field and swap texture. */
   background-color: var(--y-side-bot);
   background-image: linear-gradient(180deg, var(--y-side-top) 0%, var(--y-side-bot) 100%);
   /* Lucida Grande renders best with subpixel AA, matching YNAB4 */
@@ -254,22 +294,40 @@ body::after {
 }
 
 body::before {
-  /* Main linen pass — long, broken horizontal & vertical fibres blended
-     and contrast-compressed. */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-main' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.007 0.48' numOctaves='2' seed='17' stitchTiles='stitch' result='horizontal'/><feTurbulence type='fractalNoise' baseFrequency='0.44 0.009' numOctaves='2' seed='41' stitchTiles='stitch' result='vertical'/><feBlend in='horizontal' in2='vertical' mode='multiply' result='woven'/><feComponentTransfer in='woven'><feFuncR type='linear' slope='.52' intercept='.24'/><feFuncG type='linear' slope='.52' intercept='.24'/><feFuncB type='linear' slope='.52' intercept='.24'/></feComponentTransfer></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-main)'/></svg>");
-  background-repeat: no-repeat;
-  background-size: 100vw 100vh;
-  opacity: 0.22;
-  mix-blend-mode: soft-light;
+  /* Sidebar pattern, layer 1 — var-driven so each theme renders its
+     own texture (classic default: the linen main pass). */
+  background-image: var(--y-pat1-img);
+  background-repeat: var(--y-pat1-repeat);
+  background-size: var(--y-pat1-size);
+  opacity: var(--y-pat1-opacity);
+  mix-blend-mode: var(--y-pat1-blend);
 }
 
 body::after {
-  /* Finer pass — breaks up any detectable repeat. */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 760' preserveAspectRatio='none'><defs><filter id='linen-fine-filter' x='-10%25' y='-10%25' width='120%25' height='120%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='0.018 0.72' numOctaves='1' seed='8' result='a'/><feTurbulence type='fractalNoise' baseFrequency='0.68 0.020' numOctaves='1' seed='29' result='b'/><feBlend in='a' in2='b' mode='multiply'/></filter></defs><rect width='100%25' height='100%25' fill='%23808080' filter='url(%23linen-fine-filter)'/></svg>");
-  background-repeat: no-repeat;
-  background-size: 100vw 100vh;
-  opacity: 0.085;
-  mix-blend-mode: overlay;
+  /* Sidebar pattern, layer 2 — the per-theme detail pass. */
+  background-image: var(--y-pat2-img);
+  background-repeat: var(--y-pat2-repeat);
+  background-size: var(--y-pat2-size);
+  opacity: var(--y-pat2-opacity);
+  mix-blend-mode: var(--y-pat2-blend);
+}
+
+/* ---------- theme preview pattern (Themes settings cards) ----------
+   Miniature of the classic linen check, drawn a touch stronger than
+   the real thing so it reads at card size. Other themes show a
+   clean gradient and render no overlay. */
+.y-theme-pattern {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.y-theme-pattern--classic {
+  background-image: repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.09) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.08) 0 1px, transparent 1px 3px);
 }
 
 .y-font {
@@ -549,12 +607,12 @@ body::after {
 
 /* ---------- sidebar ---------- */
 .y-sidebar {
-  /* The body's cyan-blue + linen weave shows through entirely; the
+  /* The body's sidebar field + pattern shows through entirely; the
      sidebar itself is just a faint vertical dark vignette (~6% top
      → ~18% bottom) to give text enough contrast, plus a thin right
-     edge. No pattern is rendered on the sidebar itself — there is
-     only one linen layer on the page (the body's), so the eye reads
-     the weave as a continuous background. */
+     edge. No pattern is rendered on the sidebar itself — the two
+     pattern layers live on the body, so the eye reads the texture
+     as a continuous background. */
   background: linear-gradient(
     180deg,
     rgba(8, 22, 32, 0.06) 0%,
@@ -562,9 +620,9 @@ body::after {
   );
   border-right: none;
   color: var(--y-side-ink);
-  /* right edge: a thin translucent navy line that just shades the cyan
-     linen (reads as part of the blue, not a black bar), plus a soft
-     drop onto the light content area */
+  /* right edge: a thin translucent navy line that just shades the
+     sidebar field (reads as part of it, not a black bar), plus a
+     soft drop onto the light content area */
   box-shadow:
     inset -1px 0 0 0 rgba(23, 60, 86, 0.45),
     4px 0 8px -6px rgba(0, 0, 0, 0.25);
@@ -614,7 +672,7 @@ body::after {
   /* No background — the parent y-side-group card provides it */
 }
 .y-side-group {
-  /* Each account section is a dark-glass card over the linen pattern */
+  /* Each account section is a dark-glass card over the sidebar pattern */
   margin: 6px 6px;
   border-radius: 4px;
   overflow: hidden;
