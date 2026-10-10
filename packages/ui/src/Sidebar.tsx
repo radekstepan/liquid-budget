@@ -201,6 +201,7 @@ export const Sidebar = memo(function Sidebar({
   duplicatesByAccount,
   onBadgeClick,
   visibleViews,
+  privacyEnabled,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -218,6 +219,8 @@ export const Sidebar = memo(function Sidebar({
   onBadgeClick?: (accountId: number, kind: "new" | "duplicates") => void;
   /** Per-view menu visibility. Omitted views (or an omitted map) stay visible. */
   visibleViews?: Partial<Record<View, boolean>>;
+  /** Privacy mode: subtitle reads "MY DEMO BUDGET". Plain text, never a link. */
+  privacyEnabled?: boolean;
 }) {
   const isNavVisible = (key: View) => visibleViews?.[key] ?? true;
   const activeAccounts = accounts.filter((a) => !a.archived);
@@ -404,7 +407,7 @@ export const Sidebar = memo(function Sidebar({
                 textShadow: "0 1px 1px rgba(0, 0, 0, 0.35)",
               }}
             >
-              MY BUDGET
+              {privacyEnabled ? "MY DEMO BUDGET" : "MY BUDGET"}
             </div>
           </div>
         </div>

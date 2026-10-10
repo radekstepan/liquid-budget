@@ -22,14 +22,19 @@ import {
   isValidISOMonth,
   DEMO_MONTH,
   type TransactionFlagColor,
+  createPrivacyMask,
+  maskBudgetData,
+  isPrivacyFactor,
 } from "@ynab/logic";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
+import { guardApiForPrivacy, randomPrivacyFactor } from "./privacyApi.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import type { SearchListOption, ThemeId } from "@ynab/theme";
 import {
   Icon,
   Tooltip,
+  Notice,
   THEME_STORAGE_KEY,
   DEFAULT_THEME_ID,
   isThemeId,
@@ -346,9 +351,26 @@ export function resolveAccountFilter(
   return accounts.some((a) => a.id === stored) ? stored : null;
 }
 
+export const PRIVACY_STORAGE_KEY = "ynab:privacy";
+
+export type PrivacySettings = {
+  enabled: boolean;
+  /** Disguise factor; 0 means "none drawn yet". */
+  factor: number;
+};
+
+export function isPrivacySettings(v: unknown): v is PrivacySettings {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.enabled === "boolean" &&
+    (o.factor === 0 || isPrivacyFactor(o.factor))
+  );
+}
+
 export function BudgetApp({
-  data,
-  api,
+  data: rawData,
+  api: rawApi,
   initialView = "budget",
   initialMonth,
   initialAccount,
@@ -359,6 +381,49 @@ export function BudgetApp({
   initialMonth?: string;
   initialAccount?: number;
 }) {
+  // Privacy (screenshot) mode: every `data`/`api` use below sees the
+  // masked snapshot and the guarded api, so all views, modals, search,
+  // titles, and tooltips are disguised with no per-screen changes.
+  // Masked data must never be written back: the guard blocks all
+  // mutations while the mode is on.
+  const [privacy, setPrivacy] = useLocalStorage<PrivacySettings>(
+    PRIVACY_STORAGE_KEY,
+    { enabled: false, factor: 0 },
+    isPrivacySettings
+  );
+  const [privacyNotice, setPrivacyNotice] = useState(false);
+  const privacyMask = useMemo(
+    () =>
+      privacy.enabled && isPrivacyFactor(privacy.factor)
+        ? createPrivacyMask(rawData, privacy.factor)
+        : null,
+    [privacy, rawData]
+  );
+  const data = useMemo(
+    () => (privacyMask ? maskBudgetData(rawData, privacyMask) : rawData),
+    [rawData, privacyMask]
+  );
+  const api = useMemo(
+    () =>
+      privacyMask
+        ? guardApiForPrivacy(rawApi, privacyMask, () => setPrivacyNotice(true))
+        : rawApi,
+    [rawApi, privacyMask]
+  );
+  const enablePrivacy = useCallback(() => {
+    setPrivacy((p) => ({
+      enabled: true,
+      factor: isPrivacyFactor(p.factor) ? p.factor : randomPrivacyFactor(),
+    }));
+  }, [setPrivacy]);
+  const disablePrivacy = useCallback(() => {
+    setPrivacy((p) => ({ ...p, enabled: false }));
+    setPrivacyNotice(false);
+  }, [setPrivacy]);
+  const regeneratePrivacyFactor = useCallback(() => {
+    setPrivacy((p) => ({ ...p, factor: randomPrivacyFactor() }));
+  }, [setPrivacy]);
+
   const [view, setView] = useState<View>(
     (["budget", "reports", "transactions"] as View[]).includes(initialView as View)
       ? (initialView as View)
@@ -1270,502 +1335,557 @@ export function BudgetApp({
   }, [view, month, activeAccount]);
 
   // Split templates are code configuration (see SPLIT_TEMPLATE_PRESETS):
-  // resolved against this budget's accounts by name.
-  const splitTemplates = useMemo(
-    () => resolveSplitTemplatePresets(SPLIT_TEMPLATE_PRESETS, data.accounts),
-    [data.accounts]
-  );
+  // resolved against this budget's accounts by name. Preset names can
+  // contain real payees, so they are disguised in privacy mode (and
+  // won't resolve against the masked account names — by design).
+  const splitTemplates = useMemo(() => {
+    const resolved = resolveSplitTemplatePresets(
+      SPLIT_TEMPLATE_PRESETS,
+      privacyMask ? [] : data.accounts
+    );
+    if (!privacyMask) return resolved;
+    return resolved.map((t, i) => ({
+      ...t,
+      name: `Template ${i + 1}`,
+      legs: t.legs.map((l) => ({
+        ...l,
+        ...(l.payee !== undefined
+          ? { payee: privacyMask.maskPayee(l.payee) }
+          : {}),
+        ...(l.memo !== undefined ? { memo: "" } : {}),
+      })),
+    }));
+  }, [data.accounts, privacyMask]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden" style={{ background: "var(--y-canvas)" }}>
-      <Sidebar
-        view={view}
-        setView={navigateView}
-        visibleViews={navVisible}
-        accounts={data.accounts}
-        selectedAccountId={accountFilter}
-        onSelectAccount={handleSelectAccount}
-        onAddAccount={() => setModal({ kind: "account" })}
-        onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
-        onReorderAccount={api.reorderAccount}
-        newByAccount={newByAccount}
-        duplicatesByAccount={duplicatesByAccount}
-        onBadgeClick={handleBadgeClick}
-      />
+    <div
+      className="relative flex h-screen w-screen flex-col overflow-hidden"
+      style={{ background: "var(--y-canvas)" }}
+    >
+      {privacy.enabled && privacyNotice && (
+        <div className="pointer-events-none absolute inset-x-0 top-2 z-50 flex justify-center">
+          <div className="pointer-events-auto max-w-[520px] px-4">
+            <Notice tone="warn" title="Editing is disabled">
+              <div className="flex items-center gap-3">
+                <span>Turn off privacy mode to make changes.</span>
+                <button
+                  className="underline underline-offset-2"
+                  onClick={() => setPrivacyNotice(false)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </Notice>
+          </div>
+        </div>
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <Sidebar
+          view={view}
+          setView={navigateView}
+          visibleViews={navVisible}
+          privacyEnabled={privacy.enabled}
+          accounts={data.accounts}
+          selectedAccountId={accountFilter}
+          onSelectAccount={handleSelectAccount}
+          onAddAccount={() => setModal({ kind: "account" })}
+          onEditAccount={(id) => setModal({ kind: "editAccount", accountId: id })}
+          onReorderAccount={api.reorderAccount}
+          newByAccount={newByAccount}
+          duplicatesByAccount={duplicatesByAccount}
+          onBadgeClick={handleBadgeClick}
+        />
 
-      <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
-        <ErrorBoundary name={`${view.charAt(0).toUpperCase() + view.slice(1)} View`}>
-          {view === "budget" && (
-            <BudgetView
-              budget={budget}
-              budgets={budgets}
-              visibleMonths={visibleMonths}
-              monthCount={monthCount}
-              onSetMonthCount={handleSetMonthCount}
-              currentMonth={month}
-              collapsed={collapsed}
-              onToggleGroup={toggleGroup}
-              onAssign={assign}
-              onShiftMonth={shiftMonth}
-              onSetMonth={handleSetMonth}
-              canShiftRight={canShiftRight}
-              minYear={minYear}
-              maxYear={maxYear}
-              onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
-              onAddGroup={() => setModal({ kind: "addGroup" })}
-              onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
-              onDeleteCategory={api.deleteCategory}
-              onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
-              onDeleteGroup={api.deleteGroup}
-              onCollapseAll={collapseAll}
-              onExpandAll={expandAll}
-              onReorderCategory={api.reorderCategory}
-              onReorderGroup={api.reorderGroup}
-              lastMonthAssignments={lastMonthAssignments}
-              spentLastMonthByCategory={spentLastMonthByCategory}
-              avgSpentByCategory={avgSpentByCategory}
-              avgBudgetedByCategory={avgBudgetedByCategory}
-              underfundedByCategory={underfundedByCategory}
-              selectedCategoryId={selectedCategoryId}
-              onSelectCategory={setSelectedCategoryId}
-              quickBudgetByMonth={quickBudgetByMonth}
-              onQuickBudget={handleQuickBudget}
-              selectedCategory={selectedCategory}
-              onClearSelectedCategory={() => setSelectedCategoryId(null)}
-            />
-          )}
-          {view === "transactions" && (
-            <TransactionsView
-              data={data}
-              accountFilter={accountFilter}
-              focusTransaction={focusTransaction}
-              externalFilter={registerFilter}
-              onEditFilter={(q) => {
-                setSearchInitialQuery(q);
-                setSearchOpen(true);
-              }}
-              onClearFilter={handleClearRegisterFilter}
-              onGoToTransfer={handleGoToTransfer}
-              onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
-              onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
-              onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
-              onBulkEdit={(ids) => setModal({ kind: "bulkEditTransactions", transactionIds: ids })}
-              onDelete={api.deleteTransaction}
-              onReconcile={openReconcile}
-              onCycleStatus={cycleStatus}
-              onFlag={setFlag}
-              onBulkDelete={api.bulkDeleteTransactions}
-              onBulkUpdate={api.bulkUpdateTransactions}
-              onMergeTransactions={api.mergeTransactions}
-              onDismissDuplicateGroup={api.dismissDuplicateGroup}
-              payees={payeeOptions}
-              onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
-              onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}
-              onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}
-              onDeleteRecurring={api.deleteRecurring}
-              onPostRecurring={api.postRecurring}
-              onFlagRecurring={(id, color) => api.updateRecurring(id, { flagColor: color })}
-              onBulkPostRecurring={api.bulkPostRecurring}
-              onBulkUpdateRecurring={api.bulkUpdateRecurring}
-              onBulkDeleteRecurring={api.bulkDeleteRecurring}
-            />
-          )}
-          {view === "reports" && (
-            <ReportsView
-              data={data}
-              month={month}
-              minYear={minYear}
-              maxYear={maxYear}
-              resetKey={reportsResetKey}
-              onSelectTransaction={handleSelectTransactionFromReport}
-            />
-          )}
-        </ErrorBoundary>
+        <main className="relative flex min-w-0 flex-1 flex-col" style={{ background: "var(--y-row)" }}>
+          <ErrorBoundary name={`${view.charAt(0).toUpperCase() + view.slice(1)} View`}>
+            {view === "budget" && (
+              <BudgetView
+                budget={budget}
+                budgets={budgets}
+                visibleMonths={visibleMonths}
+                monthCount={monthCount}
+                onSetMonthCount={handleSetMonthCount}
+                currentMonth={month}
+                collapsed={collapsed}
+                onToggleGroup={toggleGroup}
+                onAssign={assign}
+                onShiftMonth={shiftMonth}
+                onSetMonth={handleSetMonth}
+                canShiftRight={canShiftRight}
+                minYear={minYear}
+                maxYear={maxYear}
+                onAddCategory={(groupId) => setModal({ kind: "addCategory", groupId })}
+                onAddGroup={() => setModal({ kind: "addGroup" })}
+                onEditCategory={(categoryId) => setModal({ kind: "editCategory", categoryId })}
+                onDeleteCategory={api.deleteCategory}
+                onEditGroup={(groupId) => setModal({ kind: "editGroup", groupId })}
+                onDeleteGroup={api.deleteGroup}
+                onCollapseAll={collapseAll}
+                onExpandAll={expandAll}
+                onReorderCategory={api.reorderCategory}
+                onReorderGroup={api.reorderGroup}
+                lastMonthAssignments={lastMonthAssignments}
+                spentLastMonthByCategory={spentLastMonthByCategory}
+                avgSpentByCategory={avgSpentByCategory}
+                avgBudgetedByCategory={avgBudgetedByCategory}
+                underfundedByCategory={underfundedByCategory}
+                selectedCategoryId={selectedCategoryId}
+                onSelectCategory={setSelectedCategoryId}
+                quickBudgetByMonth={quickBudgetByMonth}
+                onQuickBudget={handleQuickBudget}
+                selectedCategory={selectedCategory}
+                onClearSelectedCategory={() => setSelectedCategoryId(null)}
+              />
+            )}
+            {view === "transactions" && (
+              <TransactionsView
+                data={data}
+                accountFilter={accountFilter}
+                focusTransaction={focusTransaction}
+                externalFilter={registerFilter}
+                onEditFilter={(q) => {
+                  setSearchInitialQuery(q);
+                  setSearchOpen(true);
+                }}
+                onClearFilter={handleClearRegisterFilter}
+                onGoToTransfer={handleGoToTransfer}
+                onAdd={() => setModal({ kind: "addTransaction", mode: "single" })}
+                onAddTransfer={() => setModal({ kind: "addTransaction", mode: "transfer" })}
+                onEdit={(id) => setModal({ kind: "editTransaction", transactionId: id })}
+                onBulkEdit={(ids) => setModal({ kind: "bulkEditTransactions", transactionIds: ids })}
+                onDelete={api.deleteTransaction}
+                onReconcile={openReconcile}
+                onCycleStatus={cycleStatus}
+                onFlag={setFlag}
+                onBulkDelete={api.bulkDeleteTransactions}
+                onBulkUpdate={api.bulkUpdateTransactions}
+                onMergeTransactions={api.mergeTransactions}
+                onDismissDuplicateGroup={api.dismissDuplicateGroup}
+                payees={payeeOptions}
+                onAddRecurring={() => setModal({ kind: "recurring", mode: "single" })}
+                onAddRecurringTransfer={() => setModal({ kind: "recurring", mode: "transfer" })}
+                onEditRecurring={(id) => setModal({ kind: "editRecurring", recurringId: id })}
+                onDeleteRecurring={api.deleteRecurring}
+                onPostRecurring={api.postRecurring}
+                onFlagRecurring={(id, color) => api.updateRecurring(id, { flagColor: color })}
+                onBulkPostRecurring={api.bulkPostRecurring}
+                onBulkUpdateRecurring={api.bulkUpdateRecurring}
+                onBulkDeleteRecurring={api.bulkDeleteRecurring}
+              />
+            )}
+            {view === "reports" && (
+              <ReportsView
+                data={data}
+                month={month}
+                minYear={minYear}
+                maxYear={maxYear}
+                resetKey={reportsResetKey}
+                onSelectTransaction={handleSelectTransactionFromReport}
+              />
+            )}
+          </ErrorBoundary>
 
 
-        {showSettingsOverlay && (
-          <div
-            className="absolute inset-0 z-50 y-scrim"
-            onClick={() => setShowSettingsOverlay(false)}
-          >
+          {showSettingsOverlay && (
             <div
-              className="absolute inset-0 flex flex-col"
-              style={{ background: "var(--y-row)" }}
-              onClick={(e) => e.stopPropagation()}
+              className="absolute inset-0 z-50 y-scrim"
+              onClick={() => setShowSettingsOverlay(false)}
             >
               <div
-                className="flex items-center justify-end px-5 py-3"
-                style={{
-                  borderBottom: "1px solid var(--y-line)",
-                  background: "var(--y-chrome-top)",
-                }}
+                className="absolute inset-0 flex flex-col"
+                style={{ background: "var(--y-row)" }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <Tooltip tip="Close">
-                  <button
-                    className="y-icon-btn"
-                    onClick={() => setShowSettingsOverlay(false)}
-                    aria-label="Close"
-                  >
-                    <Icon name="x" size={13} />
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="flex-1 overflow-hidden">
-                {settingsPage === "menu" ? (
-                  <MenuSettingsView visible={navVisible} onToggle={handleToggleNav} />
-                ) : settingsPage === "payees" ? (
-                  <PayeesView
-                    payees={data.payees ?? []}
-                    transactions={data.transactions}
-                    recurring={data.recurring}
-                    categories={data.categories}
-                    groups={data.groups}
-                    onEnsurePayee={async (name) => {
-                      if (!api.ensurePayee) throw new Error("Payee creation is not available");
-                      return api.ensurePayee(name);
-                    }}
-                    onRename={async (id, name) => {
-                      await api.renamePayee?.(id, name);
-                    }}
-                    onSetDefaultCategory={async (id, categoryId) => {
-                      await api.setPayeeDefaultCategory?.(id, categoryId);
-                    }}
-                    onMerge={async (targetId, sourceIds) => {
-                      await api.mergePayees?.(targetId, sourceIds);
-                    }}
-                    onDelete={async (id) => {
-                      await api.deletePayee?.(id);
-                    }}
-                  />
-                ) : settingsPage === "snapshots" ? (
-                  <SnapshotsView
-                    snapshots={snapshots}
-                    suggestedName={snapshotSuggestion}
-                    loading={snapshotsLoading}
-                    error={snapshotsError}
-                    onCreate={async (name) => {
-                      await api.createSnapshot?.(name);
-                      await refreshSnapshots();
-                    }}
-                    onRestore={async (id) => {
-                      await api.restoreSnapshot?.(id);
-                      await api.reload();
-                      await refreshSnapshots();
-                    }}
-                    onDelete={async (id) => {
-                      await api.deleteSnapshot?.(id);
-                      await refreshSnapshots();
-                    }}
-                  />
-                ) : settingsPage === "themes" ? (
-                  <ThemesView themeId={themeId} onSelect={setThemeId} />
-                ) : (
-                  <SettingsView
-                    rules={data.renameRules ?? []}
-                    existingPayees={existingPayees}
-                    onAdd={async (sourcePattern, targetPayee) => {
-                      await api.addRenameRule?.(sourcePattern, targetPayee);
-                    }}
-                    onUpdate={async (id, sourcePattern, targetPayee) => {
-                      await api.updateRenameRule?.(id, sourcePattern, targetPayee);
-                    }}
-                    onDelete={async (id) => {
-                      await api.deleteRenameRule?.(id);
-                    }}
-                    onApply={api.applyRenameRule}
-                    onViewMatches={handleViewRuleMatches}
-                    suggestStatus={renameSuggestStatus}
-                    onSuggestRules={api.suggestRenameRules}
-                    onAcceptSuggestions={
-                      api.acceptRenameSuggestions
-                        ? async (suggestions, applyToExisting) => {
-                            const res = await api.acceptRenameSuggestions!(
-                              suggestions,
-                              applyToExisting
-                            );
-                            // Counts changed: refresh the uncovered-payee total.
-                            await refreshRenameSuggestStatus();
-                            return res;
-                          }
-                        : undefined
-                    }
-                  />
-                )}
+                <div
+                  className="flex items-center justify-end px-5 py-3"
+                  style={{
+                    borderBottom: "1px solid var(--y-line)",
+                    background: "var(--y-chrome-top)",
+                  }}
+                >
+                  <Tooltip tip="Close">
+                    <button
+                      className="y-icon-btn"
+                      onClick={() => setShowSettingsOverlay(false)}
+                      aria-label="Close"
+                    >
+                      <Icon name="x" size={13} />
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  {settingsPage === "menu" ? (
+                    <MenuSettingsView
+                      visible={navVisible}
+                      onToggle={handleToggleNav}
+                      privacyEnabled={privacy.enabled}
+                      onTogglePrivacy={(next) =>
+                        next ? enablePrivacy() : disablePrivacy()
+                      }
+                      onRegeneratePrivacyAmounts={regeneratePrivacyFactor}
+                    />
+                  ) : settingsPage === "payees" ? (
+                    <PayeesView
+                      payees={data.payees ?? []}
+                      transactions={data.transactions}
+                      recurring={data.recurring}
+                      categories={data.categories}
+                      groups={data.groups}
+                      onEnsurePayee={async (name) => {
+                        if (!api.ensurePayee) throw new Error("Payee creation is not available");
+                        return api.ensurePayee(name);
+                      }}
+                      onRename={async (id, name) => {
+                        await api.renamePayee?.(id, name);
+                      }}
+                      onSetDefaultCategory={async (id, categoryId) => {
+                        await api.setPayeeDefaultCategory?.(id, categoryId);
+                      }}
+                      onMerge={async (targetId, sourceIds) => {
+                        await api.mergePayees?.(targetId, sourceIds);
+                      }}
+                      onDelete={async (id) => {
+                        await api.deletePayee?.(id);
+                      }}
+                    />
+                  ) : settingsPage === "snapshots" ? (
+                    <SnapshotsView
+                      snapshots={snapshots}
+                      suggestedName={snapshotSuggestion}
+                      loading={snapshotsLoading}
+                      error={snapshotsError}
+                      onCreate={async (name) => {
+                        await api.createSnapshot?.(name);
+                        await refreshSnapshots();
+                      }}
+                      onRestore={async (id) => {
+                        await api.restoreSnapshot?.(id);
+                        await api.reload();
+                        await refreshSnapshots();
+                      }}
+                      onDelete={async (id) => {
+                        await api.deleteSnapshot?.(id);
+                        await refreshSnapshots();
+                      }}
+                    />
+                  ) : settingsPage === "themes" ? (
+                    <ThemesView themeId={themeId} onSelect={setThemeId} />
+                  ) : (
+                    <SettingsView
+                      rules={data.renameRules ?? []}
+                      existingPayees={existingPayees}
+                      onAdd={async (sourcePattern, targetPayee) => {
+                        await api.addRenameRule?.(sourcePattern, targetPayee);
+                      }}
+                      onUpdate={async (id, sourcePattern, targetPayee) => {
+                        await api.updateRenameRule?.(id, sourcePattern, targetPayee);
+                      }}
+                      onDelete={async (id) => {
+                        await api.deleteRenameRule?.(id);
+                      }}
+                      onApply={api.applyRenameRule}
+                      onViewMatches={handleViewRuleMatches}
+                      suggestStatus={renameSuggestStatus}
+                      onSuggestRules={api.suggestRenameRules}
+                      onAcceptSuggestions={
+                        api.acceptRenameSuggestions
+                          ? async (suggestions, applyToExisting) => {
+                              const res = await api.acceptRenameSuggestions!(
+                                suggestions,
+                                applyToExisting
+                              );
+                              // Counts changed: refresh the uncovered-payee total.
+                              await refreshRenameSuggestStatus();
+                              return res;
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </main>
-
-      <ErrorBoundary name="Inspector">
-        <Inspector
-          groups={groups}
-          summary={summary}
-          month={month}
-          history={history}
-          avg={avg}
-          tbb={budget.tbb}
-          overBudgeted={budget.overBudgeted}
-          priorSurplus={budget.priorSurplus}
-          totalIncome={budget.totalIncome}
-          totalAssigned={budget.totalAssigned}
-          overspentPrevious={budget.overspentPrevious}
-          overspentPreviousMonthKey={budget.overspentPreviousMonthKey}
-          incomeFromFuture={budget.incomeFromFuture}
-          incomeFromPast={budget.incomeFromPast}
-          incomeDeferredToFuture={budget.incomeDeferredToFuture}
-          incomeDeferredToPast={budget.incomeDeferredToPast}
-          cashFlow={cashFlow}
-          trailingNetWorth={trailingNetWorth}
-          insights={insights}
-          onSelectMonth={handleSetMonth}
-          onImportYnab4={api.importYnab4}
-          onImportCsv={(file) => setModal({ kind: "csvImport", file })}
-          onAnalyzeDuplicates={api.analyzeDuplicates}
-          onOpenRenameRules={() => openSettings("rename")}
-          onOpenPayees={() => openSettings("payees")}
-          onOpenPageVisibility={() => openSettings("menu")}
-          onOpenSnapshots={() => openSettings("snapshots")}
-          onOpenThemes={() => openSettings("themes")}
-        />
-      </ErrorBoundary>
-
-      {searchOpen && (
-        <GlobalSearchModal
-          data={data}
-          scopeAccountId={accountFilter}
-          open={searchOpen}
-          onClose={() => setSearchOpen(false)}
-          onJump={handleGlobalSearchJump}
-          initialQuery={searchInitialQuery}
-        />
-      )}
-
-      {modal.kind === "addTransaction" && (
-        <TransactionModal
-          accounts={data.accounts}
-          categories={data.categories}
-          groups={data.groups}
-          payees={payeeOptions}
-          defaultAccountId={accountFilter}
-          defaultDate={modal.defaultDate}
-          initialMode={modal.mode}
-          allTransactions={data.transactions}
-          splitTemplates={splitTemplates}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (t) => {
-            const { id: _ignored, ...rest } = t;
-            await api.addTransaction(rest);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "editTransaction" && editingTransaction && (
-        <TransactionModal
-          accounts={data.accounts}
-          categories={data.categories}
-          groups={data.groups}
-          payees={payeeOptions}
-          defaultAccountId={accountFilter}
-          initial={editingTransaction}
-          allTransactions={data.transactions}
-          splitTemplates={splitTemplates}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (t) => {
-            const { id, ...rest } = t;
-            if (id) await api.updateTransaction(id, rest);
-            setModal({ kind: "none" });
-          }}
-          onDelete={async () => {
-            await api.deleteTransaction(editingTransaction.id);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "bulkEditTransactions" && (
-        <BulkEditTransactionsModal
-          accounts={data.accounts}
-          categories={data.categories}
-          groups={data.groups}
-          payees={payeeOptions}
-          transactionIds={modal.transactionIds}
-          transactions={data.transactions.filter((t) => modal.transactionIds.includes(t.id))}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (patch, ids) => {
-            if (api.bulkUpdateTransactions) {
-              const targetIds = ids ?? modal.transactionIds.filter((id) => {
-                const tx = data.transactions.find((t) => t.id === id);
-                return !tx || tx.status !== "r";
-              });
-              if (targetIds.length > 0) {
-                await api.bulkUpdateTransactions(targetIds, patch);
-              }
-            }
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "recurring" && (
-        <RecurringModal
-          accounts={data.accounts}
-          categories={data.categories}
-          groups={data.groups}
-          payees={payeeOptions}
-          defaultAccountId={accountFilter}
-          initialMode={modal.mode}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            await api.addRecurring(v);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "editRecurring" && editingRecurring && (
-        <RecurringModal
-          accounts={data.accounts}
-          categories={data.categories}
-          groups={data.groups}
-          payees={payeeOptions}
-          initial={editingRecurring}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            const { id, ...rest } = v;
-            if (id) await api.updateRecurring(id, rest);
-            setModal({ kind: "none" });
-          }}
-          onPost={async (id) => {
-            await postRecurringOneClick(id);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "account" && (
-        <AccountModal
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            await api.addAccount(v);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "editAccount" && editingAccount && (
-        <AccountModal
-          initial={editingAccount}
-          transactionCount={
-            data.transactions.filter((t) => t.accountId === editingAccount.id).length
-          }
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            await api.updateAccount(editingAccount.id, {
-              name: v.name,
-              kind: v.kind,
-              onBudget: v.onBudget,
-              notes: v.notes,
-            });
-            setModal({ kind: "none" });
-          }}
-          onArchive={async () => {
-            await api.updateAccount(editingAccount.id, { archived: true });
-            setModal({ kind: "none" });
-          }}
-          onUnarchive={async () => {
-            await api.updateAccount(editingAccount.id, { archived: false });
-            setModal({ kind: "none" });
-          }}
-          onDelete={async () => {
-            await api.deleteAccount(editingAccount.id);
-            startTransition(() => {
-              setAccountFilter(null);
-              setView("budget");
-              setShowSettingsOverlay(false);
-              updateUrl("budget", null, month);
-              setModal({ kind: "none" });
-            });
-          }}
-        />
-      )}
-      {modal.kind === "addCategory" && (
-        <CategoryModal
-          groups={data.groups}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            await api.saveCategory(modal.groupId, null, v);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "editCategory" && editingCategory && (
-        <CategoryModal
-          initial={editingCategory}
-          groups={data.groups}
-          transactionCount={
-            data.transactions.filter((t) => t.categoryId === editingCategory.id).length
-          }
-          otherCategories={data.categories.filter((c) => c.id !== editingCategory.id)}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (v) => {
-            await api.saveCategory(null, editingCategory.id, v);
-            setModal({ kind: "none" });
-          }}
-          onDelete={async (opts) => {
-            await api.deleteCategory(editingCategory.id, opts);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "addGroup" && (
-        <GroupModal
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (name) => {
-            await api.saveGroup(null, name);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "editGroup" && editingGroup && (
-        <GroupModal
-          initialName={editingGroup.name}
-          onClose={() => setModal({ kind: "none" })}
-          onSave={async (name) => {
-            await api.saveGroup(editingGroup.id, name);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "csvImport" && (
-        <CsvImportModal
-          accounts={data.accounts}
-          transactions={data.transactions}
-          renameRules={data.renameRules ?? []}
-          defaultAccountId={accountFilter}
-          file={modal.file}
-          onClose={() => setModal({ kind: "none" })}
-          onImport={async (input) => {
-            await api.importCsv?.(input);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
-      {modal.kind === "reconcile" && reconcileAccount_ && (
-        <ReconcileModal
-          account={reconcileAccount_}
-          transactions={data.transactions}
-          categories={data.categories}
-          groups={data.groups.filter(
-            (g) => g.name !== "__Internal__" && g.name.toLowerCase() !== "__internal__"
           )}
-          onClose={() => setModal({ kind: "none" })}
-          onReconcile={async (input) => {
-            await api.reconcileAccount(input);
-            setModal({ kind: "none" });
-          }}
-          onFetchState={api.getReconcileState}
-          onUnreconcile={async (accountId) => {
-            await api.unreconcileAccount(accountId);
-            setModal({ kind: "none" });
-          }}
-        />
-      )}
+        </main>
+
+        <ErrorBoundary name="Inspector">
+          <Inspector
+            groups={groups}
+            summary={summary}
+            month={month}
+            history={history}
+            avg={avg}
+            tbb={budget.tbb}
+            overBudgeted={budget.overBudgeted}
+            priorSurplus={budget.priorSurplus}
+            totalIncome={budget.totalIncome}
+            totalAssigned={budget.totalAssigned}
+            overspentPrevious={budget.overspentPrevious}
+            overspentPreviousMonthKey={budget.overspentPreviousMonthKey}
+            incomeFromFuture={budget.incomeFromFuture}
+            incomeFromPast={budget.incomeFromPast}
+            incomeDeferredToFuture={budget.incomeDeferredToFuture}
+            incomeDeferredToPast={budget.incomeDeferredToPast}
+            cashFlow={cashFlow}
+            trailingNetWorth={trailingNetWorth}
+            insights={insights}
+            onSelectMonth={handleSetMonth}
+            onImportYnab4={api.importYnab4}
+            onImportCsv={(file) => {
+              // The import preview parses the real file client-side, so it
+              // can't open while names/amounts are disguised.
+              if (privacyMask) {
+                setPrivacyNotice(true);
+                return;
+              }
+              setModal({ kind: "csvImport", file });
+            }}
+            onAnalyzeDuplicates={api.analyzeDuplicates}
+            onOpenRenameRules={() => openSettings("rename")}
+            onOpenPayees={() => openSettings("payees")}
+            onOpenPageVisibility={() => openSettings("menu")}
+            onOpenSnapshots={() => openSettings("snapshots")}
+            onOpenThemes={() => openSettings("themes")}
+          />
+        </ErrorBoundary>
+
+        {searchOpen && (
+          <GlobalSearchModal
+            data={data}
+            scopeAccountId={accountFilter}
+            open={searchOpen}
+            onClose={() => setSearchOpen(false)}
+            onJump={handleGlobalSearchJump}
+            initialQuery={searchInitialQuery}
+          />
+        )}
+
+        {modal.kind === "addTransaction" && (
+          <TransactionModal
+            accounts={data.accounts}
+            categories={data.categories}
+            groups={data.groups}
+            payees={payeeOptions}
+            defaultAccountId={accountFilter}
+            defaultDate={modal.defaultDate}
+            initialMode={modal.mode}
+            allTransactions={data.transactions}
+            splitTemplates={splitTemplates}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (t) => {
+              const { id: _ignored, ...rest } = t;
+              await api.addTransaction(rest);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "editTransaction" && editingTransaction && (
+          <TransactionModal
+            accounts={data.accounts}
+            categories={data.categories}
+            groups={data.groups}
+            payees={payeeOptions}
+            defaultAccountId={accountFilter}
+            initial={editingTransaction}
+            allTransactions={data.transactions}
+            splitTemplates={splitTemplates}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (t) => {
+              const { id, ...rest } = t;
+              if (id) await api.updateTransaction(id, rest);
+              setModal({ kind: "none" });
+            }}
+            onDelete={async () => {
+              await api.deleteTransaction(editingTransaction.id);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "bulkEditTransactions" && (
+          <BulkEditTransactionsModal
+            accounts={data.accounts}
+            categories={data.categories}
+            groups={data.groups}
+            payees={payeeOptions}
+            transactionIds={modal.transactionIds}
+            transactions={data.transactions.filter((t) => modal.transactionIds.includes(t.id))}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (patch, ids) => {
+              if (api.bulkUpdateTransactions) {
+                const targetIds = ids ?? modal.transactionIds.filter((id) => {
+                  const tx = data.transactions.find((t) => t.id === id);
+                  return !tx || tx.status !== "r";
+                });
+                if (targetIds.length > 0) {
+                  await api.bulkUpdateTransactions(targetIds, patch);
+                }
+              }
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "recurring" && (
+          <RecurringModal
+            accounts={data.accounts}
+            categories={data.categories}
+            groups={data.groups}
+            payees={payeeOptions}
+            defaultAccountId={accountFilter}
+            initialMode={modal.mode}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              await api.addRecurring(v);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "editRecurring" && editingRecurring && (
+          <RecurringModal
+            accounts={data.accounts}
+            categories={data.categories}
+            groups={data.groups}
+            payees={payeeOptions}
+            initial={editingRecurring}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              const { id, ...rest } = v;
+              if (id) await api.updateRecurring(id, rest);
+              setModal({ kind: "none" });
+            }}
+            onPost={async (id) => {
+              await postRecurringOneClick(id);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "account" && (
+          <AccountModal
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              await api.addAccount(v);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "editAccount" && editingAccount && (
+          <AccountModal
+            initial={editingAccount}
+            transactionCount={
+              data.transactions.filter((t) => t.accountId === editingAccount.id).length
+            }
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              await api.updateAccount(editingAccount.id, {
+                name: v.name,
+                kind: v.kind,
+                onBudget: v.onBudget,
+                notes: v.notes,
+              });
+              setModal({ kind: "none" });
+            }}
+            onArchive={async () => {
+              await api.updateAccount(editingAccount.id, { archived: true });
+              setModal({ kind: "none" });
+            }}
+            onUnarchive={async () => {
+              await api.updateAccount(editingAccount.id, { archived: false });
+              setModal({ kind: "none" });
+            }}
+            onDelete={async () => {
+              await api.deleteAccount(editingAccount.id);
+              startTransition(() => {
+                setAccountFilter(null);
+                setView("budget");
+                setShowSettingsOverlay(false);
+                updateUrl("budget", null, month);
+                setModal({ kind: "none" });
+              });
+            }}
+          />
+        )}
+        {modal.kind === "addCategory" && (
+          <CategoryModal
+            groups={data.groups}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              await api.saveCategory(modal.groupId, null, v);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "editCategory" && editingCategory && (
+          <CategoryModal
+            initial={editingCategory}
+            groups={data.groups}
+            transactionCount={
+              data.transactions.filter((t) => t.categoryId === editingCategory.id).length
+            }
+            otherCategories={data.categories.filter((c) => c.id !== editingCategory.id)}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (v) => {
+              await api.saveCategory(null, editingCategory.id, v);
+              setModal({ kind: "none" });
+            }}
+            onDelete={async (opts) => {
+              await api.deleteCategory(editingCategory.id, opts);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "addGroup" && (
+          <GroupModal
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (name) => {
+              await api.saveGroup(null, name);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "editGroup" && editingGroup && (
+          <GroupModal
+            initialName={editingGroup.name}
+            onClose={() => setModal({ kind: "none" })}
+            onSave={async (name) => {
+              await api.saveGroup(editingGroup.id, name);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "csvImport" && (
+          <CsvImportModal
+            accounts={data.accounts}
+            transactions={data.transactions}
+            renameRules={data.renameRules ?? []}
+            defaultAccountId={accountFilter}
+            file={modal.file}
+            onClose={() => setModal({ kind: "none" })}
+            onImport={async (input) => {
+              await api.importCsv?.(input);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+        {modal.kind === "reconcile" && reconcileAccount_ && (
+          <ReconcileModal
+            account={reconcileAccount_}
+            transactions={data.transactions}
+            categories={data.categories}
+            groups={data.groups.filter(
+              (g) => g.name !== "__Internal__" && g.name.toLowerCase() !== "__internal__"
+            )}
+            onClose={() => setModal({ kind: "none" })}
+            onReconcile={async (input) => {
+              await api.reconcileAccount(input);
+              setModal({ kind: "none" });
+            }}
+            onFetchState={api.getReconcileState}
+            onUnreconcile={async (accountId) => {
+              await api.unreconcileAccount(accountId);
+              setModal({ kind: "none" });
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }

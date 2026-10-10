@@ -7,7 +7,13 @@ import type { View } from "../src/Sidebar.js";
 function renderMenu(over: Partial<Record<View, boolean>> = {}) {
   const onToggle = vi.fn();
   render(
-    <MenuSettingsView visible={{ ...DEFAULT_NAV_VISIBILITY, ...over }} onToggle={onToggle} />
+    <MenuSettingsView
+      visible={{ ...DEFAULT_NAV_VISIBILITY, ...over }}
+      onToggle={onToggle}
+      privacyEnabled={false}
+      onTogglePrivacy={vi.fn()}
+      onRegeneratePrivacyAmounts={vi.fn()}
+    />
   );
   return { onToggle };
 }
