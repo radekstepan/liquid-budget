@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { SCHEDULED_HEIGHT_STORAGE_KEY, TransactionsView } from "../src/TransactionsView.js";
-import { addDaysISO, makeSeedBudgetData, todayISO, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
+import { addDaysISO, duplicateFingerprint, makeSeedBudgetData, todayISO, type BudgetData, type Query, type TransactionFlagColor } from "@ynab/logic";
 
 describe("TransactionsView", () => {
   it("renders transaction rows and narrows them via an applied search query", () => {
@@ -1745,6 +1745,179 @@ describe("TransactionsView", () => {
     expect(checkbox).not.toBeChecked();
     expect(screen.queryByText(/1 scheduled selected/i)).not.toBeInTheDocument();
     expect(onEditRecurring).not.toHaveBeenCalled();
+  });
+
+  describe("duplicate inspector", () => {
+    const dupePair = () => [
+      {
+        id: 9701,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-15",
+        payee: "Dupe Grocer",
+        memo: "",
+        amount: "-2000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+      },
+      {
+        id: 9702,
+        accountId: 1,
+        categoryId: 1,
+        date: "2026-07-15",
+        payee: "Dupe Grocer",
+        memo: "",
+        amount: "-2000",
+        status: "c" as const,
+        transferAccountId: null,
+        parentId: null,
+        flagColor: "duplicate" as const,
+      },
+    ];
+
+    const renderDuplicatesView = (overrides?: {
+      transactions?: ReturnType<typeof makeSeedBudgetData>["transactions"];
+      onEdit?: () => void;
+      onDelete?: (id: number) => void;
+      onFlag?: (id: number, color: TransactionFlagColor | null) => void;
+      onDismissDuplicateGroup?: (fingerprint: string) => Promise<void> | void;
+    }) => {
+      const data = makeSeedBudgetData();
+      data.transactions = overrides?.transactions ?? [...data.transactions, ...dupePair()];
+      const onEdit = overrides?.onEdit ?? (() => {});
+      const onDelete = overrides?.onDelete ?? (() => {});
+      const onFlag = overrides?.onFlag ?? (() => {});
+      render(
+        <TransactionsView
+          data={data}
+          accountFilter={1}
+          externalFilter={{ query: { filters: [{ kind: "is", value: "duplicate" }], text: "" }, nonce: 1 }}
+          onAdd={() => {}}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onReconcile={() => {}}
+          onCycleStatus={() => {}}
+          onFlag={onFlag}
+          onDismissDuplicateGroup={overrides?.onDismissDuplicateGroup}
+        />
+      );
+      return { data, onEdit, onDelete, onFlag };
+    };
+
+    it("shows only flagged rows in the duplicates filter", () => {
+      renderDuplicatesView();
+
+      // The keeper stays hidden here — the D badge reveals it on demand.
+      expect(document.querySelector('tr[data-txn-id="9701"]')).toBeNull();
+      expect(document.querySelector('tr[data-txn-id="9702"]')).not.toBeNull();
+    });
+
+    it("opens the duplicate group when the D badge is clicked, without opening the editor", () => {
+      const onEdit = vi.fn();
+      renderDuplicatesView({ onEdit });
+
+      expect(screen.queryByText("Duplicate transactions")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+
+      expect(screen.getByText("Duplicate transactions")).toBeInTheDocument();
+      expect(document.querySelector('[data-duplicate-id="9701"]')).not.toBeNull();
+      expect(document.querySelector('[data-duplicate-id="9702"]')).not.toBeNull();
+      expect(onEdit).not.toHaveBeenCalled();
+    });
+
+    it("edits and deletes group rows from the inspector", () => {
+      const onEdit = vi.fn();
+      const onDelete = vi.fn();
+      renderDuplicatesView({ onEdit, onDelete });
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      fireEvent.click(screen.getAllByRole("button", { name: "Edit transaction Dupe Grocer" })[0]!);
+      expect(onEdit).toHaveBeenCalledWith(9701);
+      fireEvent.click(screen.getAllByRole("button", { name: "Delete transaction Dupe Grocer" })[1]!);
+      expect(onDelete).toHaveBeenCalledWith(9702);
+    });
+
+    it("shows all group rows in the register and clears the filter", () => {
+      renderDuplicatesView();
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Show all in register" }));
+
+      expect(screen.queryByText("Duplicate transactions")).not.toBeInTheDocument();
+      expect(screen.getByText("2 selected")).toBeInTheDocument();
+      expect(screen.queryByTestId("register-filter-bar")).not.toBeInTheDocument();
+    });
+
+    it("offers to clear a stale marker when nothing else matches", () => {
+      const data = makeSeedBudgetData();
+      data.transactions = [
+        ...data.transactions,
+        {
+          id: 9703,
+          accountId: 1,
+          categoryId: 1,
+          date: "2026-07-16",
+          payee: "Stale Dupe Grocer",
+          memo: "",
+          amount: "-3000",
+          status: "c" as const,
+          transferAccountId: null,
+          parentId: null,
+          flagColor: "duplicate" as const,
+        },
+      ];
+      const onFlag = vi.fn();
+      renderDuplicatesView({ transactions: data.transactions, onFlag });
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      expect(screen.getByText("No other matching transactions")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear marker" }));
+      expect(onFlag).toHaveBeenCalledWith(9703, null);
+      expect(screen.queryByText("No other matching transactions")).not.toBeInTheDocument();
+    });
+
+    it("confirms the group as not duplicates and closes", async () => {
+      const onDismissDuplicateGroup = vi.fn().mockResolvedValue(undefined);
+      renderDuplicatesView({ onDismissDuplicateGroup });
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Not duplicates" }));
+
+      expect(onDismissDuplicateGroup).toHaveBeenCalledWith(
+        duplicateFingerprint({
+          accountId: 1,
+          date: "2026-07-15",
+          amount: -2000,
+          payee: "Dupe Grocer",
+          memo: "",
+        })
+      );
+      await waitFor(() => {
+        expect(screen.queryByText("Duplicate transactions")).not.toBeInTheDocument();
+      });
+    });
+
+    it("hides the dismiss button when no dismiss handler is provided", () => {
+      renderDuplicatesView();
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      expect(screen.queryByRole("button", { name: "Not duplicates" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the modal open with an error when dismissing fails", async () => {
+      const onDismissDuplicateGroup = vi.fn().mockRejectedValue(new Error("nope"));
+      renderDuplicatesView({ onDismissDuplicateGroup });
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Not duplicates" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Could not confirm")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Duplicate transactions")).toBeInTheDocument();
+    });
   });
 });
 

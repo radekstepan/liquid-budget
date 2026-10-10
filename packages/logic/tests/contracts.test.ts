@@ -13,6 +13,8 @@ import {
   parseAssignmentResponse,
   parseBudgetDataResponse,
   parseDuplicateAnalysisResponse,
+  parseDuplicateDismissResponse,
+  DuplicateDismissSchema,
   parseReconcileStateResponse,
   parseRecurringAutoPostResponse,
   parseSnapshotsResponse,
@@ -264,6 +266,18 @@ describe("mutation/read response contracts", () => {
     expect(parseDuplicateAnalysisResponse(report).duplicateCount).toBe(1);
     expect(() => parseDuplicateAnalysisResponse({ groups: [] })).toThrow(
       /Invalid duplicates response/
+    );
+  });
+
+  it("dismiss-duplicates request and response round-trip", () => {
+    expect(DuplicateDismissSchema.parse({ fingerprint: "f" })).toEqual({ fingerprint: "f" });
+    expect(() => DuplicateDismissSchema.parse({ fingerprint: "" })).toThrow();
+    expect(parseDuplicateDismissResponse({ dismissed: true, clearedCount: 2 })).toEqual({
+      dismissed: true,
+      clearedCount: 2,
+    });
+    expect(() => parseDuplicateDismissResponse({ dismissed: true })).toThrow(
+      /Invalid dismiss-duplicates response/
     );
   });
 

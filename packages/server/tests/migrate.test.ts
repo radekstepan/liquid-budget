@@ -63,6 +63,7 @@ describe("Drizzle migrations", () => {
     expect(tableNames).toContain("recurring_sub_transactions");
     expect(tableNames).toContain("reconciliations");
     expect(tableNames).toContain("rename_rules");
+    expect(tableNames).toContain("duplicate_ignores");
     expect(tableNames).toContain("__drizzle_migrations");
   });
 
@@ -136,7 +137,7 @@ describe("Drizzle migrations", () => {
     // No duplicates. sqlite_sequence is excluded from the count.
     const systemTables = new Set(["__drizzle_migrations", "sqlite_sequence"]);
     const appTableCount = tableNames.filter((n) => !systemTables.has(n)).length;
-    expect(appTableCount).toBe(10);
+    expect(appTableCount).toBe(11);
   });
 
   it("enforces DB-level CHECK constraints (UNI-29 / BUG-12, F-19)", () => {

@@ -253,6 +253,15 @@ export const renameRules = sqliteTable(
   })
 );
 
+/**
+ * Duplicate fingerprints the user confirmed as legitimate. The analyzer
+ * skips these groups so confirmed rows are never re-flagged.
+ */
+export const duplicateIgnores = sqliteTable("duplicate_ignores", {
+  fingerprint: text("fingerprint").primaryKey(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
 export type Account = typeof accounts.$inferSelect;
 export type CategoryGroup = typeof categoryGroups.$inferSelect;
 export type Category = typeof categories.$inferSelect;

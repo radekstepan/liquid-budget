@@ -169,6 +169,13 @@
       "when": 1791419997266,
       "tag": "0023_yielding_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791641377607,
+      "tag": "0024_dizzy_nehzno",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/ui";
 import { Notice, Toast, type ToastItem, createToast } from "@ynab/theme";
 import type { Account, Assignment, BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSkippedEntry, ImportSummary, MergeableTransaction, MergeOverrides, ReconcileState, Transaction } from "@ynab/logic";
-import { applyMergeOverrides, applyOptimisticReconcileFlips, computeReconcileState, invalidateBudgetIndex, num, todayISO, RECONCILE_ADJUSTMENT_MEMO, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameRuleResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
+import { applyMergeOverrides, applyOptimisticReconcileFlips, computeReconcileState, invalidateBudgetIndex, num, todayISO, RECONCILE_ADJUSTMENT_MEMO, classifyBoundaryTransfer, parseAssignmentResponse, parseBudgetDataResponse, parseDuplicateAnalysisResponse, parseDuplicateDismissResponse, parseReconcileStateResponse, parseRecurringAutoPostResponse, parseRenameRuleResponse, parseRenameSuggestAcceptResponse, parseRenameSuggestResponse, parseRenameSuggestStatusResponse, parseSnapshotsResponse, parseTransactionMutationResult, pickMergePrimary, resolveMergedTransaction } from "@ynab/logic";
 
 function applyAccountDeltas(
   accounts: Account[],
@@ -2016,6 +2016,21 @@ export function BudgetAppShell({
           { failure: "Failed to analyze duplicates." }
         )
       );
+    },
+    dismissDuplicateGroup: async (fingerprint) => {
+      return withSync(() =>
+        runMutation(
+          async () => {
+            return parseDuplicateDismissResponse(
+              await jsonReq<unknown>("/api/duplicates/dismiss", {
+                method: "POST",
+                body: JSON.stringify({ fingerprint }),
+              })
+            );
+          },
+          { success: "Marked as not duplicates.", failure: "Failed to dismiss duplicates." }
+        )
+      ).then(() => undefined);
     },
     addRenameRule: async (sourcePattern, targetPayee) => {
       // Rule CRUD touches no transactions, so the returned row is patched
