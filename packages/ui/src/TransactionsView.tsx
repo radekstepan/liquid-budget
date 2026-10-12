@@ -184,6 +184,12 @@ export const TransactionsView = memo(function TransactionsView({
   accountFilter,
   focusTransaction,
   externalFilter,
+  selectedId: controlledSelectedId,
+  onSelectedIdChange,
+  selectedIds: controlledSelectedIds,
+  onSelectedIdsChange,
+  selectedRecurringIds: controlledSelectedRecurringIds,
+  onSelectedRecurringIdsChange,
   onGoToTransfer,
   onAdd,
   onAddTransfer,
@@ -220,6 +226,14 @@ export const TransactionsView = memo(function TransactionsView({
     query?: Query;
     nonce: number;
   } | null;
+  /** Controlled register selection (lifted to the owner so it survives view
+      switches). When omitted the register keeps selection in local state. */
+  selectedId?: number | null;
+  onSelectedIdChange?: (update: number | null | ((prev: number | null) => number | null)) => void;
+  selectedIds?: Set<number>;
+  onSelectedIdsChange?: (update: Set<number> | ((prev: Set<number>) => Set<number>)) => void;
+  selectedRecurringIds?: Set<number>;
+  onSelectedRecurringIdsChange?: (update: Set<number> | ((prev: Set<number>) => Set<number>)) => void;
   onGoToTransfer?: (accountId: number, transactionId: number) => void;
   onAdd: () => void;
   onAddTransfer?: () => void;
@@ -281,6 +295,39 @@ export const TransactionsView = memo(function TransactionsView({
     else setAppliedQuery({ ...appliedQuery, text: "" });
   }, [appliedQuery, clearAppliedQuery]);
 
+  // Register selection lives here when uncontrolled, or in the owner
+  // (BudgetApp) when the controlled props are provided — the register
+  // unmounts on every view switch, so owner-held selection is what lets a
+  // selection survive navigating away and back.
+  const [internalSelectedId, setInternalSelectedId] = useState<number | null>(
+    controlledSelectedId ?? null
+  );
+  const [internalSelectedIds, setInternalSelectedIds] = useState<Set<number>>(
+    () => new Set(controlledSelectedIds ?? [])
+  );
+  const [internalSelectedRecurringIds, setInternalSelectedRecurringIds] = useState<Set<number>>(
+    () => new Set(controlledSelectedRecurringIds ?? [])
+  );
+  const selectedId = controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId;
+  const setSelectedId =
+    controlledSelectedId !== undefined && onSelectedIdChange
+      ? onSelectedIdChange
+      : setInternalSelectedId;
+  const selectedIds =
+    controlledSelectedIds !== undefined ? controlledSelectedIds : internalSelectedIds;
+  const setSelectedIds =
+    controlledSelectedIds !== undefined && onSelectedIdsChange
+      ? onSelectedIdsChange
+      : setInternalSelectedIds;
+  const selectedRecurringIds =
+    controlledSelectedRecurringIds !== undefined
+      ? controlledSelectedRecurringIds
+      : internalSelectedRecurringIds;
+  const setSelectedRecurringIds =
+    controlledSelectedRecurringIds !== undefined && onSelectedRecurringIdsChange
+      ? onSelectedRecurringIdsChange
+      : setInternalSelectedRecurringIds;
+
   // Confirm a merge preview: run the merge, then leave the surviving
   // (merged) row selected. On failure the modal stays open with the
   // error and the selection is untouched.
@@ -302,13 +349,10 @@ export const TransactionsView = memo(function TransactionsView({
       }
       setMergePreviewIds(null);
     },
-    [data.transactions, onMergeTransactions]
+    [data.transactions, onMergeTransactions, setSelectedIds]
   );
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [mergePreviewIds, setMergePreviewIds] = useState<number[] | null>(null);
   const [duplicateInspectorId, setDuplicateInspectorId] = useState<number | null>(null);
-  const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
   const [sort, setSort] = useLocalStorage<SortState>(
     "ynab:transactions:sort",
     { key: "date", dir: "desc" },
@@ -563,7 +607,7 @@ export const TransactionsView = memo(function TransactionsView({
           ?.scrollIntoView?.({ block: "center" });
       }, 50);
     }
-  }, [activeDuplicateGroup, clearAppliedQuery]);
+  }, [activeDuplicateGroup, clearAppliedQuery, setSelectedId, setSelectedIds]);
 
   // Top-level rows for the active account. Free-text narrowing now lives in
   // the structured `appliedQuery` stage below (fed by the search modal), so

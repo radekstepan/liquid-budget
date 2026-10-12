@@ -996,6 +996,24 @@ describe("BudgetApp", () => {
     }
   });
 
+  it("preserves the register selection when navigating away and back", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
+
+    const txnCheckbox = screen.getAllByRole("checkbox", {
+      name: /select transaction /i,
+    })[0]!;
+    fireEvent.click(txnCheckbox);
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /reports/i }));
+    expect(screen.getByText("Spending by Category")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^transactions/i }));
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+  });
+
   it("clicking the Transactions nav clears any selected account", () => {
     window.localStorage.removeItem("ynab:transactions:accountFilter");
     window.history.pushState(null, "", "/");
