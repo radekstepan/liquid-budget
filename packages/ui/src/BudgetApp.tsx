@@ -476,6 +476,11 @@ export function BudgetApp({
     query?: Query;
     nonce: number;
   } | null>(null);
+  // Register selection lives here (not in TransactionsView) so it survives
+  // view switches — the register unmounts when we leave the view.
+  const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<number>>(new Set());
+  const [selectedRecurringIds, setSelectedRecurringIds] = useState<Set<number>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   // Query the search modal opens with: null for a fresh search, or the
   // register's applied filter when editing it from the toolbar.
@@ -1443,6 +1448,12 @@ export function BudgetApp({
                 accountFilter={accountFilter}
                 focusTransaction={focusTransaction}
                 externalFilter={registerFilter}
+                selectedId={selectedTransactionId}
+                onSelectedIdChange={setSelectedTransactionId}
+                selectedIds={selectedTransactionIds}
+                onSelectedIdsChange={setSelectedTransactionIds}
+                selectedRecurringIds={selectedRecurringIds}
+                onSelectedRecurringIdsChange={setSelectedRecurringIds}
                 onEditFilter={(q) => {
                   setSearchInitialQuery(q);
                   setSearchOpen(true);
