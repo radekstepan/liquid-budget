@@ -128,6 +128,6 @@ export function assertSplitsBalanced(
     sum += childAmount;
   }
   if (sum !== parent) {
-    return fail(`split children do not sum to parent: ${sum} vs ${parent}`);
+    return fail(`Split children do not sum to parent: ${sum} vs ${parent}`);
   }
 }

@@ -898,6 +898,13 @@ body::after {
   cursor: default;
   opacity: 0.45;
 }
+.y-icon-btn--subtle {
+  opacity: 0.6;
+}
+.y-icon-btn--subtle:hover,
+.y-icon-btn--subtle:focus-visible {
+  opacity: 1;
+}
 .y-side-section-divider {
   height: 1px;
   margin: 3px 0;

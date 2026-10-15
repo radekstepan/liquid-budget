@@ -40,7 +40,7 @@ export { BudgetApp, type BudgetAppApi } from "./BudgetApp.js";
 export { GlobalSearch, type GlobalSearchJump } from "./GlobalSearch.js";
 export { GlobalSearchModal } from "./GlobalSearchModal.js";
 export { Modal, Field, Btn, inputCls } from "./ui.js";
-export { AmountPreview, AmountFieldError, amountValidationMessage } from "./AmountInput.js";
+export { AmountPreview, AmountFieldError, AmountFieldWithCalculator, amountValidationMessage } from "./AmountInput.js";
 export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.js";
 export { useLocalStorage } from "./useLocalStorage.js";
 export { useTodayISO, msUntilNextMidnight } from "./useTodayISO.js";

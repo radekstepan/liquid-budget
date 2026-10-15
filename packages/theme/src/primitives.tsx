@@ -231,6 +231,17 @@ export const Icon: React.FC<{ name: string; size?: number; color?: string }> = (
         <path d="M1.5 13.6h13" strokeWidth="1.5" strokeLinecap="round" />
       </>
     ),
+    calculator: (
+      <>
+        <rect x="3.2" y="1.8" width="9.6" height="12.4" rx="1.5" strokeWidth="1.4" />
+        <path d="M5.2 4.6h5.6" strokeWidth="1.3" strokeLinecap="round" />
+        <path
+          d="M5.5 7.4h.1M7.9 7.4h.1M10.3 7.4h.1M5.5 9.4h.1M7.9 9.4h.1M10.3 9.4h.1M5.5 11.4h.1M7.9 11.4h.1M10.3 11.4h.1"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      </>
+    ),
   };
   return (
     <svg

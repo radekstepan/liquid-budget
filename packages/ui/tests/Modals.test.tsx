@@ -238,6 +238,43 @@ describe("TransactionModal", () => {
     });
   });
 
+  it("offers a calculator on the amount field that writes the result back", () => {
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open calculator" }));
+    fireEvent.change(screen.getByLabelText("Math expression"), {
+      target: { value: "10+5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByPlaceholderText("0.00")).toHaveValue("15.00");
+  });
+
+  it("offers a calculator on each split sub-row amount", () => {
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        initialMode="split"
+        onClose={() => {}}
+        onSave={() => {}}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "Open calculator for sub-transaction 1" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open calculator for sub-transaction 2" })
+    ).toBeInTheDocument();
+  });
+
   it("calls onSave with a positive amount when the user types a positive number", () => {
     const onSave = vi.fn();
     render(
