@@ -43,7 +43,7 @@ import {
 } from "@ynab/logic";
 import { Button, TextField, Select, Checkbox, Notice, FlagPicker, SearchList, Tooltip, Icon, ClearedFlag, type SearchListOption } from "@ynab/theme";
 import { Modal, Field, Btn } from "./ui.js";
-import { AmountPreview, AmountFieldError } from "./AmountInput.js";
+import { AmountPreview, AmountFieldError, AmountFieldWithCalculator } from "./AmountInput.js";
 
 function DateFieldError({ value }: { value: string }) {
   if (isValidISODate(value)) return null;
@@ -670,11 +670,9 @@ export function TransactionModal({
               <DateFieldError value={date} />
             </Field>
             <Field label={mode === "split" ? "Total Amount" : "Amount"}>
-              <TextField
+              <AmountFieldWithCalculator
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
+                onChange={setAmount}
                 autoFocus
                 className={inputClass}
               />
@@ -955,18 +953,16 @@ export function TransactionModal({
                           className={inputClass}
                           aria-label={`Sub-transaction ${i + 1} memo`}
                         />
-                        <TextField
+                        <AmountFieldWithCalculator
                           value={row.amount}
-                          onChange={(e) => {
-                            const val = e.target.value;
+                          onChange={(val) =>
                             setSubRows((rs) =>
                               rs.map((r, j) => (i === j ? { ...r, amount: val } : r))
-                            );
-                          }}
-                          placeholder="0.00"
-                          inputMode="decimal"
+                            )
+                          }
                           className={inputClass}
-                          aria-label={`Sub-transaction ${i + 1} amount`}
+                          ariaLabel={`Sub-transaction ${i + 1} amount`}
+                          calculatorLabel={`Open calculator for sub-transaction ${i + 1}`}
                         />
                         <button
                           type="button"
@@ -1594,11 +1590,9 @@ export function RecurringModal({
 
       <div className="grid grid-cols-2 gap-3">
         <Field label={mode === "split" ? "Total" : "Amount"}>
-          <TextField
+          <AmountFieldWithCalculator
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
+            onChange={setAmount}
             className={inputClass}
           />
           <AmountPreview value={amount} />
@@ -1841,18 +1835,16 @@ export function RecurringModal({
                       className={inputClass}
                       aria-label={`Sub-transaction ${i + 1} memo`}
                     />
-                    <TextField
+                    <AmountFieldWithCalculator
                       value={row.amount}
-                      onChange={(e) => {
-                        const val = e.target.value;
+                      onChange={(val) =>
                         setSubRows((rs) =>
                           rs.map((r, j) => (i === j ? { ...r, amount: val } : r))
-                        );
-                      }}
-                      placeholder="0.00"
-                      inputMode="decimal"
+                        )
+                      }
                       className={inputClass}
-                      aria-label={`Sub-transaction ${i + 1} amount`}
+                      ariaLabel={`Sub-transaction ${i + 1} amount`}
+                      calculatorLabel={`Open calculator for sub-transaction ${i + 1}`}
                     />
                     <button
                       type="button"

@@ -2060,7 +2060,7 @@ describe("transactions queries", () => {
         .where(eq(schema.transactions.id, split.parent.id));
       expect(parent?.amount).toBe(-8000);
 
-      // Subsequent child edit should succeed and not throw "split children do not sum to parent"
+      // Subsequent child edit should succeed and not throw "Split children do not sum to parent"
       const childToUpdate = split.children[1]!;
       await expect(
         updateTransaction(db, childToUpdate.id, { memo: "updated coffee memo" })
