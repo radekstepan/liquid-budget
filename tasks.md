@@ -67,7 +67,4 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-- ✅ DONE — Figure out why you can't run "yarn e2e" yourself, you used to be able to, then fix the 4 failed specs (`rename-suggest.spec.ts:135`, `splits-edge-cases.spec.ts:445`, `transactions-flag.spec.ts:86`, `transactions.spec.ts:79`)
-  - Shipped 2026-10-25 as `task-2` (diagnosis: default network sandbox denies `listen()` → `EPERM`; relaunch with `--sandbox-network enabled`/`--disable-sandbox`. All 4 specs were stale tests, fixed test-only + unit regression tests). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session — run `yarn e2e` in a normal terminal to confirm.
-- ✅ DONE — in reports call surplus something more appropriate. And add a trendline as well that is off by default but can be toggled on
-  - Shipped 2026-10-25 as `task-3` (tab renamed Surplus → Cash Flow, "Monthly Cash Flow" title; OLS trendline overlay with persisted off-by-default Trend toggle, disabled with <2 months). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session — run `yarn e2e` in a normal terminal to confirm.
+Reports Cash Flow trend line, if turned on, show the trend line amount in the onhover tooltip as well.
