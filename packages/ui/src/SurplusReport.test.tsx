@@ -1,7 +1,7 @@
 "use client";
 
 import { fireEvent, render } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BudgetData, SurplusMonthPoint } from "@ynab/logic";
 import { SurplusReport } from "./SurplusReport.js";
 import { ReportsView } from "./ReportsView.js";
@@ -18,7 +18,7 @@ function makePoints(surpluses: number[]): SurplusMonthPoint[] {
 describe("SurplusReport", () => {
   it("renders the panel title with surplus/loss legend entries", () => {
     const { getByText } = render(<SurplusReport points={[]} />);
-    expect(getByText("Monthly Surplus")).not.toBeNull();
+    expect(getByText("Monthly Cash Flow")).not.toBeNull();
     expect(getByText("Surplus")).not.toBeNull();
     expect(getByText("Loss")).not.toBeNull();
   });
@@ -66,7 +66,7 @@ describe("SurplusReport chart capping", () => {
   });
 });
 
-describe("ReportsView surplus tab", () => {
+describe("ReportsView cash flow tab", () => {
   const emptyData: BudgetData = {
     accounts: [],
     groups: [],
@@ -76,7 +76,7 @@ describe("ReportsView surplus tab", () => {
     recurring: [],
   };
 
-  it("places a Surplus tab immediately to the right of Net Worth", () => {
+  it("places a Cash Flow tab immediately to the right of Net Worth", () => {
     const { container } = render(<ReportsView data={emptyData} month="2026-06" />);
     const labels = Array.from(container.querySelectorAll(".y-tab")).map(
       (el) => el.textContent
@@ -85,19 +85,97 @@ describe("ReportsView surplus tab", () => {
       "Spending Trends",
       "Spending by Category",
       "Net Worth",
-      "Surplus",
+      "Cash Flow",
     ]);
   });
 
-  it("shows the surplus chart when the Surplus tab is selected", () => {
+  it("shows the cash flow chart when the Cash Flow tab is selected", () => {
     const { container, getByText } = render(
       <ReportsView data={emptyData} month="2026-06" />
     );
-    const surplusTab = Array.from(container.querySelectorAll(".y-tab")).find(
-      (el) => el.textContent === "Surplus"
+    const cashFlowTab = Array.from(container.querySelectorAll(".y-tab")).find(
+      (el) => el.textContent === "Cash Flow"
     );
-    expect(surplusTab).not.toBeUndefined();
-    fireEvent.click(surplusTab!);
-    expect(getByText("Monthly Surplus")).not.toBeNull();
+    expect(cashFlowTab).not.toBeUndefined();
+    fireEvent.click(cashFlowTab!);
+    expect(getByText("Monthly Cash Flow")).not.toBeNull();
+  });
+});
+
+describe("SurplusReport trendline", () => {
+  const origWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const origHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+
+  beforeAll(() => {
+    // jsdom reports zero sizes; give the chart a real layout box.
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+  });
+
+  afterAll(() => {
+    if (origWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", origWidth);
+    if (origHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", origHeight);
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("is off by default", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints([10000, 11000, 10500])} />
+    );
+    expect(getByText("Off")).not.toBeNull();
+    expect(container.querySelector('[data-testid="trendline"]')).toBeNull();
+  });
+
+  it("toggles the trendline on and back off", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints([10000, 11000, 10500])} />
+    );
+    fireEvent.click(getByText("Off"));
+    expect(getByText("On")).not.toBeNull();
+    expect(container.querySelector('[data-testid="trendline"]')).not.toBeNull();
+    fireEvent.click(getByText("On"));
+    expect(getByText("Off")).not.toBeNull();
+    expect(container.querySelector('[data-testid="trendline"]')).toBeNull();
+  });
+
+  it("persists the toggle across mounts", () => {
+    const points = makePoints([10000, 11000, 10500]);
+    const first = render(<SurplusReport points={points} />);
+    fireEvent.click(first.getByText("Off"));
+    expect(first.getByText("On")).not.toBeNull();
+    first.unmount();
+    const second = render(<SurplusReport points={points} />);
+    expect(second.getByText("On")).not.toBeNull();
+    expect(second.container.querySelector('[data-testid="trendline"]')).not.toBeNull();
+  });
+
+  it("disables the toggle when fewer than 2 months are available", () => {
+    const single = render(<SurplusReport points={makePoints([10000])} />);
+    expect((single.getByText("Off") as HTMLButtonElement).disabled).toBe(true);
+    expect(single.container.querySelector('[data-testid="trendline"]')).toBeNull();
+    single.unmount();
+    const empty = render(<SurplusReport points={[]} />);
+    expect((empty.getByText("Off") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("composes with the log scale and the outlier axis break", () => {
+    const points = makePoints([10000, 11000, 10500, 9500, 10200, 9800, 500000]);
+    const { container, getByText } = render(<SurplusReport points={points} />);
+    fireEvent.click(getByText("Off"));
+    // Axis break still applies with the trendline on.
+    expect(container.querySelector('[data-testid="axis-break"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="trendline"]')).not.toBeNull();
+    // And the trendline survives a switch to the log scale.
+    fireEvent.click(getByText("Log"));
+    expect(container.querySelector('[data-testid="trendline"]')).not.toBeNull();
   });
 });

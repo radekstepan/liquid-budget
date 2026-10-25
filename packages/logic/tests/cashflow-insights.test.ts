@@ -5,6 +5,7 @@ import {
   computeMonthlySurplus,
   computeTrailingNetWorth,
   computeMonthlyInsights,
+  computeTrendline,
   getOffsetMonth,
 } from "../src/reports.js";
 import { makeSeedBudgetData } from "../src/seed-fixture.js";
@@ -207,6 +208,55 @@ describe("computeMonthlySurplus", () => {
     expect(pts.map((p) => p.month)).toEqual(["2026-04", "2026-05"]);
     expect(pts[0]?.surplus).toBe(200000);
     expect(pts[1]?.surplus).toBe(-50000);
+  });
+});
+
+describe("computeTrendline", () => {
+  it("returns null when fewer than 2 values are available", () => {
+    expect(computeTrendline([])).toBeNull();
+    expect(computeTrendline([100000])).toBeNull();
+  });
+
+  it("fits a perfect line through collinear values", () => {
+    const fit = computeTrendline([100, 200, 300, 400]);
+    expect(fit).not.toBeNull();
+    expect(fit?.slope).toBeCloseTo(100, 10);
+    expect(fit?.intercept).toBeCloseTo(100, 10);
+    expect(fit?.fitted).toHaveLength(4);
+    for (let i = 0; i < 4; i++) {
+      expect(fit?.fitted[i]).toBeCloseTo(100 + 100 * i, 10);
+    }
+  });
+
+  it("fits a zero slope for a constant series", () => {
+    const fit = computeTrendline([50000, 50000, 50000]);
+    expect(fit?.slope).toBeCloseTo(0, 10);
+    expect(fit?.intercept).toBeCloseTo(50000, 10);
+    expect(fit?.fitted).toEqual([50000, 50000, 50000]);
+  });
+
+  it("fits a negative slope for a declining series", () => {
+    const fit = computeTrendline([300, 100, -100]);
+    expect(fit?.slope).toBeCloseTo(-200, 10);
+    expect(fit?.intercept).toBeCloseTo(300, 10);
+  });
+
+  it("fits two points exactly", () => {
+    const fit = computeTrendline([200000, -50000]);
+    expect(fit?.slope).toBeCloseTo(-250000, 10);
+    expect(fit?.intercept).toBeCloseTo(200000, 10);
+    expect(fit?.fitted?.[0]).toBeCloseTo(200000, 10);
+    expect(fit?.fitted?.[1]).toBeCloseTo(-50000, 10);
+  });
+
+  it("matches the hand-computed least-squares fit on noisy data", () => {
+    // x = 0..3, y = [1, 3, 2, 4]: slope 0.8, intercept 1.3.
+    const fit = computeTrendline([1, 3, 2, 4]);
+    expect(fit?.slope).toBeCloseTo(0.8, 10);
+    expect(fit?.intercept).toBeCloseTo(1.3, 10);
+    expect(fit?.fitted).toHaveLength(4);
+    expect(fit?.fitted?.[0]).toBeCloseTo(1.3, 10);
+    expect(fit?.fitted?.[3]).toBeCloseTo(3.7, 10);
   });
 });
 

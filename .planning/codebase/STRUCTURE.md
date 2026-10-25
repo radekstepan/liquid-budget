@@ -74,7 +74,7 @@
 - **`packages/logic/`**: deterministic calculations and helpers reused by both client and server (budget math incl. `computeBudget`/`buildBudgetIndex`, recurrence expansion, duplicate detection + merge, rename rules/suggestions, transfer/split invariants + split templates, CSV parsing, global-search parsing, report aggregations, payload factories, zod `contracts.ts`).
 - **`packages/server/queries/`**: one module per API domain; sole place issuing Drizzle/SQLite queries. `transaction.ts` wraps multi-step writes (AsyncMutex); `invariants.ts` + `diagnostics` verify integrity.
 - **`packages/server/migrations/`**: append-only numbered SQL schema evolution (26 files, 0000–0025) applied by `migrate*.ts` from `dist/migrations` (copied there by the `build` script).
-- **`packages/ui/`**: feature views (Budget, Transactions, Reports ×4 wired tabs — Spending Trends, Spending by Category, Net Worth, Surplus — plus an unwired `ExpenseBreakdownReport.tsx`, Payees, Snapshots, Themes, Settings) + `BudgetApp` global state + modals + primitives; no direct DB access, talks to `/api/*` only.
+- **`packages/ui/`**: feature views (Budget, Transactions, Reports ×4 wired tabs — Spending Trends, Spending by Category, Net Worth, Cash Flow — plus an unwired `ExpenseBreakdownReport.tsx`, Payees, Snapshots, Themes, Settings) + `BudgetApp` global state + modals + primitives; no direct DB access, talks to `/api/*` only.
 - **Root config**: `package.json` (workspaces + turbo scripts), `turbo.json` (task graph), `tsconfig.base.json` (shared TS), per-package `package.json` (`@ynab/*` names, `workspace:*` links).
 
 ## 3. Where to Add Things

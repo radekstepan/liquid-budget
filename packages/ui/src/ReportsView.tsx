@@ -26,7 +26,7 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "trends", label: "Spending Trends" },
   { key: "spending", label: "Spending by Category" },
   { key: "networth", label: "Net Worth" },
-  { key: "surplus", label: "Surplus" },
+  { key: "surplus", label: "Cash Flow" },
 ];
 
 export const ReportsView = memo(function ReportsView({

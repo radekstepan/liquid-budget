@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, useCallback, memo } from "react";
 import type { ReactNode } from "react";
-import { fmt, MONTHS, monthLabel, parseMonthKey, type SurplusMonthPoint } from "@ynab/logic";
+import { computeTrendline, fmt, MONTHS, monthLabel, parseMonthKey, type SurplusMonthPoint } from "@ynab/logic";
 import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   AxisBreakMark,
@@ -30,6 +30,9 @@ const GRID = "#dcdcd8";
 const SURPLUS_COLOR = "#3d8b4f";
 const LOSS_COLOR = "#c0483a";
 const AVG_COLOR = "#8a99a8";
+// Warm ochre from the shared chart palette: distinct from the green/red bars
+// and the grey average line.
+const TREND_COLOR = "#c07d1c";
 
 interface SurplusChartLayout {
   W: number;
@@ -52,6 +55,8 @@ interface SurplusChartLayout {
   colW: number;
   avg: number;
   avgY: number;
+  /** Least-squares fitted value per month index, or null when < 2 months. */
+  trend: number[] | null;
 }
 
 // Static SVG content: grid, bars, labels. Excluded from hover re-renders.
@@ -59,11 +64,16 @@ const SurplusStaticChart = memo(function SurplusStaticChart({
   chart,
   points,
   gid,
+  showTrend,
 }: {
   chart: SurplusChartLayout;
   points: SurplusMonthPoint[];
   gid: string;
+  showTrend: boolean;
 }) {
+  const trendEnd = chart.trend != null && chart.trend.length >= 2
+    ? chart.trend[chart.trend.length - 1]
+    : undefined;
   return (
     <svg width={chart.W} height={chart.H}>
       <defs>
@@ -175,6 +185,21 @@ const SurplusStaticChart = memo(function SurplusStaticChart({
           }
           return null;
         })}
+        {/* Trendline lives inside the same mask so an axis break cuts it
+            exactly where it cuts the bars. One segment per month keeps it
+            correct under the log scale and break-zone mappings too. */}
+        {showTrend && chart.trend && chart.trend.length >= 2 && (
+          <polyline
+            data-testid="trendline"
+            points={chart.trend.map((v, i) => `${chart.xAt(i)},${chart.y(v)}`).join(" ")}
+            fill="none"
+            stroke={TREND_COLOR}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </g>
 
       {chart.hasBreak && (
@@ -226,6 +251,24 @@ const SurplusStaticChart = memo(function SurplusStaticChart({
         </>
       )}
 
+      {showTrend && trendEnd !== undefined && (
+        <text
+          x={chart.W - chart.padR - 4}
+          y={chart.y(trendEnd) - 6}
+          fill={TREND_COLOR}
+          stroke="#ffffff"
+          strokeWidth={3}
+          strokeLinejoin="round"
+          paintOrder="stroke fill"
+          fontSize={9.5}
+          fontWeight={700}
+          textAnchor="end"
+          className="y-num"
+        >
+          Trend
+        </text>
+      )}
+
       {points.map((p, i) => {
         const maxTicks = Math.max(2, Math.min(12, Math.floor(chart.innerW / 65)));
         if (chart.n > maxTicks) {
@@ -261,6 +304,12 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
     "ynab:reports:scaleMode",
     "linear",
     (v): v is "linear" | "log" => v === "linear" || v === "log"
+  );
+  // Persisted like the sibling report toggles; off by default.
+  const [showTrend, setShowTrend] = useLocalStorage<boolean>(
+    "ynab:reports:cashFlowTrendline",
+    false,
+    (v): v is boolean => typeof v === "boolean"
   );
 
   const chart = useMemo(() => {
@@ -374,11 +423,13 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
     const avg = Math.round(points.reduce((s, p) => s + p.surplus, 0) / Math.max(1, n));
     const avgY = y(avg);
 
+    const trend = computeTrendline(points.map((p) => p.surplus))?.fitted ?? null;
+
     return {
       W, H, padL, padR, padT, padB, innerW, innerH, y, hasBreak,
       posBreak: posBreak.hasBreak ? posBreak : null,
       negBreak: negBreak.hasBreak ? negBreak : null,
-      zeroY, ticks, barW, n, xAt, colW, avg, avgY,
+      zeroY, ticks, barW, n, xAt, colW, avg, avgY, trend,
     };
   }, [size, points, scaleMode]);
 
@@ -416,9 +467,11 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
 
   const handleMouseLeave = useCallback(() => setHover(null), []);
 
+  const trendAvailable = points.length >= 2;
+
   return (
     <Panel
-      title="Monthly Surplus"
+      title="Monthly Cash Flow"
       className="flex h-full min-h-0 flex-col"
       bodyClass="flex min-h-0 flex-1 flex-col p-0"
     >
@@ -433,6 +486,31 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
           <span style={{ color: "var(--y-ink-soft)" }}>Loss</span>
         </span>
         <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span
+              className="y-caps text-[10px]"
+              style={{ color: "var(--y-ink-faint)" }}
+            >
+              Trend
+            </span>
+            <Tooltip
+              tip={
+                trendAvailable
+                  ? "Least-squares trend line over the visible months"
+                  : "Trend line needs at least 2 months of data"
+              }
+            >
+              <Button
+                size="sm"
+                variant={showTrend ? "primary" : "default"}
+                active={showTrend}
+                disabled={!trendAvailable}
+                onClick={() => setShowTrend(!showTrend)}
+              >
+                {showTrend ? "On" : "Off"}
+              </Button>
+            </Tooltip>
+          </div>
           <div className="flex items-center gap-1.5">
             <span
               className="y-caps text-[10px]"
@@ -479,7 +557,7 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
         )}
         {chart && !empty && (
           <>
-            <SurplusStaticChart chart={chart} points={points} gid={gid} />
+            <SurplusStaticChart chart={chart} points={points} gid={gid} showTrend={showTrend} />
 
             <svg
               width={chart.W}

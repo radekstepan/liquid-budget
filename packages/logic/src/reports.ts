@@ -310,6 +310,42 @@ export function computeMonthlySurplus(
   });
 }
 
+export type TrendlineFit = {
+  /** Least-squares slope: fitted change in value per month-index step. */
+  slope: number;
+  /** Least-squares intercept: fitted value at month index 0. */
+  intercept: number;
+  /** Fitted value (`slope * i + intercept`) for each input index. */
+  fitted: number[];
+};
+
+/**
+ * Fit an ordinary least-squares linear trendline over a sequence of monthly
+ * values, using the month position (0..n-1) as x. Returns null when fewer
+ * than 2 values are available — a line needs at least two points.
+ */
+export function computeTrendline(values: number[]): TrendlineFit | null {
+  const n = values.length;
+  if (n < 2) return null;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  for (let i = 0; i < n; i++) {
+    const y = values[i] ?? 0;
+    sumX += i;
+    sumY += y;
+    sumXX += i * i;
+    sumXY += i * y;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const fitted = values.map((_, i) => slope * i + intercept);
+  return { slope, intercept, fitted };
+}
+
 export type TrailingNetWorthSummary = {
   points: NetWorthPoint[];
   currentNet: number;
