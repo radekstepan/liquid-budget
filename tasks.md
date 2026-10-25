@@ -67,5 +67,11 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-- ✅ DONE — In Reports add a new tab to the right of Net Worth that would shows just the monthly surplus or loss as a chart. make sure we cap any extremes like we do in e.g. spending trends
-  - Shipped 2026-10-25 as `task-1` (Surplus tab + `computeMonthlySurplus` + capping + tests; also fixed pre-existing `transactions-merge.spec.ts` type errors). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session (`EPERM` on `listen()`) and was waived for the commit — run `yarn e2e` in a normal terminal to confirm.
+Figure out why you can't run "yarn e2e" yourself, you used to be able to, then fix:
+  4 failed
+    [chromium] › tests/e2e/rename-suggest.spec.ts:135:1 › Suggest with AI reviews mocked suggestions and backfills the imported rows 
+    [chromium] › tests/e2e/splits-edge-cases.spec.ts:445:3 › Split Transaction Edge Cases › split transaction containing transfer sub-transactions updates remote account balances 
+    [chromium] › tests/e2e/transactions-flag.spec.ts:86:1 › renders the duplicate marker as a read-only D badge that cannot be changed 
+    [chromium] › tests/e2e/transactions.spec.ts:79:1 › selecting a sidebar account marks the row and scopes the register; Transactions nav clears the filter 
+
+in reports call surplus something more appropriate. And add a trendline as well that is off by default but can be toggled on
