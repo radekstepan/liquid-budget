@@ -67,6 +67,4 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Reports cash flow, make sure the onhover between (income + outflow) and surplus/loss (+ trendline) in the tooltip. And remove the colored circles for income, outflow and only keep the surplus/loss and trendline ones in the tooltip. You should also render little circles on the trendline (like we do say on net worth) to signify the months. Make sure the text and amounts are still nicely aligned though.
-
-
+Reports Cash Flow - if I select June 2026 to October 2026, no bars render, no erros in console. But I can see these months if I widen the selection
