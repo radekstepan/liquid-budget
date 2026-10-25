@@ -205,18 +205,26 @@ export function TipLabel({
   label,
   value,
   pct,
+  dot = true,
 }: {
   color: string;
   label: string;
   value: string;
   pct?: string;
+  /** Hide the colored dot; a transparent spacer keeps text/amounts aligned. */
+  dot?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap">
-      <span
-        className="inline-block h-2 w-2 shrink-0 rounded-full"
-        style={{ background: color, boxShadow: "0 0 0 2px rgba(255,255,255,0.18)" }}
-      />
+      {dot ? (
+        <span
+          data-testid="tip-dot"
+          className="inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ background: color, boxShadow: "0 0 0 2px rgba(255,255,255,0.18)" }}
+        />
+      ) : (
+        <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0" />
+      )}
       <span style={{ color: "rgba(242,245,247,0.78)" }}>{label}</span>
       <span className="y-num font-semibold" style={{ color: "#f2f5f7" }}>
         {value}

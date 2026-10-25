@@ -178,6 +178,15 @@ describe("SurplusReport trendline", () => {
     fireEvent.click(getByText("Log"));
     expect(container.querySelector('[data-testid="trendline"]')).not.toBeNull();
   });
+
+  it("renders one dot per month on the trendline when on, none when off", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints([10000, 11000, 10500])} />
+    );
+    expect(container.querySelectorAll('[data-testid="trendline-dot"]').length).toBe(0);
+    fireEvent.click(getByText("Off"));
+    expect(container.querySelectorAll('[data-testid="trendline-dot"]').length).toBe(3);
+  });
 });
 
 describe("SurplusReport trendline tooltip", () => {
@@ -252,5 +261,33 @@ describe("SurplusReport trendline tooltip", () => {
     expect(tip.textContent).toContain("Trend");
     expect(tip.textContent).toContain("$200.00");
     expect(tip.textContent).not.toContain("$150.00");
+  });
+
+  it("separates income/outflow rows from surplus/trend rows with a divider", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints(surpluses)} />
+    );
+    fireEvent.click(getByText("Off"));
+    const tip = hoverMonth(container, 100);
+    expect(tip.querySelector('[data-testid="tip-divider"]')).not.toBeNull();
+  });
+
+  it("shows dots only on the surplus and trend rows", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints(surpluses)} />
+    );
+    fireEvent.click(getByText("Off"));
+    const tip = hoverMonth(container, 100);
+    // Income/Outflow render dotless with an aligning spacer; amounts stay.
+    expect(tip.textContent).toContain("Income");
+    expect(tip.textContent).toContain("Outflow");
+    expect(tip.querySelectorAll('[data-testid="tip-dot"]').length).toBe(2);
+  });
+
+  it("shows a single surplus dot and the divider when the trendline is off", () => {
+    const { container } = render(<SurplusReport points={makePoints(surpluses)} />);
+    const tip = hoverMonth(container, 100);
+    expect(tip.querySelectorAll('[data-testid="tip-dot"]').length).toBe(1);
+    expect(tip.querySelector('[data-testid="tip-divider"]')).not.toBeNull();
   });
 });

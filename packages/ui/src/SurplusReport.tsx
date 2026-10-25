@@ -189,16 +189,29 @@ const SurplusStaticChart = memo(function SurplusStaticChart({
             exactly where it cuts the bars. One segment per month keeps it
             correct under the log scale and break-zone mappings too. */}
         {showTrend && chart.trend && chart.trend.length >= 2 && (
-          <polyline
-            data-testid="trendline"
-            points={chart.trend.map((v, i) => `${chart.xAt(i)},${chart.y(v)}`).join(" ")}
-            fill="none"
-            stroke={TREND_COLOR}
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
+          <>
+            <polyline
+              data-testid="trendline"
+              points={chart.trend.map((v, i) => `${chart.xAt(i)},${chart.y(v)}`).join(" ")}
+              fill="none"
+              stroke={TREND_COLOR}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Month dots on the trendline, like the Net Worth line dots. */}
+            {chart.trend.map((v, i) => (
+              <circle
+                key={`trend-pt-${i}`}
+                data-testid="trendline-dot"
+                cx={chart.xAt(i)}
+                cy={chart.y(v)}
+                r={2.5}
+                fill={TREND_COLOR}
+              />
+            ))}
+          </>
         )}
       </g>
 
@@ -447,8 +460,13 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
         <div className="text-[11px] font-bold mb-1" style={{ color: "#f2f5f7" }}>
           {monthLabel(p.month)}
         </div>
-        <TipLabel color={SURPLUS_COLOR} label="Income" value={fmt(p.income)} />
-        <TipLabel color={LOSS_COLOR} label="Outflow" value={fmt(p.outflow)} />
+        <TipLabel dot={false} color={SURPLUS_COLOR} label="Income" value={fmt(p.income)} />
+        <TipLabel dot={false} color={LOSS_COLOR} label="Outflow" value={fmt(p.outflow)} />
+        <div
+          data-testid="tip-divider"
+          aria-hidden="true"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.16)", margin: "6px 0 3px" }}
+        />
         <TipLabel
           color={p.surplus >= 0 ? SURPLUS_COLOR : LOSS_COLOR}
           label={p.surplus >= 0 ? "Surplus" : "Loss"}
