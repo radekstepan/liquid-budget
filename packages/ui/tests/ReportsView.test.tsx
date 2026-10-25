@@ -155,6 +155,35 @@ describe("ReportsView", () => {
     expect(screen.getAllByText("$650.00").length).toBeGreaterThan(0);
   });
 
+  it("Cash Flow renders full-height bars when narrowed to Jun-Oct with an outlier month", () => {
+    // Reported scenario: narrowing to Jun-Oct 2026 rendered no bars while a
+    // wider range showed the same months. One bonus month inside the window
+    // trips the outlier axis break; the bars must keep their height instead
+    // of collapsing to 1px slivers.
+    localStorage.clear();
+    const transactions: Transaction[] = [];
+    for (const m of ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]) {
+      transactions.push(txn(m, 1, "Payroll", 5000));
+      transactions.push(txn(m, 5, "Groceries", -3200, 10));
+    }
+    transactions.push(txn("2026-08", 15, "Bonus", 20000));
+    const data: BudgetData = { ...makeData(), transactions };
+    renderView({ data, month: "2026-10" });
+    clickTab("Cash Flow");
+    pickFromOpenDropdownByValue(/from month/i, "5");
+    pickFromOpenDropdownByValue(/to month/i, "9");
+    const panel = findPanel("Monthly Cash Flow")!;
+    expect(panel).toBeTruthy();
+    const bars = Array.from(panel.querySelectorAll("rect")).filter((r) => {
+      const fill = r.getAttribute("fill") ?? "";
+      return fill.includes("surplus-grad") || fill.includes("loss-grad");
+    });
+    expect(bars.length).toBe(5);
+    for (const bar of bars) {
+      expect(Number(bar.getAttribute("height"))).toBeGreaterThan(50);
+    }
+  });
+
   it("provides 2-field selectors for month and year on both From and To", () => {
     renderView();
     expect(screen.getByRole("button", { name: /from month/i })).toBeInTheDocument();

@@ -64,6 +64,39 @@ describe("SurplusReport chart capping", () => {
     // Bars still render above and below the zero line.
     expect(container.querySelectorAll("svg").length).toBeGreaterThan(0);
   });
+
+  function barHeights(container: HTMLElement): number[] {
+    return Array.from(container.querySelectorAll("rect"))
+      .filter((r) => {
+        const fill = r.getAttribute("fill") ?? "";
+        return fill.includes("surplus-grad") || fill.includes("loss-grad");
+      })
+      .map((r) => Number(r.getAttribute("height")));
+  }
+
+  it("renders full-height bars when an outlier break fires on all-surplus months", () => {
+    // Narrow-range scenario (e.g. Jun-Oct 2026): 5 surplus months, one a
+    // bonus outlier. The break must compress the axis, not the bars — every
+    // bar keeps a fair share of the 550px plot height instead of collapsing
+    // to 1px slivers at the top edge.
+    const points = makePoints([10000, 11000, 10500, 9500, 500000]);
+    const { container } = render(<SurplusReport points={points} />);
+    expect(container.querySelector('[data-testid="axis-break"]')).not.toBeNull();
+    const heights = barHeights(container);
+    expect(heights.length).toBe(5);
+    expect(heights.every((h) => h > 50)).toBe(true);
+  });
+
+  it("renders full-height bars when an outlier break fires on all-loss months", () => {
+    // Symmetric case: 5 loss months with one outsized loss. The zero line
+    // belongs at the top so the losses get the full plot height.
+    const points = makePoints([-10000, -11000, -10500, -9500, -500000]);
+    const { container } = render(<SurplusReport points={points} />);
+    expect(container.querySelector('[data-testid="axis-break"]')).not.toBeNull();
+    const heights = barHeights(container);
+    expect(heights.length).toBe(5);
+    expect(heights.every((h) => h > 50)).toBe(true);
+  });
 });
 
 describe("ReportsView cash flow tab", () => {

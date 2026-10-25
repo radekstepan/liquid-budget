@@ -352,9 +352,19 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
 
     const posTopVal = Math.max(1, maxVal);
     const negTopVal = Math.max(1, -minVal);
-    const fracZero =
-      Math.max(1, maxVal) / (Math.max(1, maxVal) + Math.max(1, -minVal));
-    let zeroY = padT + innerH * (1 - fracZero);
+    // Zero-line placement follows the pre-break domain so each side keeps a
+    // share of the vertical space proportional to its data extent: the
+    // positive side occupies the top posShare of the chart. Single-sided
+    // data hands the whole chart to that side (zero at the opposite edge);
+    // without this, an outlier break on all-surplus months parks zero at the
+    // top and every bar collapses to a 1px sliver. (maxVal is guard-floored
+    // at 1, so the positive side is detected from the points, not from it.)
+    const hasPosData = points.some((p) => p.surplus > 0);
+    const hasNegData = minVal < 0;
+    const posShare = hasNegData
+      ? (hasPosData ? posTopVal / (posTopVal + negTopVal) : 0)
+      : 1;
+    let zeroY = padT + innerH * posShare;
 
     const posNorm = (v: number) => {
       if (v <= 0) return 0;

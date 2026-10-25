@@ -59,6 +59,7 @@ yarn e2e:install  # install browser binaries (first-time setup)
 - **Serial-mode spec files skip after the first failure** — check skipped counts, not just failures, or a second broken test in the same file hides behind the first.
 - **`E2E_TESTING=true` is currently read by nothing** — a seam for future MSW-style mocking, not an active behavior switch.
 - **Vitest version drift**: `@ynab/web` runs Vitest 4 while the other packages run 2.1.9. Check the local config before assuming shared behavior/plugins.
+- **Outlier-break chart tests must assert bar geometry, not just the break marker**: a zero-line placement bug collapsed every Cash Flow bar to a 1px sliver while the break-mark test stayed green. Assert bar heights (e.g. every bar > 50px on the plot).
 - **`BudgetAppShell.test.tsx` BUG-15 tests are timing-sensitive**: they hold deferred fetch promises and can exceed the 5s default test timeout on a slow/loaded machine (observed failing on the untouched base too). If they time out, rerun the file with `--testTimeout=60000` — a pass there means slowness, not a regression.
 
 ## Notes / gaps
