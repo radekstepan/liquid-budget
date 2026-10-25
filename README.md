@@ -9,7 +9,7 @@
 - 🧧 **True envelope budgeting** — assign money to categories each month, carry leftovers forward, and spot overspending at a glance.
 - 📥 **YNAB4-friendly** — imports `.y4backup` and CSV files, so years of history come with you.
 - 🔒 **Local-first & private** — everything lives in a SQLite file on your disk. No account, no cloud, no subscription.
-- 📊 **Reports that answer questions** — spending by category, long-term trends, net worth, and expense breakdowns.
+- 📊 **Reports that answer questions** — spending by category, long-term trends, net worth, and monthly surplus or loss.
 - ⚡ **Built for speed** — global search, bulk payee renames with auto-rename rules, split transactions, linked transfers.
 - 🤖 **Optional AI assist** — payee rename suggestions via any OpenAI-compatible API (your key, your choice — off by default).
 

@@ -282,6 +282,34 @@ export function computeCashFlow(data: BudgetData, month: string): CashFlowSummar
   return { month, ...flow };
 }
 
+export type SurplusMonthPoint = {
+  month: string;
+  income: number;
+  outflow: number;
+  /** Income minus outflow for the month (negative = loss). */
+  surplus: number;
+};
+
+/**
+ * Compute the monthly surplus (income minus outflow) for each month in a
+ * contiguous range. Each month reuses `computeCashFlowRange`, so the
+ * income/outflow semantics — split-parent exclusion, on-budget boundary
+ * logic, and internal-transfer exclusion — match the cash-flow summary
+ * exactly.
+ */
+export function computeMonthlySurplus(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): SurplusMonthPoint[] {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  return getMonthsBetween(actualStart, actualEnd).map((m) => {
+    const flow = computeCashFlowRange(data, m, m);
+    return { month: m, income: flow.income, outflow: flow.outflow, surplus: flow.net };
+  });
+}
+
 export type TrailingNetWorthSummary = {
   points: NetWorthPoint[];
   currentNet: number;

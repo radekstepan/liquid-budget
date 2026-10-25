@@ -67,4 +67,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-- In Reports add a new tab to the right of Net Worth that would shows just the monthly surplus or loss as a chart. make sure we cap any extremes like we do in e.g. spending trends
+- ✅ DONE — In Reports add a new tab to the right of Net Worth that would shows just the monthly surplus or loss as a chart. make sure we cap any extremes like we do in e.g. spending trends
+  - Shipped 2026-10-25 as `task-1` (Surplus tab + `computeMonthlySurplus` + capping + tests; also fixed pre-existing `transactions-merge.spec.ts` type errors). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session (`EPERM` on `listen()`) and was waived for the commit — run `yarn e2e` in a normal terminal to confirm.

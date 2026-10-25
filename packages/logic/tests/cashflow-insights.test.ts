@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeCashFlow,
   computeCashFlowRange,
+  computeMonthlySurplus,
   computeTrailingNetWorth,
   computeMonthlyInsights,
   getOffsetMonth,
@@ -143,6 +144,69 @@ describe("computeCashFlow", () => {
     expect(rangeFlow.income).toBe(900000); // 300k + 300k + 300k, excluding dividend
     expect(rangeFlow.outflow).toBe(150000); // 100k + 50k, excluding offbudget fee
     expect(rangeFlow.net).toBe(750000);
+  });
+});
+
+describe("computeMonthlySurplus", () => {
+  function makeData(): BudgetData {
+    return {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 1 },
+        { id: 2, name: "Savings", kind: "liquid", groupLabel: "Liquid", balance: "200000", onBudget: true, sort: 2 },
+      ],
+      groups: [],
+      categories: [{ id: 10, groupId: 1, name: "Groceries", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null }],
+      assignments: [],
+      recurring: [],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-04-01", payee: "Employer", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-04-05", payee: "Supermarket", memo: "", amount: "-100000", status: "c" },
+        { id: 3, accountId: 1, categoryId: null, date: "2026-05-01", payee: "Employer", memo: "", amount: "300000", status: "c", isIncome: true },
+        { id: 4, accountId: 1, categoryId: 10, date: "2026-05-05", payee: "Supermarket", memo: "", amount: "-350000", status: "c" },
+      ],
+    };
+  }
+
+  it("returns one point per month with income, outflow, and surplus", () => {
+    const pts = computeMonthlySurplus(makeData(), "2026-04", "2026-06");
+    expect(pts).toEqual([
+      { month: "2026-04", income: 300000, outflow: 100000, surplus: 200000 },
+      { month: "2026-05", income: 300000, outflow: 350000, surplus: -50000 },
+      { month: "2026-06", income: 0, outflow: 0, surplus: 0 },
+    ]);
+  });
+
+  it("matches computeCashFlow for each month in the range", () => {
+    const data = makeData();
+    const pts = computeMonthlySurplus(data, "2026-04", "2026-05");
+    for (const p of pts) {
+      const flow = computeCashFlow(data, p.month);
+      expect(p.income).toBe(flow.income);
+      expect(p.outflow).toBe(flow.outflow);
+      expect(p.surplus).toBe(flow.net);
+    }
+  });
+
+  it("excludes internal transfers and split parents like the cash-flow summary", () => {
+    const data = makeData();
+    data.transactions.push(
+      // Internal on-budget transfer: must not move income or outflow.
+      { id: 10, accountId: 1, transferAccountId: 2, categoryId: null, date: "2026-04-15", payee: "Transfer : Savings", memo: "", amount: "-50000", status: "c" },
+      // Split parent: only the children carry deltas.
+      { id: 20, accountId: 1, categoryId: null, date: "2026-04-20", payee: "Costco", memo: "Split parent", amount: "-60000", status: "c" },
+      { id: 21, parentId: 20, accountId: 1, categoryId: 10, date: "2026-04-20", payee: "Costco", memo: "", amount: "-60000", status: "c" },
+    );
+    const pts = computeMonthlySurplus(data, "2026-04", "2026-04");
+    expect(pts).toEqual([
+      { month: "2026-04", income: 300000, outflow: 160000, surplus: 140000 },
+    ]);
+  });
+
+  it("normalizes a swapped start/end range", () => {
+    const pts = computeMonthlySurplus(makeData(), "2026-05", "2026-04");
+    expect(pts.map((p) => p.month)).toEqual(["2026-04", "2026-05"]);
+    expect(pts[0]?.surplus).toBe(200000);
+    expect(pts[1]?.surplus).toBe(-50000);
   });
 });
 

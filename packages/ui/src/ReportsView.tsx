@@ -9,20 +9,24 @@ import {
   todayISO,
   MONTHS_LONG,
   computeNetWorthReport,
+  computeMonthlySurplus,
   type NetWorthPoint,
+  type SurplusMonthPoint,
 } from "@ynab/logic";
 import { Icon, Toolbar, Select, Tabs } from "@ynab/theme";
 import { NetWorthReport } from "./NetWorthReport.js";
+import { SurplusReport } from "./SurplusReport.js";
 import { SpendingReport, type SpendingItem } from "./SpendingReport.js";
 import { SpendingTrendsReport } from "./SpendingTrendsReport.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
-type SubTab = "trends" | "spending" | "networth";
+type SubTab = "trends" | "spending" | "networth" | "surplus";
 
 const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "trends", label: "Spending Trends" },
   { key: "spending", label: "Spending by Category" },
   { key: "networth", label: "Net Worth" },
+  { key: "surplus", label: "Surplus" },
 ];
 
 export const ReportsView = memo(function ReportsView({
@@ -171,6 +175,10 @@ export const ReportsView = memo(function ReportsView({
     return computeNetWorthReport(data, actualStart, actualEnd);
   }, [data, actualStart, actualEnd]);
 
+  const surplusData: SurplusMonthPoint[] = useMemo(() => {
+    return computeMonthlySurplus(data, actualStart, actualEnd);
+  }, [data, actualStart, actualEnd]);
+
   return (
     <div className="flex h-full flex-col">
       <Toolbar>
@@ -275,6 +283,12 @@ export const ReportsView = memo(function ReportsView({
         {sub === "networth" && (
           <div className="h-full p-4">
             <NetWorthReport points={netWorthData} />
+          </div>
+        )}
+
+        {sub === "surplus" && (
+          <div className="h-full p-4">
+            <SurplusReport points={surplusData} />
           </div>
         )}
       </div>

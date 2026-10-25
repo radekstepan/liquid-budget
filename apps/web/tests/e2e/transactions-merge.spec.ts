@@ -242,15 +242,14 @@ test("selecting two rows previews the merge and combines them into one", async (
   await expect(modal.getByTestId("merge-constituents")).toBeVisible();
   // The editable result is prepopulated with the surviving payee,
   // and the constituents table shows both source rows.
-  const result = modal.getByTestId("merge-result");
-  await expect(result.getByDisplayValue(payeeA)).toBeVisible();
+  await expect(page.getByLabel("Payee")).toHaveValue(payeeA);
   const constituents = modal.getByTestId("merge-constituents");
   await expect(constituents.getByText(payeeA)).toBeVisible();
   await expect(constituents.getByText(payeeB)).toBeVisible();
 
   // Edits to the result are saved on the merged row.
   const editedMemo = `PW merged memo ${stamp}`;
-  await result.getByPlaceholderText("Optional notes").fill(editedMemo);
+  await page.getByPlaceholder("Optional notes").fill(editedMemo);
 
   await modal.getByRole("button", { name: "Merge transactions", exact: true }).click();
   await expect(modal).toBeHidden();
@@ -357,9 +356,8 @@ test("a manual + imported pair previews with the import winning", async ({
   await expect(modal.locator(".y-modal-head")).toHaveText("Merge transactions");
   // The editable result shows the imported bank data with the manual
   // curation filled in, and both source rows below.
-  const result = modal.getByTestId("merge-result");
-  await expect(result.getByDisplayValue(importedPayee)).toBeVisible();
-  await expect(result.getByDisplayValue("curated memo")).toBeVisible();
+  await expect(page.getByLabel("Payee")).toHaveValue(importedPayee);
+  await expect(page.getByLabel("Memo")).toHaveValue("curated memo");
   const constituents = modal.getByTestId("merge-constituents");
   await expect(constituents.getByText(manualPayee)).toBeVisible();
   await expect(constituents.getByText(importedPayee)).toBeVisible();
