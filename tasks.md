@@ -67,5 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-- ✅ DONE — Reports Cash Flow trend line, if turned on, show the trend line amount in the onhover tooltip as well.
-  - Shipped 2026-10-25 as `task-4` (tooltip appends a Trend row with the hovered month's fitted value when the toggle is on; silent when off or <2 months). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session — run `yarn e2e` in a normal terminal to confirm.
+Reports cash flow, make sure the onhover between (income + outflow) and surplus/loss (+ trendline) in the tooltip. And remove the colored circles for income, outflow and only keep the surplus/loss and trendline ones in the tooltip. You should also render little circles on the trendline (like we do say on net worth) to signify the months. Make sure the text and amounts are still nicely aligned though.
+
+
