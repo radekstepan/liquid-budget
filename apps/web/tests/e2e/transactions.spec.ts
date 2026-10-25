@@ -85,23 +85,27 @@ test("selecting a sidebar account marks the row and scopes the register; Transac
 
   const transactionsNav = page.getByRole("button", { name: /^Transactions/ });
   const accountRow = page.getByRole("button", { name: /TD Unlimited Chequing/ }).first();
+  // Click the account NAME: the row's "new" badge pill is a nested
+  // clickable that would otherwise intercept a center click (badge clicks
+  // select+filter and never toggle, so the toggle step below would fail).
+  const accountRowName = accountRow.locator("span.truncate");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
   // Sidebar account click selects the row (Sidebar.tsx: <is-sel> is
   // applied) and switches to the transactions view filtered to that
   // account (BudgetApp.tsx onSelectAccount handler).
-  await accountRow.click();
+  await accountRowName.click();
   await expect(toolbarTitle).toHaveText("TD Unlimited Chequing");
   await expect(accountRow).toHaveClass(/is-sel/);
 
   // Clicking the same account again toggles the selection off.
-  await accountRow.click();
+  await accountRowName.click();
   await expect(toolbarTitle).toHaveText("All Transactions");
   await expect(accountRow).not.toHaveClass(/is-sel/);
 
   // Re-select, then click the top-level "Transactions" nav: the account
   // selection clears and the register returns to All Transactions.
-  await accountRow.click();
+  await accountRowName.click();
   await expect(accountRow).toHaveClass(/is-sel/);
   await transactionsNav.click();
   await expect(toolbarTitle).toHaveText("All Transactions");

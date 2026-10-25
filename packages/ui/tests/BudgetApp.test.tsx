@@ -234,6 +234,54 @@ describe("BudgetApp", () => {
     expect(screen.queryByText("BadgeDupe Payee")).not.toBeInTheDocument();
   });
 
+  it("row clicks toggle the account while badge clicks select+filter and never toggle", async () => {
+    // Pins the distinction the sidebar e2e relies on: the badge pill is a
+    // nested clickable inside the row, so the specs must aim row clicks at
+    // the account name — a badge click filters instead of toggling.
+    window.localStorage.removeItem("ynab:transactions:accountFilter");
+    window.history.pushState(null, "", "/");
+    try {
+      const { api } = makeApi();
+      const seed = makeSeedBudgetData();
+      render(
+        <BudgetApp
+          data={{
+            ...seed,
+            transactions: [
+              ...seed.transactions,
+              { id: 90002, accountId: 2, categoryId: null, date: "2026-09-05", payee: "BadgeNew Payee", memo: "", amount: "-200", status: "c", parentId: null, transferAccountId: null, needsReview: true },
+            ],
+          }}
+          api={api}
+        />
+      );
+      const row = () => screen.getByRole("button", { name: /^(\d+ )?EQ Bank / });
+
+      // Row click selects with no filter …
+      fireEvent.click(row());
+      expect(row().className).toMatch(/\bis-sel\b/);
+      expect(screen.queryByRole("button", { name: "Edit Is filter" })).not.toBeInTheDocument();
+
+      // … a badge click on the selected account keeps it selected and adds
+      // the Is:New filter (never toggles off) …
+      fireEvent.click(screen.getByRole("button", { name: /show \d+ new in eq bank/i }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Edit Is filter" })).toBeInTheDocument();
+      });
+      expect(row().className).toMatch(/\bis-sel\b/);
+      expect(
+        within(screen.getByRole("button", { name: "Edit Is filter" })).getByText("New")
+      ).toBeInTheDocument();
+
+      // … while a second row click toggles the selection off.
+      fireEvent.click(row());
+      expect(row().className).not.toMatch(/\bis-sel\b/);
+    } finally {
+      window.localStorage.removeItem("ynab:transactions:accountFilter");
+      window.history.pushState(null, "", "/");
+    }
+  });
+
   it("navigates to the Settings view from the Inspector gear menu", () => {
     const { api } = makeApi();
     render(<BudgetApp data={makeSeedBudgetData()} api={api} />);

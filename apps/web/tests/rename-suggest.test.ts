@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import {
+  autoPostDueRecurringTransactions,
   createRenameRule,
   getDefaultDb,
   resetAndSeedDatabase,
@@ -234,6 +235,35 @@ describe("Rename suggest API routes", () => {
       statusBody.candidates.some((c: any) => c.payee === "Wonky Smoke")
     ).toBe(false);
     expect(statusBody.totalUnique).toBe(0);
+  });
+
+  it("GET status grows when auto-post materializes overdue scheduled rows", async () => {
+    // Posted scheduled rows enter needsReview (like imports), so they join
+    // the rename-candidate pool. The app auto-posts on every page load, so
+    // the e2e "Suggest with AI" count includes ambient scheduled payees on
+    // top of freshly imported ones — never assert it as import-only.
+    // Deterministic via an explicit as-of date (not the wall clock).
+    const db = getDefaultDb();
+    await seedWonky(db, "WONKY SMOKE A");
+    await seedWonky(db, "WONKY SMOKE B");
+    await seedWonky(db, "WONKY SMOKE C");
+    expect((await (await GET()).json()).totalUnique).toBe(3);
+
+    await autoPostDueRecurringTransactions(db, "2026-10-25");
+    const after = await (await GET()).json();
+    // Six distinct scheduled payees are due by 2026-10-25: the transfer
+    // template and the future yearly one stay out of the pool.
+    expect(after.totalUnique).toBe(9);
+    for (const p of [
+      "TD Bank",
+      "Mountain's Edge MSP",
+      "Telus",
+      "Fido",
+      "Fortis BC",
+      "SAP Concur",
+    ]) {
+      expect(after.candidates.some((c: any) => c.payee === p)).toBe(true);
+    }
   });
 
   it("POST ?action=accept validates its body and rejects unknown actions", async () => {

@@ -83,7 +83,7 @@ test("applying a flag in the transaction modal does not increase row height", as
   expect(modalAfter?.height).toBe(modalBefore?.height);
 });
 
-test("renders the duplicate marker as a read-only D badge that cannot be changed", async ({ page }) => {
+test("renders the duplicate marker as a D badge that reveals matches but cannot be changed", async ({ page }) => {
   await resetToDemo();
 
   const budget = await (await fetch(`${BASE_URL}/api/budget`)).json();
@@ -129,14 +129,17 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
   const row = page.getByRole("row").filter({ hasText: payee }).first();
   await expect(row).toBeVisible();
 
-  // The D badge is a non-interactive element, not a button, and clicking it
-  // never opens the flag picker.
-  const dupBadge = row.locator('[aria-label="Flag: Duplicate"]');
+  // The D badge is a button that reveals the matching transactions —
+  // clicking it opens the duplicate inspector, never the flag picker.
+  const dupBadge = row.getByRole("button", { name: "Show duplicate transactions" });
   await expect(dupBadge).toBeVisible();
   await expect(dupBadge.locator(".y-cleared--duplicate")).toHaveText("D");
-  await expect(row.getByRole("button", { name: "Flag: Duplicate" })).toHaveCount(0);
   await dupBadge.click();
+  const inspector = page.locator(".y-modal").last();
+  await expect(inspector.locator(".y-modal-head")).toHaveText("Duplicate transactions");
   await expect(page.getByRole("dialog", { name: "Choose flag color" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(inspector).toBeHidden();
 
   // Editing the transaction shows a read-only duplicate note — no flag
   // picker — and saving other changes preserves the D badge.
@@ -151,7 +154,9 @@ test("renders the duplicate marker as a read-only D badge that cannot be changed
 
   const editedRow = page.getByRole("row").filter({ hasText: `${payee} edited` }).first();
   await expect(editedRow).toBeVisible();
-  await expect(editedRow.locator('[aria-label="Flag: Duplicate"]')).toBeVisible();
+  await expect(
+    editedRow.getByRole("button", { name: "Show duplicate transactions" })
+  ).toBeVisible();
 
   // Under BUG-10, the API allows changing or clearing the flag on a duplicate row.
   const patch = await fetch(`${BASE_URL}/api/transactions`, {

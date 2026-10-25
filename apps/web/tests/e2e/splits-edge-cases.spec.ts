@@ -492,8 +492,11 @@ test.describe("Split Transaction Edge Cases", () => {
     expect(transferChild!.transferAccountId).toBe(2);
 
     // 6. Navigate to EQ Bank register and verify the incoming +$80 transfer leg is present.
+    // Click the account NAME: the row's "new" badge pill is a nested
+    // clickable that would otherwise intercept a center click and filter
+    // the register to Is:New (hiding this needsReview=false leg).
     const eqRow = page.getByRole("button", { name: /EQ Bank/ }).first();
-    await eqRow.click();
+    await eqRow.locator("span.truncate").click();
     await expect(page.locator(".y-toolbar").getByText("EQ Bank", { exact: true })).toBeVisible();
 
     const transferRow = page

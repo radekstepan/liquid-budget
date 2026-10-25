@@ -139,7 +139,13 @@ test("Suggest with AI reviews mocked suggestions and backfills the imported rows
   await resetToDemo(request);
   expect(await importCsv(request, THREE_ROW_CSV)).toBe(3);
 
-  await mockLlmBoundary(page, {
+  // The candidate pool also holds ambient scheduled rows that page-load
+  // auto-post marks needsReview (see the route test "GET status grows
+  // when auto-post materializes overdue scheduled rows"), so the button
+  // count and the mock's batch size follow the live queue, not the
+  // import alone. `processed` is filled in after the page loads (and
+  // auto-posts); the mock reads it when the suggest POST fires.
+  const canned = {
     suggestions: [
       {
         sourcePattern: WONKY_AMZN,
@@ -155,14 +161,19 @@ test("Suggest with AI reviews mocked suggestions and backfills the imported rows
       },
     ],
     skipped: [{ source: "STARBUCKS", reason: "Already clean — no rename needed." }],
-    processed: 3,
-  });
+    processed: 0,
+  };
+  await mockLlmBoundary(page, canned);
 
   await gotoRenameRules(page);
+  const queued = (
+    (await (await request.get("/api/rename-rules/suggest")).json()) as { totalUnique: number }
+  ).totalUnique;
+  canned.processed = queued;
 
   const suggestBtn = page.getByRole("button", { name: "Suggest rename rules with AI" });
   await expect(suggestBtn).toBeVisible();
-  await expect(suggestBtn).toContainText("Suggest with AI (3)");
+  await expect(suggestBtn).toContainText(`Suggest with AI (${queued})`);
   await expect(suggestBtn).toBeEnabled();
 
   await suggestBtn.click();
@@ -204,9 +215,10 @@ test("Suggest with AI reviews mocked suggestions and backfills the imported rows
   // The skipped payee was never touched.
   expect(payees).toContain("STARBUCKS");
 
-  // Accepted payees drop out of the candidate queue.
+  // Accepted payees drop out of the candidate queue; the skipped import
+  // payee and the ambient scheduled candidates stay.
   const status = await (await request.get("/api/rename-rules/suggest")).json();
-  expect(status.totalUnique).toBe(1);
+  expect(status.totalUnique).toBe(queued - 2);
 
   await resetToDemo(request);
 });
@@ -218,15 +230,21 @@ test("the AI review modal supports deselecting, inline edits, and skipping the b
   await resetToDemo(request);
   expect(await importCsv(request, TWO_ROW_CSV)).toBe(2);
 
-  await mockLlmBoundary(page, {
+  // Single batch: claim the whole live queue (imports plus ambient
+  // auto-posted scheduled rows) so the mock's drafts are not repeated.
+  const canned = {
     suggestions: [
       { sourcePattern: WONKY_AMZN, targetPayee: "Amazon", count: 1 },
       { sourcePattern: WONKY_WHOLE, targetPayee: "Whole Foods", count: 1 },
     ],
-    processed: 2,
-  });
+    processed: 0,
+  };
+  await mockLlmBoundary(page, canned);
 
   await gotoRenameRules(page);
+  canned.processed = (
+    (await (await request.get("/api/rename-rules/suggest")).json()) as { totalUnique: number }
+  ).totalUnique;
   await page.getByRole("button", { name: "Suggest rename rules with AI" }).click();
 
   const modal = page.locator(".y-modal").last();

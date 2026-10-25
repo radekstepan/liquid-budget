@@ -1826,6 +1826,17 @@ describe("TransactionsView", () => {
       expect(onEdit).not.toHaveBeenCalled();
     });
 
+    it("never opens the flag picker from the D badge (the marker cannot be changed there)", () => {
+      renderDuplicatesView();
+
+      fireEvent.click(screen.getByRole("button", { name: "Show duplicate transactions" }));
+
+      expect(screen.getByText("Duplicate transactions")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("dialog", { name: "Choose flag color" })
+      ).not.toBeInTheDocument();
+    });
+
     it("edits and deletes group rows from the inspector", () => {
       const onEdit = vi.fn();
       const onDelete = vi.fn();

@@ -54,6 +54,9 @@ yarn e2e:install  # install browser binaries (first-time setup)
 - **E2E never touches the dev DB**: it runs with `DATABASE_URL=../../budget.test.db` on port 3100; unit tests use `DATABASE_URL=:memory:`. The dev `budget.db` on port 3000 is only for manual development.
 - **Always run E2E via root `yarn e2e`**: Playwright's `reuseExistingServer` silently reuses a stale server on port 3100 (stale bundle, dirty DB handle); `e2e:clean` kills it first.
 - **`/api/reset` needs `RESET_ENABLED=true`** (set by the Playwright `webServer` command); without it the route returns 403 and the E2E `global-setup`/import specs fail.
+- **Sidebar e2e clicks must target the account name** (`span.truncate`), not the row center — the "new" badge pill is a nested clickable that intercepts center clicks and applies the Is:New filter instead of toggling selection.
+- **Never assert absolute rename-candidate counts after a page load** — page-load auto-post materializes overdue scheduled rows into the rename pool, so ambient scheduled payees join freshly imported ones.
+- **Serial-mode spec files skip after the first failure** — check skipped counts, not just failures, or a second broken test in the same file hides behind the first.
 - **`E2E_TESTING=true` is currently read by nothing** — a seam for future MSW-style mocking, not an active behavior switch.
 - **Vitest version drift**: `@ynab/web` runs Vitest 4 while the other packages run 2.1.9. Check the local config before assuming shared behavior/plugins.
 
