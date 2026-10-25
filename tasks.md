@@ -67,4 +67,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Reports Cash Flow trend line, if turned on, show the trend line amount in the onhover tooltip as well.
+- ✅ DONE — Reports Cash Flow trend line, if turned on, show the trend line amount in the onhover tooltip as well.
+  - Shipped 2026-10-25 as `task-4` (tooltip appends a Trend row with the hovered month's fitted value when the toggle is on; silent when off or <2 months). `yarn build` / `yarn test` (8/8) / `yarn typecheck` (9/9) green. `yarn e2e` could not run in the sandboxed agent session — run `yarn e2e` in a normal terminal to confirm.

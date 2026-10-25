@@ -439,6 +439,9 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
     if (hover == null) return null;
     const p = points[hover.idx];
     if (!p) return null;
+    // Trend value for the hovered month only: silent when the toggle is off
+    // or the fit is not computable (chart.trend is null with < 2 months).
+    const trendVal = showTrend ? chart?.trend?.[hover.idx] : undefined;
     return (
       <div className="space-y-[3px]">
         <div className="text-[11px] font-bold mb-1" style={{ color: "#f2f5f7" }}>
@@ -451,6 +454,9 @@ export function SurplusReport({ points }: { points: SurplusMonthPoint[] }) {
           label={p.surplus >= 0 ? "Surplus" : "Loss"}
           value={fmt(p.surplus)}
         />
+        {trendVal !== undefined && (
+          <TipLabel color={TREND_COLOR} label="Trend" value={fmt(trendVal)} />
+        )}
       </div>
     );
   })();

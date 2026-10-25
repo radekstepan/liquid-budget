@@ -179,3 +179,78 @@ describe("SurplusReport trendline", () => {
     expect(container.querySelector('[data-testid="trendline"]')).not.toBeNull();
   });
 });
+
+describe("SurplusReport trendline tooltip", () => {
+  const origWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const origHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  const origRaf = globalThis.requestAnimationFrame;
+
+  beforeAll(() => {
+    // jsdom reports zero sizes; give the chart a real layout box.
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    // Deliver hover state updates synchronously for deterministic tooltips.
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    }) as typeof requestAnimationFrame;
+  });
+
+  afterAll(() => {
+    if (origWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", origWidth);
+    if (origHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", origHeight);
+    globalThis.requestAnimationFrame = origRaf;
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  // OLS over [10000, 30000, 20000]: slope 5000, intercept 15000,
+  // fitted [15000, 20000, 25000] — each differs from its bar value.
+  const surpluses = [10000, 30000, 20000];
+
+  function hoverMonth(container: HTMLElement, clientX: number) {
+    const chartArea = container.querySelector("div.relative.min-h-0");
+    expect(chartArea).not.toBeNull();
+    fireEvent.mouseMove(chartArea!, { clientX, clientY: 100 });
+    const tip = document.querySelector(".y-tip");
+    expect(tip).not.toBeNull();
+    return tip!;
+  }
+
+  it("shows the trend value for the hovered month when the trendline is on", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints(surpluses)} />
+    );
+    fireEvent.click(getByText("Off"));
+    expect(getByText("On")).not.toBeNull();
+    const tip = hoverMonth(container, 100);
+    expect(tip.textContent).toContain("Trend");
+    expect(tip.textContent).toContain("$150.00");
+  });
+
+  it("omits the trend value when the trendline is off", () => {
+    const { container } = render(<SurplusReport points={makePoints(surpluses)} />);
+    const tip = hoverMonth(container, 100);
+    expect(tip.textContent).toContain("Surplus");
+    expect(tip.textContent).not.toContain("Trend");
+  });
+
+  it("shows the fitted value of the hovered month, not the first month", () => {
+    const { container, getByText } = render(
+      <SurplusReport points={makePoints(surpluses)} />
+    );
+    fireEvent.click(getByText("Off"));
+    const tip = hoverMonth(container, 400);
+    expect(tip.textContent).toContain("Trend");
+    expect(tip.textContent).toContain("$200.00");
+    expect(tip.textContent).not.toContain("$150.00");
+  });
+});
