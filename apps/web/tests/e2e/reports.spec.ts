@@ -53,12 +53,17 @@ test("changing the selectors narrows the range and re-totals Spending Trends", a
 test("Spending by Category tab renders the Sankey flow and toggles view, dimension, and merge threshold", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
-  // The Sankey view is the default: Total source plus one ribbon per group.
+  // The Sankey view is the default: income sources flow into the middle
+  // Total node, which flows out to spending groups on the right.
   // The seed's top spender category is Mortgage Interest.
   await expect(panel.getByTestId("sankey-svg")).toBeVisible();
-  await expect(panel.getByText("TOTAL", { exact: true })).toBeVisible();
+  await expect(panel.getByTestId("sankey-total")).toBeVisible();
+  await expect(panel.getByTestId("sankey-in-link").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-income").first()).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
   await expect(panel.getByTestId("sankey-link").first()).toBeVisible();
+  await expect(panel.getByText("In:")).toBeVisible();
+  await expect(panel.getByText("Out:")).toBeVisible();
 
   // View toggle buttons
   const sankeyBtn = panel.getByRole("button", { name: "Sankey", exact: true });
@@ -81,14 +86,15 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   await panel.getByRole("button", { name: "Categories", exact: true }).click();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
 
-  // Threshold slider merges smaller groups into Other without changing the total.
-  const totalValue = panel.locator("span").filter({ hasText: /^Total:/ }).locator(".y-num");
-  const totalBefore = (await totalValue.textContent())?.trim();
+  // Threshold slider merges smaller groups into Other without changing
+  // the Out total.
+  const outValue = panel.locator("span").filter({ hasText: /^Out:/ }).locator(".y-num");
+  const outBefore = (await outValue.textContent())?.trim();
   const slider = panel.getByRole("slider", { name: /merge smaller expenses/i });
   await slider.fill("500");
   await expect(panel.getByText("Other")).toBeVisible();
   await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
-  expect((await totalValue.textContent())?.trim()).toBe(totalBefore);
+  expect((await outValue.textContent())?.trim()).toBe(outBefore);
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

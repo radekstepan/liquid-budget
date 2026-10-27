@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFlowColumns,
+  computeIncomeBreakdown,
   computeSpendingBreakdown,
+  layoutIncomeSankey,
   layoutSankey,
   mergeBelowThreshold,
   OTHER_BUCKET_LABEL,
+  OVERSPENT_LABEL,
+  REMAINING_LABEL,
+  sankeyContentHeight,
+  SANKEY_MIN_PITCH,
+  SANKEY_NODE_GAP,
+  SANKEY_NODE_MIN_HEIGHT,
+  SANKEY_PAD_BOTTOM,
+  SANKEY_PAD_TOP,
   type MergedSpendingItem,
 } from "../src/sankey.js";
 import type { BudgetData, Transaction } from "../src/types.js";
@@ -273,5 +284,253 @@ describe("layoutSankey", () => {
       expect(link.d).toContain("C");
       expect(link.x1).toBeGreaterThan(link.x0);
     }
+  });
+
+  it("grows content height to preserve the minimum label pitch", () => {
+    expect(sankeyContentHeight(60, 400)).toBe(60 * SANKEY_MIN_PITCH + 56);
+    expect(sankeyContentHeight(3, 400)).toBe(400);
+    expect(sankeyContentHeight(0, 400)).toBe(400);
+  });
+
+  it("keeps every row pitch at the label minimum when sized by the view contract", () => {
+    const many = Array.from({ length: 60 }, (_, i) => merged(`M${i}`, Math.max(1, 60000 - i * 997)));
+    const height = sankeyContentHeight(many.length, 400);
+    const layout = layoutSankey(many, {
+      width: 800,
+      height,
+      padTop: SANKEY_PAD_TOP,
+      padBottom: SANKEY_PAD_BOTTOM,
+      nodeGap: SANKEY_NODE_GAP,
+      minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
+    });
+    expect(layout.nodes).toHaveLength(60);
+    for (let i = 1; i < layout.nodes.length; i++) {
+      expect(layout.nodes[i]!.y - layout.nodes[i - 1]!.y).toBeGreaterThanOrEqual(
+        SANKEY_MIN_PITCH - 1e-9
+      );
+    }
+    const last = layout.nodes[layout.nodes.length - 1]!;
+    expect(last.y + last.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+  });
+});
+
+describe("computeIncomeBreakdown", () => {
+  it("aggregates income by source over the month range, sorted descending", () => {
+    const items = computeIncomeBreakdown(makeData(), "2026-04", "2026-06");
+    expect(items).toEqual([{ name: "Payroll", value: 300000 }]);
+  });
+
+  it("respects a narrowed month range and swaps reversed bounds", () => {
+    expect(computeIncomeBreakdown(makeData(), "2026-06", "2026-06")).toEqual([]);
+    expect(computeIncomeBreakdown(makeData(), "2026-05", "2026-05")).toEqual([
+      { name: "Payroll", value: 300000 },
+    ]);
+    expect(computeIncomeBreakdown(makeData(), "2026-06", "2026-04")).toEqual([
+      { name: "Payroll", value: 300000 },
+    ]);
+  });
+
+  it("ignores categorized rows and uncategorized outflows", () => {
+    const data = makeData();
+    data.transactions.push(
+      txn("2026-06-10", "Side Gig", 99999, 10),
+      txn("2026-06-11", "Corner Shop", -15000, null)
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
+  });
+
+  it("excludes split parents and counts only split children", () => {
+    const data = makeData();
+    data.transactions.push(
+      txn("2026-06-10", "Split Income", 40000, null, { id: 900 }),
+      txn("2026-06-10", "Split Income", 30000, null, { id: 901, parentId: 900 }),
+      txn("2026-06-10", "Split Income", 10000, 10, { id: 902, parentId: 900 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Split Income", value: 30000 },
+    ]);
+  });
+
+  it("excludes uncategorized outflows (they belong to merchant spending)", () => {
+    const data = makeData();
+    data.transactions.push(
+      txn("2026-06-10", "Payroll", -50000, null),
+      txn("2026-06-11", "Bonus", 20000, null),
+      txn("2026-06-12", "Bonus", -20000, null)
+    );
+    // Negative uncategorized rows are outflows, not income corrections: they
+    // never net against (or appear in) the income side. Net totals stay
+    // right because merchant spending picks those rows up instead.
+    expect(computeIncomeBreakdown(data, "2026-04", "2026-06")).toEqual([
+      { name: "Payroll", value: 300000 },
+      { name: "Bonus", value: 20000 },
+    ]);
+  });
+
+  it("returns an empty array when nothing matches", () => {
+    expect(computeIncomeBreakdown(makeData(), "2020-01", "2020-02")).toEqual([]);
+  });
+});
+
+describe("buildFlowColumns", () => {
+  const spending = [{ name: "A", value: 6000, mergedCount: 1 }];
+
+  it("adds a trailing Remaining plug when income exceeds spending", () => {
+    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 10000 }]);
+    expect(cols.incomeTotal).toBe(10000);
+    expect(cols.spendingTotal).toBe(6000);
+    expect(cols.flowTotal).toBe(10000);
+    expect(cols.sources).toEqual([{ name: "Pay", value: 10000, mergedCount: 1 }]);
+    expect(cols.targets).toEqual([
+      { name: "A", value: 6000, mergedCount: 1 },
+      { name: REMAINING_LABEL, value: 4000, mergedCount: 1 },
+    ]);
+  });
+
+  it("adds a trailing Overspent plug when spending exceeds income", () => {
+    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 2500 }]);
+    expect(cols.flowTotal).toBe(6000);
+    expect(cols.sources).toEqual([
+      { name: "Pay", value: 2500, mergedCount: 1 },
+      { name: OVERSPENT_LABEL, value: 3500, mergedCount: 1 },
+    ]);
+    expect(cols.targets).toEqual(spending);
+  });
+
+  it("adds no plug when income and spending balance exactly", () => {
+    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 6000 }]);
+    expect(cols.flowTotal).toBe(6000);
+    expect(cols.sources).toHaveLength(1);
+    expect(cols.targets).toHaveLength(1);
+  });
+
+  it("handles all-empty input with a zero flow", () => {
+    const cols = buildFlowColumns([], []);
+    expect(cols.flowTotal).toBe(0);
+    expect(cols.sources).toEqual([]);
+    expect(cols.targets).toEqual([]);
+  });
+
+  it("preserves merged spending rows untouched (Other keeps its count)", () => {
+    const cols = buildFlowColumns(
+      [
+        { name: "A", value: 6000, mergedCount: 1 },
+        { name: OTHER_BUCKET_LABEL, value: 2000, mergedCount: 4 },
+      ],
+      [{ name: "Pay", value: 10000 }]
+    );
+    expect(cols.targets[1]).toEqual({
+      name: OTHER_BUCKET_LABEL,
+      value: 2000,
+      mergedCount: 4,
+    });
+    expect(cols.targets[2]).toEqual({
+      name: REMAINING_LABEL,
+      value: 2000,
+      mergedCount: 1,
+    });
+  });
+});
+
+describe("layoutIncomeSankey", () => {
+  const cols = buildFlowColumns(
+    [
+      { name: "A", value: 6000, mergedCount: 1 },
+      { name: "B", value: 3000, mergedCount: 1 },
+      { name: "C", value: 1000, mergedCount: 1 },
+    ],
+    [
+      { name: "Pay", value: 8000 },
+      { name: "Gig", value: 3000 },
+    ]
+  );
+
+  it("returns an empty layout with zero middle for empty input (no NaN)", () => {
+    const layout = layoutIncomeSankey([], [], { width: 800, height: 400 });
+    expect(layout.flowTotal).toBe(0);
+    expect(layout.middle.h).toBe(0);
+    expect(layout.sources).toEqual([]);
+    expect(layout.targets).toEqual([]);
+    expect(layout.inLinks).toEqual([]);
+    expect(layout.outLinks).toEqual([]);
+    expect(Number.isFinite(layout.middle.x)).toBe(true);
+    expect(Number.isFinite(layout.sourceLabelX)).toBe(true);
+    expect(Number.isFinite(layout.targetLabelX)).toBe(true);
+  });
+
+  it("attaches every band to the middle node with matching heights", () => {
+    const layout = layoutIncomeSankey(cols.sources, cols.targets, {
+      width: 800,
+      height: 400,
+    });
+    expect(layout.flowTotal).toBe(11000);
+    expect(layout.sources).toHaveLength(2);
+    // A + B + C plus the Remaining plug for the $100 surplus.
+    expect(layout.targets).toHaveLength(4);
+    expect(layout.inLinks).toHaveLength(2);
+    expect(layout.outLinks).toHaveLength(4);
+
+    // Middle sits strictly between the two columns.
+    const srcRight = layout.sources[0]!.x + layout.sources[0]!.w;
+    expect(layout.middle.x).toBeGreaterThan(srcRight);
+    expect(layout.middle.x + layout.middle.w).toBeLessThan(layout.targets[0]!.x);
+
+    // In-bands run from their source bar into the middle node.
+    for (let i = 0; i < layout.inLinks.length; i++) {
+      const link = layout.inLinks[i]!;
+      const node = layout.sources[i]!;
+      expect(link.x0).toBeCloseTo(node.x + node.w, 6);
+      expect(link.x1).toBeCloseTo(layout.middle.x, 6);
+      expect(link.sy0).toBeCloseTo(node.y, 6);
+      expect(link.sy1 - link.sy0).toBeCloseTo(node.h, 6);
+      expect(link.ty0).toBeGreaterThanOrEqual(layout.middle.y - 1e-9);
+      expect(link.ty1).toBeLessThanOrEqual(layout.middle.y + layout.middle.h + 1e-9);
+    }
+    // Out-bands run from the middle node to their target bar.
+    for (let i = 0; i < layout.outLinks.length; i++) {
+      const link = layout.outLinks[i]!;
+      const node = layout.targets[i]!;
+      expect(link.x0).toBeCloseTo(layout.middle.x + layout.middle.w, 6);
+      expect(link.x1).toBeCloseTo(node.x, 6);
+      expect(link.ty0).toBeCloseTo(node.y, 6);
+      expect(link.ty1 - link.ty0).toBeCloseTo(node.h, 6);
+      expect(link.sy0).toBeGreaterThanOrEqual(layout.middle.y - 1e-9);
+      expect(link.sy1).toBeLessThanOrEqual(layout.middle.y + layout.middle.h + 1e-9);
+    }
+  });
+
+  it("stacks unequal sides independently, top-aligned under one middle", () => {
+    const oneSided = buildFlowColumns(
+      [
+        { name: "A", value: 5000, mergedCount: 1 },
+        { name: "B", value: 3000, mergedCount: 1 },
+        { name: "C", value: 2000, mergedCount: 1 },
+      ],
+      [{ name: "Pay", value: 10000 }]
+    );
+    const layout = layoutIncomeSankey(oneSided.sources, oneSided.targets, {
+      width: 800,
+      height: 400,
+      padTop: 28,
+    });
+    expect(layout.sources).toHaveLength(1);
+    expect(layout.sources[0]!.y).toBeCloseTo(28, 6);
+    expect(layout.targets[0]!.y).toBeCloseTo(28, 6);
+    expect(layout.middle.y).toBeCloseTo(28, 6);
+    // Middle covers the taller (3-row) stack.
+    const lastTgt = layout.targets[2]!;
+    expect(layout.middle.h).toBeGreaterThanOrEqual(lastTgt.y + lastTgt.h - 28 - 1e-9);
+  });
+
+  it("keeps label anchors clear of their bars", () => {
+    const layout = layoutIncomeSankey(cols.sources, cols.targets, {
+      width: 800,
+      height: 400,
+      padLeft: 112,
+    });
+    expect(layout.sourceLabelX).toBeLessThanOrEqual(layout.sources[0]!.x - 8);
+    expect(layout.targetLabelX).toBeGreaterThanOrEqual(
+      layout.targets[0]!.x + layout.targets[0]!.w + 8
+    );
   });
 });

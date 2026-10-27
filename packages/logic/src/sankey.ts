@@ -77,6 +77,89 @@ export function computeSpendingBreakdown(
     .sort((a, b) => b.value - a.value);
 }
 
+/**
+ * Aggregate income over a contiguous month range (inclusive), grouped by
+ * source (payee) name. Mirrors computeSpendingBreakdown with the predicate
+ * flipped: only income rows (uncategorized, positive, on-budget — see
+ * isIncomeTransaction) count; split parents are excluded. Negative
+ * uncategorized rows are outflows, not corrections, so they are excluded
+ * here (merchant spending picks them up instead).
+ *
+ * Returns items sorted by value descending.
+ */
+export function computeIncomeBreakdown(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): SpendingBreakdownItem[] {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+
+  const bySource = new Map<string, number>();
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    if (!isIncomeTransaction(t, accountMap)) continue;
+    const mk = t.date.slice(0, 7);
+    if (mk < actualStart || mk > actualEnd) continue;
+
+    const payee = t.payee.trim();
+    const name = payee === "" ? "—" : payee;
+    bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
+  }
+
+  return [...bySource.entries()]
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+/** Label for the unspent-income node on the target (right) side. */
+export const REMAINING_LABEL = "Remaining";
+/** Label for the income shortfall node on the source (left) side. */
+export const OVERSPENT_LABEL = "Overspent";
+
+export type FlowColumns = {
+  /** Income sources, plus an Overspent plug when spending exceeds income. */
+  sources: MergedSpendingItem[];
+  /** Spending groups, plus a Remaining plug when income exceeds spending. */
+  targets: MergedSpendingItem[];
+  incomeTotal: number;
+  spendingTotal: number;
+  /** Conserved flow: both columns sum to this. */
+  flowTotal: number;
+};
+
+/**
+ * Assemble balanced Sankey columns: the plugs keep both sides summing to
+ * max(income, spending) so inflow always equals outflow. Exactly one plug
+ * exists at most (never both); equal totals need none.
+ */
+export function buildFlowColumns(
+  spending: MergedSpendingItem[],
+  income: SpendingBreakdownItem[]
+): FlowColumns {
+  const incomeTotal = income.reduce((s, it) => s + it.value, 0);
+  const spendingTotal = spending.reduce((s, it) => s + it.value, 0);
+  const flowTotal = Math.max(incomeTotal, spendingTotal);
+
+  const sources: MergedSpendingItem[] = income.map((it) => ({ ...it, mergedCount: 1 }));
+  if (spendingTotal > incomeTotal) {
+    sources.push({ name: OVERSPENT_LABEL, value: spendingTotal - incomeTotal, mergedCount: 1 });
+  }
+  const targets: MergedSpendingItem[] = [...spending];
+  if (incomeTotal > spendingTotal) {
+    targets.push({ name: REMAINING_LABEL, value: incomeTotal - spendingTotal, mergedCount: 1 });
+  }
+  return { sources, targets, incomeTotal, spendingTotal, flowTotal };
+}
+
 export type MergedSpendingItem = SpendingBreakdownItem & {
   /** How many breakdown groups this row represents (1, or N for "Other"). */
   mergedCount: number;
@@ -185,6 +268,36 @@ export type SankeyLayout = {
   /** x where target-node labels should start (right of the node column). */
   labelX: number;
 };
+
+// ---------------------------------------------------------------------------
+// Readability contract shared with the view: minimum geometry that keeps
+// two-line node labels from overlapping each other and keeps the TOTAL
+// captions clear of the source bar. The view must size the chart with
+// sankeyContentHeight and pass these spacings into layoutSankey.
+// ---------------------------------------------------------------------------
+
+/** Minimum node height: a two-line label (name + amount) needs a 24px row. */
+export const SANKEY_NODE_MIN_HEIGHT = 24;
+/** Vertical gap between nodes; pitch = height + gap = 32px per row. */
+export const SANKEY_NODE_GAP = 8;
+/** Minimum vertical pitch per node so adjacent two-line labels never touch. */
+export const SANKEY_MIN_PITCH = SANKEY_NODE_MIN_HEIGHT + SANKEY_NODE_GAP;
+/** Top/bottom gutters: room for the TOTAL caption above, amount below. */
+export const SANKEY_PAD_TOP = 28;
+export const SANKEY_PAD_BOTTOM = 28;
+/** Left gutter: TOTAL caption + amount right-align into it, clear of the bar. */
+export const SANKEY_SOURCE_GUTTER = 112;
+
+/**
+ * Chart height honoring the minimum pitch: grows past the container (the
+ * view scrolls) instead of crushing rows when there are many groups.
+ */
+export function sankeyContentHeight(itemCount: number, containerHeight: number): number {
+  return Math.max(
+    containerHeight,
+    itemCount * SANKEY_MIN_PITCH + SANKEY_PAD_TOP + SANKEY_PAD_BOTTOM
+  );
+}
 
 /**
  * Lay out a two-column Sankey: one source node ("Total") on the left, one
@@ -316,5 +429,89 @@ export function layoutSankey(
     nodes,
     links,
     labelX: nodeX + nodeWidth + 8,
+  };
+}
+
+export type IncomeSankeyLayout = {
+  incomeTotal: number;
+  spendingTotal: number;
+  /** Conserved flow: both columns sum to this. */
+  flowTotal: number;
+  /** Middle ("Total") node spanning both stacks. */
+  middle: { x: number; y: number; w: number; h: number };
+  /** Left column: one bar per income source. */
+  sources: SankeyNodeLayout[];
+  /** Right column: one bar per spending group. */
+  targets: SankeyNodeLayout[];
+  /** Ribbons from each source bar into the middle node. */
+  inLinks: SankeyLinkLayout[];
+  /** Ribbons from the middle node out to each target bar. */
+  outLinks: SankeyLinkLayout[];
+  /** x for end-anchored income labels (left of the source column). */
+  sourceLabelX: number;
+  /** x for start-anchored target labels (right of the target column). */
+  targetLabelX: number;
+};
+
+/**
+ * Lay out a three-column money-flow Sankey: income sources (left) flow into
+ * a middle Total node, which flows out to spending groups (right). Both
+ * columns must sum to the same total (see buildFlowColumns); each column
+ * stacks independently, top-aligned, reusing layoutSankey per side so the
+ * band math stays identical. The left side's per-source bars are re-derived
+ * from its bands (a shared source bar would be wrong there).
+ *
+ * Empty input on one side yields that side empty; both empty yields a
+ * zero-height middle — never NaN geometry.
+ */
+export function layoutIncomeSankey(
+  sources: MergedSpendingItem[],
+  targets: MergedSpendingItem[],
+  opts: SankeyGeometryOptions
+): IncomeSankeyLayout {
+  const { width, nodeWidth = 14, padLeft = 8, padTop = 8 } = opts;
+  const padRight = opts.padRight ?? 8;
+  const zoneL = padLeft + nodeWidth;
+  const zoneR = width - padRight - nodeWidth;
+  const middleX = Math.max(zoneL + 24, (zoneL + zoneR) / 2 - nodeWidth / 2);
+
+  // Left flow (sources -> middle): keep the bands; the per-source bars are
+  // re-derived below from each band's source span.
+  const left = layoutSankey(sources, { ...opts, width: middleX + nodeWidth, padRight: 0 });
+  // Right flow (middle -> targets): its source bar IS the middle node.
+  const right = layoutSankey(targets, { ...opts, padLeft: middleX });
+
+  const srcNodes: SankeyNodeLayout[] = sources.map((s, i) => {
+    const link = left.links[i];
+    return {
+      name: s.name,
+      value: s.value,
+      mergedCount: s.mergedCount,
+      share: left.total > 0 ? s.value / left.total : 0,
+      x: padLeft,
+      y: link?.sy0 ?? padTop,
+      w: nodeWidth,
+      h: link ? Math.max(0, link.sy1 - link.sy0) : 0,
+    };
+  });
+
+  const incomeTotal = sources.reduce((s, it) => s + it.value, 0);
+  const spendingTotal = targets.reduce((s, it) => s + it.value, 0);
+  return {
+    incomeTotal,
+    spendingTotal,
+    flowTotal: Math.max(incomeTotal, spendingTotal),
+    middle: {
+      x: middleX,
+      y: padTop,
+      w: nodeWidth,
+      h: Math.max(left.source.h, right.source.h),
+    },
+    sources: srcNodes,
+    targets: right.nodes,
+    inLinks: left.links,
+    outLinks: right.links,
+    sourceLabelX: padLeft - 10,
+    targetLabelX: right.labelX,
   };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { fmt } from "@ynab/logic";
+import { fmt, OTHER_BUCKET_LABEL, OVERSPENT_LABEL, REMAINING_LABEL } from "@ynab/logic";
 
 export const PALETTE = [
   "#2f7fb0", // 0: Classic Steel Blue
@@ -24,11 +24,16 @@ export function colorAt(i: number): string {
 
 // Stable color per series name (djb2 hash into PALETTE): a category or
 // merchant keeps its color across month ranges, dimension toggles, and
-// threshold merges. The merged "Other" bucket always renders slate.
+// threshold merges. The merged "Other" bucket always renders slate; the
+// flow plugs get fixed semantic colors (green = unspent, red = shortfall).
 export const OTHER_BUCKET_COLOR = "#78909c";
+export const REMAINING_COLOR = "#2f9e5f";
+export const OVERSPENT_COLOR = "#c0392b";
 
 export function colorForName(name: string): string {
-  if (name === "Other") return OTHER_BUCKET_COLOR;
+  if (name === OTHER_BUCKET_LABEL) return OTHER_BUCKET_COLOR;
+  if (name === REMAINING_LABEL) return REMAINING_COLOR;
+  if (name === OVERSPENT_LABEL) return OVERSPENT_COLOR;
   let h = 5381;
   for (let i = 0; i < name.length; i++) {
     h = ((h << 5) + h + name.charCodeAt(i)) | 0;

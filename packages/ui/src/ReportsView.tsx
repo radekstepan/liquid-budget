@@ -9,6 +9,7 @@ import {
   MONTHS_LONG,
   computeNetWorthReport,
   computeMonthlySurplus,
+  computeIncomeBreakdown,
   computeSpendingBreakdown,
   type NetWorthPoint,
   type SurplusMonthPoint,
@@ -143,6 +144,11 @@ export const ReportsView = memo(function ReportsView({
     [data, actualStart, actualEnd]
   );
 
+  const incomeItems: SpendingItem[] = useMemo(
+    () => computeIncomeBreakdown(data, actualStart, actualEnd),
+    [data, actualStart, actualEnd]
+  );
+
   const netWorthData: NetWorthPoint[] = useMemo(() => {
     return computeNetWorthReport(data, actualStart, actualEnd);
   }, [data, actualStart, actualEnd]);
@@ -248,7 +254,11 @@ export const ReportsView = memo(function ReportsView({
 
         {sub === "spending" && (
           <div className="h-full p-4">
-            <SpendingReport categories={categorySpending} merchants={merchantSpending} />
+            <SpendingReport
+              categories={categorySpending}
+              merchants={merchantSpending}
+              income={incomeItems}
+            />
           </div>
         )}
 

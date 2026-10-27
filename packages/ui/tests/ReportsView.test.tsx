@@ -219,14 +219,17 @@ describe("ReportsView", () => {
     expect(sankeyBtn).toBeInTheDocument();
     expect(barsBtn).toBeInTheDocument();
 
-    // Default is the Sankey flow: Total source plus one ribbon per group.
+    // Default is the Sankey flow: income in, Total middle, one ribbon per
+    // group plus the Remaining plug on the right (income exceeds spending).
     const svg = panel.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
-    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(2);
-    expect(within(panel).getByText("TOTAL")).toBeInTheDocument();
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
+    expect(svg!.querySelector('[data-testid="sankey-total"]')).not.toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
     expect(within(panel).getByText("Groceries")).toBeInTheDocument();
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
+    expect(within(panel).getByText("Remaining")).toBeInTheDocument();
     expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
 
     // Toggle to Bars view
@@ -247,10 +250,11 @@ describe("ReportsView", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Merchants" }));
 
     // Panel retitles; uncategorized "Shop B" counts as a merchant but
-    // income payee "Payroll" is excluded.
+    // income payee "Payroll" stays on the income side only (one label: the
+    // income column — never duplicated into merchant spending).
     expect(findPanel("Spending by Merchant")).toBeTruthy();
     expect(within(panel).getByText("Shop B")).toBeInTheDocument();
-    expect(within(panel).queryByText("Payroll")).not.toBeInTheDocument();
+    expect(within(panel).getAllByText("Payroll")).toHaveLength(1);
     expect(within(panel).getByText("3 merchants")).toBeInTheDocument();
 
     fireEvent.click(within(panel).getByRole("button", { name: "Categories" }));
@@ -262,14 +266,16 @@ describe("ReportsView", () => {
     renderView();
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
-    // Full range totals $650.00 across Groceries + Rent.
-    expect(within(panel).getAllByText("$650.00")).toHaveLength(2);
+    // Full range spends $650.00 across Groceries + Rent (Out readout only —
+    // the chart carries no total caption anymore).
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
     pickFromOpenDropdownByValue(/from month/i, "5");
     // June only: $50.00 of Groceries; Rent drops out entirely.
-    expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
+    expect(within(panel).getAllByText("$50.00")).toHaveLength(1);
     expect(within(panel).queryByText("Rent")).not.toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(1);
+    // Groceries plus the Remaining plug (June income exceeds June spending).
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
   });
 
   it("Spending tab merges smaller groups into Other via the threshold slider", () => {
@@ -282,9 +288,10 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("Other")).toBeInTheDocument();
     expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
-    // Total is unchanged by merging.
-    expect(within(panel).getAllByText("$650.00")).toHaveLength(2);
+    // Groceries + Other + Remaining on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+    // Out total is unchanged by merging.
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -406,8 +413,9 @@ describe("ReportsView", () => {
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
-    expect(links).toHaveLength(3);
-    expect(nodes).toHaveLength(3);
+    // Groceries + Rent + Fees + the Remaining plug (income exceeds spending).
+    expect(links).toHaveLength(4);
+    expect(nodes).toHaveLength(4);
     // Each ribbon is a closed bezier path running left-to-right.
     for (const link of links) {
       const d = link.getAttribute("d") ?? "";
@@ -646,10 +654,14 @@ describe("ReportsView", () => {
     const panel = findPanel("Spending by Category")!;
     expect(panel).toBeInTheDocument();
 
-    // Net spend is $50.00 ($200 - $150), total is $50.00
+    // Net spend is $50.00 ($200 - $150). No income in range, so the
+    // income side shows the Overspent plug instead of sources.
     expect(within(panel).getByText("Clothing")).toBeInTheDocument();
     expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
-    expect(within(panel).getByText("Total:")).toBeInTheDocument();
+    expect(within(panel).getByText("Out:")).toBeInTheDocument();
+    expect(within(panel).getByText("Over:")).toBeInTheDocument();
+    expect(within(panel).getByText("Overspent")).toBeInTheDocument();
+    expect(within(panel).queryByText("Remaining")).not.toBeInTheDocument();
   });
 });
 

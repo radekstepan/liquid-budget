@@ -4,8 +4,17 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   fmt,
   mergeBelowThreshold,
-  layoutSankey,
+  layoutIncomeSankey,
+  buildFlowColumns,
+  sankeyContentHeight,
   OTHER_BUCKET_LABEL,
+  OVERSPENT_LABEL,
+  REMAINING_LABEL,
+  SANKEY_NODE_GAP,
+  SANKEY_NODE_MIN_HEIGHT,
+  SANKEY_PAD_BOTTOM,
+  SANKEY_PAD_TOP,
+  SANKEY_SOURCE_GUTTER,
   type SpendingBreakdownItem,
   type SpendingDimension,
 } from "@ynab/logic";
@@ -17,8 +26,10 @@ export type SpendingItem = SpendingBreakdownItem;
 export type SpendingViewMode = "bars" | "sankey";
 
 type Hover =
+  | { kind: "income" | "inLink"; idx: number; x: number; y: number }
   | { kind: "node" | "link"; idx: number; x: number; y: number }
-  | { kind: "source"; x: number; y: number };
+  | { kind: "total"; x: number; y: number }
+  | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
 
@@ -29,11 +40,13 @@ function truncateName(name: string, max = 26): string {
 export function SpendingReport({
   categories,
   merchants,
+  income,
   initialView = "sankey",
   initialDimension = "categories",
 }: {
   categories: SpendingItem[];
   merchants: SpendingItem[];
+  income: SpendingItem[];
   initialView?: SpendingViewMode;
   initialDimension?: SpendingDimension;
 }) {
@@ -72,62 +85,180 @@ export function SpendingReport({
     () => mergeBelowThreshold(raw, Math.round(activeThreshold * 100)),
     [raw, activeThreshold]
   );
-  const total = useMemo(() => merged.items.reduce((s, x) => s + x.value, 0), [merged.items]);
+  const spentTotal = useMemo(
+    () => merged.items.reduce((s, x) => s + x.value, 0),
+    [merged.items]
+  );
 
+  // Bars rows: spending shares (unchanged by the income side).
   const rows = useMemo(() => {
     const maxSpend = merged.items.reduce((m, s) => Math.max(m, s.value), 1);
     return merged.items.map((s, i) => {
-      const share = total !== 0 ? s.value / total : 0;
+      const share = spentTotal !== 0 ? s.value / spentTotal : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
       const color = colorForName(s.name);
       return { ...s, share, pctOfTotal, pctOfMax, color, i };
     });
-  }, [merged.items, total]);
+  }, [merged.items, spentTotal]);
 
-  const empty = rows.length === 0;
+  // Balanced flow columns: both sides sum to the conserved flow total.
+  const flow = useMemo(
+    () => buildFlowColumns(merged.items, income),
+    [merged.items, income]
+  );
+  const srcRows = useMemo(
+    () =>
+      flow.sources.map((s, i) => ({
+        ...s,
+        flowPct: flow.flowTotal !== 0 ? Math.round((s.value / flow.flowTotal) * 100) : 0,
+        color: colorForName(s.name),
+        i,
+      })),
+    [flow]
+  );
+  const tgtRows = useMemo(
+    () =>
+      flow.targets.map((t, i) => ({
+        ...t,
+        flowPct: flow.flowTotal !== 0 ? Math.round((t.value / flow.flowTotal) * 100) : 0,
+        color: colorForName(t.name),
+        i,
+      })),
+    [flow]
+  );
+
+  const empty = flow.sources.length === 0 && flow.targets.length === 0;
   const growRows = rows.length > 0 && rows.length <= 14;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
+  const remaining = flow.incomeTotal - flow.spendingTotal;
+
+  // The chart grows past the viewport when rows need more room (the
+  // container scrolls) instead of crushing labels onto each other.
+  const contentH = useMemo(
+    () =>
+      sankeyContentHeight(
+        Math.max(flow.sources.length, flow.targets.length),
+        chartSize.height
+      ),
+    [flow.sources.length, flow.targets.length, chartSize.height]
+  );
 
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
-    return layoutSankey(merged.items, {
+    return layoutIncomeSankey(flow.sources, flow.targets, {
       width: chartSize.width,
-      height: chartSize.height,
+      height: contentH,
+      padLeft: SANKEY_SOURCE_GUTTER,
       padRight: LABEL_ZONE,
+      padTop: SANKEY_PAD_TOP,
+      padBottom: SANKEY_PAD_BOTTOM,
+      nodeGap: SANKEY_NODE_GAP,
+      minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
-  }, [merged.items, chartSize.width, chartSize.height]);
+  }, [flow.sources, flow.targets, chartSize.width, chartSize.height, contentH]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
-    if (hover.kind === "source") {
+    if (hover.kind === "total") {
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            Total spending
+            Total flow
           </div>
-          <TipLabel color="var(--y-blue)" label="Spent" value={fmt(total)} pct="100%" />
+          <TipLabel color="#8bc34a" label="Income" value={fmt(flow.incomeTotal)} />
+          <TipLabel color="var(--y-blue)" label="Spent" value={fmt(flow.spendingTotal)} />
+          {remaining > 0 ? (
+            <TipLabel color="#8bc34a" label="Left" value={fmt(remaining)} />
+          ) : remaining < 0 ? (
+            <TipLabel color="#d45042" label="Over" value={fmt(-remaining)} />
+          ) : (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Income and spending balance exactly</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (hover.kind === "income" || hover.kind === "inLink") {
+      const r = srcRows[hover.idx];
+      if (!r) return null;
+      const isOver = r.name === OVERSPENT_LABEL;
+      const incomePct =
+        flow.incomeTotal !== 0 ? Math.round((r.value / flow.incomeTotal) * 100) : 0;
+      return (
+        <div className="space-y-[3px]">
+          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+            {r.name}
+          </div>
+          <TipLabel
+            color={r.color}
+            label={isOver ? "Shortfall" : "Received"}
+            value={fmt(r.value)}
+            pct={r.flowPct + "%"}
+          />
           <div
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
             style={{ color: "rgba(242,245,247,0.65)" }}
           >
             <span>
-              across {rows.length} {rows.length === 1 ? nounSingular : nounPlural}
+              {isOver
+                ? "Spending exceeded income — covered from savings or debt"
+                : `${incomePct}% of ${fmt(flow.incomeTotal)} income`}
             </span>
           </div>
         </div>
       );
     }
-    const r = rows[hover.idx];
+    if (hover.kind === "bar") {
+      const r = rows[hover.idx];
+      if (!r) return null;
+      const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
+      return (
+        <div className="space-y-[3px]">
+          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+            {r.name}
+          </div>
+          <TipLabel
+            color={r.color}
+            label="Spent"
+            value={fmt(r.value)}
+            pct={r.pctOfTotal + "%"}
+          />
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>
+              {isOther
+                ? `${r.mergedCount} smaller ${nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
+                : `of ${fmt(spentTotal)} total`}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    const r = tgtRows[hover.idx];
     if (!r) return null;
     const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
+    const isRemaining = r.name === REMAINING_LABEL;
+    const spendPct =
+      spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
     return (
       <div className="space-y-[3px]">
         <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
           {r.name}
         </div>
-        <TipLabel color={r.color} label="Spent" value={fmt(r.value)} pct={r.pctOfTotal + "%"} />
+        <TipLabel
+          color={r.color}
+          label={isRemaining ? "Left" : "Spent"}
+          value={fmt(r.value)}
+          pct={r.flowPct + "%"}
+        />
         <div
           className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
           style={{ color: "rgba(242,245,247,0.65)" }}
@@ -135,14 +266,20 @@ export function SpendingReport({
           <span>
             {isOther
               ? `${r.mergedCount} smaller ${nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
-              : `of ${fmt(total)} total`}
+              : isRemaining
+                ? `Unspent of ${fmt(flow.incomeTotal)} income`
+                : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
       </div>
     );
   })();
 
-  const hoverIdx = hover != null && hover.kind !== "source" ? hover.idx : null;
+  const hoverSrcIdx =
+    hover != null && (hover.kind === "income" || hover.kind === "inLink") ? hover.idx : null;
+  const hoverTgtIdx =
+    hover != null && (hover.kind === "node" || hover.kind === "link") ? hover.idx : null;
+  const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
 
   return (
     <Panel
@@ -155,7 +292,24 @@ export function SpendingReport({
         style={{ background: "linear-gradient(#fbfbf9,#f1f1ee)" }}
       >
         <span style={{ color: "var(--y-ink-soft)" }}>
-          Total: <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>{fmt(total)}</span>
+          In:{" "}
+          <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+            {fmt(flow.incomeTotal)}
+          </span>
+        </span>
+        <span style={{ color: "var(--y-ink-faint)" }}>·</span>
+        <span style={{ color: "var(--y-ink-soft)" }}>
+          Out:{" "}
+          <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+            {fmt(flow.spendingTotal)}
+          </span>
+        </span>
+        <span style={{ color: "var(--y-ink-faint)" }}>·</span>
+        <span style={{ color: "var(--y-ink-soft)" }}>
+          {remaining >= 0 ? "Left: " : "Over: "}
+          <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+            {fmt(Math.abs(remaining))}
+          </span>
         </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
         <span style={{ color: "var(--y-ink-soft)" }}>
@@ -282,7 +436,7 @@ export function SpendingReport({
           >
             {empty && <div className="grid place-items-center py-12 y-hint">No data for this timeframe.</div>}
             {rows.map((r) => {
-              const isHover = hoverIdx === r.i;
+              const isHover = hoverBarIdx === r.i;
               return (
                 <div
                   key={r.name}
@@ -291,7 +445,7 @@ export function SpendingReport({
                     (growRows ? "min-h-[36px] flex-1 py-[6px]" : "py-[7px]")
                   }
                   style={{ background: isHover ? "var(--y-row-sel)" : "transparent" }}
-                  onMouseMove={(e) => setHover({ kind: "node", idx: r.i, x: e.clientX, y: e.clientY })}
+                  onMouseMove={(e) => setHover({ kind: "bar", idx: r.i, x: e.clientX, y: e.clientY })}
                   onMouseLeave={() => setHover(null)}
                 >
                   <span
@@ -358,7 +512,7 @@ export function SpendingReport({
       ) : (
         <div
           ref={chartRef}
-          className="relative min-h-0 flex-1"
+          className="relative min-h-0 flex-1 overflow-y-auto y-scroll"
           style={{ background: "linear-gradient(#ffffff, #f7f7f4)" }}
           onMouseLeave={() => setHover(null)}
         >
@@ -369,16 +523,34 @@ export function SpendingReport({
             <svg
               data-testid="sankey-svg"
               width={chartSize.width}
-              height={chartSize.height}
+              height={contentH}
               className="block"
             >
-              {sankey.links.map((link, idx) => {
+              {sankey.inLinks.map((link, idx) => {
                 const color = colorForName(link.name);
-                const isHover = hoverIdx === idx;
-                const dim = hoverIdx != null && !isHover;
+                const isHover = hoverSrcIdx === idx;
+                const dim = (hoverSrcIdx != null && !isHover) || hoverTgtIdx != null;
                 return (
                   <path
-                    key={link.name}
+                    key={`in-${link.name}-${idx}`}
+                    data-testid="sankey-in-link"
+                    d={link.d}
+                    fill={color}
+                    fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
+                    stroke="none"
+                    style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                    onMouseMove={(e) => setHover({ kind: "inLink", idx, x: e.clientX, y: e.clientY })}
+                    onMouseLeave={() => setHover(null)}
+                  />
+                );
+              })}
+              {sankey.outLinks.map((link, idx) => {
+                const color = colorForName(link.name);
+                const isHover = hoverTgtIdx === idx;
+                const dim = (hoverTgtIdx != null && !isHover) || hoverSrcIdx != null;
+                return (
+                  <path
+                    key={`out-${link.name}-${idx}`}
                     data-testid="sankey-link"
                     d={link.d}
                     fill={color}
@@ -390,48 +562,77 @@ export function SpendingReport({
                   />
                 );
               })}
+              {sankey.sources.map((node, idx) => {
+                const color = colorForName(node.name);
+                const isHover = hoverSrcIdx === idx;
+                const dim = (hoverSrcIdx != null && !isHover) || hoverTgtIdx != null;
+                const r = srcRows[idx]!;
+                const labelY = node.y + node.h / 2;
+                return (
+                  <g key={`src-${node.name}-${idx}`}>
+                    <rect
+                      data-testid="sankey-income"
+                      x={node.x}
+                      y={node.y}
+                      width={node.w}
+                      height={Math.max(0, node.h)}
+                      rx={2}
+                      fill={color}
+                      fillOpacity={dim ? 0.35 : 1}
+                      stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
+                      strokeWidth={isHover ? 2 : 1}
+                      style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        setHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
+                    />
+                    <text
+                      x={sankey.sourceLabelX}
+                      y={node.h >= 26 ? labelY - 2 : labelY - 6}
+                      fontSize={12}
+                      textAnchor="end"
+                      fill="var(--y-ink)"
+                      opacity={dim ? 0.4 : 1}
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {truncateName(node.name, 15)}
+                    </text>
+                    <text
+                      x={sankey.sourceLabelX}
+                      y={node.h >= 26 ? labelY + 13 : labelY + 7}
+                      fontSize={11}
+                      textAnchor="end"
+                      fill="var(--y-ink-faint)"
+                      className="y-num"
+                      opacity={dim ? 0.4 : 1}
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {fmt(node.value)} · {r.flowPct}%
+                    </text>
+                  </g>
+                );
+              })}
               <rect
-                data-testid="sankey-source"
-                x={sankey.source.x}
-                y={sankey.source.y}
-                width={sankey.source.w}
-                height={Math.max(0, sankey.source.h)}
+                data-testid="sankey-total"
+                x={sankey.middle.x}
+                y={sankey.middle.y}
+                width={sankey.middle.w}
+                height={Math.max(0, sankey.middle.h)}
                 rx={2}
                 fill="var(--y-blue)"
                 style={{ cursor: "pointer" }}
-                onMouseMove={(e) => setHover({ kind: "source", x: e.clientX, y: e.clientY })}
+                onMouseMove={(e) => setHover({ kind: "total", x: e.clientX, y: e.clientY })}
                 onMouseLeave={() => setHover(null)}
               />
-              <text
-                x={sankey.source.x + sankey.source.w / 2}
-                y={Math.max(12, sankey.source.y - 8)}
-                textAnchor="middle"
-                fontSize={11}
-                fontWeight={700}
-                fill="var(--y-ink-faint)"
-                className="y-caps"
-              >
-                TOTAL
-              </text>
-              <text
-                x={sankey.source.x + sankey.source.w / 2}
-                y={Math.min(chartSize.height - 4, sankey.source.y + sankey.source.h + 16)}
-                textAnchor="middle"
-                fontSize={12}
-                fontWeight={700}
-                fill="var(--y-ink)"
-                className="y-num"
-              >
-                {fmt(total)}
-              </text>
-              {sankey.nodes.map((node, idx) => {
+              {sankey.targets.map((node, idx) => {
                 const color = colorForName(node.name);
-                const isHover = hoverIdx === idx;
-                const dim = hoverIdx != null && !isHover;
-                const r = rows[idx]!;
+                const isHover = hoverTgtIdx === idx;
+                const dim = (hoverTgtIdx != null && !isHover) || hoverSrcIdx != null;
+                const r = tgtRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 return (
-                  <g key={node.name}>
+                  <g key={`tgt-${node.name}-${idx}`}>
                     <rect
                       data-testid="sankey-node"
                       x={node.x}
@@ -450,7 +651,7 @@ export function SpendingReport({
                       onMouseLeave={() => setHover(null)}
                     />
                     <text
-                      x={sankey.labelX}
+                      x={sankey.targetLabelX}
                       y={node.h >= 26 ? labelY - 2 : labelY - 6}
                       fontSize={12}
                       fill="var(--y-ink)"
@@ -460,7 +661,7 @@ export function SpendingReport({
                       {truncateName(node.name)}
                     </text>
                     <text
-                      x={sankey.labelX}
+                      x={sankey.targetLabelX}
                       y={node.h >= 26 ? labelY + 13 : labelY + 7}
                       fontSize={11}
                       fill="var(--y-ink-faint)"
@@ -468,7 +669,7 @@ export function SpendingReport({
                       opacity={dim ? 0.4 : 1}
                       style={{ pointerEvents: "none" }}
                     >
-                      {fmt(node.value)} · {r.pctOfTotal}%
+                      {fmt(node.value)} · {r.flowPct}%
                     </text>
                   </g>
                 );

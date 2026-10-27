@@ -38,41 +38,57 @@ const sampleMerchants: SpendingItem[] = [
   { name: "Corner Shop", value: 20000 },
 ];
 
+// Income $2,000 vs spending $1,550: flow is $2,000 with a $450 Remaining plug.
+const sampleIncome: SpendingItem[] = [{ name: "Payroll", value: 200000 }];
+
 function renderReport(
   categories: SpendingItem[] = sampleCategories,
-  merchants: SpendingItem[] = sampleMerchants
+  merchants: SpendingItem[] = sampleMerchants,
+  income: SpendingItem[] = sampleIncome
 ) {
-  return render(<SpendingReport categories={categories} merchants={merchants} />);
+  return render(<SpendingReport categories={categories} merchants={merchants} income={income} />);
 }
 
 describe("SpendingReport", () => {
-  it("renders the panel title and total for the default Categories dimension", () => {
+  it("renders the panel title with the In / Out / Left header readout", () => {
     renderReport();
     expect(screen.getByText("Spending by Category")).toBeInTheDocument();
-    expect(screen.getByText(/Total:/)).toBeInTheDocument();
-    // Total appears twice: the header readout and the Sankey source label.
-    expect(screen.getAllByText("$1,550.00")).toHaveLength(2);
+    expect(screen.getByText("In:")).toBeInTheDocument();
+    expect(screen.getByText("Out:")).toBeInTheDocument();
+    expect(screen.getByText("Left:")).toBeInTheDocument();
+    expect(screen.getByText("$2,000.00")).toBeInTheDocument();
+    expect(screen.getByText("$1,550.00")).toBeInTheDocument();
+    expect(screen.getByText("$450.00")).toBeInTheDocument();
+    expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
-  it("defaults to the Sankey view with one link and node per group", () => {
+  it("defaults to the 3-column Sankey with income, Total, and spending sides", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
-    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
-    expect(svg!.querySelector('[data-testid="sankey-source"]')).not.toBeNull();
+    // Left: one income source; right: 3 groups plus the Remaining plug.
+    expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(1);
+    expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(4);
+    expect(svg!.querySelector('[data-testid="sankey-total"]')).not.toBeNull();
     expect(container.querySelectorAll(".y-bar-track")).toHaveLength(0);
   });
 
-  it("labels each Sankey node with its name, amount, and percent", () => {
+  it("labels each node with its name, amount, and share of the flow", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    expect(within(svg as unknown as HTMLElement).getByText("Mortgage Interest")).toBeInTheDocument();
-    expect(within(svg as unknown as HTMLElement).getByText("Groceries")).toBeInTheDocument();
-    // 100000/155000 = 65%, 40000/155000 = 26%, 15000/155000 = 10%.
-    expect(within(svg as unknown as HTMLElement).getByText("$1,000.00 · 65%")).toBeInTheDocument();
-    expect(within(svg as unknown as HTMLElement).getByText("$400.00 · 26%")).toBeInTheDocument();
-    expect(within(svg as unknown as HTMLElement).getByText("$150.00 · 10%")).toBeInTheDocument();
+    const scope = within(svg as unknown as HTMLElement);
+    // Flow is $2,000: 100000 -> 50%, 40000 -> 20%, 15000 -> 8%, 45000 -> 23%.
+    expect(scope.getByText("Mortgage Interest")).toBeInTheDocument();
+    expect(scope.getByText("Groceries")).toBeInTheDocument();
+    expect(scope.getByText("$1,000.00 · 50%")).toBeInTheDocument();
+    expect(scope.getByText("$400.00 · 20%")).toBeInTheDocument();
+    expect(scope.getByText("$150.00 · 8%")).toBeInTheDocument();
+    expect(scope.getByText("Payroll")).toBeInTheDocument();
+    expect(scope.getByText("$2,000.00 · 100%")).toBeInTheDocument();
+    expect(scope.getByText("Remaining")).toBeInTheDocument();
+    expect(scope.getByText("$450.00 · 23%")).toBeInTheDocument();
   });
 
   it("colors nodes by stable name hash, not by rank", () => {
@@ -86,6 +102,7 @@ describe("SpendingReport", () => {
       <SpendingReport
         categories={[...sampleCategories].reverse()}
         merchants={sampleMerchants}
+        income={sampleIncome}
       />
     );
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
@@ -107,8 +124,9 @@ describe("SpendingReport", () => {
     expect(
       within(svg as unknown as HTMLElement).queryByText("Mortgage Interest")
     ).not.toBeInTheDocument();
-    // Merchant total differs: 100000 + 30000 + 20000.
-    expect(screen.getAllByText("$1,500.00")).toHaveLength(2);
+    // Merchant total differs: 100000 + 30000 + 20000; income side is unchanged.
+    expect(screen.getByText("$1,500.00")).toBeInTheDocument();
+    expect(screen.getByText("$500.00")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Categories", exact: true }));
     expect(screen.getByText("Spending by Category")).toBeInTheDocument();
@@ -137,11 +155,12 @@ describe("SpendingReport", () => {
 
     expect(screen.getByText("(2 in Other)")).toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
+    // Mortgage + Other + Remaining on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
     expect(within(svg as unknown as HTMLElement).getByText("Other")).toBeInTheDocument();
-    expect(within(svg as unknown as HTMLElement).getByText("$550.00 · 35%")).toBeInTheDocument();
-    // Total is unchanged by merging.
-    expect(screen.getAllByText("$1,550.00")).toHaveLength(2);
+    expect(within(svg as unknown as HTMLElement).getByText("$550.00 · 28%")).toBeInTheDocument();
+    // Out total is unchanged by merging.
+    expect(screen.getByText("$1,550.00")).toBeInTheDocument();
   });
 
   it("merges everything into a single Other row when the threshold exceeds all values", () => {
@@ -157,7 +176,7 @@ describe("SpendingReport", () => {
     expect(slider).toHaveAttribute("max", "1000");
     fireEvent.change(slider, { target: { value: "1000" } });
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
     expect(within(svg as unknown as HTMLElement).getByText("Other")).toBeInTheDocument();
     expect(screen.getByText("(2 in Other)")).toBeInTheDocument();
   });
@@ -172,7 +191,7 @@ describe("SpendingReport", () => {
     expect(screen.getByText("(2 merged)")).toBeInTheDocument();
   });
 
-  it("shows a tooltip with amount and share when hovering a Sankey node", () => {
+  it("shows a tooltip with amount and shares when hovering a spending node", () => {
     const { container } = renderReport();
     const node = container.querySelectorAll('[data-testid="sankey-node"]')[1]!;
     fireEvent.mouseMove(node, { clientX: 400, clientY: 200 });
@@ -182,9 +201,9 @@ describe("SpendingReport", () => {
     expect(tip).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("Groceries")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$400.00")).toBeInTheDocument();
-    expect(within(tip as unknown as HTMLElement).getByText("(26%)")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("(20%)")).toBeInTheDocument();
     expect(
-      within(tip as unknown as HTMLElement).getByText("of $1,550.00 total")
+      within(tip as unknown as HTMLElement).getByText("26% of $1,550.00 spending")
     ).toBeInTheDocument();
     fireEvent.mouseLeave(node);
     expect(document.querySelector(".y-tip")).toBeNull();
@@ -194,23 +213,101 @@ describe("SpendingReport", () => {
     const { container } = renderReport();
     const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
     fireEvent.change(slider, { target: { value: "500" } });
-    const otherLink = Array.from(
-      container.querySelectorAll('[data-testid="sankey-link"]')
-    ).pop()!;
+    // Out-links are Mortgage, Other, Remaining — Other sits in the middle.
+    const otherLink = container.querySelectorAll('[data-testid="sankey-link"]')[1]!;
     fireEvent.mouseMove(otherLink, { clientX: 400, clientY: 200 });
     expect(screen.getByText("2 smaller categories under $500.00")).toBeInTheDocument();
   });
 
-  it("shows the group count when hovering the Total source node", () => {
+  it("shows the income breakdown when hovering the Total middle node", () => {
     const { container } = renderReport();
-    const source = container.querySelector('[data-testid="sankey-source"]')!;
-    fireEvent.mouseMove(source, { clientX: 20, clientY: 200 });
-    expect(screen.getByText("Total spending")).toBeInTheDocument();
-    expect(screen.getByText("across 3 categories")).toBeInTheDocument();
+    const total = container.querySelector('[data-testid="sankey-total"]')!;
+    fireEvent.mouseMove(total, { clientX: 400, clientY: 200 });
+    expect(screen.getByText("Total flow")).toBeInTheDocument();
+    expect(screen.getByText("Income")).toBeInTheDocument();
+    expect(screen.getByText("Spent")).toBeInTheDocument();
+    expect(screen.getByText("Left")).toBeInTheDocument();
   });
 
-  it("shows empty state when both dimensions are empty", () => {
-    renderReport([], []);
+  it("shows received amount and income share when hovering an income node", () => {
+    const { container } = renderReport();
+    const node = container.querySelector('[data-testid="sankey-income"]')!;
+    fireEvent.mouseMove(node, { clientX: 100, clientY: 200 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Payroll")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("$2,000.00")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("(100%)")).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("100% of $2,000.00 income")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(node);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("shows unspent detail when hovering the Remaining plug", () => {
+    const { container } = renderReport();
+    const nodes = container.querySelectorAll('[data-testid="sankey-node"]');
+    const remaining = nodes[nodes.length - 1]!;
+    fireEvent.mouseMove(remaining, { clientX: 600, clientY: 350 });
+    expect(screen.getByText("Unspent of $2,000.00 income")).toBeInTheDocument();
+  });
+
+  it("shows an Overspent plug on the income side when spending exceeds income", () => {
+    const { container } = render(
+      <SpendingReport
+        categories={sampleCategories}
+        merchants={sampleMerchants}
+        income={[{ name: "Payroll", value: 100000 }]}
+      />
+    );
+    // $1,550 out vs $1,000 in: $550 short, no Remaining anywhere.
+    expect(screen.getByText("Over:")).toBeInTheDocument();
+    expect(screen.getByText("$550.00")).toBeInTheDocument();
+    expect(screen.queryByText("Remaining")).not.toBeInTheDocument();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    expect(within(svg as unknown as HTMLElement).getByText("Overspent")).toBeInTheDocument();
+    expect(svg.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(2);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+  });
+
+  it("anchors income labels into the left gutter, clear of the source bars", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const barX = Number(svg.querySelector('[data-testid="sankey-income"]')!.getAttribute("x"));
+    // Both income label lines are right-aligned into the gutter, ending
+    // before the source bar — never over the bar, never clipped.
+    for (const text of ["Payroll", "$2,000.00 · 100%"]) {
+      const el = within(svg as unknown as HTMLElement).getByText(text);
+      expect(el.getAttribute("text-anchor")).toBe("end");
+      expect(Number(el.getAttribute("x"))).toBeLessThanOrEqual(barX - 8);
+    }
+  });
+
+  it("grows the chart with a minimum row pitch so crowded labels never overlap", () => {
+    const many: SpendingItem[] = Array.from({ length: 60 }, (_, i) => ({
+      name: `Merchant ${i + 1}`,
+      value: 200000 - i * 1000,
+    }));
+    const { container } = render(
+      <SpendingReport categories={[]} merchants={many} income={[]} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Two-line labels need 32px of vertical pitch each; the SVG grows past
+    // the 400px viewport (the container scrolls) instead of crushing rows.
+    expect(Number(svg.getAttribute("height"))).toBeGreaterThanOrEqual(60 * 32);
+    const ys = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map((n) =>
+      Number(n.getAttribute("y"))
+    );
+    expect(ys).toHaveLength(60);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(32);
+    }
+  });
+
+  it("shows empty state when income and spending are both empty", () => {
+    renderReport([], [], []);
     expect(screen.getByText("No data for this timeframe.")).toBeInTheDocument();
     expect(screen.getByText("0 categories")).toBeInTheDocument();
   });
