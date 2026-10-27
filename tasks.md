@@ -67,4 +67,4 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-The Spending by Category sankey was done wrong. On the left it hags Money in, on the right categories or merchants. And in the middle is has to have category groups! The middle piece is missing.
+The Spending by Category sankey has issues. The sources on the left are sometimes so small that you can't fit income names with amounts both. So stop showing amounts if there is not enough space. The other issue is that iw ant the snakey lines have the same color and highlight all the way from source. If you can do shades of that color from half way that'd be even better. So income might be my job, category needs (all blue) and then the lines turn shades of blue to reach the actual needs subcategories. That'd be ideal.
