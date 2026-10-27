@@ -219,18 +219,20 @@ describe("ReportsView", () => {
     expect(sankeyBtn).toBeInTheDocument();
     expect(barsBtn).toBeInTheDocument();
 
-    // Default is the direct Sankey flow: the income feeds one ribbon per
-    // group plus the Remaining plug on the right (income exceeds spending),
-    // with no middle Total bar.
+    // Default is the three-column Sankey flow: the income feeds the
+    // Everyday group plus the full-width Remaining ribbon (income exceeds
+    // spending), and the group fans out to Groceries and Rent.
     const svg = panel.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
     expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
+    expect(svg!.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
     expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
     expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(0);
     expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
     expect(within(panel).getByText("Groceries")).toBeInTheDocument();
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
+    expect(within(panel).getByText("Everyday")).toBeInTheDocument();
     expect(within(panel).getByText("Remaining")).toBeInTheDocument();
     expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
 
@@ -258,6 +260,8 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("Shop B")).toBeInTheDocument();
     expect(within(panel).getAllByText("Payroll")).toHaveLength(1);
     expect(within(panel).getByText("3 merchants")).toBeInTheDocument();
+    // Uncategorized Shop B routes through the Uncategorized pseudo-group.
+    expect(within(panel).getByText("Uncategorized")).toBeInTheDocument();
 
     fireEvent.click(within(panel).getByRole("button", { name: "Categories" }));
     expect(findPanel("Spending by Category")).toBeTruthy();
@@ -276,8 +280,9 @@ describe("ReportsView", () => {
     expect(within(panel).getAllByText("$50.00")).toHaveLength(1);
     expect(within(panel).queryByText("Rent")).not.toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
-    // Groceries plus the Remaining plug (June income exceeds June spending).
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
+    // Groceries plus the Remaining plug (June income exceeds June spending),
+    // routed through the Everyday group: two left ribbons, one right ribbon.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
   });
 
   it("Spending tab merges smaller groups into Other via the threshold slider", () => {
@@ -290,8 +295,8 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("Other")).toBeInTheDocument();
     expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
-    // Groceries + Other + Remaining on the right.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+    // Groceries + Other + Remaining on the right, all through Everyday.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
     // Out total is unchanged by merging.
     expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
   });
@@ -309,7 +314,8 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
-    // 2 incomes x 3 right-column rows (Groceries + Other + Remaining).
+    // 2 incomes x 2 middles (Everyday + Remaining plug) plus 2 group
+    // ribbons into Groceries + Other.
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
   });
 
@@ -433,9 +439,11 @@ describe("ReportsView", () => {
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
     // Groceries + Rent + Fees + the Remaining plug (income exceeds spending),
-    // each fed directly by the single income.
-    expect(links).toHaveLength(4);
+    // all routed through the single Everyday group: two left ribbons (group
+    // + full-width Remaining) and three right ribbons.
+    expect(links).toHaveLength(5);
     expect(nodes).toHaveLength(4);
+    expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
     // Each ribbon is a closed bezier path running left-to-right.
     for (const link of links) {
       const d = link.getAttribute("d") ?? "";
@@ -687,6 +695,9 @@ describe("ReportsView", () => {
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(0);
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
     expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(1);
+    // The dangling group still draws its (fully unfunded) middle bar.
+    expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
   });
 });
 

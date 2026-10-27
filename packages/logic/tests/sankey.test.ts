@@ -3,13 +3,17 @@ import {
   computeDirectFlowLinks,
   computeIncomeBreakdown,
   computeSpendingBreakdown,
+  computeSpendingGroupFlow,
   layoutDirectIncomeSankey,
+  layoutGroupedIncomeSankey,
   layoutSankey,
   mergeBelowThreshold,
+  mergeGroupFlow,
   OTHER_BUCKET_LABEL,
   REMAINING_LABEL,
   sankeyContentHeight,
   SANKEY_LEFT_LABEL_INSET,
+  SANKEY_MIDDLE_LABEL_GAP,
   SANKEY_MIN_PITCH,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -17,6 +21,7 @@ import {
   SANKEY_PAD_TOP,
   SANKEY_SOURCE_GUTTER,
   SANKEY_SOURCE_LABEL_GAP,
+  UNCATEGORIZED_GROUP_LABEL,
   type MergedSpendingItem,
 } from "../src/sankey.js";
 import type { BudgetData, Transaction } from "../src/types.js";
@@ -212,6 +217,343 @@ describe("computeSpendingBreakdown", () => {
   });
 });
 
+function makeFlowData(): BudgetData {
+  const data = makeData();
+  data.groups.push({ id: 2, name: "Bills", sort: 1, isCreditCardPayments: false });
+  data.categories.push(
+    { id: 12, groupId: 1, name: "Dining", sort: 2, carryover: "0", goalTarget: null, linkedAccountId: null },
+    { id: 13, groupId: 2, name: "Electric", sort: 3, carryover: "0", goalTarget: null, linkedAccountId: null }
+  );
+  // Move Rent into Bills so the two groups both carry spending.
+  data.categories.find((c) => c.id === 11)!.groupId = 2;
+  return data;
+}
+
+describe("computeSpendingGroupFlow", () => {
+  it("attributes each category to its group exactly in categories mode", () => {
+    const flow = computeSpendingGroupFlow(makeFlowData(), "2026-04", "2026-06", "categories");
+    expect(flow.targets).toEqual([
+      { name: "Groceries", value: 35000 },
+      { name: "Rent", value: 30000 },
+    ]);
+    expect(flow.groups).toEqual([
+      { name: "Everyday", value: 35000 },
+      { name: "Bills", value: 30000 },
+    ]);
+    expect(flow.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 35000 },
+      { groupIndex: 1, targetIndex: 1, value: 30000 },
+    ]);
+  });
+
+  it("returns targets identical to computeSpendingBreakdown in both dimensions", () => {
+    for (const dim of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(makeFlowData(), "2026-04", "2026-06", dim);
+      expect(flow.targets).toEqual(computeSpendingBreakdown(makeFlowData(), "2026-04", "2026-06", dim));
+      // Reversed bounds agree too (the swap lives in the shared loop).
+      const rev = computeSpendingGroupFlow(makeFlowData(), "2026-06", "2026-04", dim);
+      expect(rev.targets).toEqual(flow.targets);
+      expect(rev.groups).toEqual(flow.groups);
+      expect(rev.links).toEqual(flow.links);
+    }
+  });
+
+  it("splits a merchant across its transactions' groups exactly in merchant mode", () => {
+    const data = makeFlowData();
+    // Whole Foods also sells electricity now: $80 in Bills on top of $350 in Everyday.
+    data.transactions.push(txn("2026-06-10", "Whole Foods", -8000, 13));
+    const flow = computeSpendingGroupFlow(data, "2026-04", "2026-06", "merchants");
+    expect(flow.targets).toEqual([
+      { name: "Whole Foods", value: 43000 },
+      { name: "Landlord", value: 30000 },
+      { name: "Corner Shop", value: 15000 },
+    ]);
+    expect(flow.groups).toEqual([
+      { name: "Bills", value: 38000 },
+      { name: "Everyday", value: 35000 },
+      { name: UNCATEGORIZED_GROUP_LABEL, value: 15000 },
+    ]);
+    // Links sorted by (groupIndex, targetIndex).
+    expect(flow.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 8000 },
+      { groupIndex: 0, targetIndex: 1, value: 30000 },
+      { groupIndex: 1, targetIndex: 0, value: 35000 },
+      { groupIndex: 2, targetIndex: 2, value: 15000 },
+    ]);
+  });
+
+  it("routes uncategorized rows to the Uncategorized pseudo-group in merchant mode", () => {
+    const flow = computeSpendingGroupFlow(makeFlowData(), "2026-04", "2026-06", "merchants");
+    // Corner Shop ($150) is the only uncategorized spender in the fixture.
+    expect(flow.groups).toContainEqual({ name: UNCATEGORIZED_GROUP_LABEL, value: 15000 });
+    const cornerIdx = flow.targets.findIndex((t) => t.name === "Corner Shop");
+    const cornerLinks = flow.links.filter((l) => l.targetIndex === cornerIdx);
+    expect(cornerLinks).toHaveLength(1);
+    expect(flow.groups[cornerLinks[0]!.groupIndex]!.name).toBe(UNCATEGORIZED_GROUP_LABEL);
+  });
+
+  it("spreads a net-negative group cell proportionally instead of drawing negative ribbons", () => {
+    const data = makeFlowData();
+    data.transactions.push(
+      txn("2026-06-10", "Gadget Store", -10000, 10),
+      // A refund bigger than nothing in Bills: the (Bills, Gadget Store)
+      // cell nets to -$60 while the merchant nets to +$40 overall.
+      txn("2026-06-11", "Gadget Store", 6000, 13)
+    );
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "merchants");
+    const gsIdx = flow.targets.findIndex((t) => t.name === "Gadget Store");
+    expect(flow.targets[gsIdx]).toEqual({ name: "Gadget Store", value: 4000 });
+    const gsLinks = flow.links.filter((l) => l.targetIndex === gsIdx);
+    // Only the positive Everyday cell draws; the -$60 Bills cell is spread
+    // (the $40 net attributes entirely to Everyday).
+    expect(gsLinks).toHaveLength(1);
+    expect(flow.groups[gsLinks[0]!.groupIndex]!.name).toBe("Everyday");
+    expect(gsLinks[0]!.value).toBeCloseTo(4000, 9);
+    for (const l of flow.links) {
+      expect(l.value).toBeGreaterThan(0);
+    }
+  });
+
+  it("falls back to an em-dash group for dangling categories", () => {
+    const data = makeFlowData();
+    data.categories.push(
+      { id: 50, groupId: 99, name: "Orphan", sort: 9, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Mystery", -7000, 999),
+      txn("2026-06-11", "Orphan Store", -3000, 50)
+    );
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toContainEqual({ name: "—", value: 7000 });
+    expect(flow.targets).toContainEqual({ name: "Orphan", value: 3000 });
+    // Both rows land in the em-dash group (unknown category / unknown group).
+    expect(flow.groups).toContainEqual({ name: "—", value: 10000 });
+  });
+
+  it("conserves flow: link marginals match both columns", () => {
+    const data = makeFlowData();
+    data.transactions.push(txn("2026-06-10", "Whole Foods", -8000, 13));
+    for (const dim of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-04", "2026-06", dim);
+      for (let i = 0; i < flow.groups.length; i++) {
+        const out = flow.links.filter((l) => l.groupIndex === i).reduce((s, l) => s + l.value, 0);
+        expect(out).toBeCloseTo(flow.groups[i]!.value, 9);
+      }
+      for (let j = 0; j < flow.targets.length; j++) {
+        const into = flow.links.filter((l) => l.targetIndex === j).reduce((s, l) => s + l.value, 0);
+        expect(into).toBeCloseTo(flow.targets[j]!.value, 9);
+        // Every kept target draws at least one ribbon.
+        expect(flow.links.some((l) => l.targetIndex === j)).toBe(true);
+      }
+      // Both columns sum to the same spending total.
+      const gSum = flow.groups.reduce((s, g) => s + g.value, 0);
+      const tSum = flow.targets.reduce((s, t) => s + t.value, 0);
+      expect(gSum).toBeCloseTo(tSum, 9);
+    }
+  });
+
+  it("inherits every breakdown filter (payoffs, boundary inflows, splits)", () => {
+    // Delegation keeps the filters identical by construction; one joint
+    // probe proves the flow (not just the targets) honors them.
+    const data = makeFlowData();
+    data.accounts.push(
+      { id: 3, name: "Visa", kind: "credit", groupLabel: "Credit", balance: "0", onBudget: true, sort: 2 },
+      { id: 5, name: "Broker", kind: "offbudget", groupLabel: "Invest", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-15", "Transfer : Visa", -20000, null, { transferAccountId: 3 }),
+      txn("2026-06-16", "Transfer : Broker", 100000, 10, { transferAccountId: 5 }),
+      txn("2026-06-10", "Split Store", -10000, null, { id: 900 }),
+      txn("2026-06-10", "Split Store", -10000, 10, { id: 901, parentId: 900 })
+    );
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    // Only the June Groceries rows count: $50 + the $100 split child.
+    expect(flow.targets).toEqual([{ name: "Groceries", value: 15000 }]);
+    expect(flow.groups).toEqual([{ name: "Everyday", value: 15000 }]);
+    expect(flow.links).toEqual([{ groupIndex: 0, targetIndex: 0, value: 15000 }]);
+  });
+
+  it("returns an empty flow when nothing matches", () => {
+    for (const dim of ["categories", "merchants"] as const) {
+      expect(computeSpendingGroupFlow(makeFlowData(), "2020-01", "2020-02", dim)).toEqual({
+        groups: [],
+        targets: [],
+        links: [],
+      });
+    }
+  });
+});
+
+describe("mergeGroupFlow", () => {
+  const groups = [
+    { name: "Bills", value: 38000 },
+    { name: "Everyday", value: 35000 },
+    { name: UNCATEGORIZED_GROUP_LABEL, value: 15000 },
+  ];
+  const targets = [
+    { name: "Whole Foods", value: 43000 },
+    { name: "Landlord", value: 30000 },
+    { name: "Corner Shop", value: 15000 },
+  ];
+  const links = [
+    { groupIndex: 0, targetIndex: 0, value: 8000 },
+    { groupIndex: 0, targetIndex: 1, value: 30000 },
+    { groupIndex: 1, targetIndex: 0, value: 35000 },
+    { groupIndex: 2, targetIndex: 2, value: 15000 },
+  ];
+
+  function expectConserved(
+    merged: { groups: { value: number }[]; targets: { value: number }[]; links: { groupIndex: number; targetIndex: number; value: number }[] }
+  ) {
+    for (let i = 0; i < merged.groups.length; i++) {
+      const out = merged.links.filter((l) => l.groupIndex === i).reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(merged.groups[i]!.value, 9);
+    }
+    for (let j = 0; j < merged.targets.length; j++) {
+      const into = merged.links.filter((l) => l.targetIndex === j).reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(merged.targets[j]!.value, 9);
+    }
+  }
+
+  it("passes everything through unchanged when the threshold is 0", () => {
+    const merged = mergeGroupFlow(groups, targets, links, 0);
+    expect(merged.groups).toEqual(groups.map((g) => ({ ...g, mergedCount: 1 })));
+    expect(merged.targets).toEqual(targets.map((t) => ({ ...t, mergedCount: 1 })));
+    expect(merged.links).toEqual(links);
+    expect(merged.otherCount).toBe(0);
+    expect(merged.otherValue).toBe(0);
+  });
+
+  it("merges both columns with mergeBelowThreshold semantics and re-aggregates links", () => {
+    const merged = mergeGroupFlow(groups, targets, links, 20000);
+    // Corner Shop ($150) and Uncategorized ($150) fold; the rest stay.
+    expect(merged.targets).toEqual(mergeBelowThreshold(targets, 20000).items);
+    expect(merged.groups).toEqual(mergeBelowThreshold(groups, 20000).items);
+    expect(merged.targets).toEqual([
+      { name: "Whole Foods", value: 43000, mergedCount: 1 },
+      { name: "Landlord", value: 30000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 15000, mergedCount: 1, bucket: true },
+    ]);
+    expect(merged.groups).toEqual([
+      { name: "Bills", value: 38000, mergedCount: 1 },
+      { name: "Everyday", value: 35000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 15000, mergedCount: 1, bucket: true },
+    ]);
+    // The merged cell re-keys onto the two Other buckets.
+    expect(merged.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 8000 },
+      { groupIndex: 0, targetIndex: 1, value: 30000 },
+      { groupIndex: 1, targetIndex: 0, value: 35000 },
+      { groupIndex: 2, targetIndex: 2, value: 15000 },
+    ]);
+    expect(merged.otherCount).toBe(2);
+    expect(merged.otherValue).toBe(30000);
+    expectConserved(merged);
+  });
+
+  it("routes a kept target through the middle Other when only its group merges", () => {
+    const merged = mergeGroupFlow(
+      [
+        { name: "Big", value: 9000 },
+        { name: "Small", value: 1000 },
+      ],
+      [{ name: "A", value: 10000 }],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9000 },
+        { groupIndex: 1, targetIndex: 0, value: 1000 },
+      ],
+      5000
+    );
+    expect(merged.groups).toEqual([
+      { name: "Big", value: 9000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+    ]);
+    expect(merged.targets).toEqual([{ name: "A", value: 10000, mergedCount: 1 }]);
+    expect(merged.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 9000 },
+      { groupIndex: 1, targetIndex: 0, value: 1000 },
+    ]);
+    expect(merged.otherCount).toBe(1);
+    expectConserved(merged);
+  });
+
+  it("fans a merged Other target out to every group that feeds it", () => {
+    const merged = mergeGroupFlow(
+      [{ name: "G", value: 10000 }],
+      [
+        { name: "A", value: 9000 },
+        { name: "B", value: 1000 },
+      ],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9000 },
+        { groupIndex: 0, targetIndex: 1, value: 1000 },
+      ],
+      5000
+    );
+    expect(merged.targets).toEqual([
+      { name: "A", value: 9000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+    ]);
+    expect(merged.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 9000 },
+      { groupIndex: 0, targetIndex: 1, value: 1000 },
+    ]);
+    expectConserved(merged);
+  });
+
+  it("keeps a literal Other name distinct from the merged bucket (index-keyed)", () => {
+    const merged = mergeGroupFlow(
+      [
+        { name: OTHER_BUCKET_LABEL, value: 10000 },
+        { name: "Dust", value: 100 },
+      ],
+      [{ name: "A", value: 10100 }],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 10000 },
+        { groupIndex: 1, targetIndex: 0, value: 100 },
+      ],
+      5000
+    );
+    // Two rows share the name but route by index: the kept group and the
+    // merged bucket stay separate, and both marginals still hold.
+    expect(merged.groups).toEqual([
+      { name: OTHER_BUCKET_LABEL, value: 10000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 100, mergedCount: 1, bucket: true },
+    ]);
+    expect(merged.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 10000 },
+      { groupIndex: 1, targetIndex: 0, value: 100 },
+    ]);
+    expectConserved(merged);
+  });
+
+  it("drops dangling and non-positive links", () => {
+    const merged = mergeGroupFlow(
+      [{ name: "G", value: 10000 }],
+      [{ name: "A", value: 10000 }],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 10000 },
+        { groupIndex: 9, targetIndex: 0, value: 500 },
+        { groupIndex: 0, targetIndex: 9, value: 500 },
+        { groupIndex: 0, targetIndex: 0, value: 0 },
+        { groupIndex: -1, targetIndex: 0, value: 5 },
+      ],
+      0
+    );
+    expect(merged.links).toEqual([{ groupIndex: 0, targetIndex: 0, value: 10000 }]);
+    expectConserved(merged);
+  });
+
+  it("returns empty output with no phantom Other for empty input", () => {
+    const merged = mergeGroupFlow([], [], [], 5000);
+    expect(merged.groups).toEqual([]);
+    expect(merged.targets).toEqual([]);
+    expect(merged.links).toEqual([]);
+    expect(merged.otherCount).toBe(0);
+    expect(merged.otherValue).toBe(0);
+  });
+});
+
 describe("mergeBelowThreshold", () => {
   const items = [
     { name: "Big", value: 10000 },
@@ -237,10 +579,25 @@ describe("mergeBelowThreshold", () => {
     const merged = mergeBelowThreshold(items, 5000);
     expect(merged.items).toEqual([
       { name: "Big", value: 10000, mergedCount: 1 },
-      { name: OTHER_BUCKET_LABEL, value: 5200, mergedCount: 3 },
+      { name: OTHER_BUCKET_LABEL, value: 5200, mergedCount: 3, bucket: true },
     ]);
     expect(merged.otherCount).toBe(3);
     expect(merged.otherValue).toBe(5200);
+  });
+
+  it("flags even a single-row Other bucket so views never mistake it for a kept row", () => {
+    const merged = mergeBelowThreshold(
+      [
+        { name: "Big", value: 10000 },
+        { name: "Small", value: 1000 },
+      ],
+      5000
+    );
+    expect(merged.items).toEqual([
+      { name: "Big", value: 10000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+    ]);
+    expect(merged.items[0]).not.toHaveProperty("bucket");
   });
 
   it("keeps items equal to the threshold (strictly-below comparison)", () => {
@@ -253,7 +610,7 @@ describe("mergeBelowThreshold", () => {
   it("merges everything into a single Other row when the threshold exceeds all values", () => {
     const merged = mergeBelowThreshold(items, 999999);
     expect(merged.items).toEqual([
-      { name: OTHER_BUCKET_LABEL, value: 15200, mergedCount: 4 },
+      { name: OTHER_BUCKET_LABEL, value: 15200, mergedCount: 4, bucket: true },
     ]);
     expect(merged.otherCount).toBe(4);
     expect(merged.otherValue).toBe(15200);
@@ -929,6 +1286,492 @@ describe("layoutDirectIncomeSankey", () => {
     const lastSrc = layout.sources[layout.sources.length - 1]!;
     expect(lastSrc.y + lastSrc.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
     for (const node of [...layout.sources, ...layout.targets]) {
+      expect(Number.isFinite(node.y)).toBe(true);
+      expect(Number.isFinite(node.h)).toBe(true);
+    }
+  });
+});
+
+describe("layoutGroupedIncomeSankey", () => {
+  const gSources = [merged("Pay", 8000), merged("Gig", 2000)];
+  const gGroups = [merged("G1", 6000), merged("G2", 4000)];
+  const gTargets = [merged("A", 5000), merged("B", 3000), merged("C", 2000)];
+  const gLinks = [
+    { groupIndex: 0, targetIndex: 0, value: 5000 },
+    { groupIndex: 0, targetIndex: 1, value: 1000 },
+    { groupIndex: 1, targetIndex: 1, value: 2000 },
+    { groupIndex: 1, targetIndex: 2, value: 2000 },
+  ];
+
+  it("returns an empty layout with finite anchors for empty input (no NaN)", () => {
+    const layout = layoutGroupedIncomeSankey([], [], [], [], { width: 800, height: 400 });
+    expect(layout.flowTotal).toBe(0);
+    expect(layout.sources).toEqual([]);
+    expect(layout.middles).toEqual([]);
+    expect(layout.targets).toEqual([]);
+    expect(layout.remainingTargetIndex).toBeNull();
+    expect(layout.linksLeft).toEqual([]);
+    expect(layout.linksRight).toEqual([]);
+    for (const v of [
+      layout.incomeTotal,
+      layout.spendingTotal,
+      layout.flowTotal,
+      layout.sourceLabelX,
+      layout.middleLabelX,
+      layout.targetLabelX,
+    ]) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("returns degenerate geometry for zero flow, bad dimensions, and absurd node widths", () => {
+    // Targets without groups carry no flow (groups always derive from
+    // targets in well-formed flows): flowTotal is 0, so the layout is empty.
+    const zeroFlow = layoutGroupedIncomeSankey([], [], [merged("X", 5000)], [], {
+      width: 800,
+      height: 400,
+    });
+    expect(zeroFlow.flowTotal).toBe(0);
+    expect(zeroFlow.targets).toEqual([]);
+    expect(zeroFlow.linksRight).toEqual([]);
+    for (const layout of [
+      layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, { width: 0, height: 400 }),
+      layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, { width: 800, height: 0 }),
+      // The middle clamp degrades to a fixed offset instead of NaN.
+      layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+        width: 800,
+        height: 400,
+        nodeWidth: 500,
+      }),
+    ]) {
+      for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
+        expect(Number.isFinite(node.x)).toBe(true);
+        expect(Number.isFinite(node.y)).toBe(true);
+        expect(Number.isFinite(node.h)).toBe(true);
+      }
+      for (const link of [...layout.linksLeft, ...layout.linksRight]) {
+        expect(Number.isFinite(link.x0)).toBe(true);
+        expect(Number.isFinite(link.x1)).toBe(true);
+      }
+      expect(Number.isFinite(layout.middleLabelX)).toBe(true);
+    }
+  });
+
+  it("drops non-positive rows and their links, staying finite", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 6000)],
+      [merged("G1", 6000), merged("Zero", 0)],
+      [merged("A", 5000), merged("Neg", -100)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 5000 },
+        { groupIndex: 1, targetIndex: 0, value: 999 },
+        { groupIndex: 0, targetIndex: 1, value: 999 },
+      ],
+      { width: 800, height: 400 }
+    );
+    expect(layout.middles.map((m) => m.name)).toEqual(["G1"]);
+    expect(layout.targets.map((t) => t.name)).toEqual(["A"]);
+    expect(layout.remainingTargetIndex).toBeNull();
+    expect(layout.linksRight).toHaveLength(1);
+    expect(layout.linksRight[0]).toMatchObject({ sourceIndex: 0, targetIndex: 0, value: 5000 });
+    for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
+      expect(Number.isFinite(node.y)).toBe(true);
+      expect(Number.isFinite(node.h)).toBe(true);
+    }
+  });
+
+  it("routes income through groups into spending with no Remaining when balanced", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    expect(layout.incomeTotal).toBe(10000);
+    expect(layout.spendingTotal).toBe(10000);
+    expect(layout.flowTotal).toBe(10000);
+    expect(layout.sources).toHaveLength(2);
+    expect(layout.middles.map((m) => m.name)).toEqual(["G1", "G2"]);
+    expect(layout.targets).toHaveLength(3);
+    // Left hop is dense (2 sources x 2 middles, middle-major); the right
+    // hop draws exactly the input rollup cells at full coverage.
+    expect(layout.linksLeft.map((l) => [l.sourceIndex, l.targetIndex])).toEqual([
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ]);
+    expect(layout.linksRight.map((l) => [l.sourceIndex, l.targetIndex, l.value])).toEqual([
+      [0, 0, 5000],
+      [0, 1, 1000],
+      [1, 1, 2000],
+      [1, 2, 2000],
+    ]);
+    expect(layout.linksLeft[0]).toMatchObject({ sourceName: "Pay", targetName: "G1" });
+    expect(layout.linksRight[0]).toMatchObject({ sourceName: "G1", targetName: "A" });
+  });
+
+  it("appends Remaining as a trailing target fed directly from income, bypassing groups", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 12000)],
+      gGroups,
+      gTargets,
+      gLinks,
+      { width: 800, height: 400 }
+    );
+    expect(layout.middles.map((m) => m.name)).toEqual(["G1", "G2"]);
+    expect(layout.targets.map((t) => t.name)).toEqual(["A", "B", "C", REMAINING_LABEL]);
+    expect(layout.remainingTargetIndex).toBe(3);
+    const rem = layout.targets[3]!;
+    expect(rem).toMatchObject({ value: 2000, fundedValue: 2000, unfundedValue: 0 });
+    // Every group draws an income ribbon, plus one ribbon into Remaining;
+    // the right hop only routes groups into spending targets.
+    expect(layout.linksLeft).toHaveLength(3);
+    expect(layout.linksRight).toHaveLength(4);
+    expect(layout.linksRight.every((l) => l.targetIndex < 3)).toBe(true);
+    // The plug ribbon carries the plug index (one past the last middle).
+    const plug = layout.linksLeft[2]!;
+    expect(plug).toMatchObject({ sourceIndex: 0, targetIndex: 2, value: 2000 });
+    expect(plug.targetName).toBe(REMAINING_LABEL);
+    // Full-width: runs from the source bar to the Remaining bar, crossing
+    // behind the middle column — and fills the plug bar exactly, no taper.
+    expect(plug.x0).toBeCloseTo(layout.sources[0]!.x + layout.sources[0]!.w, 6);
+    expect(plug.x1).toBeCloseTo(rem.x, 6);
+    expect(plug.x1).toBeGreaterThan(layout.middles[0]!.x + layout.middles[0]!.w);
+    expect(plug.sy1 - plug.sy0).toBeCloseTo(plug.ty1 - plug.ty0, 6);
+    expect(plug.ty0).toBeCloseTo(rem.y, 6);
+    expect(plug.ty1).toBeCloseTo(rem.y + rem.h, 6);
+    expect(plug.d).toMatch(/^M .* C .* Z$/);
+  });
+
+  it("never mistakes a literal Remaining group for the surplus plug", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 12000)],
+      [merged(REMAINING_LABEL, 6000), merged("G2", 4000)],
+      gTargets,
+      gLinks,
+      { width: 800, height: 400 }
+    );
+    // The literal group stays in the middle; the plug is identified by
+    // position (one past the last middle), never by name.
+    expect(layout.middles.map((m) => m.name)).toEqual([REMAINING_LABEL, "G2"]);
+    expect(layout.remainingTargetIndex).toBe(3);
+    expect(layout.targets[3]).toMatchObject({ name: REMAINING_LABEL, value: 2000 });
+    const plugLinks = layout.linksLeft.filter((l) => l.targetIndex === 2);
+    expect(plugLinks).toHaveLength(1);
+    expect(plugLinks[0]!.x1).toBeCloseTo(layout.targets[3]!.x, 6);
+  });
+
+  it("conserves each source across groups and Remaining under a surplus", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 9000), merged("Gig", 3000)],
+      gGroups,
+      gTargets,
+      gLinks,
+      { width: 800, height: 400 }
+    );
+    expect(layout.remainingTargetIndex).toBe(3);
+    for (let i = 0; i < layout.sources.length; i++) {
+      const out = layout.linksLeft
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(layout.sources[i]!.value, 9);
+    }
+    // The Remaining bands fill the plug bar exactly, in source order.
+    const rem = layout.targets[3]!;
+    const bands = layout.linksLeft.filter((l) => l.targetIndex === 2);
+    expect(bands).toHaveLength(2);
+    expect(bands.reduce((s, l) => s + (l.ty1 - l.ty0), 0)).toBeCloseTo(rem.h, 6);
+    expect(bands[0]!.ty0).toBeCloseTo(rem.y, 6);
+  });
+
+  it("conserves value on both hops", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    for (let i = 0; i < layout.sources.length; i++) {
+      const out = layout.linksLeft
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(layout.sources[i]!.value, 9);
+    }
+    for (let i = 0; i < layout.middles.length; i++) {
+      const into = layout.linksLeft
+        .filter((l) => l.targetIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      const out = layout.linksRight
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(layout.middles[i]!.fundedValue, 9);
+      expect(out).toBeCloseTo(layout.middles[i]!.fundedValue, 9);
+      expect(layout.middles[i]!.fundedValue + layout.middles[i]!.unfundedValue).toBeCloseTo(
+        layout.middles[i]!.value,
+        9
+      );
+    }
+    for (let j = 0; j < layout.targets.length; j++) {
+      const into = layout.linksRight
+        .filter((l) => l.targetIndex === j)
+        .reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(layout.targets[j]!.fundedValue, 9);
+      expect(layout.targets[j]!.fundedValue + layout.targets[j]!.unfundedValue).toBeCloseTo(
+        layout.targets[j]!.value,
+        9
+      );
+    }
+  });
+
+  it("runs every ribbon bar-to-bar with no taper and closed paths", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    for (const link of layout.linksLeft) {
+      const src = layout.sources[link.sourceIndex]!;
+      const mid = layout.middles[link.targetIndex]!;
+      expect(link.x0).toBeCloseTo(src.x + src.w, 6);
+      expect(link.x1).toBeCloseTo(mid.x, 6);
+      expect(link.x1).toBeGreaterThan(link.x0);
+      expect(link.sy1 - link.sy0).toBeCloseTo(link.ty1 - link.ty0, 6);
+      expect(link.sy0).toBeGreaterThanOrEqual(src.y - 1e-9);
+      expect(link.sy1).toBeLessThanOrEqual(src.y + src.h + 1e-9);
+      expect(link.ty0).toBeGreaterThanOrEqual(mid.y - 1e-9);
+      expect(link.ty1).toBeLessThanOrEqual(mid.y + mid.h + 1e-9);
+      expect(link.d).toMatch(/^M .* C .* Z$/);
+    }
+    for (const link of layout.linksRight) {
+      const mid = layout.middles[link.sourceIndex]!;
+      const tgt = layout.targets[link.targetIndex]!;
+      expect(link.x0).toBeCloseTo(mid.x + mid.w, 6);
+      expect(link.x1).toBeCloseTo(tgt.x, 6);
+      expect(link.x1).toBeGreaterThan(link.x0);
+      expect(link.sy1 - link.sy0).toBeCloseTo(link.ty1 - link.ty0, 6);
+      expect(link.sy0).toBeGreaterThanOrEqual(mid.y - 1e-9);
+      expect(link.sy1).toBeLessThanOrEqual(mid.y + mid.h + 1e-9);
+      expect(link.ty0).toBeGreaterThanOrEqual(tgt.y - 1e-9);
+      expect(link.ty1).toBeLessThanOrEqual(tgt.y + tgt.h + 1e-9);
+      expect(link.d).toMatch(/^M .* C .* Z$/);
+    }
+  });
+
+  it("fills each middle funded region exactly from both sides, in order", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    for (let i = 0; i < layout.middles.length; i++) {
+      const mid = layout.middles[i]!;
+      const inBands = layout.linksLeft.filter((l) => l.targetIndex === i);
+      const outBands = layout.linksRight.filter((l) => l.sourceIndex === i);
+      const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      const outH = outBands.reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+      // Fully funded here: bands fill the whole bar from both sides.
+      expect(inH).toBeCloseTo(mid.h, 6);
+      expect(outH).toBeCloseTo(mid.h, 6);
+      expect(inBands[0]!.ty0).toBeCloseTo(mid.y, 6);
+      expect(outBands[0]!.sy0).toBeCloseTo(mid.y, 6);
+      // Bands run in source order on the way in, target order on the way out.
+      expect(inBands.map((l) => l.sourceIndex)).toEqual([0, 1]);
+      const outs = outBands.map((l) => l.targetIndex);
+      expect(outs).toEqual([...outs].sort((a, b) => a - b));
+      expect(mid.unfundedH).toBe(0);
+    }
+    // Bands within a target run in middle order: B draws from G1 then G2.
+    const intoB = layout.linksRight.filter((l) => l.targetIndex === 1);
+    expect(intoB.map((l) => l.sourceIndex)).toEqual([0, 1]);
+    expect(intoB[1]!.ty0).toBeCloseTo(intoB[0]!.ty1, 6);
+  });
+
+  it("stacks all three columns top-down inside the padded plot area", () => {
+    const W = 800;
+    const H = 400;
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: W,
+      height: H,
+      padTop: 28,
+      padBottom: 28,
+    });
+    expect(layout.sources[0]!.y).toBeCloseTo(28, 6);
+    expect(layout.middles[0]!.y).toBeCloseTo(28, 6);
+    expect(layout.targets[0]!.y).toBeCloseTo(28, 6);
+    for (const col of [layout.sources, layout.middles, layout.targets]) {
+      let prevTop = 28;
+      for (const node of col) {
+        expect(node.y).toBeGreaterThanOrEqual(prevTop - 1e-9);
+        expect(node.x).toBeGreaterThanOrEqual(0);
+        expect(node.x + node.w).toBeLessThanOrEqual(W);
+        expect(node.y + node.h).toBeLessThanOrEqual(H - 28 + 1e-9);
+        prevTop = node.y + node.h;
+      }
+    }
+    // The middle column sits strictly between the outer columns.
+    const srcR = layout.sources[0]!.x + layout.sources[0]!.w;
+    expect(layout.middles[0]!.x).toBeGreaterThan(srcR);
+    expect(layout.middles[0]!.x + layout.middles[0]!.w).toBeLessThan(layout.targets[0]!.x);
+    // Node shares match drawn heights on all three sides.
+    for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
+      expect(node.share).toBeCloseTo(node.value / layout.flowTotal, 9);
+    }
+  });
+
+  it("renders the shortfall as unfunded segments at the bottom of middle and right bars", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 5000)],
+      gGroups,
+      gTargets,
+      gLinks,
+      { width: 800, height: 400 }
+    );
+    // $5000 income over $10000 spending: uniform half coverage, no Remaining.
+    expect(layout.middles.map((m) => m.name)).toEqual(["G1", "G2"]);
+    for (const mid of layout.middles) {
+      expect(mid.fundedValue).toBeCloseTo(mid.value / 2, 9);
+      expect(mid.unfundedValue).toBeCloseTo(mid.value / 2, 9);
+      expect(mid.unfundedH).toBeCloseTo(mid.h / 2, 6);
+      // Incoming bands fill exactly the funded (top) half.
+      const inBands = layout.linksLeft.filter((l) => l.targetIndex === layout.middles.indexOf(mid));
+      const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      expect(inH).toBeCloseTo(mid.h - mid.unfundedH, 6);
+    }
+    for (const tgt of layout.targets) {
+      expect(tgt.fundedValue).toBeCloseTo(tgt.value / 2, 9);
+      expect(tgt.unfundedValue).toBeCloseTo(tgt.value / 2, 9);
+      expect(tgt.unfundedH).toBeCloseTo(tgt.h / 2, 6);
+      const inBands = layout.linksRight.filter(
+        (l) => l.targetIndex === layout.targets.indexOf(tgt)
+      );
+      const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      expect(inH).toBeCloseTo(tgt.h - tgt.unfundedH, 6);
+      expect(inBands[0]!.ty0).toBeCloseTo(tgt.y, 6);
+    }
+    // Right ribbons carry the exact cells at half coverage.
+    expect(layout.linksRight.map((l) => l.value)).toEqual([2500, 500, 1000, 1000]);
+  });
+
+  it("renders fully-unfunded bars with no ribbons when there is no income", () => {
+    const layout = layoutGroupedIncomeSankey([], gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    expect(layout.sources).toEqual([]);
+    expect(layout.linksLeft).toEqual([]);
+    expect(layout.linksRight).toEqual([]);
+    for (const mid of layout.middles) {
+      expect(mid.fundedValue).toBe(0);
+      expect(mid.unfundedValue).toBe(mid.value);
+      expect(mid.unfundedH).toBeCloseTo(mid.h, 9);
+    }
+    for (const tgt of layout.targets) {
+      expect(tgt.fundedValue).toBe(0);
+      expect(tgt.unfundedValue).toBe(tgt.value);
+      expect(tgt.unfundedH).toBeCloseTo(tgt.h, 9);
+      expect(Number.isFinite(tgt.y)).toBe(true);
+      expect(Number.isFinite(tgt.h)).toBe(true);
+    }
+    // Right bars fall back to the middle scale, so heights stay proportional.
+    const [a, b] = [layout.targets[0]!, layout.targets[1]!];
+    expect(a.h / b.h).toBeCloseTo(5000 / 3000, 9);
+  });
+
+  it("routes all income to a lone Remaining target when there is no spending", () => {
+    const layout = layoutGroupedIncomeSankey([merged("Pay", 10000)], [], [], [], {
+      width: 800,
+      height: 400,
+    });
+    expect(layout.middles).toEqual([]);
+    expect(layout.targets.map((t) => t.name)).toEqual([REMAINING_LABEL]);
+    expect(layout.remainingTargetIndex).toBe(0);
+    expect(layout.linksRight).toEqual([]);
+    expect(layout.linksLeft).toHaveLength(1);
+    expect(layout.linksLeft[0]).toMatchObject({ sourceIndex: 0, targetIndex: 0, value: 10000 });
+    // Full-width ribbon into the lone plug.
+    expect(layout.linksLeft[0]!.x1).toBeCloseTo(layout.targets[0]!.x, 6);
+  });
+
+  it("keeps label anchors clear of their bars on all three columns", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+      padLeft: 112,
+    });
+    expect(layout.sourceLabelX).toBeLessThanOrEqual(layout.sources[0]!.x - 8);
+    expect(layout.middleLabelX).toBe(
+      layout.middles[0]!.x + layout.middles[0]!.w + SANKEY_MIDDLE_LABEL_GAP
+    );
+    expect(layout.targetLabelX).toBeGreaterThanOrEqual(
+      layout.targets[0]!.x + layout.targets[0]!.w + 8
+    );
+  });
+
+  it("reserves a left label zone clear of the viewport edge at any width", () => {
+    // The view renders up to 20 name chars at ~7px plus an 11px amount line
+    // into this zone, so it must hold that budget past the minimum inset.
+    const MIN_LABEL_BUDGET = 20 * 7;
+    for (const width of [800, 360]) {
+      const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+        width,
+        height: 400,
+        padLeft: SANKEY_SOURCE_GUTTER,
+      });
+      expect(layout.sourceLabelX).toBe(SANKEY_SOURCE_GUTTER - SANKEY_SOURCE_LABEL_GAP);
+      expect(layout.sources[0]!.x).toBe(SANKEY_SOURCE_GUTTER);
+      expect(layout.sourceLabelX - SANKEY_LEFT_LABEL_INSET).toBeGreaterThanOrEqual(
+        MIN_LABEL_BUDGET
+      );
+      // Narrow widths squeeze the ribbons, never the labels or bars: both
+      // runs stay positive.
+      for (const link of [...layout.linksLeft, ...layout.linksRight]) {
+        expect(link.x1).toBeGreaterThan(link.x0);
+      }
+    }
+    // Degenerate layouts anchor the same way (the contract is unconditional).
+    const empty = layoutGroupedIncomeSankey([], [], [], [], {
+      width: 800,
+      height: 400,
+      padLeft: SANKEY_SOURCE_GUTTER,
+    });
+    expect(empty.sourceLabelX).toBe(SANKEY_SOURCE_GUTTER - SANKEY_SOURCE_LABEL_GAP);
+    expect(Number.isFinite(empty.middleLabelX)).toBe(true);
+  });
+
+  it("keeps every row pitch at the label minimum when sized by the view contract", () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      merged(`M${i}`, Math.max(1, 60000 - i * 997))
+    );
+    const triLinks = many.map((m, j) => ({ groupIndex: j % 3, targetIndex: j, value: m.value }));
+    // Groups derived from their links, exactly like computeSpendingGroupFlow.
+    const triGroups = [0, 1, 2].map((g) =>
+      merged(
+        `G${g + 1}`,
+        triLinks.filter((l) => l.groupIndex === g).reduce((s, l) => s + l.value, 0)
+      )
+    );
+    const both = [merged("Pay", 300000), merged("Gig", 120000)];
+    const height = sankeyContentHeight(Math.max(both.length, triGroups.length, many.length), 400);
+    const layout = layoutGroupedIncomeSankey(both, triGroups, many, triLinks, {
+      width: 800,
+      height,
+      padTop: SANKEY_PAD_TOP,
+      padBottom: SANKEY_PAD_BOTTOM,
+      nodeGap: SANKEY_NODE_GAP,
+      minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
+    });
+    // 60 targets, no Remaining (spending exceeds income); 2 x 3 left ribbons.
+    expect(layout.targets).toHaveLength(60);
+    expect(layout.middles).toHaveLength(3);
+    expect(layout.linksLeft).toHaveLength(6);
+    expect(layout.linksRight).toHaveLength(60);
+    for (let i = 1; i < layout.targets.length; i++) {
+      expect(layout.targets[i]!.y - layout.targets[i - 1]!.y).toBeGreaterThanOrEqual(
+        SANKEY_MIN_PITCH - 1e-9
+      );
+    }
+    const last = layout.targets[layout.targets.length - 1]!;
+    expect(last.y + last.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+    const lastMid = layout.middles[layout.middles.length - 1]!;
+    expect(lastMid.y + lastMid.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+    const lastSrc = layout.sources[layout.sources.length - 1]!;
+    expect(lastSrc.y + lastSrc.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+    for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
       expect(Number.isFinite(node.y)).toBe(true);
       expect(Number.isFinite(node.h)).toBe(true);
     }

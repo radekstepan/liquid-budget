@@ -10,7 +10,7 @@ import {
   computeNetWorthReport,
   computeMonthlySurplus,
   computeIncomeBreakdown,
-  computeSpendingBreakdown,
+  computeSpendingGroupFlow,
   type NetWorthPoint,
   type SurplusMonthPoint,
 } from "@ynab/logic";
@@ -134,13 +134,13 @@ export const ReportsView = memo(function ReportsView({
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
 
-  const categorySpending: SpendingItem[] = useMemo(
-    () => computeSpendingBreakdown(data, actualStart, actualEnd, "categories"),
+  const categoryFlow = useMemo(
+    () => computeSpendingGroupFlow(data, actualStart, actualEnd, "categories"),
     [data, actualStart, actualEnd]
   );
 
-  const merchantSpending: SpendingItem[] = useMemo(
-    () => computeSpendingBreakdown(data, actualStart, actualEnd, "merchants"),
+  const merchantFlow = useMemo(
+    () => computeSpendingGroupFlow(data, actualStart, actualEnd, "merchants"),
     [data, actualStart, actualEnd]
   );
 
@@ -255,8 +255,8 @@ export const ReportsView = memo(function ReportsView({
         {sub === "spending" && (
           <div className="h-full p-4">
             <SpendingReport
-              categories={categorySpending}
-              merchants={merchantSpending}
+              categoryFlow={categoryFlow}
+              merchantFlow={merchantFlow}
               income={incomeItems}
             />
           </div>

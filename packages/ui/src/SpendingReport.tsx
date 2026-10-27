@@ -4,10 +4,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   fmt,
   mergeBelowThreshold,
-  layoutDirectIncomeSankey,
+  mergeGroupFlow,
+  layoutGroupedIncomeSankey,
   sankeyContentHeight,
-  OTHER_BUCKET_LABEL,
-  REMAINING_LABEL,
   SHORTFALL_LABEL,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
@@ -18,6 +17,7 @@ import {
   type MergedSpendingItem,
   type SpendingBreakdownItem,
   type SpendingDimension,
+  type SpendingGroupFlow,
 } from "@ynab/logic";
 import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
@@ -34,8 +34,12 @@ export type SpendingViewMode = "bars" | "sankey";
 
 type Hover =
   | { kind: "income"; idx: number; x: number; y: number }
+  | { kind: "group"; idx: number; x: number; y: number }
   | { kind: "node"; idx: number; x: number; y: number }
-  | { kind: "link"; src: number; tgt: number; x: number; y: number }
+  // Left ribbon: a = income index, b = middle index (or the plug index,
+  // one past the last middle, for full-width Remaining ribbons). Right
+  // ribbon: a = middle index, b = target index.
+  | { kind: "link"; side: "left" | "right"; a: number; b: number; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
@@ -52,14 +56,14 @@ function truncateName(name: string, max = 26): string {
 }
 
 export function SpendingReport({
-  categories,
-  merchants,
+  categoryFlow,
+  merchantFlow,
   income,
   initialView = "sankey",
   initialDimension = "categories",
 }: {
-  categories: SpendingItem[];
-  merchants: SpendingItem[];
+  categoryFlow: SpendingGroupFlow;
+  merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
   initialView?: SpendingViewMode;
   initialDimension?: SpendingDimension;
@@ -82,14 +86,15 @@ export function SpendingReport({
   const [hover, setHover] = useState<Hover | null>(null);
   const { ref: chartRef, size: chartSize } = useElementSize<HTMLDivElement>();
 
-  const raw = dimension === "categories" ? categories : merchants;
+  const flow = dimension === "categories" ? categoryFlow : merchantFlow;
+  const raw = flow.targets;
 
-  // One shared threshold merges both columns, so the ceiling covers the
-  // largest group on either side.
+  // One shared threshold merges all three columns, so the ceiling covers
+  // the largest row on any side.
   const maxDollars = useMemo(
     () =>
-      [...raw, ...income].reduce((m, s) => Math.max(m, s.value / 100), 0),
-    [raw, income]
+      [...raw, ...flow.groups, ...income].reduce((m, s) => Math.max(m, s.value / 100), 0),
+    [raw, flow.groups, income]
   );
   // Slider ceiling: a round number covering the largest group, floored at
   // $50 so the control stays useful on small datasets, capped at $2000 so
@@ -99,48 +104,49 @@ export function SpendingReport({
   const activeThreshold = Math.min(Math.max(0, thresholdDollars), sliderMax);
 
   const merged = useMemo(
-    () => mergeBelowThreshold(raw, Math.round(activeThreshold * 100)),
-    [raw, activeThreshold]
+    () =>
+      mergeGroupFlow(flow.groups, flow.targets, flow.links, Math.round(activeThreshold * 100)),
+    [flow, activeThreshold]
   );
   const mergedIncome = useMemo(
     () => mergeBelowThreshold(income, Math.round(activeThreshold * 100)),
     [income, activeThreshold]
   );
-  // The header "(N in Other)" note covers both merged columns.
+  // The header "(N in Other)" note covers all three merged columns.
   const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
 
   // Header totals: plain sums (merging preserves sums and breakdowns never
   // emit non-positive values, so these match the layout's filtered totals).
   const totals = useMemo(() => {
     const incomeTotal = mergedIncome.items.reduce((s, x) => s + x.value, 0);
-    const spendingTotal = merged.items.reduce((s, x) => s + x.value, 0);
+    const spendingTotal = merged.targets.reduce((s, x) => s + x.value, 0);
     return {
       incomeTotal,
       spendingTotal,
       flowTotal: Math.max(incomeTotal, spendingTotal),
       remaining: incomeTotal - spendingTotal,
     };
-  }, [merged.items, mergedIncome.items]);
+  }, [merged.targets, mergedIncome.items]);
   const spentTotal = totals.spendingTotal;
 
   // Bars rows: spending shares (unchanged by the income side).
   const rows = useMemo(() => {
-    const maxSpend = merged.items.reduce((m, s) => Math.max(m, s.value), 1);
-    return merged.items.map((s, i) => {
+    const maxSpend = merged.targets.reduce((m, s) => Math.max(m, s.value), 1);
+    return merged.targets.map((s, i) => {
       const share = spentTotal !== 0 ? s.value / spentTotal : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
       const color = colorForName(s.name);
       return { ...s, share, pctOfTotal, pctOfMax, color, i };
     });
-  }, [merged.items, spentTotal]);
+  }, [merged.targets, spentTotal]);
 
   // Income rows for the layout: the same Under threshold folds small
   // income sources into an Other bucket on the left, and the proportional
   // link math runs on the merged columns (conservation preserved).
   const incomeRows: MergedSpendingItem[] = mergedIncome.items;
 
-  const empty = incomeRows.length === 0 && merged.items.length === 0;
+  const empty = incomeRows.length === 0 && merged.targets.length === 0;
   const growRows = rows.length > 0 && rows.length <= 14;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
@@ -156,16 +162,17 @@ export function SpendingReport({
       sankeyContentHeight(
         Math.max(
           incomeRows.length,
-          merged.items.length + (totals.incomeTotal > totals.spendingTotal ? 1 : 0)
+          merged.groups.length,
+          merged.targets.length + (totals.incomeTotal > totals.spendingTotal ? 1 : 0)
         ),
         chartSize.height
       ),
-    [incomeRows.length, merged.items.length, totals.incomeTotal, totals.spendingTotal, chartSize.height]
+    [incomeRows.length, merged.groups.length, merged.targets.length, totals.incomeTotal, totals.spendingTotal, chartSize.height]
   );
 
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
-    return layoutDirectIncomeSankey(incomeRows, merged.items, {
+    return layoutGroupedIncomeSankey(incomeRows, merged.groups, merged.targets, merged.links, {
       width: chartSize.width,
       height: contentH,
       padLeft: SANKEY_SOURCE_GUTTER,
@@ -175,7 +182,7 @@ export function SpendingReport({
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
-  }, [incomeRows, merged.items, chartSize.width, chartSize.height, contentH]);
+  }, [incomeRows, merged.groups, merged.targets, merged.links, chartSize.width, chartSize.height, contentH]);
 
   // Left-column names truncate to fit the pixel budget between the label
   // anchor and the minimum left inset, so even long names (with ellipsis)
@@ -200,6 +207,20 @@ export function SpendingReport({
       })),
     [sankey, totals.flowTotal]
   );
+  const midRows = useMemo(
+    () =>
+      (sankey?.middles ?? []).map((m, i) => ({
+        ...m,
+        flowPct:
+          totals.flowTotal !== 0 ? Math.round((m.value / totals.flowTotal) * 100) : 0,
+        color: colorForName(m.name),
+        // How many right-column rows this group feeds (each target draws
+        // at most one ribbon per group).
+        memberCount: sankey?.linksRight.filter((l) => l.sourceIndex === i).length ?? 0,
+        i,
+      })),
+    [sankey, totals.flowTotal]
+  );
   const tgtRows = useMemo(
     () =>
       (sankey?.targets ?? []).map((t, i) => ({
@@ -207,6 +228,9 @@ export function SpendingReport({
         flowPct:
           totals.flowTotal !== 0 ? Math.round((t.value / totals.flowTotal) * 100) : 0,
         color: colorForName(t.name),
+        // By position, never by name: a literal "Remaining" category is
+        // still just a category.
+        isPlug: sankey?.remainingTargetIndex === i,
         i,
       })),
     [sankey, totals.flowTotal]
@@ -217,7 +241,7 @@ export function SpendingReport({
     if (hover.kind === "income") {
       const r = srcRows[hover.idx];
       if (!r) return null;
-      const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
+      const isOther = r.bucket === true;
       const incomePct =
         totals.incomeTotal !== 0 ? Math.round((r.value / totals.incomeTotal) * 100) : 0;
       return (
@@ -237,7 +261,7 @@ export function SpendingReport({
           >
             <span>
               {isOther
-                ? `${r.mergedCount} smaller incomes under ${fmt(Math.round(activeThreshold * 100))}`
+                ? `${r.mergedCount} smaller income${r.mergedCount === 1 ? "" : "s"} under ${fmt(Math.round(activeThreshold * 100))}`
                 : `${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
           </div>
@@ -245,11 +269,46 @@ export function SpendingReport({
       );
     }
     if (hover.kind === "link") {
-      const s = srcRows[hover.src];
-      const t = tgtRows[hover.tgt];
-      if (!s || !t) return null;
-      const link = sankey?.links.find(
-        (l) => l.sourceIndex === hover.src && l.targetIndex === hover.tgt
+      if (hover.side === "left") {
+        const s = srcRows[hover.a];
+        const link = sankey?.linksLeft.find(
+          (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b
+        );
+        if (!s || !link) return null;
+        // The ribbon lands on a middle, or — past the last middle — on the
+        // Remaining plug.
+        const target =
+          midRows[hover.b] ?? tgtRows[sankey?.remainingTargetIndex ?? -1] ?? null;
+        if (!target) return null;
+        const fundedPct =
+          target.fundedValue !== 0
+            ? Math.round((link.value / target.fundedValue) * 100)
+            : 0;
+        return (
+          <div className="space-y-[3px]">
+            <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+              {`${s.name} → ${target.name}`}
+            </div>
+            <TipLabel
+              color={target.color}
+              label="Flows"
+              value={fmt(link.value)}
+              pct={fundedPct + "%"}
+            />
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Proportional split — money is fungible</span>
+            </div>
+          </div>
+        );
+      }
+      const m = midRows[hover.a];
+      const t = tgtRows[hover.b];
+      if (!m || !t) return null;
+      const link = sankey?.linksRight.find(
+        (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b
       );
       if (!link) return null;
       // Share of the target's funded amount (under a shortfall the expense
@@ -259,7 +318,7 @@ export function SpendingReport({
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            {`${s.name} → ${t.name}`}
+            {`${m.name} → ${t.name}`}
           </div>
           <TipLabel
             color={t.color}
@@ -271,15 +330,64 @@ export function SpendingReport({
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
             style={{ color: "rgba(242,245,247,0.65)" }}
           >
-            <span>Proportional split — money is fungible</span>
+            <span>
+              {dimension === "categories"
+                ? "Rolls up into its group — no splitting"
+                : "The merchant's exact share in this group"}
+            </span>
           </div>
+        </div>
+      );
+    }
+    if (hover.kind === "group") {
+      const r = midRows[hover.idx];
+      if (!r) return null;
+      const isOther = r.bucket === true;
+      const spendPct =
+        spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
+      return (
+        <div className="space-y-[3px]">
+          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+            {r.name}
+          </div>
+          <TipLabel
+            color={r.color}
+            label="Spent"
+            value={fmt(r.value)}
+            pct={r.flowPct + "%"}
+          />
+          {r.unfundedValue > 0 && (
+            <TipLabel
+              color={SHORTFALL_COLOR}
+              label={SHORTFALL_LABEL}
+              value={fmt(r.unfundedValue)}
+            />
+          )}
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>
+              {isOther
+                ? `${r.mergedCount} smaller group${r.mergedCount === 1 ? "" : "s"} under ${fmt(Math.round(activeThreshold * 100))}`
+                : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
+            </span>
+          </div>
+          {r.unfundedValue > 0 && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Spending exceeded income — covered from savings or debt</span>
+            </div>
+          )}
         </div>
       );
     }
     if (hover.kind === "bar") {
       const r = rows[hover.idx];
       if (!r) return null;
-      const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
+      const isOther = r.bucket === true;
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
@@ -297,7 +405,7 @@ export function SpendingReport({
           >
             <span>
               {isOther
-                ? `${r.mergedCount} smaller ${nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
+                ? `${r.mergedCount} smaller ${r.mergedCount === 1 ? nounSingular : nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
                 : `of ${fmt(spentTotal)} total`}
             </span>
           </div>
@@ -306,8 +414,8 @@ export function SpendingReport({
     }
     const r = tgtRows[hover.idx];
     if (!r) return null;
-    const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
-    const isRemaining = r.name === REMAINING_LABEL;
+    const isOther = r.bucket === true;
+    const isRemaining = r.isPlug;
     const spendPct =
       spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
     return (
@@ -334,7 +442,7 @@ export function SpendingReport({
         >
           <span>
             {isOther
-              ? `${r.mergedCount} smaller ${nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
+              ? `${r.mergedCount} smaller ${r.mergedCount === 1 ? nounSingular : nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
               : isRemaining
                 ? `Unspent of ${fmt(totals.incomeTotal)} income`
                 : `${spendPct}% of ${fmt(spentTotal)} spending`}
@@ -352,18 +460,108 @@ export function SpendingReport({
     );
   })();
 
-  const hoverSrcIdx =
-    hover != null && (hover.kind === "income" || hover.kind === "link")
-      ? hover.kind === "link"
-        ? hover.src
-        : hover.idx
-      : null;
-  const hoverTgtIdx =
-    hover != null && (hover.kind === "node" || hover.kind === "link")
-      ? hover.kind === "link"
-        ? hover.tgt
-        : hover.idx
-      : null;
+  // Connected-highlight sets per hover (null = unconstrained, everything
+  // stays full opacity). Hovering any bar or ribbon spotlights its flow
+  // path — a target lights its group, the group ribbon, and the income
+  // ribbons feeding that group — and dims the rest.
+  const hl = useMemo(() => {
+    const none = {
+      src: null as Set<number> | null,
+      mid: null as Set<number> | null,
+      tgt: null as Set<number> | null,
+      ll: null as Set<string> | null,
+      rl: null as Set<string> | null,
+    };
+    if (!hover || hover.kind === "bar" || !sankey) return none;
+    const key = (a: number, b: number) => `${a}:${b}`;
+    const midCount = sankey.middles.length;
+    if (hover.kind === "income") {
+      const ll = new Set<string>();
+      const mid = new Set<number>();
+      const tgt = new Set<number>();
+      for (const l of sankey.linksLeft) {
+        if (l.sourceIndex !== hover.idx) continue;
+        ll.add(key(l.sourceIndex, l.targetIndex));
+        if (l.targetIndex < midCount) mid.add(l.targetIndex);
+        else if (sankey.remainingTargetIndex != null) tgt.add(sankey.remainingTargetIndex);
+      }
+      return { src: new Set([hover.idx]), mid, tgt, ll, rl: new Set<string>() };
+    }
+    if (hover.kind === "group") {
+      const ll = new Set<string>();
+      const rl = new Set<string>();
+      const src = new Set<number>();
+      const tgt = new Set<number>();
+      for (const l of sankey.linksLeft) {
+        if (l.targetIndex !== hover.idx) continue;
+        ll.add(key(l.sourceIndex, l.targetIndex));
+        src.add(l.sourceIndex);
+      }
+      for (const l of sankey.linksRight) {
+        if (l.sourceIndex !== hover.idx) continue;
+        rl.add(key(l.sourceIndex, l.targetIndex));
+        tgt.add(l.targetIndex);
+      }
+      return { src, mid: new Set([hover.idx]), tgt, ll, rl };
+    }
+    if (hover.kind === "node") {
+      const rl = new Set<string>();
+      const mid = new Set<number>();
+      for (const l of sankey.linksRight) {
+        if (l.targetIndex !== hover.idx) continue;
+        rl.add(key(l.sourceIndex, l.targetIndex));
+        mid.add(l.sourceIndex);
+      }
+      const ll = new Set<string>();
+      const src = new Set<number>();
+      const isPlug = sankey.remainingTargetIndex === hover.idx;
+      for (const l of sankey.linksLeft) {
+        const plugLink = l.targetIndex >= midCount;
+        if (isPlug ? !plugLink : !mid.has(l.targetIndex)) continue;
+        ll.add(key(l.sourceIndex, l.targetIndex));
+        src.add(l.sourceIndex);
+      }
+      return { src, mid, tgt: new Set([hover.idx]), ll, rl };
+    }
+    // Ribbon hover: the ribbon plus its endpoint bars.
+    if (hover.side === "left") {
+      const isPlug = hover.b >= midCount;
+      return {
+        src: new Set([hover.a]),
+        mid: isPlug ? new Set<number>() : new Set([hover.b]),
+        tgt:
+          isPlug && sankey.remainingTargetIndex != null
+            ? new Set([sankey.remainingTargetIndex])
+            : new Set<number>(),
+        ll: new Set([key(hover.a, hover.b)]),
+        rl: new Set<string>(),
+      };
+    }
+    return {
+      src: new Set<number>(),
+      mid: new Set([hover.a]),
+      tgt: new Set([hover.b]),
+      ll: new Set<string>(),
+      rl: new Set([key(hover.a, hover.b)]),
+    };
+  }, [hover, sankey]);
+
+  const isSrcHover = (idx: number) =>
+    (hover?.kind === "income" && hover.idx === idx) ||
+    (hover?.kind === "link" && hover.side === "left" && hover.a === idx);
+  const isMidHover = (idx: number) =>
+    (hover?.kind === "group" && hover.idx === idx) ||
+    (hover?.kind === "link" &&
+      ((hover.side === "left" && hover.b === idx) || (hover.side === "right" && hover.a === idx)));
+  const isTgtHover = (idx: number) =>
+    (hover?.kind === "node" && hover.idx === idx) ||
+    (hover?.kind === "link" &&
+      ((hover.side === "right" && hover.b === idx) ||
+        (hover.side === "left" &&
+          hover.b >= (sankey?.middles.length ?? 0) &&
+          sankey?.remainingTargetIndex === idx)));
+  const isLinkHover = (side: "left" | "right", a: number, b: number) =>
+    hover?.kind === "link" && hover.side === side && hover.a === a && hover.b === b;
   const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
 
   return (
@@ -548,7 +746,7 @@ export function SpendingReport({
                     style={{ color: "var(--y-ink)" }}
                   >
                     {r.name}
-                    {r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1 && (
+                    {r.bucket === true && (
                       <span className="ml-1 text-[11px]" style={{ color: "var(--y-ink-faint)" }}>
                         ({r.mergedCount} merged)
                       </span>
@@ -611,19 +809,18 @@ export function SpendingReport({
               height={contentH}
               className="block"
             >
-              {sankey.links.map((link) => {
-                // Ribbons take the expense (target) color so each expense
-                // bar reads as one flow arriving from the incomes.
+              {sankey.linksLeft.map((link) => {
+                // Ribbons take their downstream color so each bar reads as
+                // one flow arriving from upstream.
                 const color = colorForName(link.targetName);
-                const isHover =
-                  hoverSrcIdx === link.sourceIndex && hoverTgtIdx === link.targetIndex;
+                const isHover = isLinkHover("left", link.sourceIndex, link.targetIndex);
                 const dim =
-                  (hoverSrcIdx != null && link.sourceIndex !== hoverSrcIdx) ||
-                  (hoverTgtIdx != null && link.targetIndex !== hoverTgtIdx);
+                  hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
                 return (
                   <path
-                    key={`link-${link.sourceIndex}-${link.targetIndex}`}
+                    key={`ll-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
+                    data-side="left"
                     d={link.d}
                     fill={color}
                     fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
@@ -632,8 +829,38 @@ export function SpendingReport({
                     onMouseMove={(e) =>
                       setHover({
                         kind: "link",
-                        src: link.sourceIndex,
-                        tgt: link.targetIndex,
+                        side: "left",
+                        a: link.sourceIndex,
+                        b: link.targetIndex,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseLeave={() => setHover(null)}
+                  />
+                );
+              })}
+              {sankey.linksRight.map((link) => {
+                const color = colorForName(link.targetName);
+                const isHover = isLinkHover("right", link.sourceIndex, link.targetIndex);
+                const dim =
+                  hl.rl != null && !hl.rl.has(`${link.sourceIndex}:${link.targetIndex}`);
+                return (
+                  <path
+                    key={`rl-${link.sourceIndex}-${link.targetIndex}`}
+                    data-testid="sankey-link"
+                    data-side="right"
+                    d={link.d}
+                    fill={color}
+                    fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
+                    stroke="none"
+                    style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                    onMouseMove={(e) =>
+                      setHover({
+                        kind: "link",
+                        side: "right",
+                        a: link.sourceIndex,
+                        b: link.targetIndex,
                         x: e.clientX,
                         y: e.clientY,
                       })
@@ -644,8 +871,8 @@ export function SpendingReport({
               })}
               {sankey.sources.map((node, idx) => {
                 const color = colorForName(node.name);
-                const isHover = hoverSrcIdx === idx;
-                const dim = (hoverSrcIdx != null && !isHover) || hoverTgtIdx != null;
+                const isHover = isSrcHover(idx);
+                const dim = hl.src != null && !hl.src.has(idx);
                 const r = srcRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 return (
@@ -695,10 +922,90 @@ export function SpendingReport({
                   </g>
                 );
               })}
+              {sankey.middles.map((node, idx) => {
+                const color = colorForName(node.name);
+                const isHover = isMidHover(idx);
+                const dim = hl.mid != null && !hl.mid.has(idx);
+                const r = midRows[idx]!;
+                const labelY = node.y + node.h / 2;
+                return (
+                  <g key={`mid-${node.name}-${idx}`}>
+                    <rect
+                      data-testid="sankey-group"
+                      x={node.x}
+                      y={node.y}
+                      width={node.w}
+                      height={Math.max(0, node.h)}
+                      rx={2}
+                      fill={color}
+                      fillOpacity={dim ? 0.35 : 1}
+                      stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
+                      strokeWidth={isHover ? 2 : 1}
+                      style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        setHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
+                    />
+                    {node.unfundedH > 0 && (
+                      <rect
+                        data-testid="sankey-group-shortfall"
+                        x={node.x}
+                        y={node.y + Math.max(0, node.h) - node.unfundedH}
+                        width={node.w}
+                        height={node.unfundedH}
+                        rx={2}
+                        fill={SHORTFALL_COLOR}
+                        fillOpacity={dim ? 0.35 : 1}
+                        stroke="rgba(0,0,0,0.35)"
+                        strokeWidth={1}
+                        strokeDasharray="3 2"
+                        style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                        onMouseMove={(e) =>
+                          setHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseLeave={() => setHover(null)}
+                      />
+                    )}
+                    {/* Middle labels sit in the ribbon zone, so they carry
+                        a light halo to stay readable over the ribbons. */}
+                    <text
+                      data-testid="sankey-group-label"
+                      x={sankey.middleLabelX}
+                      y={node.h >= 26 ? labelY - 2 : labelY - 6}
+                      fontSize={12}
+                      fill="var(--y-ink)"
+                      opacity={dim ? 0.4 : 1}
+                      stroke="rgba(255,255,255,0.9)"
+                      strokeWidth={3}
+                      strokeLinejoin="round"
+                      paintOrder="stroke"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {truncateName(node.name)}
+                    </text>
+                    <text
+                      x={sankey.middleLabelX}
+                      y={node.h >= 26 ? labelY + 13 : labelY + 7}
+                      fontSize={11}
+                      fill="var(--y-ink-faint)"
+                      className="y-num"
+                      opacity={dim ? 0.4 : 1}
+                      stroke="rgba(255,255,255,0.9)"
+                      strokeWidth={3}
+                      strokeLinejoin="round"
+                      paintOrder="stroke"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {fmt(node.value)} · {r.flowPct}%
+                    </text>
+                  </g>
+                );
+              })}
               {sankey.targets.map((node, idx) => {
                 const color = colorForName(node.name);
-                const isHover = hoverTgtIdx === idx;
-                const dim = (hoverTgtIdx != null && !isHover) || hoverSrcIdx != null;
+                const isHover = isTgtHover(idx);
+                const dim = hl.tgt != null && !hl.tgt.has(idx);
                 const r = tgtRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 return (

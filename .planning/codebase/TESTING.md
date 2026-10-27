@@ -61,6 +61,7 @@ yarn e2e:install  # install browser binaries (first-time setup)
 - **Vitest version drift**: `@ynab/web` runs Vitest 4 while the other packages run 2.1.9. Check the local config before assuming shared behavior/plugins.
 - **Outlier-break chart tests must assert bar geometry, not just the break marker**: a zero-line placement bug collapsed every Cash Flow bar to a 1px sliver while the break-mark test stayed green. Assert bar heights (e.g. every bar > 50px on the plot).
 - **`BudgetAppShell.test.tsx` BUG-15 tests are timing-sensitive**: they hold deferred fetch promises and can exceed the 5s default test timeout on a slow/loaded machine (observed failing on the untouched base too). If they time out, rerun the file with `--testTimeout=60000` — a pass there means slowness, not a regression.
+- **A failing UI assertion can mask itself as `path: \`key\` is not a prop`**: when a failure message serializes React elements (e.g. `toHaveLength` on an element array), pretty-format reads `props.key`, React logs the special-props warning, `onConsoleLog` throws, and the run aborts with an unattributed "Unhandled Rejection" — hiding the real failure and which test failed. Bisect with `-t` to isolate, or temporarily neuter the `onConsoleLog` throw in the workspace `vitest.config.ts` (restore it immediately after) to see the underlying assertion failure.
 
 ## Notes / gaps
 

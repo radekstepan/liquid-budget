@@ -53,16 +53,17 @@ test("changing the selectors narrows the range and re-totals Spending Trends", a
 test("Spending by Category tab renders the Sankey flow and toggles view, dimension, and merge threshold", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
-  // The Sankey view is the default: ribbons run directly from income
-  // sources on the left to spending groups on the right — no middle Total
-  // bar. The seed's top spender category is Mortgage Interest.
+  // The Sankey view is the default: income sources on the left flow
+  // through category groups in the middle into categories or merchants on
+  // the right. The seed's top spender category is Mortgage Interest.
   await expect(panel.getByTestId("sankey-svg")).toBeVisible();
   await expect(panel.getByTestId("sankey-total")).toHaveCount(0);
   await expect(panel.getByTestId("sankey-in-link")).toHaveCount(0);
   await expect(panel.getByTestId("sankey-income").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-group").first()).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
   await expect(panel.getByTestId("sankey-link").first()).toBeVisible();
-  // Every expense bar is fed by at least one direct ribbon.
+  // Every expense bar is fed by at least one group ribbon.
   const linkCount = await panel.getByTestId("sankey-link").count();
   const nodeCount = await panel.getByTestId("sankey-node").count();
   expect(nodeCount).toBeGreaterThan(0);
