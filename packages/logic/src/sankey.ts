@@ -331,8 +331,16 @@ export const SANKEY_MIN_PITCH = SANKEY_NODE_MIN_HEIGHT + SANKEY_NODE_GAP;
 /** Top/bottom gutters: room for the TOTAL caption above, amount below. */
 export const SANKEY_PAD_TOP = 28;
 export const SANKEY_PAD_BOTTOM = 28;
-/** Left gutter: TOTAL caption + amount right-align into it, clear of the bar. */
-export const SANKEY_SOURCE_GUTTER = 112;
+/** Gap between end-anchored left-column labels and the source bar column. */
+export const SANKEY_SOURCE_LABEL_GAP = 8;
+/** Minimum clear space between any left-column label and the SVG left edge. */
+export const SANKEY_LEFT_LABEL_INSET = 8;
+/**
+ * Left gutter: room for two-line income labels (truncated name + $ amount)
+ * ending SANKEY_SOURCE_LABEL_GAP before the bars while starting no closer
+ * than SANKEY_LEFT_LABEL_INSET to x=0.
+ */
+export const SANKEY_SOURCE_GUTTER = 160;
 
 /**
  * Chart height honoring the minimum pitch: grows past the container (the
@@ -598,7 +606,7 @@ export function layoutDirectIncomeSankey(
       sources: [],
       targets: [],
       links: [],
-      sourceLabelX: padLeft - 10,
+      sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,
       targetLabelX: width - padRight,
     };
   }
@@ -748,7 +756,7 @@ export function layoutDirectIncomeSankey(
     sources: srcNodes,
     targets: tgtNodes,
     links,
-    sourceLabelX: padLeft - 10,
+    sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,
     targetLabelX: nodeX + nodeWidth + 8,
   };
 }

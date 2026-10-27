@@ -9,11 +9,14 @@ import {
   OTHER_BUCKET_LABEL,
   REMAINING_LABEL,
   sankeyContentHeight,
+  SANKEY_LEFT_LABEL_INSET,
   SANKEY_MIN_PITCH,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
   SANKEY_PAD_BOTTOM,
   SANKEY_PAD_TOP,
+  SANKEY_SOURCE_GUTTER,
+  SANKEY_SOURCE_LABEL_GAP,
   type MergedSpendingItem,
 } from "../src/sankey.js";
 import type { BudgetData, Transaction } from "../src/types.js";
@@ -760,6 +763,35 @@ describe("layoutDirectIncomeSankey", () => {
     expect(layout.targetLabelX).toBeGreaterThanOrEqual(
       layout.targets[0]!.x + layout.targets[0]!.w + 8
     );
+  });
+
+  it("reserves a left label zone clear of the viewport edge at any width", () => {
+    // The view renders up to 20 name chars at ~7px plus an 11px amount line
+    // into this zone, so it must hold that budget past the minimum inset.
+    const MIN_LABEL_BUDGET = 20 * 7;
+    for (const width of [800, 360]) {
+      const layout = layoutDirectIncomeSankey(sources, spending, {
+        width,
+        height: 400,
+        padLeft: SANKEY_SOURCE_GUTTER,
+      });
+      expect(layout.sourceLabelX).toBe(SANKEY_SOURCE_GUTTER - SANKEY_SOURCE_LABEL_GAP);
+      expect(layout.sources[0]!.x).toBe(SANKEY_SOURCE_GUTTER);
+      expect(layout.sourceLabelX - SANKEY_LEFT_LABEL_INSET).toBeGreaterThanOrEqual(
+        MIN_LABEL_BUDGET
+      );
+      // Narrow widths squeeze the ribbons, never the labels or bars.
+      for (const link of layout.links) {
+        expect(link.x1).toBeGreaterThan(link.x0);
+      }
+    }
+    // Degenerate layouts anchor the same way (the contract is unconditional).
+    const empty = layoutDirectIncomeSankey([], [], {
+      width: 800,
+      height: 400,
+      padLeft: SANKEY_SOURCE_GUTTER,
+    });
+    expect(empty.sourceLabelX).toBe(SANKEY_SOURCE_GUTTER - SANKEY_SOURCE_LABEL_GAP);
   });
 
   it("keeps every row pitch at the label minimum when sized by the view contract", () => {

@@ -1,6 +1,12 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { SpendingReport, type SpendingItem } from "../src/SpendingReport.js";
+import { SANKEY_LEFT_LABEL_INSET } from "@ynab/logic";
+import {
+  SpendingReport,
+  SOURCE_AMOUNT_PX_PER_CHAR,
+  SOURCE_NAME_PX_PER_CHAR,
+  type SpendingItem,
+} from "../src/SpendingReport.js";
 import { colorForName } from "../src/chartUtils.js";
 
 class MockResizeObserver {
@@ -366,6 +372,36 @@ describe("SpendingReport", () => {
       expect(el.getAttribute("text-anchor")).toBe("end");
       expect(Number(el.getAttribute("x"))).toBeLessThanOrEqual(barX - 8);
     }
+  });
+
+  it("truncates long income names with ellipsis inside the visible area, amounts inset from the edge", () => {
+    const { container } = render(
+      <SpendingReport
+        categories={sampleCategories}
+        merchants={sampleMerchants}
+        income={[{ name: "Canada Revenue Agency", value: 200000 }]}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // 21 chars exceeds the label budget, so the name truncates with an
+    // ellipsis — and the truncation itself must fit inside the viewport.
+    const nameEl = svg.querySelector('[data-testid="sankey-income-label"]')!;
+    const name = nameEl.textContent ?? "";
+    expect(name).toBe("Canada Revenue Agen…");
+    expect(nameEl.getAttribute("text-anchor")).toBe("end");
+    const nameX = Number(nameEl.getAttribute("x"));
+    expect(nameX - name.length * SOURCE_NAME_PX_PER_CHAR).toBeGreaterThanOrEqual(
+      SANKEY_LEFT_LABEL_INSET
+    );
+    // The $ amount line keeps the same safe inset from the left edge.
+    const amountEl = svg.querySelector('[data-testid="sankey-income-amount"]')!;
+    expect(amountEl.getAttribute("text-anchor")).toBe("end");
+    const amountX = Number(amountEl.getAttribute("x"));
+    const amount = amountEl.textContent ?? "";
+    expect(amount).toBe("$2,000.00 · 100%");
+    expect(amountX - amount.length * SOURCE_AMOUNT_PX_PER_CHAR).toBeGreaterThanOrEqual(
+      SANKEY_LEFT_LABEL_INSET
+    );
   });
 
   it("grows the chart with a minimum row pitch so crowded labels never overlap", () => {

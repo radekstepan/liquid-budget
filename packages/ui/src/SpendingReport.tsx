@@ -9,6 +9,7 @@ import {
   OTHER_BUCKET_LABEL,
   REMAINING_LABEL,
   SHORTFALL_LABEL,
+  SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
   SANKEY_PAD_BOTTOM,
@@ -38,6 +39,13 @@ type Hover =
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
+
+// Conservative per-character px estimates for the left-column labels (12px
+// names, 11px tabular-nums amounts). SVG gives no text metrics, so name
+// truncation budgets against these to stay clear of the left edge; tests
+// reuse them to assert the same geometric contract.
+export const SOURCE_NAME_PX_PER_CHAR = 7;
+export const SOURCE_AMOUNT_PX_PER_CHAR = 6;
 
 function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
@@ -168,6 +176,16 @@ export function SpendingReport({
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
   }, [incomeRows, merged.items, chartSize.width, chartSize.height, contentH]);
+
+  // Left-column names truncate to fit the pixel budget between the label
+  // anchor and the minimum left inset, so even long names (with ellipsis)
+  // end inside the visible area instead of clipping past x=0.
+  const sourceLabelMaxChars = Math.max(
+    8,
+    Math.floor(
+      ((sankey?.sourceLabelX ?? 0) - SANKEY_LEFT_LABEL_INSET) / SOURCE_NAME_PX_PER_CHAR
+    )
+  );
 
   // Label/tooltip rows follow the layout (which appends Remaining and drops
   // non-positive values), so labels and bars always agree.
@@ -650,6 +668,7 @@ export function SpendingReport({
                       onMouseLeave={() => setHover(null)}
                     />
                     <text
+                      data-testid="sankey-income-label"
                       x={sankey.sourceLabelX}
                       y={node.h >= 26 ? labelY - 2 : labelY - 6}
                       fontSize={12}
@@ -658,9 +677,10 @@ export function SpendingReport({
                       opacity={dim ? 0.4 : 1}
                       style={{ pointerEvents: "none" }}
                     >
-                      {truncateName(node.name, 15)}
+                      {truncateName(node.name, sourceLabelMaxChars)}
                     </text>
                     <text
+                      data-testid="sankey-income-amount"
                       x={sankey.sourceLabelX}
                       y={node.h >= 26 ? labelY + 13 : labelY + 7}
                       fontSize={11}
