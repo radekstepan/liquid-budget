@@ -67,4 +67,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-...
+Rework the spending by category from the current donut chart. Instead it should be a sankey. There should be a toggle for Categories and Merchants. A slider that would merge smaller expenses under e.g. $50 etc.
+It should respect the month(s) in view and onhover show useful informaiton in a tooltip (or sidebar, you decide). Make sure tooltips don't show cutoff. Make sure to use good consistent colors.
