@@ -28,6 +28,7 @@ import {
   TipLabel,
   SHORTFALL_COLOR,
   useElementSize,
+  useRafThrottledSet,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -96,6 +97,11 @@ export function SpendingReport({
     (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0
   );
   const [hover, setHover] = useState<Hover | null>(null);
+  // Mousemove fires far more often than the display refreshes; coalescing
+  // hover commits to one per frame (latest wins) keeps cursor sweeps from
+  // queuing a full multi-hundred-element re-render per event — the same
+  // throttle the other reports use. Clears stay synchronous.
+  const pushHover = useRafThrottledSet(setHover);
   const { ref: chartRef, size: chartSize } = useElementSize<HTMLDivElement>();
 
   const flow = dimension === "categories" ? categoryFlow : merchantFlow;
@@ -771,7 +777,7 @@ export function SpendingReport({
                     (growRows ? "min-h-[36px] flex-1 py-[6px]" : "py-[7px]")
                   }
                   style={{ background: isHover ? "var(--y-row-sel)" : "transparent" }}
-                  onMouseMove={(e) => setHover({ kind: "bar", idx: r.i, x: e.clientX, y: e.clientY })}
+                  onMouseMove={(e) => pushHover({ kind: "bar", idx: r.i, x: e.clientX, y: e.clientY })}
                   onMouseLeave={() => setHover(null)}
                 >
                   <span
@@ -838,8 +844,16 @@ export function SpendingReport({
       ) : (
         <div
           ref={chartRef}
-          className="relative min-h-0 flex-1 overflow-y-auto y-scroll"
-          style={{ background: "linear-gradient(#ffffff, #f7f7f4)" }}
+          className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto y-scroll"
+          style={{
+            background: "linear-gradient(#ffffff, #f7f7f4)",
+            // The SVG is sized exactly to this box, so horizontal scrolling
+            // is never legitimate — clip it (a stray horizontal bar steals
+            // vertical space and re-flows the chart). Reserve the vertical
+            // gutter so a scrollbar appearing mid-session (threshold slider,
+            // new data) never steps the width: the first paint is final.
+            scrollbarGutter: "stable",
+          }}
           onMouseLeave={() => setHover(null)}
         >
           {empty && (
@@ -888,7 +902,7 @@ export function SpendingReport({
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
-                      setHover({
+                      pushHover({
                         kind: "link",
                         side: "left",
                         a: link.sourceIndex,
@@ -926,7 +940,7 @@ export function SpendingReport({
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
-                      setHover({
+                      pushHover({
                         kind: "link",
                         side: "right",
                         a: link.sourceIndex,
@@ -964,7 +978,7 @@ export function SpendingReport({
                       strokeWidth={isHover ? 2 : 1}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
-                        setHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
+                        pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
@@ -1019,7 +1033,7 @@ export function SpendingReport({
                       strokeWidth={isHover ? 2 : 1}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
-                        setHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
@@ -1038,7 +1052,7 @@ export function SpendingReport({
                         strokeDasharray="3 2"
                         style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                         onMouseMove={(e) =>
-                          setHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                          pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                         }
                         onMouseLeave={() => setHover(null)}
                       />
@@ -1099,7 +1113,7 @@ export function SpendingReport({
                       strokeWidth={isHover ? 2 : 1}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
-                        setHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
@@ -1118,7 +1132,7 @@ export function SpendingReport({
                         strokeDasharray="3 2"
                         style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                         onMouseMove={(e) =>
-                          setHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                          pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                         }
                         onMouseLeave={() => setHover(null)}
                       />

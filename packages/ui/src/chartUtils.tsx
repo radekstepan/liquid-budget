@@ -139,6 +139,12 @@ export function symlogTicks(minVal: number, maxVal: number): number[] {
 
 export function useElementSize<T extends HTMLElement>() {
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Last committed size: the observer can deliver duplicate notifications
+  // (the ref-attach update races the observer's initial notification, and
+  // settling scrollbars re-fire with identical dimensions). Committing only
+  // on actual change keeps each duplicate from forcing a full chart
+  // re-render and layout recompute — visible jitter on open.
+  const lastRef = useRef({ width: 0, height: 0 });
   const roRef = useRef<ResizeObserver | null>(null);
 
   const ref = useCallback((node: T | null) => {
@@ -146,12 +152,19 @@ export function useElementSize<T extends HTMLElement>() {
       roRef.current.disconnect();
       roRef.current = null;
     }
+    const commit = (width: number, height: number) => {
+      const last = lastRef.current;
+      if (last.width === width && last.height === height) return;
+      const next = { width, height };
+      lastRef.current = next;
+      setSize(next);
+    };
     if (!node) {
-      setSize({ width: 0, height: 0 });
+      commit(0, 0);
       return;
     }
     const update = () => {
-      setSize({ width: node.clientWidth, height: node.clientHeight });
+      commit(node.clientWidth, node.clientHeight);
     };
     update();
     if (typeof ResizeObserver !== "undefined") {
@@ -169,23 +182,29 @@ export function useElementSize<T extends HTMLElement>() {
 // intermediate cursor positions are lost during fast sweeps.
 export function useRafThrottledSet<T>(set: (v: T) => void): (v: T) => void {
   const rafRef = useRef<number | null>(null);
+  // Gating flag (not the rAF id): with a synchronous requestAnimationFrame
+  // the callback runs before the call returns, so assigning its id over the
+  // ref would clobber the callback's own reset and wedge later pushes off.
+  const scheduledRef = useRef(false);
   const pendingRef = useRef<T | null>(null);
   const setRef = useRef(set);
   setRef.current = set;
 
   const push = useCallback((value: T) => {
     pendingRef.current = value;
-    if (rafRef.current == null) {
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = null;
-        const v = pendingRef.current;
-        if (v !== null) setRef.current(v);
-      });
-    }
+    if (scheduledRef.current) return;
+    scheduledRef.current = true;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      scheduledRef.current = false;
+      const v = pendingRef.current;
+      if (v !== null) setRef.current(v);
+    });
   }, []);
 
   useEffect(() => () => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    scheduledRef.current = false;
   }, []);
 
   return push;

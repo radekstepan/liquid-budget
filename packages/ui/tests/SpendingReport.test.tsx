@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { SANKEY_LEFT_LABEL_INSET, type SpendingGroupFlow } from "@ynab/logic";
 import {
   SpendingReport,
@@ -31,6 +31,12 @@ class MockResizeObserver {
 beforeAll(() => {
   (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
     MockResizeObserver;
+  // Deliver hover state updates synchronously for deterministic tooltips
+  // (same pattern as the other rAF-throttled report tests).
+  globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  };
 });
 
 const sampleCategories: SpendingItem[] = [
@@ -761,5 +767,56 @@ describe("SpendingReport", () => {
     expect(within(tip as unknown as HTMLElement).getByText("$1,000.00")).toBeInTheDocument();
     fireEvent.mouseLeave(row);
     expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("coalesces rapid hover updates into one commit per animation frame", () => {
+    // Mousemove fires far more often than the display refreshes; committing
+    // a full multi-hundred-element chart re-render per event drops frames
+    // and restarts every ribbon's opacity transition mid-flight — visible
+    // jitter. Hover commits coalesce to at most one per frame (latest wins),
+    // like the other reports.
+    const queue: FrameRequestCallback[] = [];
+    const syncRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      queue.push(cb);
+      return queue.length;
+    };
+    try {
+      const { container } = renderReport();
+      const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+      const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+      fireEvent.mouseMove(nodes[0]!, { clientX: 600, clientY: 100 });
+      fireEvent.mouseMove(nodes[1]!, { clientX: 600, clientY: 140 });
+      fireEvent.mouseMove(nodes[2]!, { clientX: 600, clientY: 180 });
+      // Nothing commits before the frame boundary.
+      expect(document.querySelector(".y-tip")).toBeNull();
+      act(() => {
+        queue.splice(0).forEach((cb) => cb(0));
+      });
+      // Exactly one commit, carrying the latest hover.
+      const tip = document.querySelector(".y-tip")!;
+      expect(tip).toBeInTheDocument();
+      expect(
+        within(tip as unknown as HTMLElement).getByText("Electric Bill")
+      ).toBeInTheDocument();
+    } finally {
+      globalThis.requestAnimationFrame = syncRaf;
+    }
+  });
+
+  it("pins the chart scroll container so scrollbars can never shift the geometry", () => {
+    // The SVG is sized exactly to the container's client box, so a
+    // horizontal scrollbar is never legitimate — but fractionally-wide flex
+    // boxes round clientWidth up, squeezing out a stray one that steals
+    // vertical space and re-flows the whole chart. And a vertical scrollbar
+    // appearing mid-session (threshold slider, new data) must not step the
+    // width. Horizontal overflow is clipped and the gutter is reserved, so
+    // the first paint is already the final geometry.
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const scroller = svg.parentElement!;
+    expect(scroller.className).toMatch(/\boverflow-x-hidden\b/);
+    expect(scroller.className).toMatch(/\boverflow-y-auto\b/);
+    expect(scroller.style.scrollbarGutter).toBe("stable");
   });
 });

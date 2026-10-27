@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { act, render } from "@testing-library/react";
 import {
   computeOutlierBreak,
   iqrFence,
@@ -6,6 +7,7 @@ import {
   NO_BREAK,
   quantile,
   sankeyRibbonShade,
+  useElementSize,
 } from "./chartUtils.js";
 
 describe("quantile", () => {
@@ -84,5 +86,74 @@ describe("sankeyRibbonShade", () => {
         expect(got).toBeLessThanOrEqual(inp);
       }
     }
+  });
+});
+
+describe("useElementSize", () => {
+  const origRO = globalThis.ResizeObserver;
+  const origWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const origHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+
+  afterEach(() => {
+    globalThis.ResizeObserver = origRO;
+    if (origWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", origWidth);
+    if (origHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", origHeight);
+  });
+
+  it("commits a new size only when the measured box actually changes", () => {
+    // The observer delivers duplicate notifications (the ref-attach update
+    // races the observer's initial notification, and scrollbars settling can
+    // re-fire with identical dimensions). Each duplicate used to setState a
+    // fresh object, forcing a full chart re-render and layout recompute per
+    // notification — visible jitter on open. Same-size notifications must be
+    // dropped; real resizes still commit.
+    let box = { width: 800, height: 400 };
+    // jsdom reports zero sizes; give the measured box a real layout box.
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => box.width,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => box.height,
+    });
+    let notify: (() => void) | null = null;
+    class CaptureRO {
+      constructor(cb: () => void) {
+        notify = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    globalThis.ResizeObserver = CaptureRO as unknown as typeof ResizeObserver;
+
+    let renders = 0;
+    function Probe() {
+      const { ref, size } = useElementSize<HTMLDivElement>();
+      renders++;
+      return <div ref={ref} data-w={size.width} data-h={size.height} />;
+    }
+    const { container } = render(<Probe />);
+    expect(notify).not.toBeNull();
+    const settledRenders = renders;
+    expect(container.firstElementChild!.getAttribute("data-w")).toBe("800");
+
+    // Duplicate notifications with an unchanged box: no re-render.
+    act(() => {
+      notify!();
+    });
+    act(() => {
+      notify!();
+    });
+    expect(renders).toBe(settledRenders);
+
+    // A real resize still commits.
+    box = { width: 1024, height: 400 };
+    act(() => {
+      notify!();
+    });
+    expect(renders).toBe(settledRenders + 1);
+    expect(container.firstElementChild!.getAttribute("data-w")).toBe("1024");
   });
 });
