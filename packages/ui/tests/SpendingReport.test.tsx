@@ -62,16 +62,18 @@ describe("SpendingReport", () => {
     expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
-  it("defaults to the 3-column Sankey with income, Total, and spending sides", () => {
+  it("defaults to the 2-column Sankey with direct income→expense ribbons", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
-    // Left: one income source; right: 3 groups plus the Remaining plug.
-    expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(1);
+    // Left: one income source; right: 3 groups plus the Remaining plug;
+    // ribbons connect the income directly to each expense (1 x 4).
     expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
     expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(4);
-    expect(svg!.querySelector('[data-testid="sankey-total"]')).not.toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    // No middle Total bar and no Total-side ribbons anymore.
+    expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(0);
     expect(container.querySelectorAll(".y-bar-track")).toHaveLength(0);
   });
 
@@ -213,20 +215,27 @@ describe("SpendingReport", () => {
     const { container } = renderReport();
     const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
     fireEvent.change(slider, { target: { value: "500" } });
-    // Out-links are Mortgage, Other, Remaining — Other sits in the middle.
-    const otherLink = container.querySelectorAll('[data-testid="sankey-link"]')[1]!;
-    fireEvent.mouseMove(otherLink, { clientX: 400, clientY: 200 });
+    // Nodes are Mortgage, Other, Remaining — Other sits in the middle.
+    const otherNode = container.querySelectorAll('[data-testid="sankey-node"]')[1]!;
+    fireEvent.mouseMove(otherNode, { clientX: 600, clientY: 200 });
     expect(screen.getByText("2 smaller categories under $500.00")).toBeInTheDocument();
   });
 
-  it("shows the income breakdown when hovering the Total middle node", () => {
+  it("shows the proportional flow when hovering a direct income→expense ribbon", () => {
     const { container } = renderReport();
-    const total = container.querySelector('[data-testid="sankey-total"]')!;
-    fireEvent.mouseMove(total, { clientX: 400, clientY: 200 });
-    expect(screen.getByText("Total flow")).toBeInTheDocument();
-    expect(screen.getByText("Income")).toBeInTheDocument();
-    expect(screen.getByText("Spent")).toBeInTheDocument();
-    expect(screen.getByText("Left")).toBeInTheDocument();
+    // Ribbons run target-major: [Payroll→Mortgage, Payroll→Groceries, ...].
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[1]!;
+    fireEvent.mouseMove(link, { clientX: 400, clientY: 200 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Payroll → Groceries")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("$400.00")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("(100%)")).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("Proportional split — money is fungible")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(link);
+    expect(document.querySelector(".y-tip")).toBeNull();
   });
 
   it("shows received amount and income share when hovering an income node", () => {
@@ -253,7 +262,7 @@ describe("SpendingReport", () => {
     expect(screen.getByText("Unspent of $2,000.00 income")).toBeInTheDocument();
   });
 
-  it("shows an Overspent plug on the income side when spending exceeds income", () => {
+  it("shows neutral unfunded segments instead of an Overspent income source when spending exceeds income", () => {
     const { container } = render(
       <SpendingReport
         categories={sampleCategories}
@@ -261,14 +270,32 @@ describe("SpendingReport", () => {
         income={[{ name: "Payroll", value: 100000 }]}
       />
     );
-    // $1,550 out vs $1,000 in: $550 short, no Remaining anywhere.
+    // $1,550 out vs $1,000 in: $550 short, no Remaining anywhere, and no
+    // invented Overspent income.
     expect(screen.getByText("Over:")).toBeInTheDocument();
     expect(screen.getByText("$550.00")).toBeInTheDocument();
     expect(screen.queryByText("Remaining")).not.toBeInTheDocument();
+    expect(screen.queryByText("Overspent")).not.toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    expect(within(svg as unknown as HTMLElement).getByText("Overspent")).toBeInTheDocument();
-    expect(svg.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(2);
+    // One ribbon per expense from the single income; each bar carries a
+    // neutral unfunded segment for its shortfall share.
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+    expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
+    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(3);
+    expect(svg.querySelector('[data-testid="sankey-total"]')).toBeNull();
+    // Hovering a bar explains the shortfall.
+    const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
+    fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Unfunded")).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText(
+        "Spending exceeded income — covered from savings or debt"
+      )
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(node);
+    expect(document.querySelector(".y-tip")).toBeNull();
   });
 
   it("anchors income labels into the left gutter, clear of the source bars", () => {
@@ -304,6 +331,9 @@ describe("SpendingReport", () => {
     for (let i = 1; i < ys.length; i++) {
       expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(32);
     }
+    // No income: no ribbons, and every bar is fully unfunded.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
+    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(60);
   });
 
   it("shows empty state when income and spending are both empty", () => {

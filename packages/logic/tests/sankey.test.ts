@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildFlowColumns,
+  computeDirectFlowLinks,
   computeIncomeBreakdown,
   computeSpendingBreakdown,
-  layoutIncomeSankey,
+  layoutDirectIncomeSankey,
   layoutSankey,
   mergeBelowThreshold,
   OTHER_BUCKET_LABEL,
-  OVERSPENT_LABEL,
   REMAINING_LABEL,
   sankeyContentHeight,
   SANKEY_MIN_PITCH,
@@ -372,59 +371,168 @@ describe("computeIncomeBreakdown", () => {
   });
 });
 
-describe("buildFlowColumns", () => {
-  const spending = [{ name: "A", value: 6000, mergedCount: 1 }];
+describe("computeDirectFlowLinks", () => {
+  it("splits every expense across incomes by income share (fungible allocation)", () => {
+    const model = computeDirectFlowLinks(
+      [
+        { name: "Pay", value: 8000, mergedCount: 1 },
+        { name: "Gig", value: 2000, mergedCount: 1 },
+      ],
+      [
+        { name: "A", value: 6000, mergedCount: 1 },
+        { name: "B", value: 4000, mergedCount: 1 },
+      ]
+    );
+    expect(model.incomeTotal).toBe(10000);
+    expect(model.spendingTotal).toBe(10000);
+    // 80/20 income shares applied to each expense, target-major.
+    expect(model.links).toEqual([
+      { sourceIndex: 0, targetIndex: 0, value: 4800 },
+      { sourceIndex: 1, targetIndex: 0, value: 1200 },
+      { sourceIndex: 0, targetIndex: 1, value: 3200 },
+      { sourceIndex: 1, targetIndex: 1, value: 800 },
+    ]);
+    expect(model.funded).toEqual([6000, 4000]);
+    expect(model.unfunded).toEqual([0, 0]);
+  });
 
-  it("adds a trailing Remaining plug when income exceeds spending", () => {
-    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 10000 }]);
-    expect(cols.incomeTotal).toBe(10000);
-    expect(cols.spendingTotal).toBe(6000);
-    expect(cols.flowTotal).toBe(10000);
-    expect(cols.sources).toEqual([{ name: "Pay", value: 10000, mergedCount: 1 }]);
-    expect(cols.targets).toEqual([
+  it("conserves flow per source and per target", () => {
+    const sources = [
+      { name: "Pay", value: 8000, mergedCount: 1 },
+      { name: "Gig", value: 3000, mergedCount: 1 },
+    ];
+    const spending = [
+      { name: "A", value: 6000, mergedCount: 1 },
+      { name: "B", value: 3000, mergedCount: 1 },
+      { name: "C", value: 1000, mergedCount: 1 },
+    ];
+    const model = computeDirectFlowLinks(sources, spending);
+    // A + B + C plus the Remaining plug for the $100 surplus.
+    expect(model.targets).toHaveLength(4);
+    for (let i = 0; i < sources.length; i++) {
+      const out = model.links
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(sources[i]!.value, 9);
+    }
+    for (let j = 0; j < model.targets.length; j++) {
+      const into = model.links
+        .filter((l) => l.targetIndex === j)
+        .reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(model.funded[j] ?? 0, 9);
+      expect((model.funded[j] ?? 0) + (model.unfunded[j] ?? 0)).toBeCloseTo(
+        model.targets[j]!.value,
+        9
+      );
+    }
+  });
+
+  it("adds a trailing Remaining plug, fed proportionally, when income exceeds spending", () => {
+    const model = computeDirectFlowLinks(
+      [
+        { name: "Pay", value: 8000, mergedCount: 1 },
+        { name: "Gig", value: 2000, mergedCount: 1 },
+      ],
+      [{ name: "A", value: 6000, mergedCount: 1 }]
+    );
+    expect(model.targets).toEqual([
       { name: "A", value: 6000, mergedCount: 1 },
       { name: REMAINING_LABEL, value: 4000, mergedCount: 1 },
     ]);
+    expect(model.funded).toEqual([6000, 4000]);
+    expect(model.unfunded).toEqual([0, 0]);
+    // The $4000 surplus draws 80/20 from the two incomes, like any expense.
+    expect(
+      model.links.filter((l) => l.targetIndex === 1).map((l) => l.value)
+    ).toEqual([3200, 800]);
   });
 
-  it("adds a trailing Overspent plug when spending exceeds income", () => {
-    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 2500 }]);
-    expect(cols.flowTotal).toBe(6000);
-    expect(cols.sources).toEqual([
-      { name: "Pay", value: 2500, mergedCount: 1 },
-      { name: OVERSPENT_LABEL, value: 3500, mergedCount: 1 },
+  it("funds every expense pro-rata with per-target unfunded remainders when spending exceeds income", () => {
+    const model = computeDirectFlowLinks(
+      [{ name: "Pay", value: 3000, mergedCount: 1 }],
+      [{ name: "A", value: 6000, mergedCount: 1 }]
+    );
+    // No phantom income source is invented: the single source stands alone.
+    expect(model.sources).toEqual([{ name: "Pay", value: 3000, mergedCount: 1 }]);
+    expect(model.targets).toEqual([{ name: "A", value: 6000, mergedCount: 1 }]);
+    expect(model.funded).toEqual([3000]);
+    expect(model.unfunded).toEqual([3000]);
+    expect(model.links).toEqual([{ sourceIndex: 0, targetIndex: 0, value: 3000 }]);
+  });
+
+  it("applies a uniform coverage ratio across expenses under a shortfall", () => {
+    const model = computeDirectFlowLinks(
+      [
+        { name: "Pay", value: 4000, mergedCount: 1 },
+        { name: "Gig", value: 2000, mergedCount: 1 },
+      ],
+      [
+        { name: "A", value: 6000, mergedCount: 1 },
+        { name: "B", value: 3000, mergedCount: 1 },
+      ]
+    );
+    // $6000 income over $9000 spending: every expense is 2/3 funded.
+    expect(model.funded[0]).toBeCloseTo(4000, 9);
+    expect(model.funded[1]).toBeCloseTo(2000, 9);
+    expect(model.unfunded[0]).toBeCloseTo(2000, 9);
+    expect(model.unfunded[1]).toBeCloseTo(1000, 9);
+    // Sources still fully flow out (Pay 2/3 of income, Gig 1/3).
+    const outPay = model.links
+      .filter((l) => l.sourceIndex === 0)
+      .reduce((s, l) => s + l.value, 0);
+    expect(outPay).toBeCloseTo(4000, 9);
+  });
+
+  it("routes all income to Remaining when there is no spending", () => {
+    const model = computeDirectFlowLinks(
+      [{ name: "Pay", value: 10000, mergedCount: 1 }],
+      []
+    );
+    expect(model.targets).toEqual([
+      { name: REMAINING_LABEL, value: 10000, mergedCount: 1 },
     ]);
-    expect(cols.targets).toEqual(spending);
+    expect(model.links).toEqual([{ sourceIndex: 0, targetIndex: 0, value: 10000 }]);
   });
 
-  it("adds no plug when income and spending balance exactly", () => {
-    const cols = buildFlowColumns(spending, [{ name: "Pay", value: 6000 }]);
-    expect(cols.flowTotal).toBe(6000);
-    expect(cols.sources).toHaveLength(1);
-    expect(cols.targets).toHaveLength(1);
+  it("reports every expense fully unfunded with no links when there is no income", () => {
+    const model = computeDirectFlowLinks([], [{ name: "A", value: 6000, mergedCount: 1 }]);
+    expect(model.incomeTotal).toBe(0);
+    expect(model.targets).toEqual([{ name: "A", value: 6000, mergedCount: 1 }]);
+    expect(model.funded).toEqual([0]);
+    expect(model.unfunded).toEqual([6000]);
+    expect(model.links).toEqual([]);
   });
 
-  it("handles all-empty input with a zero flow", () => {
-    const cols = buildFlowColumns([], []);
-    expect(cols.flowTotal).toBe(0);
-    expect(cols.sources).toEqual([]);
-    expect(cols.targets).toEqual([]);
+  it("drops zero and negative values and handles all-empty input", () => {
+    const model = computeDirectFlowLinks(
+      [merged("Zero", 0), merged("Neg", -500)],
+      [merged("Nil", 0)]
+    );
+    expect(model.incomeTotal).toBe(0);
+    expect(model.spendingTotal).toBe(0);
+    expect(model.sources).toEqual([]);
+    expect(model.targets).toEqual([]);
+    expect(model.links).toEqual([]);
+    const empty = computeDirectFlowLinks([], []);
+    expect(empty.incomeTotal).toBe(0);
+    expect(empty.spendingTotal).toBe(0);
+    expect(empty.links).toEqual([]);
   });
 
   it("preserves merged spending rows untouched (Other keeps its count)", () => {
-    const cols = buildFlowColumns(
+    const model = computeDirectFlowLinks(
+      [{ name: "Pay", value: 10000, mergedCount: 1 }],
       [
         { name: "A", value: 6000, mergedCount: 1 },
         { name: OTHER_BUCKET_LABEL, value: 2000, mergedCount: 4 },
-      ],
-      [{ name: "Pay", value: 10000 }]
+      ]
     );
-    expect(cols.targets[1]).toEqual({
+    expect(model.targets[1]).toEqual({
       name: OTHER_BUCKET_LABEL,
       value: 2000,
       mergedCount: 4,
     });
-    expect(cols.targets[2]).toEqual({
+    expect(model.targets[2]).toEqual({
       name: REMAINING_LABEL,
       value: 2000,
       mergedCount: 1,
@@ -432,98 +540,169 @@ describe("buildFlowColumns", () => {
   });
 });
 
-describe("layoutIncomeSankey", () => {
-  const cols = buildFlowColumns(
-    [
-      { name: "A", value: 6000, mergedCount: 1 },
-      { name: "B", value: 3000, mergedCount: 1 },
-      { name: "C", value: 1000, mergedCount: 1 },
-    ],
-    [
-      { name: "Pay", value: 8000 },
-      { name: "Gig", value: 3000 },
-    ]
-  );
+describe("layoutDirectIncomeSankey", () => {
+  const sources = [
+    merged("Pay", 8000),
+    merged("Gig", 3000),
+  ];
+  const spending = [merged("A", 6000), merged("B", 3000), merged("C", 1000)];
 
-  it("returns an empty layout with zero middle for empty input (no NaN)", () => {
-    const layout = layoutIncomeSankey([], [], { width: 800, height: 400 });
+  it("returns an empty layout with no middle node for empty input (no NaN)", () => {
+    const layout = layoutDirectIncomeSankey([], [], { width: 800, height: 400 });
     expect(layout.flowTotal).toBe(0);
-    expect(layout.middle.h).toBe(0);
     expect(layout.sources).toEqual([]);
     expect(layout.targets).toEqual([]);
-    expect(layout.inLinks).toEqual([]);
-    expect(layout.outLinks).toEqual([]);
-    expect(Number.isFinite(layout.middle.x)).toBe(true);
+    expect(layout.links).toEqual([]);
+    expect("middle" in layout).toBe(false);
     expect(Number.isFinite(layout.sourceLabelX)).toBe(true);
     expect(Number.isFinite(layout.targetLabelX)).toBe(true);
   });
 
-  it("attaches every band to the middle node with matching heights", () => {
-    const layout = layoutIncomeSankey(cols.sources, cols.targets, {
+  it("returns finite degenerate geometry for zero/negative values", () => {
+    const layout = layoutDirectIncomeSankey(
+      [merged("Zero", 0)],
+      [merged("Neg", -100)],
+      { width: 800, height: 400 }
+    );
+    expect(layout.flowTotal).toBe(0);
+    expect(layout.sources).toEqual([]);
+    expect(layout.targets).toEqual([]);
+    expect(layout.links).toEqual([]);
+    for (const v of [
+      layout.incomeTotal,
+      layout.spendingTotal,
+      layout.flowTotal,
+      layout.sourceLabelX,
+      layout.targetLabelX,
+    ]) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("connects every income directly to every expense with no middle node", () => {
+    const layout = layoutDirectIncomeSankey(sources, spending, {
       width: 800,
       height: 400,
     });
+    expect(layout.incomeTotal).toBe(11000);
+    expect(layout.spendingTotal).toBe(10000);
     expect(layout.flowTotal).toBe(11000);
     expect(layout.sources).toHaveLength(2);
     // A + B + C plus the Remaining plug for the $100 surplus.
     expect(layout.targets).toHaveLength(4);
-    expect(layout.inLinks).toHaveLength(2);
-    expect(layout.outLinks).toHaveLength(4);
+    // Dense ribbons: 2 sources x 4 targets, target-major.
+    expect(layout.links).toHaveLength(8);
+    expect("middle" in layout).toBe(false);
+    expect(layout.links.map((l) => [l.sourceIndex, l.targetIndex])).toEqual([
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [0, 2],
+      [1, 2],
+      [0, 3],
+      [1, 3],
+    ]);
+    expect(layout.links[0]).toMatchObject({ sourceName: "Pay", targetName: "A" });
+    expect(layout.links[7]).toMatchObject({ sourceName: "Gig", targetName: REMAINING_LABEL });
+  });
 
-    // Middle sits strictly between the two columns.
-    const srcRight = layout.sources[0]!.x + layout.sources[0]!.w;
-    expect(layout.middle.x).toBeGreaterThan(srcRight);
-    expect(layout.middle.x + layout.middle.w).toBeLessThan(layout.targets[0]!.x);
-
-    // In-bands run from their source bar into the middle node.
-    for (let i = 0; i < layout.inLinks.length; i++) {
-      const link = layout.inLinks[i]!;
-      const node = layout.sources[i]!;
-      expect(link.x0).toBeCloseTo(node.x + node.w, 6);
-      expect(link.x1).toBeCloseTo(layout.middle.x, 6);
-      expect(link.sy0).toBeCloseTo(node.y, 6);
-      expect(link.sy1 - link.sy0).toBeCloseTo(node.h, 6);
-      expect(link.ty0).toBeGreaterThanOrEqual(layout.middle.y - 1e-9);
-      expect(link.ty1).toBeLessThanOrEqual(layout.middle.y + layout.middle.h + 1e-9);
+  it("runs every ribbon from its source bar to its target bar with no taper", () => {
+    const layout = layoutDirectIncomeSankey(sources, spending, {
+      width: 800,
+      height: 400,
+    });
+    for (const link of layout.links) {
+      const src = layout.sources[link.sourceIndex]!;
+      const tgt = layout.targets[link.targetIndex]!;
+      expect(link.x0).toBeCloseTo(src.x + src.w, 6);
+      expect(link.x1).toBeCloseTo(tgt.x, 6);
+      expect(link.x1).toBeGreaterThan(link.x0);
+      // No taper: equal band height at both ends.
+      expect(link.sy1 - link.sy0).toBeCloseTo(link.ty1 - link.ty0, 6);
+      // Bands sit inside their bars.
+      expect(link.sy0).toBeGreaterThanOrEqual(src.y - 1e-9);
+      expect(link.sy1).toBeLessThanOrEqual(src.y + src.h + 1e-9);
+      expect(link.ty0).toBeGreaterThanOrEqual(tgt.y - 1e-9);
+      expect(link.ty1).toBeLessThanOrEqual(tgt.y + tgt.h + 1e-9);
+      // Closed ribbon path running left-to-right.
+      expect(link.d).toMatch(/^M .* C .* Z$/);
     }
-    // Out-bands run from the middle node to their target bar.
-    for (let i = 0; i < layout.outLinks.length; i++) {
-      const link = layout.outLinks[i]!;
-      const node = layout.targets[i]!;
-      expect(link.x0).toBeCloseTo(layout.middle.x + layout.middle.w, 6);
-      expect(link.x1).toBeCloseTo(node.x, 6);
-      expect(link.ty0).toBeCloseTo(node.y, 6);
-      expect(link.ty1 - link.ty0).toBeCloseTo(node.h, 6);
-      expect(link.sy0).toBeGreaterThanOrEqual(layout.middle.y - 1e-9);
-      expect(link.sy1).toBeLessThanOrEqual(layout.middle.y + layout.middle.h + 1e-9);
+    // Incoming bands exactly fill each target bar (fully funded here).
+    for (let j = 0; j < layout.targets.length; j++) {
+      const tgt = layout.targets[j]!;
+      const bands = layout.links.filter((l) => l.targetIndex === j);
+      const bandsH = bands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      expect(bandsH).toBeCloseTo(tgt.h, 6);
+      expect(bands[0]!.ty0).toBeCloseTo(tgt.y, 6);
+      expect(tgt.unfundedH).toBe(0);
+      expect(tgt.unfundedValue).toBe(0);
     }
   });
 
-  it("stacks unequal sides independently, top-aligned under one middle", () => {
-    const oneSided = buildFlowColumns(
-      [
-        { name: "A", value: 5000, mergedCount: 1 },
-        { name: "B", value: 3000, mergedCount: 1 },
-        { name: "C", value: 2000, mergedCount: 1 },
-      ],
-      [{ name: "Pay", value: 10000 }]
-    );
-    const layout = layoutIncomeSankey(oneSided.sources, oneSided.targets, {
-      width: 800,
-      height: 400,
+  it("stacks both columns top-down inside the padded plot area", () => {
+    const W = 800;
+    const H = 400;
+    const layout = layoutDirectIncomeSankey(sources, spending, {
+      width: W,
+      height: H,
       padTop: 28,
+      padBottom: 28,
     });
-    expect(layout.sources).toHaveLength(1);
     expect(layout.sources[0]!.y).toBeCloseTo(28, 6);
     expect(layout.targets[0]!.y).toBeCloseTo(28, 6);
-    expect(layout.middle.y).toBeCloseTo(28, 6);
-    // Middle covers the taller (3-row) stack.
-    const lastTgt = layout.targets[2]!;
-    expect(layout.middle.h).toBeGreaterThanOrEqual(lastTgt.y + lastTgt.h - 28 - 1e-9);
+    for (const col of [layout.sources, layout.targets]) {
+      let prevTop = 28;
+      for (const node of col) {
+        expect(node.y).toBeGreaterThanOrEqual(prevTop - 1e-9);
+        expect(node.x).toBeGreaterThanOrEqual(0);
+        expect(node.x + node.w).toBeLessThanOrEqual(W);
+        expect(node.y + node.h).toBeLessThanOrEqual(H - 28 + 1e-9);
+        prevTop = node.y + node.h;
+      }
+    }
+    // Node shares match drawn heights on both sides.
+    for (const node of [...layout.sources, ...layout.targets]) {
+      expect(node.share).toBeCloseTo(node.value / layout.flowTotal, 9);
+    }
+  });
+
+  it("renders the shortfall as an unfunded segment at each expense bar's bottom", () => {
+    const layout = layoutDirectIncomeSankey([merged("Pay", 2500)], [merged("A", 6000)], {
+      width: 800,
+      height: 400,
+    });
+    expect(layout.targets).toHaveLength(1);
+    const tgt = layout.targets[0]!;
+    expect(tgt.fundedValue).toBeCloseTo(2500, 9);
+    expect(tgt.unfundedValue).toBeCloseTo(3500, 9);
+    // The unfunded segment takes the unfunded share of the bar at its bottom.
+    expect(tgt.unfundedH).toBeCloseTo((tgt.h * 3500) / 6000, 6);
+    expect(tgt.unfundedH).toBeGreaterThan(0);
+    expect(tgt.unfundedH).toBeLessThan(tgt.h);
+    // The single ribbon fills exactly the funded (top) region.
+    expect(layout.links).toHaveLength(1);
+    const link = layout.links[0]!;
+    expect(link.ty0).toBeCloseTo(tgt.y, 6);
+    expect(link.ty1).toBeCloseTo(tgt.y + tgt.h - tgt.unfundedH, 6);
+  });
+
+  it("renders fully-unfunded bars with no ribbons when there is no income", () => {
+    const layout = layoutDirectIncomeSankey([], spending, { width: 800, height: 400 });
+    expect(layout.sources).toEqual([]);
+    expect(layout.targets).toHaveLength(3);
+    expect(layout.links).toEqual([]);
+    for (const tgt of layout.targets) {
+      expect(tgt.fundedValue).toBe(0);
+      expect(tgt.unfundedValue).toBe(tgt.value);
+      expect(tgt.unfundedH).toBeCloseTo(tgt.h, 9);
+      expect(Number.isFinite(tgt.y)).toBe(true);
+      expect(Number.isFinite(tgt.h)).toBe(true);
+    }
   });
 
   it("keeps label anchors clear of their bars", () => {
-    const layout = layoutIncomeSankey(cols.sources, cols.targets, {
+    const layout = layoutDirectIncomeSankey(sources, spending, {
       width: 800,
       height: 400,
       padLeft: 112,
@@ -532,5 +711,40 @@ describe("layoutIncomeSankey", () => {
     expect(layout.targetLabelX).toBeGreaterThanOrEqual(
       layout.targets[0]!.x + layout.targets[0]!.w + 8
     );
+  });
+
+  it("keeps every row pitch at the label minimum when sized by the view contract", () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      merged(`M${i}`, Math.max(1, 60000 - i * 997))
+    );
+    const both = [merged("Pay", 300000), merged("Gig", 120000)];
+    const height = sankeyContentHeight(
+      Math.max(both.length, many.length + 1),
+      400
+    );
+    const layout = layoutDirectIncomeSankey(both, many, {
+      width: 800,
+      height,
+      padTop: SANKEY_PAD_TOP,
+      padBottom: SANKEY_PAD_BOTTOM,
+      nodeGap: SANKEY_NODE_GAP,
+      minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
+    });
+    // 60 expenses, no Remaining (spending exceeds income); 2 x 60 ribbons.
+    expect(layout.targets).toHaveLength(60);
+    expect(layout.links).toHaveLength(120);
+    for (let i = 1; i < layout.targets.length; i++) {
+      expect(layout.targets[i]!.y - layout.targets[i - 1]!.y).toBeGreaterThanOrEqual(
+        SANKEY_MIN_PITCH - 1e-9
+      );
+    }
+    const last = layout.targets[layout.targets.length - 1]!;
+    expect(last.y + last.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+    const lastSrc = layout.sources[layout.sources.length - 1]!;
+    expect(lastSrc.y + lastSrc.h).toBeLessThanOrEqual(height - SANKEY_PAD_BOTTOM + 1e-6);
+    for (const node of [...layout.sources, ...layout.targets]) {
+      expect(Number.isFinite(node.y)).toBe(true);
+      expect(Number.isFinite(node.h)).toBe(true);
+    }
   });
 });

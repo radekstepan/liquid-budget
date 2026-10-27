@@ -122,42 +122,87 @@ export function computeIncomeBreakdown(
 
 /** Label for the unspent-income node on the target (right) side. */
 export const REMAINING_LABEL = "Remaining";
-/** Label for the income shortfall node on the source (left) side. */
-export const OVERSPENT_LABEL = "Overspent";
+/**
+ * Label for an expense's unfunded slice. When spending exceeds income there
+ * is no extra income source (money is not invented) — each expense is only
+ * partly funded, and the shortfall renders as a distinct neutral segment on
+ * the expense side. Wording is provisional; a follow-up refines it.
+ */
+export const UNFUNDED_LABEL = "Unfunded";
 
-export type FlowColumns = {
-  /** Income sources, plus an Overspent plug when spending exceeds income. */
-  sources: MergedSpendingItem[];
-  /** Spending groups, plus a Remaining plug when income exceeds spending. */
-  targets: MergedSpendingItem[];
+export type DirectFlowLinkValue = {
+  sourceIndex: number;
+  targetIndex: number;
+  /** Cents on this ribbon (funded flow only; always > 0). */
+  value: number;
+};
+
+export type DirectFlowModel = {
   incomeTotal: number;
   spendingTotal: number;
-  /** Conserved flow: both columns sum to this. */
-  flowTotal: number;
+  /** Income sources with value > 0, in input order; link.sourceIndex keys here. */
+  sources: MergedSpendingItem[];
+  /**
+   * Spending groups plus a trailing Remaining plug when income exceeds
+   * spending; link.targetIndex, funded, and unfunded key here. There is
+   * deliberately no plug for the reverse imbalance (see UNFUNDED_LABEL).
+   */
+  targets: MergedSpendingItem[];
+  /** Funded cents per target; incoming links sum to this. */
+  funded: number[];
+  /** Unfunded cents per target (0 unless spending exceeds income). */
+  unfunded: number[];
+  /** One ribbon per (source, target) pair with positive flow, target-major. */
+  links: DirectFlowLinkValue[];
 };
 
 /**
- * Assemble balanced Sankey columns: the plugs keep both sides summing to
- * max(income, spending) so inflow always equals outflow. Exactly one plug
- * exists at most (never both); equal totals need none.
+ * Fungible proportional allocation of income to expenses: money has no
+ * identity, so every expense draws from every income source in proportion to
+ * that source's share of total income. Each link's value is
+ * `funded(target) * source.value / incomeTotal`.
+ *
+ * Imbalance handling:
+ * - Income exceeds spending: the surplus lands in a trailing Remaining
+ *   target, fed proportionally like any other expense.
+ * - Spending exceeds income: every expense is funded pro-rata at the uniform
+ *   coverage ratio `incomeTotal / spendingTotal`; the remainder per expense
+ *   is reported as unfunded. No phantom income is invented.
+ *
+ * Conservation (covered by unit tests): links out of a source sum to that
+ * source's value; links into a target sum to that target's funded value.
+ * Items with value <= 0 are dropped (they would be phantom nodes).
  */
-export function buildFlowColumns(
-  spending: MergedSpendingItem[],
-  income: SpendingBreakdownItem[]
-): FlowColumns {
-  const incomeTotal = income.reduce((s, it) => s + it.value, 0);
-  const spendingTotal = spending.reduce((s, it) => s + it.value, 0);
-  const flowTotal = Math.max(incomeTotal, spendingTotal);
+export function computeDirectFlowLinks(
+  sources: MergedSpendingItem[],
+  spending: MergedSpendingItem[]
+): DirectFlowModel {
+  const src = sources.filter((s) => s.value > 0);
+  const spend = spending.filter((t) => t.value > 0);
+  const incomeTotal = src.reduce((s, it) => s + it.value, 0);
+  const spendingTotal = spend.reduce((s, it) => s + it.value, 0);
 
-  const sources: MergedSpendingItem[] = income.map((it) => ({ ...it, mergedCount: 1 }));
-  if (spendingTotal > incomeTotal) {
-    sources.push({ name: OVERSPENT_LABEL, value: spendingTotal - incomeTotal, mergedCount: 1 });
-  }
-  const targets: MergedSpendingItem[] = [...spending];
+  const targets: MergedSpendingItem[] = [...spend];
   if (incomeTotal > spendingTotal) {
     targets.push({ name: REMAINING_LABEL, value: incomeTotal - spendingTotal, mergedCount: 1 });
   }
-  return { sources, targets, incomeTotal, spendingTotal, flowTotal };
+
+  const coverage = spendingTotal > 0 ? Math.min(1, incomeTotal / spendingTotal) : 1;
+  const funded = targets.map((t) => t.value * coverage);
+  const unfunded = targets.map((t, j) => t.value - (funded[j] ?? 0));
+
+  const links: DirectFlowLinkValue[] = [];
+  if (incomeTotal > 0) {
+    for (let j = 0; j < targets.length; j++) {
+      const fj = funded[j] ?? 0;
+      if (!(fj > 0)) continue;
+      for (let i = 0; i < src.length; i++) {
+        const value = fj * ((src[i]?.value ?? 0) / incomeTotal);
+        if (value > 0) links.push({ sourceIndex: i, targetIndex: j, value });
+      }
+    }
+  }
+  return { incomeTotal, spendingTotal, sources: src, targets, funded, unfunded, links };
 }
 
 export type MergedSpendingItem = SpendingBreakdownItem & {
@@ -300,6 +345,69 @@ export function sankeyContentHeight(itemCount: number, containerHeight: number):
 }
 
 /**
+ * Resolve per-node pixel heights for a column of `values` filling `bandH`
+ * (the plot height minus gaps): proportional shares first, then a minimum
+ * height enforced by taking from the largest nodes first (largest-first
+ * keeps small-but-visible nodes exact), then a rescale to fit when even the
+ * minimums overflow (pathological all-tiny case). The result always sums to
+ * at most `bandH` and never contains NaN.
+ */
+function resolveNodeHeights(values: number[], bandH: number, minNodeHeight: number): number[] {
+  const total = values.reduce((s, v) => s + v, 0);
+  if (values.length === 0 || total <= 0 || bandH <= 0) {
+    return values.map(() => 0);
+  }
+  const heights = values.map((v) => (v / total) * bandH);
+  const minH = Math.min(minNodeHeight, bandH / values.length);
+  if (minH > 0) {
+    const below = heights.filter((h) => h < minH).length;
+    if (below > 0) {
+      let short = 0;
+      for (const h of heights) {
+        if (h < minH) short += minH - h;
+      }
+      const donors = heights
+        .map((h, idx) => ({ h, idx }))
+        .filter((o) => o.h > minH)
+        .sort((a, b) => b.h - a.h);
+      for (const o of donors) {
+        if (short <= 0) break;
+        const give = Math.min(o.h - minH, short);
+        heights[o.idx] = (heights[o.idx] ?? o.h) - give;
+        short -= give;
+      }
+      for (let i = 0; i < heights.length; i++) {
+        if ((heights[i] ?? 0) < minH) heights[i] = minH;
+      }
+      // Pathological case (everything tiny): rescale to fit the plot.
+      const sum = heights.reduce((a, h) => a + h, 0);
+      if (sum > bandH && sum > 0) {
+        const k = bandH / sum;
+        for (let i = 0; i < heights.length; i++) heights[i] = (heights[i] ?? 0) * k;
+      }
+    }
+  }
+  return heights;
+}
+
+/** Closed bezier ribbon path from the source band to the target band. */
+function ribbonPath(
+  x0: number,
+  x1: number,
+  sy0: number,
+  sy1: number,
+  ty0: number,
+  ty1: number
+): string {
+  const f = (n: number) => n.toFixed(2);
+  const midX = (x0 + x1) / 2;
+  return (
+    `M ${f(x0)} ${f(sy0)} C ${f(midX)} ${f(sy0)} ${f(midX)} ${f(ty0)} ${f(x1)} ${f(ty0)} ` +
+    `L ${f(x1)} ${f(ty1)} C ${f(midX)} ${f(ty1)} ${f(midX)} ${f(sy1)} ${f(x0)} ${f(sy1)} Z`
+  );
+}
+
+/**
  * Lay out a two-column Sankey: one source node ("Total") on the left, one
  * target node per item on the right, connected by bezier ribbons.
  *
@@ -351,44 +459,16 @@ export function layoutSankey(
   const gapsH = gap * Math.max(0, n - 1);
   const bandH = Math.max(0, availH - gapsH);
 
-  // Proportional heights, then enforce the minimum by taking from the
-  // largest nodes first (largest-first keeps small-but-visible nodes exact).
-  const heights = items.map((it) => (it.value / total) * bandH);
-  const minH = Math.min(minNodeHeight, items.length > 0 ? bandH / items.length : 0);
-  if (minH > 0) {
-    const below = heights.filter((h) => h < minH).length;
-    if (below > 0) {
-      let short = 0;
-      for (const h of heights) {
-        if (h < minH) short += minH - h;
-      }
-      const donors = heights
-        .map((h, idx) => ({ h, idx }))
-        .filter((o) => o.h > minH)
-        .sort((a, b) => b.h - a.h);
-      for (const o of donors) {
-        if (short <= 0) break;
-        const give = Math.min(o.h - minH, short);
-        heights[o.idx] = (heights[o.idx] ?? o.h) - give;
-        short -= give;
-      }
-      for (let i = 0; i < heights.length; i++) {
-        if ((heights[i] ?? 0) < minH) heights[i] = minH;
-      }
-      // Pathological case (everything tiny): rescale to fit the plot.
-      const sum = heights.reduce((a, h) => a + h, 0);
-      if (sum > bandH && sum > 0) {
-        const k = bandH / sum;
-        for (let i = 0; i < heights.length; i++) heights[i] = (heights[i] ?? 0) * k;
-      }
-    }
-  }
+  const heights = resolveNodeHeights(
+    items.map((it) => it.value),
+    bandH,
+    minNodeHeight
+  );
 
   const nodeX = Math.max(padLeft + nodeWidth + 24, width - padRight - nodeWidth);
   const sourceX = padLeft;
   const linkX0 = sourceX + nodeWidth;
   const linkX1 = nodeX;
-  const midX = (linkX0 + linkX1) / 2;
 
   const nodes: SankeyNodeLayout[] = [];
   const links: SankeyLinkLayout[] = [];
@@ -403,7 +483,6 @@ export function layoutSankey(
     const sy1 = sy + h;
     const ty0 = y;
     const ty1 = y + h;
-    const f = (n: number) => n.toFixed(2);
     links.push({
       name: it.name,
       value: it.value,
@@ -414,9 +493,7 @@ export function layoutSankey(
       ty1,
       x0: linkX0,
       x1: linkX1,
-      d:
-        `M ${f(linkX0)} ${f(sy0)} C ${f(midX)} ${f(sy0)} ${f(midX)} ${f(ty0)} ${f(linkX1)} ${f(ty0)} ` +
-        `L ${f(linkX1)} ${f(ty1)} C ${f(midX)} ${f(ty1)} ${f(midX)} ${f(sy1)} ${f(linkX0)} ${f(sy1)} Z`,
+      d: ribbonPath(linkX0, linkX1, sy0, sy1, ty0, ty1),
     });
     y += h + gap;
     sy += h + gap;
@@ -432,21 +509,33 @@ export function layoutSankey(
   };
 }
 
-export type IncomeSankeyLayout = {
+export type DirectSankeyTargetNode = SankeyNodeLayout & {
+  /** Funded cents; incoming ribbons sum to this. */
+  fundedValue: number;
+  /** Unfunded cents (0 unless spending exceeds income). */
+  unfundedValue: number;
+  /** Height of the unfunded segment at the node's bottom edge (px). */
+  unfundedH: number;
+};
+
+export type DirectSankeyLinkLayout = SankeyLinkLayout & {
+  sourceIndex: number;
+  targetIndex: number;
+  sourceName: string;
+  targetName: string;
+};
+
+export type DirectIncomeSankeyLayout = {
   incomeTotal: number;
   spendingTotal: number;
-  /** Conserved flow: both columns sum to this. */
+  /** Height-scale denominator: max(income, spending). */
   flowTotal: number;
-  /** Middle ("Total") node spanning both stacks. */
-  middle: { x: number; y: number; w: number; h: number };
   /** Left column: one bar per income source. */
   sources: SankeyNodeLayout[];
-  /** Right column: one bar per spending group. */
-  targets: SankeyNodeLayout[];
-  /** Ribbons from each source bar into the middle node. */
-  inLinks: SankeyLinkLayout[];
-  /** Ribbons from the middle node out to each target bar. */
-  outLinks: SankeyLinkLayout[];
+  /** Right column: one bar per spending group (plus Remaining when unspent). */
+  targets: DirectSankeyTargetNode[];
+  /** One ribbon per (source, target) pair, target-major. */
+  links: DirectSankeyLinkLayout[];
   /** x for end-anchored income labels (left of the source column). */
   sourceLabelX: number;
   /** x for start-anchored target labels (right of the target column). */
@@ -454,64 +543,211 @@ export type IncomeSankeyLayout = {
 };
 
 /**
- * Lay out a three-column money-flow Sankey: income sources (left) flow into
- * a middle Total node, which flows out to spending groups (right). Both
- * columns must sum to the same total (see buildFlowColumns); each column
- * stacks independently, top-aligned, reusing layoutSankey per side so the
- * band math stays identical. The left side's per-source bars are re-derived
- * from its bands (a shared source bar would be wrong there).
+ * Lay out a two-column direct money-flow Sankey: income sources (left) flow
+ * DIRECTLY into spending groups (right) — there is no middle Total bar.
+ * Ribbon values come from computeDirectFlowLinks (fungible proportional
+ * allocation), so each expense visibly draws from each income.
  *
- * Empty input on one side yields that side empty; both empty yields a
- * zero-height middle — never NaN geometry.
+ * Geometry contract (covered by unit tests):
+ * - The expense (right) column owns the pixel scale: target bars resolve via
+ *   resolveNodeHeights, incoming bands exactly fill each bar's funded region
+ *   (top-aligned; the unfunded segment, if any, sits at the bar's bottom),
+ *   and bands within a bar split its height in proportion to their values.
+ * - The income (left) column wraps its outgoing bands: each source bar is
+ *   exactly its bands' height, water-filled up to the minimum node height
+ *   from leftover plot space (never overflowing it).
+ * - Every ribbon has equal height at both ends (no taper): `sy1 - sy0` sums
+ *   to the source bar's band region and `ty1 - ty0` to the target's funded
+ *   region. Bands within a source run in target order; bands within a target
+ *   run in source order.
+ * - Node `share` is value/flowTotal on both sides, matching drawn heights.
+ * - Degenerate input (no positive values, or a non-positive dimension)
+ *   yields no nodes — never NaN geometry.
+ *
+ * Callers should size height with sankeyContentHeight over the LONGER column
+ * (see the readability contract above); the layout never exceeds the padded
+ * plot area, but rows below the minimum pitch may touch.
  */
-export function layoutIncomeSankey(
+export function layoutDirectIncomeSankey(
   sources: MergedSpendingItem[],
-  targets: MergedSpendingItem[],
+  spending: MergedSpendingItem[],
   opts: SankeyGeometryOptions
-): IncomeSankeyLayout {
-  const { width, nodeWidth = 14, padLeft = 8, padTop = 8 } = opts;
-  const padRight = opts.padRight ?? 8;
-  const zoneL = padLeft + nodeWidth;
-  const zoneR = width - padRight - nodeWidth;
-  const middleX = Math.max(zoneL + 24, (zoneL + zoneR) / 2 - nodeWidth / 2);
+): DirectIncomeSankeyLayout {
+  const {
+    width,
+    height,
+    nodeWidth = 14,
+    nodeGap = 6,
+    minNodeHeight = 8,
+    padLeft = 8,
+    padRight = 8,
+    padTop = 8,
+    padBottom = 8,
+  } = opts;
 
-  // Left flow (sources -> middle): keep the bands; the per-source bars are
-  // re-derived below from each band's source span.
-  const left = layoutSankey(sources, { ...opts, width: middleX + nodeWidth, padRight: 0 });
-  // Right flow (middle -> targets): its source bar IS the middle node.
-  const right = layoutSankey(targets, { ...opts, padLeft: middleX });
+  const model = computeDirectFlowLinks(sources, spending);
+  const { incomeTotal, spendingTotal } = model;
+  const flowTotal = Math.max(incomeTotal, spendingTotal);
 
-  const srcNodes: SankeyNodeLayout[] = sources.map((s, i) => {
-    const link = left.links[i];
+  if (model.targets.length === 0 || flowTotal <= 0 || width <= 0 || height <= 0) {
     return {
-      name: s.name,
-      value: s.value,
-      mergedCount: s.mergedCount,
-      share: left.total > 0 ? s.value / left.total : 0,
-      x: padLeft,
-      y: link?.sy0 ?? padTop,
-      w: nodeWidth,
-      h: link ? Math.max(0, link.sy1 - link.sy0) : 0,
+      incomeTotal,
+      spendingTotal,
+      flowTotal,
+      sources: [],
+      targets: [],
+      links: [],
+      sourceLabelX: padLeft - 10,
+      targetLabelX: width - padRight,
     };
+  }
+
+  const srcItems = model.sources;
+  const tgtItems = model.targets;
+  const nS = srcItems.length;
+  const nT = tgtItems.length;
+  const nMax = Math.max(nS, nT);
+
+  const availH = Math.max(0, height - padTop - padBottom);
+  // The longer column's gaps cap the shared gap so both columns fit.
+  let gap = nodeGap;
+  if (nMax > 1 && gap * (nMax - 1) > availH) {
+    gap = Math.max(0, (availH - nMax) / (nMax - 1));
+  }
+  const bandH = Math.max(0, availH - gap * (nMax - 1));
+
+  // Right column owns the scale; resolveNodeHeights guarantees the bars plus
+  // the longer column's gaps fit the plot.
+  const rightH = resolveNodeHeights(
+    tgtItems.map((t) => t.value),
+    bandH,
+    minNodeHeight
+  );
+
+  // Group ribbon indices per side (model.links is target-major, so groups
+  // stay in input order on both sides).
+  const byTarget: number[][] = tgtItems.map(() => []);
+  const bySource: number[][] = srcItems.map(() => []);
+  model.links.forEach((l, k) => {
+    byTarget[l.targetIndex]?.push(k);
+    bySource[l.sourceIndex]?.push(k);
   });
 
-  const incomeTotal = sources.reduce((s, it) => s + it.value, 0);
-  const spendingTotal = targets.reduce((s, it) => s + it.value, 0);
+  // Ribbon pixel heights, derived from the target side so bands exactly fill
+  // each bar's funded region.
+  const linkH = new Array<number>(model.links.length).fill(0);
+  const unfundedH: number[] = tgtItems.map((t, j) => {
+    const nodeH = rightH[j] ?? 0;
+    const fundedPx = t.value > 0 ? nodeH * ((model.funded[j] ?? 0) / t.value) : 0;
+    const fj = model.funded[j] ?? 0;
+    if (fj > 0) {
+      for (const k of byTarget[j] ?? []) {
+        linkH[k] = fundedPx * ((model.links[k]?.value ?? 0) / fj);
+      }
+    }
+    return Math.max(0, nodeH - fundedPx);
+  });
+
+  // Left column wraps its outgoing bands, water-filled to the minimum height
+  // from leftover space: total bands fit bandH (a subset of the right bars),
+  // so the fill can never push the column past the plot.
+  const bandSum = srcItems.map((_, i) =>
+    (bySource[i] ?? []).reduce((s, k) => s + (linkH[k] ?? 0), 0)
+  );
+  const totalBands = bandSum.reduce((s, b) => s + b, 0);
+  const gapsLeft = gap * Math.max(0, nS - 1);
+  const minH = nS > 0 ? Math.min(minNodeHeight, (availH - gapsLeft) / nS) : 0;
+  const tiny = bandSum.filter((b) => b < minH).length;
+  const extra = Math.max(0, availH - gapsLeft - totalBands);
+  const effMin = tiny > 0 ? Math.min(minH, extra / tiny) : minH;
+  const leftH = bandSum.map((b) => Math.max(b, effMin));
+
+  const nodeX = Math.max(padLeft + nodeWidth + 24, width - padRight - nodeWidth);
+  const linkX0 = padLeft + nodeWidth;
+  const linkX1 = nodeX;
+
+  const srcNodes: SankeyNodeLayout[] = srcItems.map((s, i) => ({
+    name: s.name,
+    value: s.value,
+    mergedCount: s.mergedCount,
+    share: s.value / flowTotal,
+    x: padLeft,
+    y: 0, // placed by the stacking pass below
+    w: nodeWidth,
+    h: Math.max(0, leftH[i] ?? 0),
+  }));
+  const tgtNodes: DirectSankeyTargetNode[] = tgtItems.map((t, j) => ({
+    name: t.name,
+    value: t.value,
+    mergedCount: t.mergedCount,
+    share: t.value / flowTotal,
+    x: nodeX,
+    y: 0, // placed by the stacking pass below
+    w: nodeWidth,
+    h: Math.max(0, rightH[j] ?? 0),
+    fundedValue: model.funded[j] ?? 0,
+    unfundedValue: model.unfunded[j] ?? 0,
+    unfundedH: unfundedH[j] ?? 0,
+  }));
+
+  // Stack both columns top-down; bands accumulate from each bar's top edge.
+  let y = padTop;
+  for (let i = 0; i < srcNodes.length; i++) {
+    srcNodes[i]!.y = y;
+    y += (leftH[i] ?? 0) + gap;
+  }
+  y = padTop;
+  for (let j = 0; j < tgtNodes.length; j++) {
+    tgtNodes[j]!.y = y;
+    y += (rightH[j] ?? 0) + gap;
+  }
+
+  const links: DirectSankeyLinkLayout[] = model.links.map((l) => ({
+    name: tgtItems[l.targetIndex]?.name ?? "",
+    value: l.value,
+    mergedCount: 1,
+    sourceIndex: l.sourceIndex,
+    targetIndex: l.targetIndex,
+    sourceName: srcItems[l.sourceIndex]?.name ?? "",
+    targetName: tgtItems[l.targetIndex]?.name ?? "",
+    sy0: 0,
+    sy1: 0,
+    ty0: 0,
+    ty1: 0,
+    x0: linkX0,
+    x1: linkX1,
+    d: "",
+  }));
+  for (let i = 0; i < srcNodes.length; i++) {
+    let sy = srcNodes[i]!.y;
+    for (const k of bySource[i] ?? []) {
+      const h = linkH[k] ?? 0;
+      links[k]!.sy0 = sy;
+      links[k]!.sy1 = sy + h;
+      sy += h;
+    }
+  }
+  for (let j = 0; j < tgtNodes.length; j++) {
+    let ty = tgtNodes[j]!.y;
+    for (const k of byTarget[j] ?? []) {
+      const h = linkH[k] ?? 0;
+      links[k]!.ty0 = ty;
+      links[k]!.ty1 = ty + h;
+      ty += h;
+    }
+  }
+  for (const l of links) {
+    l.d = ribbonPath(l.x0, l.x1, l.sy0, l.sy1, l.ty0, l.ty1);
+  }
+
   return {
     incomeTotal,
     spendingTotal,
-    flowTotal: Math.max(incomeTotal, spendingTotal),
-    middle: {
-      x: middleX,
-      y: padTop,
-      w: nodeWidth,
-      h: Math.max(left.source.h, right.source.h),
-    },
+    flowTotal,
     sources: srcNodes,
-    targets: right.nodes,
-    inLinks: left.links,
-    outLinks: right.links,
+    targets: tgtNodes,
+    links,
     sourceLabelX: padLeft - 10,
-    targetLabelX: right.labelX,
+    targetLabelX: nodeX + nodeWidth + 8,
   };
 }

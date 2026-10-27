@@ -4,31 +4,37 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   fmt,
   mergeBelowThreshold,
-  layoutIncomeSankey,
-  buildFlowColumns,
+  layoutDirectIncomeSankey,
   sankeyContentHeight,
   OTHER_BUCKET_LABEL,
-  OVERSPENT_LABEL,
   REMAINING_LABEL,
+  UNFUNDED_LABEL,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
   SANKEY_PAD_BOTTOM,
   SANKEY_PAD_TOP,
   SANKEY_SOURCE_GUTTER,
+  type MergedSpendingItem,
   type SpendingBreakdownItem,
   type SpendingDimension,
 } from "@ynab/logic";
 import { Button, Panel, Tooltip } from "@ynab/theme";
-import { ChartTip, colorForName, TipLabel, useElementSize } from "./chartUtils.js";
+import {
+  ChartTip,
+  colorForName,
+  TipLabel,
+  UNFUNDED_COLOR,
+  useElementSize,
+} from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
 export type SpendingItem = SpendingBreakdownItem;
 export type SpendingViewMode = "bars" | "sankey";
 
 type Hover =
-  | { kind: "income" | "inLink"; idx: number; x: number; y: number }
-  | { kind: "node" | "link"; idx: number; x: number; y: number }
-  | { kind: "total"; x: number; y: number }
+  | { kind: "income"; idx: number; x: number; y: number }
+  | { kind: "node"; idx: number; x: number; y: number }
+  | { kind: "link"; src: number; tgt: number; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
@@ -85,10 +91,20 @@ export function SpendingReport({
     () => mergeBelowThreshold(raw, Math.round(activeThreshold * 100)),
     [raw, activeThreshold]
   );
-  const spentTotal = useMemo(
-    () => merged.items.reduce((s, x) => s + x.value, 0),
-    [merged.items]
-  );
+
+  // Header totals: plain sums (breakdowns never emit non-positive values, so
+  // these match the layout's filtered totals exactly).
+  const totals = useMemo(() => {
+    const incomeTotal = income.reduce((s, x) => s + x.value, 0);
+    const spendingTotal = merged.items.reduce((s, x) => s + x.value, 0);
+    return {
+      incomeTotal,
+      spendingTotal,
+      flowTotal: Math.max(incomeTotal, spendingTotal),
+      remaining: incomeTotal - spendingTotal,
+    };
+  }, [merged.items, income]);
+  const spentTotal = totals.spendingTotal;
 
   // Bars rows: spending shares (unchanged by the income side).
   const rows = useMemo(() => {
@@ -102,52 +118,39 @@ export function SpendingReport({
     });
   }, [merged.items, spentTotal]);
 
-  // Balanced flow columns: both sides sum to the conserved flow total.
-  const flow = useMemo(
-    () => buildFlowColumns(merged.items, income),
-    [merged.items, income]
-  );
-  const srcRows = useMemo(
-    () =>
-      flow.sources.map((s, i) => ({
-        ...s,
-        flowPct: flow.flowTotal !== 0 ? Math.round((s.value / flow.flowTotal) * 100) : 0,
-        color: colorForName(s.name),
-        i,
-      })),
-    [flow]
-  );
-  const tgtRows = useMemo(
-    () =>
-      flow.targets.map((t, i) => ({
-        ...t,
-        flowPct: flow.flowTotal !== 0 ? Math.round((t.value / flow.flowTotal) * 100) : 0,
-        color: colorForName(t.name),
-        i,
-      })),
-    [flow]
+  // Income rows for the layout (unmerged: the Under slider applies to
+  // expenses only — merging small incomes is a follow-up).
+  const incomeRows: MergedSpendingItem[] = useMemo(
+    () => income.map((it) => ({ ...it, mergedCount: 1 })),
+    [income]
   );
 
-  const empty = flow.sources.length === 0 && flow.targets.length === 0;
+  const empty = incomeRows.length === 0 && merged.items.length === 0;
   const growRows = rows.length > 0 && rows.length <= 14;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
-  const remaining = flow.incomeTotal - flow.spendingTotal;
+  const remaining = totals.remaining;
 
   // The chart grows past the viewport when rows need more room (the
-  // container scrolls) instead of crushing labels onto each other.
+  // container scrolls) instead of crushing labels onto each other. Counts
+  // come from the raw inputs (plus the future Remaining plug): raw lengths
+  // can only overestimate the layout's filtered columns, erring toward
+  // harmless slack rather than crushed rows.
   const contentH = useMemo(
     () =>
       sankeyContentHeight(
-        Math.max(flow.sources.length, flow.targets.length),
+        Math.max(
+          incomeRows.length,
+          merged.items.length + (totals.incomeTotal > totals.spendingTotal ? 1 : 0)
+        ),
         chartSize.height
       ),
-    [flow.sources.length, flow.targets.length, chartSize.height]
+    [incomeRows.length, merged.items.length, totals.incomeTotal, totals.spendingTotal, chartSize.height]
   );
 
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
-    return layoutIncomeSankey(flow.sources, flow.targets, {
+    return layoutDirectIncomeSankey(incomeRows, merged.items, {
       width: chartSize.width,
       height: contentH,
       padLeft: SANKEY_SOURCE_GUTTER,
@@ -157,39 +160,40 @@ export function SpendingReport({
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
-  }, [flow.sources, flow.targets, chartSize.width, chartSize.height, contentH]);
+  }, [incomeRows, merged.items, chartSize.width, chartSize.height, contentH]);
+
+  // Label/tooltip rows follow the layout (which appends Remaining and drops
+  // non-positive values), so labels and bars always agree.
+  const srcRows = useMemo(
+    () =>
+      (sankey?.sources ?? []).map((s, i) => ({
+        ...s,
+        flowPct:
+          totals.flowTotal !== 0 ? Math.round((s.value / totals.flowTotal) * 100) : 0,
+        color: colorForName(s.name),
+        i,
+      })),
+    [sankey, totals.flowTotal]
+  );
+  const tgtRows = useMemo(
+    () =>
+      (sankey?.targets ?? []).map((t, i) => ({
+        ...t,
+        flowPct:
+          totals.flowTotal !== 0 ? Math.round((t.value / totals.flowTotal) * 100) : 0,
+        color: colorForName(t.name),
+        i,
+      })),
+    [sankey, totals.flowTotal]
+  );
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
-    if (hover.kind === "total") {
-      return (
-        <div className="space-y-[3px]">
-          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            Total flow
-          </div>
-          <TipLabel color="#8bc34a" label="Income" value={fmt(flow.incomeTotal)} />
-          <TipLabel color="var(--y-blue)" label="Spent" value={fmt(flow.spendingTotal)} />
-          {remaining > 0 ? (
-            <TipLabel color="#8bc34a" label="Left" value={fmt(remaining)} />
-          ) : remaining < 0 ? (
-            <TipLabel color="#d45042" label="Over" value={fmt(-remaining)} />
-          ) : (
-            <div
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>Income and spending balance exactly</span>
-            </div>
-          )}
-        </div>
-      );
-    }
-    if (hover.kind === "income" || hover.kind === "inLink") {
+    if (hover.kind === "income") {
       const r = srcRows[hover.idx];
       if (!r) return null;
-      const isOver = r.name === OVERSPENT_LABEL;
       const incomePct =
-        flow.incomeTotal !== 0 ? Math.round((r.value / flow.incomeTotal) * 100) : 0;
+        totals.incomeTotal !== 0 ? Math.round((r.value / totals.incomeTotal) * 100) : 0;
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
@@ -197,7 +201,7 @@ export function SpendingReport({
           </div>
           <TipLabel
             color={r.color}
-            label={isOver ? "Shortfall" : "Received"}
+            label="Received"
             value={fmt(r.value)}
             pct={r.flowPct + "%"}
           />
@@ -206,10 +210,40 @@ export function SpendingReport({
             style={{ color: "rgba(242,245,247,0.65)" }}
           >
             <span>
-              {isOver
-                ? "Spending exceeded income — covered from savings or debt"
-                : `${incomePct}% of ${fmt(flow.incomeTotal)} income`}
+              {`${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
+          </div>
+        </div>
+      );
+    }
+    if (hover.kind === "link") {
+      const s = srcRows[hover.src];
+      const t = tgtRows[hover.tgt];
+      if (!s || !t) return null;
+      const link = sankey?.links.find(
+        (l) => l.sourceIndex === hover.src && l.targetIndex === hover.tgt
+      );
+      if (!link) return null;
+      // Share of the target's funded amount (under a shortfall the expense
+      // is only partly funded, so this is relative to funded, not total).
+      const fundedPct =
+        t.fundedValue !== 0 ? Math.round((link.value / t.fundedValue) * 100) : 0;
+      return (
+        <div className="space-y-[3px]">
+          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+            {`${s.name} → ${t.name}`}
+          </div>
+          <TipLabel
+            color={t.color}
+            label="Flows"
+            value={fmt(link.value)}
+            pct={fundedPct + "%"}
+          />
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>Proportional split — money is fungible</span>
           </div>
         </div>
       );
@@ -259,6 +293,13 @@ export function SpendingReport({
           value={fmt(r.value)}
           pct={r.flowPct + "%"}
         />
+        {r.unfundedValue > 0 && (
+          <TipLabel
+            color={UNFUNDED_COLOR}
+            label={UNFUNDED_LABEL}
+            value={fmt(r.unfundedValue)}
+          />
+        )}
         <div
           className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
           style={{ color: "rgba(242,245,247,0.65)" }}
@@ -267,18 +308,34 @@ export function SpendingReport({
             {isOther
               ? `${r.mergedCount} smaller ${nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
               : isRemaining
-                ? `Unspent of ${fmt(flow.incomeTotal)} income`
+                ? `Unspent of ${fmt(totals.incomeTotal)} income`
                 : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
+        {r.unfundedValue > 0 && (
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>Spending exceeded income — covered from savings or debt</span>
+          </div>
+        )}
       </div>
     );
   })();
 
   const hoverSrcIdx =
-    hover != null && (hover.kind === "income" || hover.kind === "inLink") ? hover.idx : null;
+    hover != null && (hover.kind === "income" || hover.kind === "link")
+      ? hover.kind === "link"
+        ? hover.src
+        : hover.idx
+      : null;
   const hoverTgtIdx =
-    hover != null && (hover.kind === "node" || hover.kind === "link") ? hover.idx : null;
+    hover != null && (hover.kind === "node" || hover.kind === "link")
+      ? hover.kind === "link"
+        ? hover.tgt
+        : hover.idx
+      : null;
   const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
 
   return (
@@ -294,14 +351,14 @@ export function SpendingReport({
         <span style={{ color: "var(--y-ink-soft)" }}>
           In:{" "}
           <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-            {fmt(flow.incomeTotal)}
+            {fmt(totals.incomeTotal)}
           </span>
         </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
         <span style={{ color: "var(--y-ink-soft)" }}>
           Out:{" "}
           <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-            {fmt(flow.spendingTotal)}
+            {fmt(totals.spendingTotal)}
           </span>
         </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
@@ -526,38 +583,33 @@ export function SpendingReport({
               height={contentH}
               className="block"
             >
-              {sankey.inLinks.map((link, idx) => {
-                const color = colorForName(link.name);
-                const isHover = hoverSrcIdx === idx;
-                const dim = (hoverSrcIdx != null && !isHover) || hoverTgtIdx != null;
+              {sankey.links.map((link) => {
+                // Ribbons take the expense (target) color so each expense
+                // bar reads as one flow arriving from the incomes.
+                const color = colorForName(link.targetName);
+                const isHover =
+                  hoverSrcIdx === link.sourceIndex && hoverTgtIdx === link.targetIndex;
+                const dim =
+                  (hoverSrcIdx != null && link.sourceIndex !== hoverSrcIdx) ||
+                  (hoverTgtIdx != null && link.targetIndex !== hoverTgtIdx);
                 return (
                   <path
-                    key={`in-${link.name}-${idx}`}
-                    data-testid="sankey-in-link"
-                    d={link.d}
-                    fill={color}
-                    fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
-                    stroke="none"
-                    style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
-                    onMouseMove={(e) => setHover({ kind: "inLink", idx, x: e.clientX, y: e.clientY })}
-                    onMouseLeave={() => setHover(null)}
-                  />
-                );
-              })}
-              {sankey.outLinks.map((link, idx) => {
-                const color = colorForName(link.name);
-                const isHover = hoverTgtIdx === idx;
-                const dim = (hoverTgtIdx != null && !isHover) || hoverSrcIdx != null;
-                return (
-                  <path
-                    key={`out-${link.name}-${idx}`}
+                    key={`link-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
                     d={link.d}
                     fill={color}
                     fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
-                    onMouseMove={(e) => setHover({ kind: "link", idx, x: e.clientX, y: e.clientY })}
+                    onMouseMove={(e) =>
+                      setHover({
+                        kind: "link",
+                        src: link.sourceIndex,
+                        tgt: link.targetIndex,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
                     onMouseLeave={() => setHover(null)}
                   />
                 );
@@ -613,18 +665,6 @@ export function SpendingReport({
                   </g>
                 );
               })}
-              <rect
-                data-testid="sankey-total"
-                x={sankey.middle.x}
-                y={sankey.middle.y}
-                width={sankey.middle.w}
-                height={Math.max(0, sankey.middle.h)}
-                rx={2}
-                fill="var(--y-blue)"
-                style={{ cursor: "pointer" }}
-                onMouseMove={(e) => setHover({ kind: "total", x: e.clientX, y: e.clientY })}
-                onMouseLeave={() => setHover(null)}
-              />
               {sankey.targets.map((node, idx) => {
                 const color = colorForName(node.name);
                 const isHover = hoverTgtIdx === idx;
@@ -650,6 +690,26 @@ export function SpendingReport({
                       }
                       onMouseLeave={() => setHover(null)}
                     />
+                    {node.unfundedH > 0 && (
+                      <rect
+                        data-testid="sankey-unfunded"
+                        x={node.x}
+                        y={node.y + Math.max(0, node.h) - node.unfundedH}
+                        width={node.w}
+                        height={node.unfundedH}
+                        rx={2}
+                        fill={UNFUNDED_COLOR}
+                        fillOpacity={dim ? 0.35 : 1}
+                        stroke="rgba(0,0,0,0.35)"
+                        strokeWidth={1}
+                        strokeDasharray="3 2"
+                        style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                        onMouseMove={(e) =>
+                          setHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseLeave={() => setHover(null)}
+                      />
+                    )}
                     <text
                       x={sankey.targetLabelX}
                       y={node.h >= 26 ? labelY - 2 : labelY - 6}

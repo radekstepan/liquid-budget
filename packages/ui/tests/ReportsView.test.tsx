@@ -219,13 +219,15 @@ describe("ReportsView", () => {
     expect(sankeyBtn).toBeInTheDocument();
     expect(barsBtn).toBeInTheDocument();
 
-    // Default is the Sankey flow: income in, Total middle, one ribbon per
-    // group plus the Remaining plug on the right (income exceeds spending).
+    // Default is the direct Sankey flow: the income feeds one ribbon per
+    // group plus the Remaining plug on the right (income exceeds spending),
+    // with no middle Total bar.
     const svg = panel.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
     expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
     expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
-    expect(svg!.querySelector('[data-testid="sankey-total"]')).not.toBeNull();
+    expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(0);
     expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
     expect(within(panel).getByText("Groceries")).toBeInTheDocument();
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
@@ -413,7 +415,8 @@ describe("ReportsView", () => {
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
-    // Groceries + Rent + Fees + the Remaining plug (income exceeds spending).
+    // Groceries + Rent + Fees + the Remaining plug (income exceeds spending),
+    // each fed directly by the single income.
     expect(links).toHaveLength(4);
     expect(nodes).toHaveLength(4);
     // Each ribbon is a closed bezier path running left-to-right.
@@ -654,14 +657,19 @@ describe("ReportsView", () => {
     const panel = findPanel("Spending by Category")!;
     expect(panel).toBeInTheDocument();
 
-    // Net spend is $50.00 ($200 - $150). No income in range, so the
-    // income side shows the Overspent plug instead of sources.
+    // Net spend is $50.00 ($200 - $150). No income in range, so there are
+    // no income bars — the expense bar is fully unfunded instead of the
+    // income side inventing an Overspent source.
     expect(within(panel).getByText("Clothing")).toBeInTheDocument();
     expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
     expect(within(panel).getByText("Out:")).toBeInTheDocument();
     expect(within(panel).getByText("Over:")).toBeInTheDocument();
-    expect(within(panel).getByText("Overspent")).toBeInTheDocument();
+    expect(within(panel).queryByText("Overspent")).not.toBeInTheDocument();
     expect(within(panel).queryByText("Remaining")).not.toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(0);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
+    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(1);
   });
 });
 
