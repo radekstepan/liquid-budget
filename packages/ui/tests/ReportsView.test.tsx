@@ -197,6 +197,7 @@ describe("ReportsView", () => {
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     expectPanelBodyIsFlexColumn(panel);
+    fireEvent.click(within(panel).getByRole("button", { name: "Bars" }));
     const scope = within(panel);
     // Groceries ($350, 54%) is top, Rent ($300, 46%) second.
     const names = scope.getAllByText(/Groceries|Rent/).map((el) => el.textContent);
@@ -206,33 +207,84 @@ describe("ReportsView", () => {
     expect(scope.getByText("46%")).toBeInTheDocument();
   });
 
-  it("Spending by Category tab toggles between Bars and Donut view modes", () => {
+  it("Spending by Category defaults to the Sankey view and toggles to Bars", () => {
     renderView();
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     expect(panel).toBeTruthy();
     expectPanelBodyIsFlexColumn(panel);
 
+    const sankeyBtn = within(panel).getByRole("button", { name: "Sankey" });
     const barsBtn = within(panel).getByRole("button", { name: "Bars" });
-    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
+    expect(sankeyBtn).toBeInTheDocument();
     expect(barsBtn).toBeInTheDocument();
-    expect(donutBtn).toBeInTheDocument();
 
-    // Default is Bars view with bar tracks
-    expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
-    expect(panel.querySelector("svg")).toBeNull();
-
-    // Toggle to Donut view
-    fireEvent.click(donutBtn);
-    expect(panel.querySelector("svg")).not.toBeNull();
+    // Default is the Sankey flow: Total source plus one ribbon per group.
+    const svg = panel.querySelector('[data-testid="sankey-svg"]');
+    expect(svg).not.toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
+    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(2);
     expect(within(panel).getByText("TOTAL")).toBeInTheDocument();
     expect(within(panel).getByText("Groceries")).toBeInTheDocument();
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
+    expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
 
-    // Toggle back to Bars view
+    // Toggle to Bars view
     fireEvent.click(barsBtn);
-    expect(panel.querySelector("svg")).toBeNull();
+    expect(panel.querySelector('[data-testid="sankey-svg"]')).toBeNull();
     expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
+
+    // Toggle back to Sankey view
+    fireEvent.click(sankeyBtn);
+    expect(panel.querySelector('[data-testid="sankey-svg"]')).not.toBeNull();
+    expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
+  });
+
+  it("Spending tab toggles between Categories and Merchants dimensions", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    fireEvent.click(within(panel).getByRole("button", { name: "Merchants" }));
+
+    // Panel retitles; uncategorized "Shop B" counts as a merchant but
+    // income payee "Payroll" is excluded.
+    expect(findPanel("Spending by Merchant")).toBeTruthy();
+    expect(within(panel).getByText("Shop B")).toBeInTheDocument();
+    expect(within(panel).queryByText("Payroll")).not.toBeInTheDocument();
+    expect(within(panel).getByText("3 merchants")).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Categories" }));
+    expect(findPanel("Spending by Category")).toBeTruthy();
+    expect(within(panel).queryByText("Shop B")).not.toBeInTheDocument();
+  });
+
+  it("Spending tab re-totals the Sankey when the From month is narrowed", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    // Full range totals $650.00 across Groceries + Rent.
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(2);
+    pickFromOpenDropdownByValue(/from month/i, "5");
+    // June only: $50.00 of Groceries; Rent drops out entirely.
+    expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
+    expect(within(panel).queryByText("Rent")).not.toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(1);
+  });
+
+  it("Spending tab merges smaller groups into Other via the threshold slider", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const slider = within(panel).getByRole("slider", { name: /merge smaller expenses/i });
+    // Groceries $350 is kept, Rent $300 folds into Other at a $320 threshold.
+    fireEvent.change(slider, { target: { value: "320" } });
+    expect(within(panel).getByText("Other")).toBeInTheDocument();
+    expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
+    // Total is unchanged by merging.
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(2);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -333,9 +385,9 @@ describe("ReportsView", () => {
     }
   });
 
-  it("Spending by Category in Donut mode draws slices as explicit arc paths so tiny slices cannot render a dash 'bow'", () => {
-    // "Fees" is a tiny share — the slice whose sub-pixel stroke-dasharray used
-    // to rasterize as a ragged multi-colour sliver at the ring seam.
+  it("Spending by Category draws one closed ribbon per group and keeps tiny flows hoverable", () => {
+    // "Fees" is a dust share ($0.01 of $650.01) — without a minimum node
+    // height it would collapse to a sub-pixel sliver no cursor can hit.
     const data = makeData();
     data.categories.push({
       id: 12,
@@ -350,27 +402,29 @@ describe("ReportsView", () => {
     renderView({ data });
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
-    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
-    fireEvent.click(donutBtn);
 
-    const svg = panel.querySelector("svg")!;
-    const circles = svg.querySelectorAll("circle");
-    const paths = svg.querySelectorAll("path");
-    // Wedges are explicit <path> arcs; the only <circle> left is the background fill.
-    expect(circles.length).toBe(1);
-    expect(paths.length).toBe(3);
-    // No slice may use stroke-dasharray/dashoffset — the source of the "bow".
-    for (const c of Array.from(circles)) {
-      expect(c.getAttribute("stroke-dasharray")).toBeNull();
-      expect(c.getAttribute("stroke-dashoffset")).toBeNull();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
+    const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
+    expect(links).toHaveLength(3);
+    expect(nodes).toHaveLength(3);
+    // Each ribbon is a closed bezier path running left-to-right.
+    for (const link of links) {
+      const d = link.getAttribute("d") ?? "";
+      expect(d).toMatch(/^M .* C .* Z$/);
     }
-    // Each wedge closes along the ring's inner edge: its path data must contain
-    // an arc drawn in the reverse (sweep 0) direction. A missing/incorrectly
-    // swept inner arc renders slices as an "outer arc with no inner band".
-    for (const p of Array.from(paths)) {
-      const d = p.getAttribute("d");
-      expect(d).toMatch(/A [\d.]+ [\d.]+ 0 [01] 0 /);
+    // Every node (including dust) is tall enough to hover, and the bands
+    // stack without overlap inside the 400px-tall mock viewport.
+    let prevBottom = 8;
+    for (const node of nodes) {
+      const y = Number(node.getAttribute("y"));
+      const h = Number(node.getAttribute("height"));
+      expect(h).toBeGreaterThanOrEqual(8);
+      expect(y).toBeGreaterThanOrEqual(prevBottom - 1e-6);
+      expect(y + h).toBeLessThanOrEqual(400 - 8 + 1e-6);
+      prevBottom = y + h + 6;
     }
+    expect(within(panel).getByText("Fees")).toBeInTheDocument();
   });
 
   it("Spending by Category renders proportional bars with no truncation breaks", () => {
@@ -395,6 +449,7 @@ describe("ReportsView", () => {
     renderView({ data });
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
+    fireEvent.click(within(panel).getByRole("button", { name: "Bars" }));
 
     // No truncation / break UI on any bar: no masks, markers, or caps.
     expect(panel.querySelector('[data-testid="axis-break"]')).toBeNull();

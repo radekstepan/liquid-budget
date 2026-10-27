@@ -3,13 +3,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import {
-  num,
   monthKey,
   parseMonthKey,
   todayISO,
   MONTHS_LONG,
   computeNetWorthReport,
   computeMonthlySurplus,
+  computeSpendingBreakdown,
   type NetWorthPoint,
   type SurplusMonthPoint,
 } from "@ynab/logic";
@@ -133,43 +133,15 @@ export const ReportsView = memo(function ReportsView({
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
 
-  const splitParentIds = useMemo(() => {
-    const set = new Set<number>();
-    for (const t of data.transactions) {
-      if (t.parentId != null) set.add(t.parentId);
-    }
-    return set;
-  }, [data.transactions]);
-
-  const catMap = useMemo(
-    () => new Map(data.categories.map((c) => [c.id, c.name])),
-    [data.categories]
+  const categorySpending: SpendingItem[] = useMemo(
+    () => computeSpendingBreakdown(data, actualStart, actualEnd, "categories"),
+    [data, actualStart, actualEnd]
   );
 
-  const rangeTxns = useMemo(
-    () =>
-      data.transactions.filter((t) => {
-        if (splitParentIds.has(t.id)) return false;
-        const mk = t.date.slice(0, 7);
-        return mk >= actualStart && mk <= actualEnd;
-      }),
-    [data.transactions, splitParentIds, actualStart, actualEnd]
+  const merchantSpending: SpendingItem[] = useMemo(
+    () => computeSpendingBreakdown(data, actualStart, actualEnd, "merchants"),
+    [data, actualStart, actualEnd]
   );
-
-  const spending: SpendingItem[] = useMemo(() => {
-    const byCat = new Map<number, number>();
-    for (const t of rangeTxns) {
-      if (t.categoryId == null) continue;
-      const a = num(t.amount);
-      byCat.set(t.categoryId, (byCat.get(t.categoryId) ?? 0) - a);
-    }
-    return [...byCat.entries()]
-      .filter(([_, v]) => v > 0)
-      .map(([id, v]) => ({ name: catMap.get(id) ?? "—", value: v }))
-      .sort((a, b) => b.value - a.value);
-  }, [rangeTxns, catMap]);
-
-  const totalSpend = useMemo(() => spending.reduce((s, x) => s + x.value, 0), [spending]);
 
   const netWorthData: NetWorthPoint[] = useMemo(() => {
     return computeNetWorthReport(data, actualStart, actualEnd);
@@ -276,7 +248,7 @@ export const ReportsView = memo(function ReportsView({
 
         {sub === "spending" && (
           <div className="h-full p-4">
-            <SpendingReport spending={spending} total={totalSpend} />
+            <SpendingReport categories={categorySpending} merchants={merchantSpending} />
           </div>
         )}
 

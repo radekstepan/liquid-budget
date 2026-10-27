@@ -5,6 +5,9 @@ import {
   symlog,
   fmtShort,
   colorAt,
+  colorForName,
+  OTHER_BUCKET_COLOR,
+  PALETTE,
   computeOutlierBreak,
   iqrFence,
   niceScale,
@@ -166,5 +169,23 @@ describe("zigZag generators", () => {
     const v = zigZagVertical(0, 100, 50);
     expect(v.startsWith("M 50 0")).toBe(true);
     expect(v).toContain("l ");
+  });
+});
+
+describe("colorForName", () => {
+  it("is deterministic: the same name always maps to the same palette color", () => {
+    const a = colorForName("Groceries");
+    expect(colorForName("Groceries")).toBe(a);
+    expect(PALETTE).toContain(a);
+  });
+
+  it("spreads distinct names across the palette", () => {
+    const names = ["Groceries", "Rent", "Fuel", "Fees", "Taxes", "Dining", "Travel"];
+    const colors = new Set(names.map(colorForName));
+    expect(colors.size).toBeGreaterThan(1);
+  });
+
+  it("always renders the Other bucket in slate", () => {
+    expect(colorForName("Other")).toBe(OTHER_BUCKET_COLOR);
   });
 });

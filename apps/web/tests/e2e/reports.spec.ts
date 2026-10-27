@@ -50,30 +50,45 @@ test("changing the selectors narrows the range and re-totals Spending Trends", a
   expect(narrowTotal).not.toBe(fullTotal);
 });
 
-test("Spending by Category tab renders the top spender with a percent bar and toggles Bars/Donut view", async ({ page }) => {
+test("Spending by Category tab renders the Sankey flow and toggles view, dimension, and merge threshold", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
+  // The Sankey view is the default: Total source plus one ribbon per group.
   // The seed's top spender category is Mortgage Interest.
-  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
-  // Percent labels now render without parenthesised percent (e.g. "54%").
-  await expect(panel.getByText(/\b\d+%/).first()).toBeVisible();
-  await expect(panel.locator(".y-bar-track").first()).toBeVisible();
-
-  // Toggle buttons
-  const barsBtn = panel.getByRole("button", { name: "Bars", exact: true });
-  const donutBtn = panel.getByRole("button", { name: "Donut", exact: true });
-  await expect(barsBtn).toBeVisible();
-  await expect(donutBtn).toBeVisible();
-
-  // Switch to Donut view
-  await donutBtn.click();
-  await expect(panel.locator("svg")).toBeVisible();
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
   await expect(panel.getByText("TOTAL", { exact: true })).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
+  await expect(panel.getByTestId("sankey-link").first()).toBeVisible();
 
-  // Switch back to Bars view
+  // View toggle buttons
+  const sankeyBtn = panel.getByRole("button", { name: "Sankey", exact: true });
+  const barsBtn = panel.getByRole("button", { name: "Bars", exact: true });
+  await expect(sankeyBtn).toBeVisible();
+  await expect(barsBtn).toBeVisible();
+
+  // Switch to Bars view and back
   await barsBtn.click();
   await expect(panel.locator(".y-bar-track").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-svg")).toHaveCount(0);
+  await sankeyBtn.click();
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
+
+  // Dimension toggle: Merchants view retitles the panel and lists payees.
+  await panel.getByRole("button", { name: "Merchants", exact: true }).click();
+  await expect(
+    page.locator(".y-panel-head").filter({ hasText: "Spending by Merchant" })
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "Categories", exact: true }).click();
+  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
+
+  // Threshold slider merges smaller groups into Other without changing the total.
+  const totalValue = panel.locator("span").filter({ hasText: /^Total:/ }).locator(".y-num");
+  const totalBefore = (await totalValue.textContent())?.trim();
+  const slider = panel.getByRole("slider", { name: /merge smaller expenses/i });
+  await slider.fill("500");
+  await expect(panel.getByText("Other")).toBeVisible();
+  await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
+  expect((await totalValue.textContent())?.trim()).toBe(totalBefore);
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

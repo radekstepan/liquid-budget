@@ -369,6 +369,8 @@ describe("BudgetApp privacy mode", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Reports", exact: true }));
     fireEvent.click(screen.getByText("Spending by Category"));
+    // Bars view renders exact "$X" amount spans (Sankey labels show "$X · N%").
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
 
     // Expected top-category spend, computed per dataset (mirror of the
     // view's own aggregation over the default full-range selection).

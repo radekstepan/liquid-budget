@@ -22,6 +22,20 @@ export function colorAt(i: number): string {
   return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length] ?? "#888";
 }
 
+// Stable color per series name (djb2 hash into PALETTE): a category or
+// merchant keeps its color across month ranges, dimension toggles, and
+// threshold merges. The merged "Other" bucket always renders slate.
+export const OTHER_BUCKET_COLOR = "#78909c";
+
+export function colorForName(name: string): string {
+  if (name === "Other") return OTHER_BUCKET_COLOR;
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+  }
+  return PALETTE[Math.abs(h) % PALETTE.length] ?? "#888";
+}
+
 // Mix a hex color toward black (amt < 1) or white (amt > 1). amt 0..1 darkens,
 // 1 keeps it unchanged, >1 lightens. Returns a hex string.
 export function shade(hex: string, amt: number): string {

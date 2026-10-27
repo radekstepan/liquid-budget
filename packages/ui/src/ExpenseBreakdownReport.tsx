@@ -6,6 +6,5 @@ export function ExpenseBreakdownReport(props: {
   spending: SpendingItem[];
   total: number;
 }) {
-  return <SpendingReport {...props} initialView="donut" />;
+  return <SpendingReport categories={props.spending} merchants={[]} initialView="sankey" />;
 }
-
