@@ -67,10 +67,3 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-The Spending by Category sankey has issues:
-- the under slider needs to have a higher amount, make it jump in larger chunks (slow to start, then larger)
-- the color of the sankey is of the final category/merchant on the right, not of the income on the left; and hovering on an income on the left should highlight all the categories benefiting all the way on the right including the sankey lines
-- I do not understand what "shortfall" means
-- I see Transfers on the left and if I turn on Merchnats I see Transfers on the right. I am still confused. Yes I have deposited income into say Wealthsimple Trade. And then later withdrew. So is the stuff on the left pure surplus?? Also this means there is "Uncategorized" which I don't understand as a parent category
-- I need tooltips onhover labels and not just chart
-Overall, think about UX - what would make sense. What would be useful for the user to understand

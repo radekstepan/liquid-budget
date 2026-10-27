@@ -24,7 +24,6 @@ export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";
 export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
-export * from "./sankey.js";
 export * from "./duplicates.js";
 export * from "./merge.js";
 export * from "./rename-rules.js";
