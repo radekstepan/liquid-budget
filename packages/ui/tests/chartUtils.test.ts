@@ -7,7 +7,7 @@ import {
   colorAt,
   colorForName,
   OTHER_BUCKET_COLOR,
-  UNFUNDED_COLOR,
+  SHORTFALL_COLOR,
   REMAINING_COLOR,
   PALETTE,
   computeOutlierBreak,
@@ -191,8 +191,8 @@ describe("colorForName", () => {
     expect(colorForName("Other")).toBe(OTHER_BUCKET_COLOR);
   });
 
-  it("renders Remaining and Unfunded in fixed semantic colors", () => {
+  it("renders Remaining and Shortfall in fixed semantic colors", () => {
     expect(colorForName("Remaining")).toBe(REMAINING_COLOR);
-    expect(colorForName("Unfunded")).toBe(UNFUNDED_COLOR);
+    expect(colorForName("Shortfall")).toBe(SHORTFALL_COLOR);
   });
 });

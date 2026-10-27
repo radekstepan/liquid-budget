@@ -151,7 +151,7 @@ describe("SpendingReport", () => {
 
   it("merges groups under the slider threshold into an Other bucket", () => {
     const { container } = renderReport();
-    const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     // $500 threshold: Groceries ($400) and Electric Bill ($150) merge.
     fireEvent.change(slider, { target: { value: "500" } });
 
@@ -166,31 +166,87 @@ describe("SpendingReport", () => {
   });
 
   it("merges everything into a single Other row when the threshold exceeds all values", () => {
-    // Non-round top value so the slider ceiling ($1000) sits above it.
+    // Non-round top value so the slider ceiling ($1000) sits above it; the
+    // income stays below it so the ceiling still comes from the expense side.
     const { container } = renderReport(
       [
         { name: "Almost All", value: 99900 },
         { name: "Dust", value: 100 },
       ],
-      []
+      [],
+      [{ name: "Payroll", value: 50000 }]
     );
-    const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     expect(slider).toHaveAttribute("max", "1000");
     fireEvent.change(slider, { target: { value: "1000" } });
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(2);
-    expect(within(svg as unknown as HTMLElement).getByText("Other")).toBeInTheDocument();
-    expect(screen.getByText("(2 in Other)")).toBeInTheDocument();
+    // Both columns collapse to a single Other row each: $500 of income
+    // cannot cover $1000 of spending, so there is no Remaining — one ribbon
+    // from the income Other to the expense Other, and the header counts the
+    // merged groups on both sides (2 expenses + 1 income).
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
+    expect(within(svg as unknown as HTMLElement).getAllByText("Other")).toHaveLength(2);
+    expect(screen.getByText("(3 in Other)")).toBeInTheDocument();
   });
 
   it("applies the threshold merge to the Bars view too", () => {
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
-    const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     fireEvent.change(slider, { target: { value: "500" } });
     expect(container.querySelectorAll(".y-bar-track")).toHaveLength(2);
     expect(screen.getByText("Other")).toBeInTheDocument();
     expect(screen.getByText("(2 merged)")).toBeInTheDocument();
+  });
+
+  it("merges small incomes into an Other bucket on the left with the same threshold", () => {
+    const { container } = renderReport(sampleCategories, sampleMerchants, [
+      { name: "Payroll", value: 200000 },
+      { name: "Side Gig", value: 30000 },
+      { name: "Cashback", value: 5000 },
+    ]);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    // $500 threshold: Groceries ($400) + Electric Bill ($150) merge on the
+    // right, Side Gig ($300) + Cashback ($50) merge on the left.
+    fireEvent.change(slider, { target: { value: "500" } });
+
+    // Header counts merged groups on both sides.
+    expect(screen.getByText("(4 in Other)")).toBeInTheDocument();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Left: Payroll + Other; right: Mortgage + Other + Remaining; each
+    // income feeds each expense (2 x 3 ribbons).
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
+    expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
+    expect(within(svg as unknown as HTMLElement).getAllByText("Other")).toHaveLength(2);
+    expect(within(svg as unknown as HTMLElement).getByText("$350.00 · 15%")).toBeInTheDocument();
+    // In total is unchanged by merging.
+    expect(screen.getByText("$2,350.00")).toBeInTheDocument();
+  });
+
+  it("shows merged-income detail when hovering the income Other bucket", () => {
+    const { container } = renderReport(sampleCategories, sampleMerchants, [
+      { name: "Payroll", value: 200000 },
+      { name: "Side Gig", value: 30000 },
+      { name: "Cashback", value: 5000 },
+    ]);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: "500" } });
+    // Left column is Payroll, then Other.
+    const otherIncome = container.querySelectorAll('[data-testid="sankey-income"]')[1]!;
+    fireEvent.mouseMove(otherIncome, { clientX: 100, clientY: 300 });
+    expect(screen.getByText("2 smaller incomes under $500.00")).toBeInTheDocument();
+    fireEvent.mouseLeave(otherIncome);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("sizes the slider ceiling from the largest group on either side", () => {
+    // Largest expense is $1,000 but the $2,000 income drives the ceiling.
+    renderReport();
+    expect(
+      screen.getByRole("slider", { name: /merge smaller groups/i })
+    ).toHaveAttribute("max", "2000");
   });
 
   it("shows a tooltip with amount and shares when hovering a spending node", () => {
@@ -213,7 +269,7 @@ describe("SpendingReport", () => {
 
   it("shows merged-group detail when hovering the Other bucket", () => {
     const { container } = renderReport();
-    const slider = screen.getByRole("slider", { name: /merge smaller expenses/i });
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     fireEvent.change(slider, { target: { value: "500" } });
     // Nodes are Mortgage, Other, Remaining — Other sits in the middle.
     const otherNode = container.querySelectorAll('[data-testid="sankey-node"]')[1]!;
@@ -262,7 +318,7 @@ describe("SpendingReport", () => {
     expect(screen.getByText("Unspent of $2,000.00 income")).toBeInTheDocument();
   });
 
-  it("shows neutral unfunded segments instead of an Overspent income source when spending exceeds income", () => {
+  it("shows neutral Shortfall segments instead of an Overspent income source when spending exceeds income", () => {
     const { container } = render(
       <SpendingReport
         categories={sampleCategories}
@@ -281,14 +337,15 @@ describe("SpendingReport", () => {
     // neutral unfunded segment for its shortfall share.
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
     expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
-    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(3);
+    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(3);
     expect(svg.querySelector('[data-testid="sankey-total"]')).toBeNull();
     // Hovering a bar explains the shortfall.
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
     fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
     const tip = document.querySelector(".y-tip")!;
     expect(tip).toBeInTheDocument();
-    expect(within(tip as unknown as HTMLElement).getByText("Unfunded")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Shortfall")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).queryByText("Unfunded")).not.toBeInTheDocument();
     expect(
       within(tip as unknown as HTMLElement).getByText(
         "Spending exceeded income — covered from savings or debt"
@@ -333,7 +390,7 @@ describe("SpendingReport", () => {
     }
     // No income: no ribbons, and every bar is fully unfunded.
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
-    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(60);
+    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(60);
   });
 
   it("shows empty state when income and spending are both empty", () => {

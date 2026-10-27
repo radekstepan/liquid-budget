@@ -538,6 +538,55 @@ describe("computeDirectFlowLinks", () => {
       mergedCount: 1,
     });
   });
+
+  it("routes merged income buckets (Other keeps its count on the source side)", () => {
+    const model = computeDirectFlowLinks(
+      [
+        { name: "Pay", value: 8000, mergedCount: 1 },
+        { name: OTHER_BUCKET_LABEL, value: 2000, mergedCount: 3 },
+      ],
+      [{ name: "A", value: 6000, mergedCount: 1 }]
+    );
+    expect(model.sources[1]).toEqual({
+      name: OTHER_BUCKET_LABEL,
+      value: 2000,
+      mergedCount: 3,
+    });
+    // The Other income funds its 20% share of the expense and of Remaining.
+    const otherLinks = model.links.filter((l) => l.sourceIndex === 1);
+    expect(otherLinks.map((l) => [l.targetIndex, l.value])).toEqual([
+      [0, 1200],
+      [1, 800],
+    ]);
+  });
+
+  it("conserves flow when both columns are merged", () => {
+    const sources = [
+      { name: "Pay", value: 8000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 2000, mergedCount: 3 },
+    ];
+    const spending = [
+      { name: "A", value: 6000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 3000, mergedCount: 2 },
+    ];
+    const model = computeDirectFlowLinks(sources, spending);
+    for (let i = 0; i < sources.length; i++) {
+      const out = model.links
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(sources[i]!.value, 9);
+    }
+    for (let j = 0; j < model.targets.length; j++) {
+      const into = model.links
+        .filter((l) => l.targetIndex === j)
+        .reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(model.funded[j] ?? 0, 9);
+      expect((model.funded[j] ?? 0) + (model.unfunded[j] ?? 0)).toBeCloseTo(
+        model.targets[j]!.value,
+        9
+      );
+    }
+  });
 });
 
 describe("layoutDirectIncomeSankey", () => {

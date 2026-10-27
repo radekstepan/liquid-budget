@@ -95,7 +95,7 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   // the Out total.
   const outValue = panel.locator("span").filter({ hasText: /^Out:/ }).locator(".y-num");
   const outBefore = (await outValue.textContent())?.trim();
-  const slider = panel.getByRole("slider", { name: /merge smaller expenses/i });
+  const slider = panel.getByRole("slider", { name: /merge smaller groups/i });
   await slider.fill("500");
   await expect(panel.getByText("Other")).toBeVisible();
   await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();

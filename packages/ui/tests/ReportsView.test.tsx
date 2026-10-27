@@ -284,7 +284,7 @@ describe("ReportsView", () => {
     renderView();
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
-    const slider = within(panel).getByRole("slider", { name: /merge smaller expenses/i });
+    const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
     // Groceries $350 is kept, Rent $300 folds into Other at a $320 threshold.
     fireEvent.change(slider, { target: { value: "320" } });
     expect(within(panel).getByText("Other")).toBeInTheDocument();
@@ -294,6 +294,23 @@ describe("ReportsView", () => {
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
     // Out total is unchanged by merging.
     expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
+  });
+
+  it("Spending tab merges small incomes into Other with the same threshold", () => {
+    const data = makeData();
+    data.transactions.push(txn("2026-06", 15, "Bonus", 100));
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
+    // $320 threshold: Rent ($300) folds into Other on the right, Bonus
+    // ($100) into Other on the left; Groceries ($350) and Payroll stay.
+    fireEvent.change(slider, { target: { value: "320" } });
+    expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
+    // 2 incomes x 3 right-column rows (Groceries + Other + Remaining).
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -669,7 +686,7 @@ describe("ReportsView", () => {
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(0);
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
-    expect(svg.querySelectorAll('[data-testid="sankey-unfunded"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(1);
   });
 });
 

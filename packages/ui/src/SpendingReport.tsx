@@ -8,7 +8,7 @@ import {
   sankeyContentHeight,
   OTHER_BUCKET_LABEL,
   REMAINING_LABEL,
-  UNFUNDED_LABEL,
+  SHORTFALL_LABEL,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
   SANKEY_PAD_BOTTOM,
@@ -23,7 +23,7 @@ import {
   ChartTip,
   colorForName,
   TipLabel,
-  UNFUNDED_COLOR,
+  SHORTFALL_COLOR,
   useElementSize,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
@@ -76,9 +76,12 @@ export function SpendingReport({
 
   const raw = dimension === "categories" ? categories : merchants;
 
+  // One shared threshold merges both columns, so the ceiling covers the
+  // largest group on either side.
   const maxDollars = useMemo(
-    () => raw.reduce((m, s) => Math.max(m, s.value / 100), 0),
-    [raw]
+    () =>
+      [...raw, ...income].reduce((m, s) => Math.max(m, s.value / 100), 0),
+    [raw, income]
   );
   // Slider ceiling: a round number covering the largest group, floored at
   // $50 so the control stays useful on small datasets, capped at $2000 so
@@ -91,11 +94,17 @@ export function SpendingReport({
     () => mergeBelowThreshold(raw, Math.round(activeThreshold * 100)),
     [raw, activeThreshold]
   );
+  const mergedIncome = useMemo(
+    () => mergeBelowThreshold(income, Math.round(activeThreshold * 100)),
+    [income, activeThreshold]
+  );
+  // The header "(N in Other)" note covers both merged columns.
+  const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
 
-  // Header totals: plain sums (breakdowns never emit non-positive values, so
-  // these match the layout's filtered totals exactly).
+  // Header totals: plain sums (merging preserves sums and breakdowns never
+  // emit non-positive values, so these match the layout's filtered totals).
   const totals = useMemo(() => {
-    const incomeTotal = income.reduce((s, x) => s + x.value, 0);
+    const incomeTotal = mergedIncome.items.reduce((s, x) => s + x.value, 0);
     const spendingTotal = merged.items.reduce((s, x) => s + x.value, 0);
     return {
       incomeTotal,
@@ -103,7 +112,7 @@ export function SpendingReport({
       flowTotal: Math.max(incomeTotal, spendingTotal),
       remaining: incomeTotal - spendingTotal,
     };
-  }, [merged.items, income]);
+  }, [merged.items, mergedIncome.items]);
   const spentTotal = totals.spendingTotal;
 
   // Bars rows: spending shares (unchanged by the income side).
@@ -118,12 +127,10 @@ export function SpendingReport({
     });
   }, [merged.items, spentTotal]);
 
-  // Income rows for the layout (unmerged: the Under slider applies to
-  // expenses only — merging small incomes is a follow-up).
-  const incomeRows: MergedSpendingItem[] = useMemo(
-    () => income.map((it) => ({ ...it, mergedCount: 1 })),
-    [income]
-  );
+  // Income rows for the layout: the same Under threshold folds small
+  // income sources into an Other bucket on the left, and the proportional
+  // link math runs on the merged columns (conservation preserved).
+  const incomeRows: MergedSpendingItem[] = mergedIncome.items;
 
   const empty = incomeRows.length === 0 && merged.items.length === 0;
   const growRows = rows.length > 0 && rows.length <= 14;
@@ -192,6 +199,7 @@ export function SpendingReport({
     if (hover.kind === "income") {
       const r = srcRows[hover.idx];
       if (!r) return null;
+      const isOther = r.name === OTHER_BUCKET_LABEL && r.mergedCount > 1;
       const incomePct =
         totals.incomeTotal !== 0 ? Math.round((r.value / totals.incomeTotal) * 100) : 0;
       return (
@@ -210,7 +218,9 @@ export function SpendingReport({
             style={{ color: "rgba(242,245,247,0.65)" }}
           >
             <span>
-              {`${incomePct}% of ${fmt(totals.incomeTotal)} income`}
+              {isOther
+                ? `${r.mergedCount} smaller incomes under ${fmt(Math.round(activeThreshold * 100))}`
+                : `${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
           </div>
         </div>
@@ -295,8 +305,8 @@ export function SpendingReport({
         />
         {r.unfundedValue > 0 && (
           <TipLabel
-            color={UNFUNDED_COLOR}
-            label={UNFUNDED_LABEL}
+            color={SHORTFALL_COLOR}
+            label={SHORTFALL_LABEL}
             value={fmt(r.unfundedValue)}
           />
         )}
@@ -371,10 +381,10 @@ export function SpendingReport({
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
         <span style={{ color: "var(--y-ink-soft)" }}>
           {rows.length} {rows.length === 1 ? nounSingular : nounPlural}
-          {merged.otherCount > 0 && (
+          {mergedOtherCount > 0 && (
             <span style={{ color: "var(--y-ink-faint)" }}>
               {" "}
-              ({merged.otherCount} in Other)
+              ({mergedOtherCount} in Other)
             </span>
           )}
         </span>
@@ -459,7 +469,7 @@ export function SpendingReport({
                 </span>
                 <input
                   type="range"
-                  aria-label="Merge smaller expenses under threshold"
+                  aria-label="Merge smaller groups under threshold"
                   className="ml-1.5 inline-block w-[110px] align-middle"
                   style={{ accentColor: "var(--y-blue)" }}
                   min={0}
@@ -692,13 +702,13 @@ export function SpendingReport({
                     />
                     {node.unfundedH > 0 && (
                       <rect
-                        data-testid="sankey-unfunded"
+                        data-testid="sankey-shortfall"
                         x={node.x}
                         y={node.y + Math.max(0, node.h) - node.unfundedH}
                         width={node.w}
                         height={node.unfundedH}
                         rx={2}
-                        fill={UNFUNDED_COLOR}
+                        fill={SHORTFALL_COLOR}
                         fillOpacity={dim ? 0.35 : 1}
                         stroke="rgba(0,0,0,0.35)"
                         strokeWidth={1}

@@ -126,9 +126,10 @@ export const REMAINING_LABEL = "Remaining";
  * Label for an expense's unfunded slice. When spending exceeds income there
  * is no extra income source (money is not invented) — each expense is only
  * partly funded, and the shortfall renders as a distinct neutral segment on
- * the expense side. Wording is provisional; a follow-up refines it.
+ * the expense side. "Shortfall" names the gap (spent more than earned, the
+ * difference covered from savings or debt) without implying new income.
  */
-export const UNFUNDED_LABEL = "Unfunded";
+export const SHORTFALL_LABEL = "Shortfall";
 
 export type DirectFlowLinkValue = {
   sourceIndex: number;
@@ -145,7 +146,7 @@ export type DirectFlowModel = {
   /**
    * Spending groups plus a trailing Remaining plug when income exceeds
    * spending; link.targetIndex, funded, and unfunded key here. There is
-   * deliberately no plug for the reverse imbalance (see UNFUNDED_LABEL).
+   * deliberately no plug for the reverse imbalance (see SHORTFALL_LABEL).
    */
   targets: MergedSpendingItem[];
   /** Funded cents per target; incoming links sum to this. */
