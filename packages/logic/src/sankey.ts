@@ -18,6 +18,14 @@ export type SpendingBreakdownItem = {
   name: string;
   /** Net outflow in cents (always > 0). */
   value: number;
+  /**
+   * True when at least one contributing row crossed the budget boundary as
+   * a transfer: money returning INTO the budget (an income-side withdrawal
+   * from an off-budget account) or money moving OUT of it (a spending-side
+   * allocation to one). Absent (never false) when no transfer contributed,
+   * so plain rows keep their exact `{ name, value }` shape.
+   */
+  transfer?: boolean;
 };
 
 /**
@@ -118,11 +126,15 @@ export function computeSpendingGroupFlow(
 
   // Cells: target name -> group name -> net outflow cents.
   const cells = new Map<string, Map<string, number>>();
+  // Targets fed by at least one transfer row (a boundary outflow: money
+  // moved out to an off-budget account, e.g. an investment contribution).
+  const transferNames = new Set<string>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
     if (isCreditPayoffTransfer(t, accountMap)) continue;
-    if (transferNetOnBudgetDelta(t, accountMap) > 0) continue;
+    const netTransferDelta = transferNetOnBudgetDelta(t, accountMap);
+    if (netTransferDelta > 0) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
@@ -138,6 +150,9 @@ export function computeSpendingGroupFlow(
       group =
         t.categoryId == null ? UNCATEGORIZED_GROUP_LABEL : groupNameFor(t.categoryId);
     }
+    // Boundary outflows only (inflows continue above; internal same-boundary
+    // moves are not off-budget money and stay unflagged).
+    if (netTransferDelta !== 0) transferNames.add(name);
     let row = cells.get(name);
     if (!row) {
       row = new Map();
@@ -189,7 +204,11 @@ export function computeSpendingGroupFlow(
 
   return {
     groups,
-    targets: targets.map(({ name, value }) => ({ name, value })),
+    targets: targets.map(({ name, value }) => ({
+      name,
+      value,
+      ...(transferNames.has(name) ? { transfer: true as const } : {}),
+    })),
     links: outLinks,
   };
 }
@@ -244,6 +263,9 @@ export function computeIncomeBreakdown(
   const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   const bySource = new Map<string, number>();
+  // Sources fed by at least one transfer row (a boundary inflow: money
+  // returning into the budget, e.g. an investment withdrawal).
+  const transferSources = new Set<string>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     const netTransferDelta = transferNetOnBudgetDelta(t, accountMap);
@@ -253,6 +275,8 @@ export function computeIncomeBreakdown(
 
     const payee = t.payee.trim();
     const name = payee === "" ? "—" : payee;
+    // Boundary inflows only; plain income rows carry no transfer delta.
+    if (netTransferDelta > 0) transferSources.add(name);
     // Transfer rows are valued at their budget impact: a withdrawal recorded
     // on the off-budget leg carries a negative amount but is positive income.
     const value = t.transferAccountId != null ? netTransferDelta : num(t.amount);
@@ -261,7 +285,11 @@ export function computeIncomeBreakdown(
 
   return [...bySource.entries()]
     .filter(([, v]) => v > 0)
-    .map(([name, value]) => ({ name, value }))
+    .map(([name, value]) => ({
+      name,
+      value,
+      ...(transferSources.has(name) ? { transfer: true as const } : {}),
+    }))
     .sort((a, b) => b.value - a.value);
 }
 
@@ -270,11 +298,12 @@ export const REMAINING_LABEL = "Remaining";
 /**
  * Label for an expense's unfunded slice. When spending exceeds income there
  * is no extra income source (money is not invented) — each expense is only
- * partly funded, and the shortfall renders as a distinct neutral segment on
- * the expense side. "Shortfall" names the gap (spent more than earned, the
- * difference covered from savings or debt) without implying new income.
+ * partly funded, and the gap renders as a distinct neutral segment on the
+ * expense side. "Over income" names it in the header's own words (the
+ * header reads "Over: $X" in this state): spent more than earned, the
+ * difference covered from savings or debt — without implying new income.
  */
-export const SHORTFALL_LABEL = "Shortfall";
+export const OVER_INCOME_LABEL = "Over income";
 
 export type DirectFlowLinkValue = {
   sourceIndex: number;
@@ -291,7 +320,7 @@ export type DirectFlowModel = {
   /**
    * Spending groups plus a trailing Remaining plug when income exceeds
    * spending; link.targetIndex, funded, and unfunded key here. There is
-   * deliberately no plug for the reverse imbalance (see SHORTFALL_LABEL).
+   * deliberately no plug for the reverse imbalance (see OVER_INCOME_LABEL).
    */
   targets: MergedSpendingItem[];
   /** Funded cents per target; incoming links sum to this. */
@@ -396,16 +425,24 @@ export function mergeBelowThreshold(
   const kept: MergedSpendingItem[] = [];
   let otherCount = 0;
   let otherValue = 0;
+  let otherTransfer = false;
   for (const it of items) {
     if (it.value < thresholdCents) {
       otherCount += 1;
       otherValue += it.value;
+      if (it.transfer === true) otherTransfer = true;
     } else {
       kept.push({ ...it, mergedCount: 1 });
     }
   }
   if (otherCount > 0) {
-    kept.push({ name: OTHER_BUCKET_LABEL, value: otherValue, mergedCount: otherCount, bucket: true });
+    kept.push({
+      name: OTHER_BUCKET_LABEL,
+      value: otherValue,
+      mergedCount: otherCount,
+      bucket: true,
+      ...(otherTransfer ? { transfer: true as const } : {}),
+    });
   }
   return { items: kept, otherCount, otherValue };
 }
@@ -455,10 +492,12 @@ export function mergeGroupFlow(
     const remap: number[] = new Array<number>(items.length).fill(-1);
     let otherCount = 0;
     let otherValue = 0;
+    let otherTransfer = false;
     items.forEach((it, i) => {
       if (thresholdCents > 0 && it.value < thresholdCents) {
         otherCount += 1;
         otherValue += it.value;
+        if (it.transfer === true) otherTransfer = true;
       } else {
         remap[i] = merged.length;
         merged.push({ ...it, mergedCount: 1 });
@@ -466,7 +505,13 @@ export function mergeGroupFlow(
     });
     if (otherCount > 0) {
       const otherIndex = merged.length;
-      merged.push({ name: OTHER_BUCKET_LABEL, value: otherValue, mergedCount: otherCount, bucket: true });
+      merged.push({
+        name: OTHER_BUCKET_LABEL,
+        value: otherValue,
+        mergedCount: otherCount,
+        bucket: true,
+        ...(otherTransfer ? { transfer: true as const } : {}),
+      });
       for (let i = 0; i < remap.length; i++) {
         if (remap[i]! < 0) remap[i] = otherIndex;
       }
@@ -501,6 +546,58 @@ export function mergeGroupFlow(
   };
 }
 
+/**
+ * Canonical "Under" threshold stops in whole dollars. The slider walks these
+ * positions (0 = off) instead of raw dollars, so the first steps merge in
+ * small increments ($10, $25, $50…) where rows are dense and later steps
+ * jump in thousands where only the long tail is left. Gaps grow down the
+ * list; sankeyThresholdStops doubles past the last stop for huge datasets.
+ */
+export const SANKEY_THRESHOLD_STOPS: readonly number[] = [
+  0, 10, 25, 50, 75, 100, 150, 200, 250, 300, 350, 400, 500, 750, 1000, 1500,
+  2000, 3000, 5000, 7500, 10000, 15000, 25000, 50000,
+];
+
+/**
+ * Slider stops covering `maxDollars` (the largest row on any column): the
+ * canonical prefix through the smallest stop at or above the data, floored
+ * at $50 so the control stays useful on tiny datasets, extended by doubling
+ * when the data exceeds the largest canonical stop. Always starts at 0
+ * (threshold off) and is strictly ascending.
+ */
+export function sankeyThresholdStops(maxDollars: number): number[] {
+  const target = Math.max(50, Number.isFinite(maxDollars) ? maxDollars : 0);
+  const ceiling = SANKEY_THRESHOLD_STOPS.find((s) => s >= target);
+  if (ceiling != null) return SANKEY_THRESHOLD_STOPS.filter((s) => s <= ceiling);
+  // Beyond the canonical range: keep every canonical stop, then double
+  // (50k → 100k → 200k …) until covered.
+  const stops = [...SANKEY_THRESHOLD_STOPS];
+  const lastCanonical = stops[stops.length - 1]!;
+  let next = lastCanonical * 2;
+  while (next < target) {
+    stops.push(next);
+    next *= 2;
+  }
+  stops.push(next);
+  return stops;
+}
+
+/**
+ * Slider position for a dollar threshold: the nearest stop (ties round
+ * down, out-of-range clamps). Stored dollar values from before the stepped
+ * slider snap to their closest stop through this.
+ */
+export function sankeyThresholdStep(stops: readonly number[], dollars: number): number {
+  if (stops.length === 0) return 0;
+  let best = 0;
+  for (let i = 1; i < stops.length; i++) {
+    const cur = Math.abs((stops[i] ?? 0) - dollars);
+    const prev = Math.abs((stops[best] ?? 0) - dollars);
+    if (cur < prev) best = i;
+  }
+  return best;
+}
+
 export type SankeyGeometryOptions = {
   /** Total SVG width/height in px. */
   width: number;
@@ -526,6 +623,12 @@ export type SankeyNodeLayout = {
   mergedCount: number;
   /** True only for merged "Other" bucket bars (copied from the item). */
   bucket: boolean;
+  /**
+   * True when the row includes transfer money (copied from the item):
+   * withdrawals back into the budget on the income side, allocations out
+   * to off-budget accounts on the spending side. Absent otherwise.
+   */
+  transfer?: boolean;
   share: number;
   x: number;
   y: number;
@@ -748,7 +851,7 @@ export function layoutSankey(
     const it = items[i]!;
     const h = Math.max(0, heights[i] ?? 0);
     const share = total !== 0 ? it.value / total : 0;
-    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, share, x: nodeX, y, w: nodeWidth, h });
+    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, ...(it.transfer === true ? { transfer: true as const } : {}), share, x: nodeX, y, w: nodeWidth, h });
     const sy0 = sy;
     const sy1 = sy + h;
     const ty0 = y;
@@ -941,6 +1044,7 @@ export function layoutDirectIncomeSankey(
     value: s.value,
     mergedCount: s.mergedCount,
     bucket: s.bucket === true,
+    ...(s.transfer === true ? { transfer: true as const } : {}),
     share: s.value / flowTotal,
     x: padLeft,
     y: 0, // placed by the stacking pass below
@@ -952,6 +1056,7 @@ export function layoutDirectIncomeSankey(
     value: t.value,
     mergedCount: t.mergedCount,
     bucket: t.bucket === true,
+    ...(t.transfer === true ? { transfer: true as const } : {}),
     share: t.value / flowTotal,
     x: nodeX,
     y: 0, // placed by the stacking pass below
@@ -1029,14 +1134,14 @@ export type GroupedSankeyMiddleNode = DirectSankeyTargetNode;
 
 /**
  * Right-hop link: one income's share of a middle→target cell. The right hop
- * is subdivided per income source (in source order at both ends) so every
- * ribbon keeps its income source's color all the way from the left column
- * through the middle to the right — one solid through-color, never a
- * source-colored segment plus a group-colored segment. Sub-bands tile their
- * parent cell exactly: values and pixel heights sum to the cell's.
+ * stays subdivided per income source (in source order at both ends) so a
+ * hovered income can spotlight its own share of every downstream ribbon —
+ * but the sub-bands all render in the TARGET's color, so each cell reads as
+ * its final category or merchant, never as its income source. Sub-bands tile
+ * their parent cell exactly: values and pixel heights sum to the cell's.
  */
 export type GroupedRightLinkLayout = DirectSankeyLinkLayout & {
-  /** Index into sources: the income source funding (and coloring) this sub-ribbon. */
+  /** Index into sources: the income source funding this sub-ribbon. */
   incomeIndex: number;
 };
 
@@ -1329,6 +1434,7 @@ export function layoutGroupedIncomeSankey(
     value: s.value,
     mergedCount: s.mergedCount,
     bucket: s.bucket === true,
+    ...(s.transfer === true ? { transfer: true as const } : {}),
     share: s.value / flowTotal,
     x: padLeft,
     y: 0, // placed by the stacking pass below
@@ -1340,6 +1446,7 @@ export function layoutGroupedIncomeSankey(
     value: g.value,
     mergedCount: g.mergedCount,
     bucket: g.bucket === true,
+    ...(g.transfer === true ? { transfer: true as const } : {}),
     share: g.value / flowTotal,
     x: midX,
     y: 0, // placed by the stacking pass below
@@ -1354,6 +1461,7 @@ export function layoutGroupedIncomeSankey(
     value: t.value,
     mergedCount: t.mergedCount,
     bucket: t.bucket === true,
+    ...(t.transfer === true ? { transfer: true as const } : {}),
     share: t.value / flowTotal,
     x: nodeX,
     y: 0, // placed by the stacking pass below
@@ -1433,11 +1541,13 @@ export function layoutGroupedIncomeSankey(
     }
   }
 
-  // Through-color subdivision: each cell ribbon splits into one
-  // sub-ribbon per income source (cell-major, so linksRight runs in
-  // (middle, target, income) order). Shares sum to 1, so each cell's
-  // sub-bands tile it exactly at both ends. With no income there are no
-  // cells (coverage is 0), so subs is empty — never a sourceless ribbon.
+  // Per-income subdivision: each cell ribbon splits into one sub-ribbon
+  // per income source (cell-major, so linksRight runs in (middle, target,
+  // income) order). Shares sum to 1, so each cell's sub-bands tile it
+  // exactly at both ends. With no income there are no cells (coverage is
+  // 0), so subs is empty — never a sourceless ribbon. The bands render in
+  // the target's color (see the type docs); the split exists so hovering
+  // an income can spotlight its share of every downstream ribbon.
   const shares = incomeTotal > 0 ? srcItems.map((s) => s.value / incomeTotal) : [];
   const subs = rightVals.flatMap((l, k) =>
     shares.map((share, incomeIndex) => ({

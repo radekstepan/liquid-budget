@@ -4,7 +4,15 @@ import { ReportsView } from "../src/ReportsView.js";
 import { sankeyRibbonGradientId } from "../src/SpendingReport.js";
 import { colorForName, sankeyRibbonShade } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
+import { sankeyThresholdStops } from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
+
+// The Under slider walks stepped stops, not raw dollars: resolve the slider
+// position for a dollar threshold from the stops covering `maxDollars` (the
+// fixture's largest row on any column — the same input the report uses).
+function stepFor(maxDollars: number, dollars: number): string {
+  return String(sankeyThresholdStops(maxDollars).indexOf(dollars));
+}
 
 class MockResizeObserver {
   cb: () => void;
@@ -292,8 +300,9 @@ describe("ReportsView", () => {
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
-    // Groceries $350 is kept, Rent $300 folds into Other at a $320 threshold.
-    fireEvent.change(slider, { target: { value: "320" } });
+    // Groceries $350 is kept, Rent $300 folds into Other at a $350 stop
+    // (the $9,000 Payroll drives the stops).
+    fireEvent.change(slider, { target: { value: stepFor(9000, 350) } });
     expect(within(panel).getByText("Other")).toBeInTheDocument();
     expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
@@ -310,9 +319,9 @@ describe("ReportsView", () => {
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
-    // $320 threshold: Rent ($300) folds into Other on the right, Bonus
-    // ($100) into Other on the left; Groceries ($350) and Payroll stay.
-    fireEvent.change(slider, { target: { value: "320" } });
+    // $350 stop: Rent ($300) folds into Other on the right, Bonus ($100)
+    // into Other on the left; Groceries ($350) and Payroll stay.
+    fireEvent.change(slider, { target: { value: stepFor(9000, 350) } });
     expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
@@ -702,7 +711,7 @@ describe("ReportsView", () => {
     expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
   });
 
-  it("Spending sankey hides amounts on tiny income bars and runs ribbons through in income colors", () => {
+  it("Spending sankey hides amounts on tiny income bars and colors ribbons by destination", () => {
     const data = makeData();
     data.transactions.push(txn("2026-06", 15, "Bonus", 1));
     renderView({ data });
@@ -724,40 +733,50 @@ describe("ReportsView", () => {
     expect(barH).toBeLessThan(26);
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
-    // Left ribbons and right sub-ribbons alike fill from an income
-    // gradient: the income color runs through the middle column to the
-    // right, never split into a source segment plus a group segment.
+    // Left ribbons take their middle group's color and right sub-ribbons
+    // their final category's: each ribbon reads as where the money lands.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
     // 2 incomes x 1 group plus 2 Remaining ribbons on the left; 2 cells
     // x 2 incomes on the right.
     expect(left).toHaveLength(4);
     expect(right).toHaveLength(4);
-    for (const link of [...left, ...right]) {
-      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-\d+\)$/);
-    }
-    for (const link of right) {
-      const income = Number(link.getAttribute("data-income"));
-      expect(link.getAttribute("fill")).toBe(`url(#${sankeyRibbonGradientId(income)})`);
-    }
-    // One gradient per income bar — no middle-group gradients.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
-    // Each gradient holds its income color through the midpoint, then
-    // settles into a shade of that same hue at the target end.
-    const payroll = colorForName("Payroll");
-    const grad = svg.querySelector(`#${sankeyRibbonGradientId(0)}`)!;
+    // One gradient per middle and per target (Everyday + Groceries, Rent,
+    // Remaining) — no income gradients.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(1 + 3);
+    const leftFills = [
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("target", 2),
+      sankeyRibbonGradientId("target", 2),
+    ];
+    left.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(`url(#${leftFills[k]!})`);
+    });
+    // Right sub-bands fill from their target's gradient, cell-major.
+    const targetOrder = [0, 0, 1, 1];
+    right.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(
+        `url(#${sankeyRibbonGradientId("target", targetOrder[k]!)})`
+      );
+      expect(link.getAttribute("data-income")).toBe(String(k % 2));
+    });
+    // Each gradient holds its node color through the midpoint, then settles
+    // into a shade of that same hue at the target end.
+    const everyday = colorForName("Everyday");
+    const grad = svg.querySelector(`#${sankeyRibbonGradientId("middle", 0)}`)!;
     const stops = Array.from(grad.querySelectorAll("stop"));
     expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
     expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
-      payroll,
-      payroll,
-      sankeyRibbonShade(payroll),
+      everyday,
+      everyday,
+      sankeyRibbonShade(everyday),
     ]);
-    const bonusGrad = svg.querySelector(`#${sankeyRibbonGradientId(1)}`)!;
-    const bonusStops = Array.from(bonusGrad.querySelectorAll("stop"));
-    expect(bonusStops[0]!.getAttribute("stop-color")).toBe(colorForName("Bonus"));
-    expect(bonusStops[2]!.getAttribute("stop-color")).toBe(
-      sankeyRibbonShade(colorForName("Bonus"))
+    const groceriesGrad = svg.querySelector(`#${sankeyRibbonGradientId("target", 0)}`)!;
+    const groceriesStops = Array.from(groceriesGrad.querySelectorAll("stop"));
+    expect(groceriesStops[0]!.getAttribute("stop-color")).toBe(colorForName("Groceries"));
+    expect(groceriesStops[2]!.getAttribute("stop-color")).toBe(
+      sankeyRibbonShade(colorForName("Groceries"))
     );
   });
 });

@@ -1,6 +1,10 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
-import { SANKEY_LEFT_LABEL_INSET, type SpendingGroupFlow } from "@ynab/logic";
+import {
+  SANKEY_LEFT_LABEL_INSET,
+  sankeyThresholdStops,
+  type SpendingGroupFlow,
+} from "@ynab/logic";
 import {
   SpendingReport,
   sankeyRibbonGradientId,
@@ -8,7 +12,7 @@ import {
   SOURCE_NAME_PX_PER_CHAR,
   type SpendingItem,
 } from "../src/SpendingReport.js";
-import { colorForName } from "../src/chartUtils.js";
+import { colorForName, sankeyRibbonShade } from "../src/chartUtils.js";
 
 class MockResizeObserver {
   cb: () => void;
@@ -90,6 +94,13 @@ function renderReport(
   return render(
     <SpendingReport categoryFlow={categoryFlow} merchantFlow={merchantFlow} income={income} />
   );
+}
+
+// The Under slider walks stepped stops, not raw dollars: resolve the slider
+// position for a dollar threshold from the stops covering `maxDollars` (the
+// fixture's largest row on any column — the same input the report uses).
+function stepFor(maxDollars: number, dollars: number): string {
+  return String(sankeyThresholdStops(maxDollars).indexOf(dollars));
 }
 
 describe("SpendingReport", () => {
@@ -236,7 +247,7 @@ describe("SpendingReport", () => {
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     // $500 threshold: Groceries ($400) and Electric Bill ($150) merge on
     // the right, Everyday ($400) merges in the middle.
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
 
     expect(screen.getByText("(3 in Other)")).toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
@@ -271,8 +282,9 @@ describe("SpendingReport", () => {
       [{ name: "Payroll", value: 50000 }]
     );
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    expect(slider).toHaveAttribute("max", "1000");
-    fireEvent.change(slider, { target: { value: "1000" } });
+    // Stops cover the $1,000 group: 15 positions, top stop $1,000.
+    expect(slider).toHaveAttribute("max", String(sankeyThresholdStops(1000).length - 1));
+    fireEvent.change(slider, { target: { value: stepFor(1000, 1000) } });
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Both outer columns collapse to a single Other row each while the
     // $1000 group sits exactly at the threshold and stays: $500 of income
@@ -289,7 +301,7 @@ describe("SpendingReport", () => {
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     expect(container.querySelectorAll(".y-bar-track")).toHaveLength(2);
     expect(screen.getByText("Other")).toBeInTheDocument();
     expect(screen.getByText("(2 merged)")).toBeInTheDocument();
@@ -305,7 +317,7 @@ describe("SpendingReport", () => {
     // $500 threshold: Groceries ($400) + Electric Bill ($150) merge on the
     // right, Side Gig ($300) + Cashback ($50) merge on the left, and
     // Everyday ($400) merges in the middle.
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
 
     // Header counts merged rows on all three columns.
     expect(screen.getByText("(5 in Other)")).toBeInTheDocument();
@@ -336,7 +348,7 @@ describe("SpendingReport", () => {
       { name: "Cashback", value: 5000 },
     ]);
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     // Left column is Payroll, then Other.
     const otherIncome = container.querySelectorAll('[data-testid="sankey-income"]')[1]!;
     fireEvent.mouseMove(otherIncome, { clientX: 100, clientY: 300 });
@@ -345,12 +357,46 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("sizes the slider ceiling from the largest group on either side", () => {
-    // Largest expense is $1,000 but the $2,000 income drives the ceiling.
+  it("sizes the slider ceiling from the largest row on any side", () => {
+    // Largest expense is $1,000 but the $2,000 income drives the ceiling:
+    // positions run through the $2,000 stop.
     renderReport();
+    const stops = sankeyThresholdStops(2000);
     expect(
       screen.getByRole("slider", { name: /merge smaller groups/i })
-    ).toHaveAttribute("max", "2000");
+    ).toHaveAttribute("max", String(stops.length - 1));
+  });
+
+  it("steps the Under slider in small increments first, larger jumps later", () => {
+    renderReport();
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    const stops = sankeyThresholdStops(2000);
+    // Position 1 merges under $10; the last step jumps $500 to $2,000.
+    expect(stops[1]).toBe(10);
+    expect(stops[stops.length - 1]! - stops[stops.length - 2]!).toBe(500);
+    fireEvent.change(slider, { target: { value: "1" } });
+    expect(screen.getByText("$10.00")).toBeInTheDocument();
+    fireEvent.change(slider, { target: { value: String(stops.length - 1) } });
+    // The Under readout joins the $2,000 income total at the top stop.
+    expect(screen.getAllByText("$2,000.00")).toHaveLength(2);
+  });
+
+  it("raises the Under ceiling past the old $2,000 cap on large datasets", () => {
+    // A $60,000 income used to pin the slider at $2,000; stops now reach
+    // $100,000 so the long tail stays mergeable.
+    const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
+      { name: "Windfall", value: 6000000 },
+    ]);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    const stops = sankeyThresholdStops(60000);
+    expect(stops[stops.length - 1]).toBe(100000);
+    expect(slider).toHaveAttribute("max", String(stops.length - 1));
+    fireEvent.change(slider, { target: { value: String(stops.length - 1) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Everything folds: one Other bucket per column.
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
+    expect(within(svg as unknown as HTMLElement).getAllByText("Other")).toHaveLength(3);
   });
 
   it("shows a tooltip with amount and shares when hovering a spending node", () => {
@@ -374,7 +420,7 @@ describe("SpendingReport", () => {
   it("shows merged-group detail when hovering the Other bucket", () => {
     const { container } = renderReport();
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     // Nodes are Mortgage, Other, Remaining — Other sits in the middle.
     const otherNode = container.querySelectorAll('[data-testid="sankey-node"]')[1]!;
     fireEvent.mouseMove(otherNode, { clientX: 600, clientY: 200 });
@@ -445,28 +491,61 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("runs every right sub-ribbon in its own income's color through the middle", () => {
+  it("colors every ribbon by the node it flows into, not its income source", () => {
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Bonus", value: 50000 },
     ]);
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // 3 cells x 2 incomes: each cell draws one sub-ribbon per income.
+    // 3 cells x 2 incomes: each cell keeps one sub-ribbon per income so a
+    // hovered income can spotlight its share — but every band renders in
+    // the final category's color.
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
     expect(right).toHaveLength(6);
-    // One gradient per income — no middle-group gradients — and every
-    // right sub-ribbon fills from its own income's gradient, so the
-    // income color runs uninterrupted to the right column.
-    const incomes = ["Payroll", "Bonus"];
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
-    for (const link of right) {
-      const income = Number(link.getAttribute("data-income"));
-      expect(link.getAttribute("fill")).toBe(`url(#${sankeyRibbonGradientId(income)})`);
-      const grad = svg.querySelector(`#${sankeyRibbonGradientId(income)}`)!;
-      expect(grad.querySelector("stop")!.getAttribute("stop-color")).toBe(
-        colorForName(incomes[income]!)
+    const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
+    // 2 incomes x 2 groups plus 2 full-width Remaining ribbons on the left.
+    expect(left).toHaveLength(6);
+    // One gradient per middle and per target (2 groups + 3 categories +
+    // Remaining) — no income gradients.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2 + 4);
+    // Right sub-bands fill from their target's gradient, cell-major:
+    // Bills→Mortgage x2, Bills→Electric x2, Everyday→Groceries x2.
+    const targetOrder = [0, 0, 2, 2, 1, 1];
+    right.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(
+        `url(#${sankeyRibbonGradientId("target", targetOrder[k]!)})`
       );
-    }
+      // The funding income is still recorded for the hover highlight.
+      expect(link.getAttribute("data-income")).toBe(String(k % 2));
+    });
+    // Left ribbons fill from their middle's gradient; the plug ribbons run
+    // Remaining green full-width. Links run middle-major, incomes within.
+    const leftFills = [
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("middle", 1),
+      sankeyRibbonGradientId("middle", 1),
+      sankeyRibbonGradientId("target", 3),
+      sankeyRibbonGradientId("target", 3),
+    ];
+    left.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(`url(#${leftFills[k]!})`);
+    });
+    // Each gradient holds its node color through the midpoint, then settles
+    // into a shade of that same hue at the target end.
+    const grad = svg.querySelector(`#${sankeyRibbonGradientId("target", 0)}`)!;
+    const stops = Array.from(grad.querySelectorAll("stop"));
+    expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
+    const mortgage = colorForName("Mortgage Interest");
+    expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
+      mortgage,
+      mortgage,
+      sankeyRibbonShade(mortgage),
+    ]);
+    const billsGrad = svg.querySelector(`#${sankeyRibbonGradientId("middle", 0)}`)!;
+    expect(billsGrad.querySelector("stop")!.getAttribute("stop-color")).toBe(
+      colorForName("Bills")
+    );
     // The group tooltip still counts distinct targets, not sub-ribbons.
     const group = svg.querySelectorAll('[data-testid="sankey-group"]')[0]!;
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
@@ -476,6 +555,54 @@ describe("SpendingReport", () => {
     ).toBeInTheDocument();
     fireEvent.mouseLeave(group);
     expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("highlights every benefiting category when hovering an income source", () => {
+    // Money is fungible, so one income reaches every group and target: the
+    // hover lights the whole downstream path plus its own share of each
+    // cell, and dims only the OTHER income's bars and bands.
+    const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Bonus", value: 50000 },
+    ]);
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const income = svg.querySelectorAll('[data-testid="sankey-income"]')[0]!;
+    fireEvent.mouseMove(income, { clientX: 100, clientY: 200 });
+    // Every middle and right bar stays lit — all benefit from Payroll.
+    for (const bar of svg.querySelectorAll('[data-testid="sankey-group"]')) {
+      expect(bar.getAttribute("fill-opacity")).toBe("1");
+    }
+    for (const bar of svg.querySelectorAll('[data-testid="sankey-node"]')) {
+      expect(bar.getAttribute("fill-opacity")).toBe("1");
+    }
+    // Payroll's own bar stays lit; the Bonus bar dims.
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    expect(incomes[0]!.getAttribute("fill-opacity")).toBe("1");
+    expect(incomes[1]!.getAttribute("fill-opacity")).toBe("0.35");
+    // Left ribbons from Payroll stay lit; Bonus ribbons dim.
+    const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.35",
+      "0.18",
+      "0.35",
+      "0.18",
+      "0.35",
+      "0.18",
+    ]);
+    // Right sub-bands alternate Payroll/Bonus within each cell: only
+    // Payroll's share of every cell stays lit.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.35",
+      "0.18",
+      "0.35",
+      "0.18",
+      "0.35",
+      "0.18",
+    ]);
+    fireEvent.mouseLeave(income);
   });
 
   it("shows the proportional flow when hovering the full-width Remaining ribbon", () => {
@@ -522,7 +649,7 @@ describe("SpendingReport", () => {
     expect(screen.getByText("Unspent of $2,000.00 income")).toBeInTheDocument();
   });
 
-  it("shows neutral Shortfall segments instead of an Overspent income source when spending exceeds income", () => {
+  it("shows neutral Over income segments instead of an Overspent income source when spending exceeds income", () => {
     const { container } = render(
       <SpendingReport
         categoryFlow={sampleCategoryFlow}
@@ -546,16 +673,17 @@ describe("SpendingReport", () => {
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
     expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(2);
     expect(svg.querySelector('[data-testid="sankey-total"]')).toBeNull();
-    // Hovering a bar explains the shortfall.
+    // Hovering a bar explains the gap: spending ran $550 past income.
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
     fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
     const tip = document.querySelector(".y-tip")!;
     expect(tip).toBeInTheDocument();
-    expect(within(tip as unknown as HTMLElement).getByText("Shortfall")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Over income")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).queryByText("Unfunded")).not.toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).queryByText("Shortfall")).not.toBeInTheDocument();
     expect(
       within(tip as unknown as HTMLElement).getByText(
-        "Spending exceeded income — covered from savings or debt"
+        "Spending exceeded income by $550.00 — covered from savings or debt"
       )
     ).toBeInTheDocument();
     fireEvent.mouseLeave(node);
@@ -680,7 +808,7 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("shows the shortfall and its explainer when hovering a group under a shortfall", () => {
+  it("shows the over-income gap and its explainer when hovering a group under a shortfall", () => {
     const { container } = render(
       <SpendingReport
         categoryFlow={sampleCategoryFlow}
@@ -693,10 +821,10 @@ describe("SpendingReport", () => {
     const tip = document.querySelector(".y-tip")!;
     expect(tip).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("Everyday")).toBeInTheDocument();
-    expect(within(tip as unknown as HTMLElement).getByText("Shortfall")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Over income")).toBeInTheDocument();
     expect(
       within(tip as unknown as HTMLElement).getByText(
-        "Spending exceeded income — covered from savings or debt"
+        "Spending exceeded income by $550.00 — covered from savings or debt"
       )
     ).toBeInTheDocument();
     fireEvent.mouseLeave(group);
@@ -707,7 +835,7 @@ describe("SpendingReport", () => {
     const { container } = renderReport();
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     // $500 threshold folds Everyday ($400) into the middle Other bucket.
-    fireEvent.change(slider, { target: { value: "500" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     const otherGroup = container.querySelectorAll('[data-testid="sankey-group"]')[1]!;
     fireEvent.mouseMove(otherGroup, { clientX: 380, clientY: 250 });
     expect(screen.getByText("1 smaller group under $500.00")).toBeInTheDocument();
@@ -723,7 +851,7 @@ describe("SpendingReport", () => {
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     // $200 threshold: Electric Bill ($150) folds on the right, Bonus ($100)
     // folds on the left; groups all stay.
-    fireEvent.change(slider, { target: { value: "200" } });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 200) } });
     expect(screen.getByText("(2 in Other)")).toBeInTheDocument();
     const otherIncome = container.querySelectorAll('[data-testid="sankey-income"]')[1]!;
     fireEvent.mouseMove(otherIncome, { clientX: 100, clientY: 300 });
@@ -802,6 +930,141 @@ describe("SpendingReport", () => {
     } finally {
       globalThis.requestAnimationFrame = syncRaf;
     }
+  });
+
+  it("shows node tooltips when hovering labels, not just bars", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Income label.
+    const incomeLabel = svg.querySelector('[data-testid="sankey-income-label"]')!;
+    fireEvent.mouseMove(incomeLabel, { clientX: 100, clientY: 200 });
+    expect(
+      within(document.querySelector(".y-tip")! as unknown as HTMLElement).getByText(
+        "100% of $2,000.00 income"
+      )
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(incomeLabel);
+    expect(document.querySelector(".y-tip")).toBeNull();
+    // Middle label.
+    const groupLabel = svg.querySelectorAll('[data-testid="sankey-group-label"]')[0]!;
+    fireEvent.mouseMove(groupLabel, { clientX: 380, clientY: 100 });
+    expect(
+      within(document.querySelector(".y-tip")! as unknown as HTMLElement).getByText("Bills")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(groupLabel);
+    expect(document.querySelector(".y-tip")).toBeNull();
+    // Target label.
+    const targetLabel = svg.querySelectorAll('[data-testid="sankey-target-label"]')[1]!;
+    fireEvent.mouseMove(targetLabel, { clientX: 600, clientY: 200 });
+    expect(
+      within(document.querySelector(".y-tip")! as unknown as HTMLElement).getByText("Groceries")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(targetLabel);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("labels each column and explains it on hover", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const heads = svg.querySelectorAll('[data-testid="sankey-colhead"]');
+    expect(heads).toHaveLength(3);
+    expect(Array.from(heads).map((h) => h.textContent)).toEqual([
+      "INCOME",
+      "GROUPS",
+      "CATEGORIES",
+    ]);
+    // Hovering a header explains the column without dimming the chart.
+    const incomeHead = svg.querySelector('[data-testid="sankey-colhead"][data-col="income"]')!;
+    fireEvent.mouseMove(incomeHead, { clientX: 160, clientY: 20 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("Money received this period.")
+    ).toBeInTheDocument();
+    for (const bar of svg.querySelectorAll('[data-testid="sankey-node"]')) {
+      expect(bar.getAttribute("fill-opacity")).toBe("1");
+    }
+    fireEvent.mouseLeave(incomeHead);
+    expect(document.querySelector(".y-tip")).toBeNull();
+    // The right header follows the dimension toggle.
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    expect(
+      svg.querySelector('[data-testid="sankey-colhead"][data-col="target"]')!.textContent
+    ).toBe("MERCHANTS");
+  });
+
+  it("explains transfer money on both sides of the chart", () => {
+    const flow: SpendingGroupFlow = {
+      groups: [{ name: "Bills", value: 100000 }],
+      targets: [
+        { name: "Mortgage Interest", value: 70000 },
+        { name: "Transfer : Broker", value: 30000, transfer: true },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 70000 },
+        { groupIndex: 0, targetIndex: 1, value: 30000 },
+      ],
+    };
+    const { container } = renderReport(flow, emptyFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Transfer : Broker", value: 50000, transfer: true },
+    ]);
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Left: the withdrawal counts as income.
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    fireEvent.mouseMove(incomes[1]!, { clientX: 100, clientY: 300 });
+    expect(
+      screen.getByText("Includes withdrawals from off-budget accounts")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(incomes[1]!);
+    // Right: the contribution counts as spending.
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    fireEvent.mouseMove(nodes[1]!, { clientX: 600, clientY: 200 });
+    expect(
+      screen.getByText("Includes money moved to off-budget accounts")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(nodes[1]!);
+    // Plain rows carry no transfer line.
+    fireEvent.mouseMove(nodes[0]!, { clientX: 600, clientY: 100 });
+    expect(
+      screen.queryByText("Includes money moved to off-budget accounts")
+    ).not.toBeInTheDocument();
+    fireEvent.mouseLeave(nodes[0]!);
+  });
+
+  it("explains the Uncategorized pseudo-group as spending with no category", () => {
+    const merchantFlow: SpendingGroupFlow = {
+      groups: [
+        { name: "Everyday", value: 40000 },
+        { name: "Uncategorized", value: 15000 },
+      ],
+      targets: [
+        { name: "Whole Foods", value: 40000 },
+        { name: "Corner Shop", value: 15000 },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 40000 },
+        { groupIndex: 1, targetIndex: 1, value: 15000 },
+      ],
+    };
+    const { container } = renderReport(sampleCategoryFlow, merchantFlow, sampleIncome);
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
+    fireEvent.mouseMove(groups[1]!, { clientX: 380, clientY: 250 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(
+      within(tip as unknown as HTMLElement).getByText("Spending with no category set")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(groups[1]!);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("offers a How-to-read explainer in the header", () => {
+    renderReport();
+    expect(
+      screen.getByRole("button", { name: "How to read this chart" })
+    ).toBeInTheDocument();
   });
 
   it("pins the chart scroll container so scrollbars can never shift the geometry", () => {

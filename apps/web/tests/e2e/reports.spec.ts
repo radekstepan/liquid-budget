@@ -93,14 +93,21 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
 
   // Threshold slider merges smaller groups into Other without changing
-  // the Out total.
+  // the Out total. The slider walks stepped stops (positions, not dollars),
+  // so drive it to its top stop, which always merges the smaller rows.
   const outValue = panel.locator("span").filter({ hasText: /^Out:/ }).locator(".y-num");
   const outBefore = (await outValue.textContent())?.trim();
   const slider = panel.getByRole("slider", { name: /merge smaller groups/i });
-  await slider.fill("500");
+  const sliderMax = await slider.getAttribute("max");
+  await slider.fill(sliderMax ?? "0");
   await expect(panel.getByText("Other")).toBeVisible();
   await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
   expect((await outValue.textContent())?.trim()).toBe(outBefore);
+
+  // Column headers and the How-to-read explainer keep the chart
+  // self-explanatory.
+  await expect(panel.getByTestId("sankey-colhead")).toHaveCount(3);
+  await expect(panel.getByRole("button", { name: "How to read this chart" })).toBeVisible();
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

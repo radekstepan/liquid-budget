@@ -10,8 +10,12 @@ import {
   mergeBelowThreshold,
   mergeGroupFlow,
   OTHER_BUCKET_LABEL,
+  OVER_INCOME_LABEL,
   REMAINING_LABEL,
   sankeyContentHeight,
+  sankeyThresholdStep,
+  sankeyThresholdStops,
+  SANKEY_THRESHOLD_STOPS,
   SANKEY_SOURCE_AMOUNT_MIN_HEIGHT,
   showSankeySourceAmount,
   SANKEY_LEFT_LABEL_INSET,
@@ -146,6 +150,9 @@ describe("computeSpendingBreakdown", () => {
       { name: "Rent", value: 50000 },
       { name: "Groceries", value: 5000 },
     ]);
+    // Internal same-boundary move: counted as spending (legacy semantics)
+    // but not off-budget money, so no transfer flag.
+    expect(items.every((i) => i.transfer === undefined)).toBe(true);
   });
 
   it("excludes credit-card payoff transfers in category mode (money flows through once)", () => {
@@ -190,7 +197,8 @@ describe("computeSpendingBreakdown", () => {
       txn("2026-06-15", "Transfer : Tracking Loan", -20000, 10, { transferAccountId: 4 })
     );
     const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
-    expect(items).toEqual([{ name: "Groceries", value: 25000 }]);
+    // The boundary outflow flags the row as transfer money.
+    expect(items).toEqual([{ name: "Groceries", value: 25000, transfer: true }]);
   });
 
   it("counts investment contributions once and excludes the withdrawal from spending", () => {
@@ -205,10 +213,10 @@ describe("computeSpendingBreakdown", () => {
     // The contribution is the outflow allocation; the withdrawal is income, so
     // it must not net against spending here.
     expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
-      { name: "Groceries", value: 35000 },
+      { name: "Groceries", value: 35000, transfer: true },
     ]);
     expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
-      { name: "Transfer : Wealthsimple Trade", value: 30000 },
+      { name: "Transfer : Wealthsimple Trade", value: 30000, transfer: true },
       { name: "Whole Foods", value: 5000 },
     ]);
   });
@@ -554,6 +562,35 @@ describe("mergeGroupFlow", () => {
     expect(merged.otherCount).toBe(0);
     expect(merged.otherValue).toBe(0);
   });
+
+  it("carries transfer flags through both columns into their Other buckets", () => {
+    const merged = mergeGroupFlow(
+      [
+        { name: "Big", value: 9000 },
+        { name: "Small", value: 1000 },
+      ],
+      [
+        { name: "Kept", value: 9000 },
+        { name: "Moved Out", value: 1000, transfer: true },
+      ],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9000 },
+        { groupIndex: 1, targetIndex: 1, value: 1000 },
+      ],
+      5000
+    );
+    // The flagged target folds, so the target Other bucket inherits the
+    // flag; the group Other bucket holds a plain row and stays unflagged.
+    expect(merged.targets).toEqual([
+      { name: "Kept", value: 9000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true, transfer: true },
+    ]);
+    expect(merged.groups).toEqual([
+      { name: "Big", value: 9000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+    ]);
+    expectConserved(merged);
+  });
 });
 
 describe("mergeBelowThreshold", () => {
@@ -623,6 +660,35 @@ describe("mergeBelowThreshold", () => {
     expect(merged.items).toEqual([]);
     expect(merged.otherCount).toBe(0);
     expect(merged.otherValue).toBe(0);
+  });
+
+  it("keeps transfer flags on kept rows and folds them into the Other bucket", () => {
+    const merged = mergeBelowThreshold(
+      [
+        { name: "Big", value: 10000, transfer: true },
+        { name: "Mid", value: 4000 },
+        { name: "Small", value: 1000, transfer: true },
+      ],
+      5000
+    );
+    expect(merged.items).toEqual([
+      { name: "Big", value: 10000, mergedCount: 1, transfer: true },
+      { name: OTHER_BUCKET_LABEL, value: 5000, mergedCount: 2, bucket: true, transfer: true },
+    ]);
+  });
+
+  it("leaves the Other bucket unflagged when no folded row is a transfer", () => {
+    const merged = mergeBelowThreshold(
+      [
+        { name: "Big", value: 10000, transfer: true },
+        { name: "Small", value: 1000 },
+      ],
+      5000
+    );
+    expect(merged.items).toEqual([
+      { name: "Big", value: 10000, mergedCount: 1, transfer: true },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+    ]);
   });
 });
 
@@ -803,7 +869,7 @@ describe("computeIncomeBreakdown", () => {
       txn("2026-06-11", "Transfer : Wealthsimple Trade", 50000, null, { transferAccountId: 5 })
     );
     expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
-      { name: "Transfer : Wealthsimple Trade", value: 150000 },
+      { name: "Transfer : Wealthsimple Trade", value: 150000, transfer: true },
     ]);
   });
 
@@ -818,7 +884,22 @@ describe("computeIncomeBreakdown", () => {
       txn("2026-06-12", "Transfer : Chequing", -75000, null, { accountId: 5, transferAccountId: 1 })
     );
     expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
-      { name: "Transfer : Chequing", value: 75000 },
+      { name: "Transfer : Chequing", value: 75000, transfer: true },
+    ]);
+  });
+
+  it("flags only the withdrawal source when plain income mixes with transfers", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 }),
+      txn("2026-06-11", "Bonus", 20000, null)
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Transfer : Wealthsimple Trade", value: 100000, transfer: true },
+      { name: "Bonus", value: 20000 },
     ]);
   });
 
@@ -1858,5 +1939,103 @@ describe("showSankeySourceAmount", () => {
   it("shows name only when the source bar is too short for two lines", () => {
     expect(showSankeySourceAmount(SANKEY_SOURCE_AMOUNT_MIN_HEIGHT - 0.01)).toBe(false);
     expect(showSankeySourceAmount(0)).toBe(false);
+  });
+});
+
+describe("over-income wording", () => {
+  it("names the unfunded slice in the header's own words", () => {
+    expect(OVER_INCOME_LABEL).toBe("Over income");
+  });
+});
+
+describe("sankey transfer flags on layout nodes", () => {
+  it("copies the transfer flag from merged rows onto their bars", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [
+        { name: "Payroll", value: 200000, mergedCount: 1 },
+        { name: "Withdrawal", value: 50000, mergedCount: 1, transfer: true },
+      ],
+      [{ name: "Everyday", value: 100000, mergedCount: 1 }],
+      [
+        { name: "Groceries", value: 70000, mergedCount: 1 },
+        { name: "Moved Out", value: 30000, mergedCount: 1, transfer: true },
+      ],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 70000 },
+        { groupIndex: 0, targetIndex: 1, value: 30000 },
+      ],
+      { width: 800, height: 400 }
+    );
+    expect(layout.sources[0]).not.toHaveProperty("transfer");
+    expect(layout.sources[1]).toHaveProperty("transfer", true);
+    expect(layout.middles[0]).not.toHaveProperty("transfer");
+    expect(layout.targets[0]).not.toHaveProperty("transfer");
+    expect(layout.targets[1]).toHaveProperty("transfer", true);
+    // The surplus plug is never transfer money.
+    const plug = layout.remainingTargetIndex;
+    expect(plug).not.toBeNull();
+    expect(layout.targets[plug!]).not.toHaveProperty("transfer");
+  });
+});
+
+describe("sankeyThresholdStops", () => {
+  it("starts at 0 and steps small first, larger later (non-linear)", () => {
+    expect(SANKEY_THRESHOLD_STOPS[0]).toBe(0);
+    const gaps: number[] = [];
+    for (let i = 1; i < SANKEY_THRESHOLD_STOPS.length; i++) {
+      gaps.push(SANKEY_THRESHOLD_STOPS[i]! - SANKEY_THRESHOLD_STOPS[i - 1]!);
+    }
+    // Small increments up front, thousand-dollar jumps at the back.
+    expect(gaps.slice(0, 4)).toEqual([10, 15, 25, 25]);
+    expect(gaps[gaps.length - 1]).toBe(25000);
+    for (let i = 1; i < gaps.length; i++) {
+      expect(gaps[i]).toBeGreaterThanOrEqual(gaps[i - 1]!);
+    }
+  });
+
+  it("covers the largest row with the next canonical stop", () => {
+    expect(sankeyThresholdStops(999)).toEqual([
+      0, 10, 25, 50, 75, 100, 150, 200, 250, 300, 350, 400, 500, 750, 1000,
+    ]);
+    expect(sankeyThresholdStops(2000).at(-1)).toBe(2000);
+    expect(sankeyThresholdStops(9000).at(-1)).toBe(10000);
+  });
+
+  it("floors tiny and degenerate inputs at $50 so the slider stays useful", () => {
+    expect(sankeyThresholdStops(0)).toEqual([0, 10, 25, 50]);
+    expect(sankeyThresholdStops(-5)).toEqual([0, 10, 25, 50]);
+    expect(sankeyThresholdStops(Number.NaN)).toEqual([0, 10, 25, 50]);
+  });
+
+  it("doubles past the last canonical stop for huge datasets", () => {
+    // Old cap was $2,000; a $60k row now gets a $100k ceiling.
+    expect(sankeyThresholdStops(60000).at(-1)).toBe(100000);
+    expect(sankeyThresholdStops(150000).slice(-2)).toEqual([100000, 200000]);
+    const stops = sankeyThresholdStops(60000);
+    expect(stops.slice(0, SANKEY_THRESHOLD_STOPS.length)).toEqual([...SANKEY_THRESHOLD_STOPS]);
+  });
+});
+
+describe("sankeyThresholdStep", () => {
+  const stops = [0, 10, 25, 50, 75, 100, 150, 200, 250, 300, 350, 400, 500];
+
+  it("snaps dollar values to their nearest stop", () => {
+    expect(sankeyThresholdStep(stops, 0)).toBe(0);
+    expect(sankeyThresholdStep(stops, 320)).toBe(stops.indexOf(300));
+    expect(sankeyThresholdStep(stops, 340)).toBe(stops.indexOf(350));
+    expect(sankeyThresholdStep(stops, 500)).toBe(stops.indexOf(500));
+    expect(sankeyThresholdStep(stops, 99999)).toBe(stops.length - 1);
+    expect(sankeyThresholdStep(stops, -20)).toBe(0);
+  });
+
+  it("rounds ties down to the smaller stop", () => {
+    expect(sankeyThresholdStep(stops, 325)).toBe(stops.indexOf(300));
+  });
+
+  it("round-trips through the stops covering real data", () => {
+    const data = sankeyThresholdStops(2000);
+    for (const dollars of data) {
+      expect(data[sankeyThresholdStep(data, dollars)]).toBe(dollars);
+    }
   });
 });

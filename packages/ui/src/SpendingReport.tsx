@@ -7,7 +7,9 @@ import {
   mergeGroupFlow,
   layoutGroupedIncomeSankey,
   sankeyContentHeight,
-  SHORTFALL_LABEL,
+  OVER_INCOME_LABEL,
+  sankeyThresholdStep,
+  sankeyThresholdStops,
   showSankeySourceAmount,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
@@ -15,6 +17,7 @@ import {
   SANKEY_PAD_BOTTOM,
   SANKEY_PAD_TOP,
   SANKEY_SOURCE_GUTTER,
+  UNCATEGORIZED_GROUP_LABEL,
   type MergedSpendingItem,
   type SpendingBreakdownItem,
   type SpendingDimension,
@@ -26,7 +29,7 @@ import {
   colorForName,
   sankeyRibbonShade,
   TipLabel,
-  SHORTFALL_COLOR,
+  OVER_INCOME_COLOR,
   useElementSize,
   useRafThrottledSet,
 } from "./chartUtils.js";
@@ -41,10 +44,11 @@ type Hover =
   | { kind: "node"; idx: number; x: number; y: number }
   // Left ribbon: a = income index, b = middle index (or the plug index,
   // one past the last middle, for full-width Remaining ribbons). Right
-  // sub-ribbon: a = middle index, b = target index, c = income index whose
-  // color the sub-ribbon carries through the middle.
+  // sub-ribbon: a = middle index, b = target index, c = income index
+  // funding this sub-band (the band renders in the target's color).
   | { kind: "link"; side: "left"; a: number; b: number; x: number; y: number }
   | { kind: "link"; side: "right"; a: number; b: number; c: number; x: number; y: number }
+  | { kind: "head"; col: "income" | "group" | "target"; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
@@ -60,12 +64,14 @@ function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
 }
 
-// One shared gradient per income source: every ribbon carrying that
-// income's flow — left-hop ribbons and right-hop sub-ribbons alike — holds
-// the income color through its midpoint, then settles into a shade of that
-// same hue toward the target end. Exported so tests can pin the defs.
-export function sankeyRibbonGradientId(incomeIndex: number): string {
-  return `sankey-ribbon-${incomeIndex}`;
+// One shared gradient per downstream node: each ribbon takes the color
+// of the node it flows INTO — left-hop ribbons the middle group's (or the
+// Remaining plug's green for the full-width surplus ribbons), right-hop
+// sub-ribbons their final category's or merchant's — holding that color
+// through the midpoint, then settling into a shade of the same hue toward
+// the target end. Exported so tests can pin the defs.
+export function sankeyRibbonGradientId(side: "middle" | "target", index: number): string {
+  return `sankey-ribbon-${side === "middle" ? "m" : "t"}${index}`;
 }
 
 export function SpendingReport({
@@ -114,12 +120,13 @@ export function SpendingReport({
       [...raw, ...flow.groups, ...income].reduce((m, s) => Math.max(m, s.value / 100), 0),
     [raw, flow.groups, income]
   );
-  // Slider ceiling: a round number covering the largest group, floored at
-  // $50 so the control stays useful on small datasets, capped at $2000 so
-  // the slider keeps its resolution on large ones.
-  const sliderMax = Math.max(50, Math.min(2000, Math.ceil(maxDollars / 10) * 10));
-  const sliderStep = sliderMax <= 100 ? 5 : 10;
-  const activeThreshold = Math.min(Math.max(0, thresholdDollars), sliderMax);
+  // The slider walks stepped stops (small increments first, larger jumps
+  // later — see SANKEY_THRESHOLD_STOPS) instead of raw dollars. The stored
+  // dollar value snaps to its nearest stop, so values saved before the
+  // stepped slider keep working.
+  const stops = useMemo(() => sankeyThresholdStops(maxDollars), [maxDollars]);
+  const sliderPos = sankeyThresholdStep(stops, thresholdDollars);
+  const activeThreshold = stops[sliderPos] ?? 0;
 
   const merged = useMemo(
     () =>
@@ -285,6 +292,14 @@ export function SpendingReport({
                 : `${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
           </div>
+          {r.transfer === true && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Includes withdrawals from off-budget accounts</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -310,7 +325,7 @@ export function SpendingReport({
               {`${s.name} → ${target.name}`}
             </div>
             <TipLabel
-              color={s.color}
+              color={target.color}
               label="Flows"
               value={fmt(link.value)}
               pct={fundedPct + "%"}
@@ -332,8 +347,9 @@ export function SpendingReport({
         (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b && l.incomeIndex === hover.c
       );
       if (!link) return null;
-      // Share of the target's funded amount (under a shortfall the expense
-      // is only partly funded, so this is relative to funded, not total).
+      // Share of the target's funded amount (when spending exceeds income
+      // the expense is only partly funded, so this is relative to funded,
+      // not total).
       const fundedPct =
         t.fundedValue !== 0 ? Math.round((link.value / t.fundedValue) * 100) : 0;
       return (
@@ -342,7 +358,7 @@ export function SpendingReport({
             {`${s.name} → ${t.name}`}
           </div>
           <TipLabel
-            color={s.color}
+            color={t.color}
             label="Flows"
             value={fmt(link.value)}
             pct={fundedPct + "%"}
@@ -385,8 +401,8 @@ export function SpendingReport({
           />
           {r.unfundedValue > 0 && (
             <TipLabel
-              color={SHORTFALL_COLOR}
-              label={SHORTFALL_LABEL}
+              color={OVER_INCOME_COLOR}
+              label={OVER_INCOME_LABEL}
               value={fmt(r.unfundedValue)}
             />
           )}
@@ -400,12 +416,22 @@ export function SpendingReport({
                 : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
             </span>
           </div>
+          {r.name === UNCATEGORIZED_GROUP_LABEL && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Spending with no category set</span>
+            </div>
+          )}
           {r.unfundedValue > 0 && (
             <div
               className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
               style={{ color: "rgba(242,245,247,0.65)" }}
             >
-              <span>Spending exceeded income — covered from savings or debt</span>
+              <span>
+                {`Spending exceeded income by ${fmt(totals.spendingTotal - totals.incomeTotal)} — covered from savings or debt`}
+              </span>
             </div>
           )}
         </div>
@@ -439,6 +465,48 @@ export function SpendingReport({
         </div>
       );
     }
+    if (hover.kind === "head") {
+      const heads = {
+        income: {
+          title: "Income",
+          lines: [
+            "Money received this period.",
+            "Includes withdrawals back into the budget.",
+          ],
+        },
+        group: {
+          title: "Category groups",
+          lines: [
+            "Income splits across groups,",
+            "then flows into spending.",
+          ],
+        },
+        target: {
+          title: dimension === "categories" ? "Spending by category" : "Spending by merchant",
+          lines: [
+            "Where the money went.",
+            "Unspent income lands in Remaining.",
+          ],
+        },
+      } as const;
+      const head = heads[hover.col];
+      return (
+        <div className="space-y-[3px]">
+          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
+            {head.title}
+          </div>
+          {head.lines.map((line) => (
+            <div
+              key={line}
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>{line}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
     const r = tgtRows[hover.idx];
     if (!r) return null;
     const isOther = r.bucket === true;
@@ -458,8 +526,8 @@ export function SpendingReport({
         />
         {r.unfundedValue > 0 && (
           <TipLabel
-            color={SHORTFALL_COLOR}
-            label={SHORTFALL_LABEL}
+            color={OVER_INCOME_COLOR}
+            label={OVER_INCOME_LABEL}
             value={fmt(r.unfundedValue)}
           />
         )}
@@ -475,12 +543,22 @@ export function SpendingReport({
                 : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
+        {r.transfer === true && !isRemaining && (
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>Includes money moved to off-budget accounts</span>
+          </div>
+        )}
         {r.unfundedValue > 0 && (
           <div
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
             style={{ color: "rgba(242,245,247,0.65)" }}
           >
-            <span>Spending exceeded income — covered from savings or debt</span>
+            <span>
+              {`Spending exceeded income by ${fmt(totals.spendingTotal - totals.incomeTotal)} — covered from savings or debt`}
+            </span>
           </div>
         )}
       </div>
@@ -489,11 +567,14 @@ export function SpendingReport({
 
   // Connected-highlight sets per hover (null = unconstrained, everything
   // stays full opacity). Hovering any bar or ribbon spotlights its flow
-  // path — a target lights its groups, the sub-ribbons feeding it, and the
-  // income ribbons feeding those groups — and dims the rest. Ribbon hovers
-  // trace the through-line end to end: a right sub-ribbon lights its
-  // income bar and the left ribbon feeding its middle, and a left ribbon
-  // lights the sub-ribbons continuing its income through that middle.
+  // path and dims the rest: an income lights its left ribbons, every group
+  // and target they reach (money is fungible, so that is every category),
+  // and its own share of each right-hop cell; a target lights its groups,
+  // the sub-ribbons feeding it, and the income ribbons feeding those
+  // groups. Ribbon hovers trace the through-line end to end: a right
+  // sub-ribbon lights its income bar and the left ribbon feeding its
+  // middle, and a left ribbon lights the sub-ribbons continuing its income
+  // through that middle.
   const hl = useMemo(() => {
     const none = {
       src: null as Set<number> | null,
@@ -502,7 +583,7 @@ export function SpendingReport({
       ll: null as Set<string> | null,
       rl: null as Set<string> | null,
     };
-    if (!hover || hover.kind === "bar" || !sankey) return none;
+    if (!hover || hover.kind === "bar" || hover.kind === "head" || !sankey) return none;
     const key = (a: number, b: number) => `${a}:${b}`;
     const rkey = (a: number, b: number, c: number) => `${a}:${b}:${c}`;
     const midCount = sankey.middles.length;
@@ -520,6 +601,7 @@ export function SpendingReport({
       for (const l of sankey.linksRight) {
         if (l.incomeIndex !== hover.idx) continue;
         rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
+        tgt.add(l.targetIndex);
       }
       return { src: new Set([hover.idx]), mid, tgt, ll, rl };
     }
@@ -637,12 +719,20 @@ export function SpendingReport({
           </span>
         </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
-        <span style={{ color: "var(--y-ink-soft)" }}>
-          {remaining >= 0 ? "Left: " : "Over: "}
-          <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-            {fmt(Math.abs(remaining))}
+        <Tooltip
+          tip={
+            remaining >= 0
+              ? `Unspent income — lands in Remaining on the right`
+              : `Spending exceeded income by ${fmt(Math.abs(remaining))} — covered from savings or debt`
+          }
+        >
+          <span style={{ color: "var(--y-ink-soft)" }}>
+            {remaining >= 0 ? "Left: " : "Over: "}
+            <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+              {fmt(Math.abs(remaining))}
+            </span>
           </span>
-        </span>
+        </Tooltip>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
         <span style={{ color: "var(--y-ink-soft)" }}>
           {rows.length} {rows.length === 1 ? nounSingular : nounPlural}
@@ -735,21 +825,49 @@ export function SpendingReport({
                 <input
                   type="range"
                   aria-label="Merge smaller groups under threshold"
+                  aria-valuetext={
+                    activeThreshold === 0 ? "Off" : fmt(Math.round(activeThreshold * 100))
+                  }
                   className="ml-1.5 inline-block w-[110px] align-middle"
                   style={{ accentColor: "var(--y-blue)" }}
                   min={0}
-                  max={sliderMax}
-                  step={sliderStep}
-                  value={activeThreshold}
+                  max={stops.length - 1}
+                  step={1}
+                  value={sliderPos}
                   disabled={empty}
                   onChange={(e) => {
-                    setThresholdDollars(Number(e.target.value));
+                    setThresholdDollars(stops[Number(e.target.value)] ?? 0);
                     setHover(null);
                   }}
                 />
               </label>
             </Tooltip>
           </div>
+          <Tooltip
+            tip={
+              <span className="block max-w-[280px] space-y-1 text-left text-[11px] leading-snug">
+                <span className="block font-bold">How to read this chart</span>
+                <span className="block">
+                  Income (left) flows through category groups (middle) into spending (right).
+                </span>
+                <span className="block">
+                  Remaining is unspent income. Over income is spending beyond income — covered
+                  from savings or debt.
+                </span>
+                <span className="block">
+                  Moving money out to investments counts as spending; bringing it back counts
+                  as income.
+                </span>
+                <span className="block">
+                  Uncategorized is spending with no category (Merchants view).
+                </span>
+              </span>
+            }
+          >
+            <Button size="sm" variant="default" aria-label="How to read this chart">
+              How to read
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -867,10 +985,24 @@ export function SpendingReport({
               className="block"
             >
               <defs>
-                {srcRows.map((r) => (
+                {midRows.map((r) => (
                   <linearGradient
-                    key={`sgrad-${r.i}`}
-                    id={sankeyRibbonGradientId(r.i)}
+                    key={`mgrad-${r.i}`}
+                    id={sankeyRibbonGradientId("middle", r.i)}
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="0"
+                  >
+                    <stop offset="0" stopColor={r.color} />
+                    <stop offset="0.5" stopColor={r.color} />
+                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
+                  </linearGradient>
+                ))}
+                {tgtRows.map((r) => (
+                  <linearGradient
+                    key={`tgrad-${r.i}`}
+                    id={sankeyRibbonGradientId("target", r.i)}
                     x1="0"
                     y1="0"
                     x2="1"
@@ -882,12 +1014,51 @@ export function SpendingReport({
                   </linearGradient>
                 ))}
               </defs>
+              {/* Column headers: each column names what it holds, so the
+                  chart reads without prior knowledge (left is income
+                  received — not surplus — middle groups route it, right is
+                  where it went). Hovering a header explains the column. */}
+              {(
+                [
+                  { col: "income" as const, label: "Income", node: sankey.sources[0] },
+                  { col: "group" as const, label: "Groups", node: sankey.middles[0] },
+                  {
+                    col: "target" as const,
+                    label: dimension === "categories" ? "Categories" : "Merchants",
+                    node: sankey.targets[0],
+                  },
+                ] satisfies { col: "income" | "group" | "target"; label: string; node: { x: number; w: number } | undefined }[]
+              ).map(
+                (h) =>
+                  h.node != null && (
+                    <text
+                      key={h.col}
+                      data-testid="sankey-colhead"
+                      data-col={h.col}
+                      x={h.node.x + h.node.w / 2}
+                      y={SANKEY_PAD_TOP - 10}
+                      fontSize={10}
+                      textAnchor="middle"
+                      fill="var(--y-ink-faint)"
+                      style={{ cursor: "pointer", letterSpacing: "0.08em" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "head", col: h.col, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
+                    >
+                      {h.label.toUpperCase()}
+                    </text>
+                  )
+              )}
               {sankey.linksLeft.map((link) => {
-                // Ribbons carry their income source's color on both hops:
-                // each ribbon holds the source color through its midpoint,
-                // then settles into a shade of that same hue toward the
-                // target end — one solid through-color, no per-hop split.
-                const fill = `url(#${sankeyRibbonGradientId(link.sourceIndex)})`;
+                // Left-hop ribbons take their middle group's color — except
+                // the full-width surplus ribbons, which take the Remaining
+                // plug's green straight through to the right.
+                const plugTarget = sankey.remainingTargetIndex;
+                const fill =
+                  link.targetIndex >= midRows.length && plugTarget != null
+                    ? `url(#${sankeyRibbonGradientId("target", plugTarget)})`
+                    : `url(#${sankeyRibbonGradientId("middle", link.targetIndex)})`;
                 const isHover = isLeftLinkHover(link.sourceIndex, link.targetIndex);
                 const dim =
                   hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
@@ -916,10 +1087,12 @@ export function SpendingReport({
                 );
               })}
               {sankey.linksRight.map((link) => {
-                // Through-color: each sub-ribbon fills from its own income's
-                // gradient, so the income color runs uninterrupted from the
-                // left source through the middle group to the right target.
-                const fill = `url(#${sankeyRibbonGradientId(link.incomeIndex)})`;
+                // Destination color: every sub-band in a cell fills from
+                // the final category's or merchant's gradient, so each
+                // ribbon reads as where the money lands. The per-income
+                // split stays invisible until an income hover spotlights
+                // its own share of every cell.
+                const fill = `url(#${sankeyRibbonGradientId("target", link.targetIndex)})`;
                 const isHover = isRightLinkHover(
                   link.sourceIndex,
                   link.targetIndex,
@@ -990,7 +1163,11 @@ export function SpendingReport({
                       textAnchor="end"
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
-                      style={{ pointerEvents: "none" }}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
                     >
                       {truncateName(node.name, sourceLabelMaxChars)}
                     </text>
@@ -1004,7 +1181,11 @@ export function SpendingReport({
                         fill="var(--y-ink-faint)"
                         className="y-num"
                         opacity={dim ? 0.4 : 1}
-                        style={{ pointerEvents: "none" }}
+                        style={{ cursor: "pointer" }}
+                        onMouseMove={(e) =>
+                          pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseLeave={() => setHover(null)}
                       >
                         {fmt(node.value)} · {r.flowPct}%
                       </text>
@@ -1045,7 +1226,7 @@ export function SpendingReport({
                         width={node.w}
                         height={node.unfundedH}
                         rx={2}
-                        fill={SHORTFALL_COLOR}
+                        fill={OVER_INCOME_COLOR}
                         fillOpacity={dim ? 0.35 : 1}
                         stroke="rgba(0,0,0,0.35)"
                         strokeWidth={1}
@@ -1070,7 +1251,11 @@ export function SpendingReport({
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
-                      style={{ pointerEvents: "none" }}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
                     >
                       {truncateName(node.name)}
                     </text>
@@ -1085,7 +1270,11 @@ export function SpendingReport({
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
-                      style={{ pointerEvents: "none" }}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
@@ -1125,7 +1314,7 @@ export function SpendingReport({
                         width={node.w}
                         height={node.unfundedH}
                         rx={2}
-                        fill={SHORTFALL_COLOR}
+                        fill={OVER_INCOME_COLOR}
                         fillOpacity={dim ? 0.35 : 1}
                         stroke="rgba(0,0,0,0.35)"
                         strokeWidth={1}
@@ -1138,12 +1327,17 @@ export function SpendingReport({
                       />
                     )}
                     <text
+                      data-testid="sankey-target-label"
                       x={sankey.targetLabelX}
                       y={node.h >= 26 ? labelY - 2 : labelY - 6}
                       fontSize={12}
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
-                      style={{ pointerEvents: "none" }}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
                     >
                       {truncateName(node.name)}
                     </text>
@@ -1154,7 +1348,11 @@ export function SpendingReport({
                       fill="var(--y-ink-faint)"
                       className="y-num"
                       opacity={dim ? 0.4 : 1}
-                      style={{ pointerEvents: "none" }}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) =>
+                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setHover(null)}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
