@@ -8,6 +8,7 @@ import {
   layoutGroupedIncomeSankey,
   sankeyContentHeight,
   SHORTFALL_LABEL,
+  showSankeySourceAmount,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -23,6 +24,7 @@ import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   ChartTip,
   colorForName,
+  sankeyRibbonShade,
   TipLabel,
   SHORTFALL_COLOR,
   useElementSize,
@@ -53,6 +55,13 @@ export const SOURCE_AMOUNT_PX_PER_CHAR = 6;
 
 function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
+}
+
+// One shared gradient per ribbon source bar (income sources on the left,
+// middle groups on the right): every ribbon leaving that bar fades from its
+// color to a shade of it. Exported so tests can pin the defs.
+export function sankeyRibbonGradientId(side: "left" | "right", sourceIndex: number): string {
+  return `sankey-ribbon-${side}-${sourceIndex}`;
 }
 
 export function SpendingReport({
@@ -290,7 +299,7 @@ export function SpendingReport({
               {`${s.name} → ${target.name}`}
             </div>
             <TipLabel
-              color={target.color}
+              color={s.color}
               label="Flows"
               value={fmt(link.value)}
               pct={fundedPct + "%"}
@@ -321,7 +330,7 @@ export function SpendingReport({
             {`${m.name} → ${t.name}`}
           </div>
           <TipLabel
-            color={t.color}
+            color={m.color}
             label="Flows"
             value={fmt(link.value)}
             pct={fundedPct + "%"}
@@ -809,10 +818,41 @@ export function SpendingReport({
               height={contentH}
               className="block"
             >
+              <defs>
+                {srcRows.map((r) => (
+                  <linearGradient
+                    key={`sgrad-l-${r.i}`}
+                    id={sankeyRibbonGradientId("left", r.i)}
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="0"
+                  >
+                    <stop offset="0" stopColor={r.color} />
+                    <stop offset="0.5" stopColor={r.color} />
+                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
+                  </linearGradient>
+                ))}
+                {midRows.map((r) => (
+                  <linearGradient
+                    key={`sgrad-r-${r.i}`}
+                    id={sankeyRibbonGradientId("right", r.i)}
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="0"
+                  >
+                    <stop offset="0" stopColor={r.color} />
+                    <stop offset="0.5" stopColor={r.color} />
+                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
+                  </linearGradient>
+                ))}
+              </defs>
               {sankey.linksLeft.map((link) => {
-                // Ribbons take their downstream color so each bar reads as
-                // one flow arriving from upstream.
-                const color = colorForName(link.targetName);
+                // Ribbons carry their source bar's color: each ribbon holds
+                // the source color through its midpoint, then settles into
+                // a shade of that same hue toward the target end.
+                const fill = `url(#${sankeyRibbonGradientId("left", link.sourceIndex)})`;
                 const isHover = isLinkHover("left", link.sourceIndex, link.targetIndex);
                 const dim =
                   hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
@@ -822,7 +862,7 @@ export function SpendingReport({
                     data-testid="sankey-link"
                     data-side="left"
                     d={link.d}
-                    fill={color}
+                    fill={fill}
                     fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
@@ -841,7 +881,7 @@ export function SpendingReport({
                 );
               })}
               {sankey.linksRight.map((link) => {
-                const color = colorForName(link.targetName);
+                const fill = `url(#${sankeyRibbonGradientId("right", link.sourceIndex)})`;
                 const isHover = isLinkHover("right", link.sourceIndex, link.targetIndex);
                 const dim =
                   hl.rl != null && !hl.rl.has(`${link.sourceIndex}:${link.targetIndex}`);
@@ -851,7 +891,7 @@ export function SpendingReport({
                     data-testid="sankey-link"
                     data-side="right"
                     d={link.d}
-                    fill={color}
+                    fill={fill}
                     fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
@@ -875,6 +915,9 @@ export function SpendingReport({
                 const dim = hl.src != null && !hl.src.has(idx);
                 const r = srcRows[idx]!;
                 const labelY = node.y + node.h / 2;
+                // Bars too short for two lines show the name only, centered
+                // on the bar; taller bars keep name + amount.
+                const twoLine = showSankeySourceAmount(node.h);
                 return (
                   <g key={`src-${node.name}-${idx}`}>
                     <rect
@@ -897,7 +940,7 @@ export function SpendingReport({
                     <text
                       data-testid="sankey-income-label"
                       x={sankey.sourceLabelX}
-                      y={node.h >= 26 ? labelY - 2 : labelY - 6}
+                      y={twoLine ? labelY - 2 : labelY + 4}
                       fontSize={12}
                       textAnchor="end"
                       fill="var(--y-ink)"
@@ -906,19 +949,21 @@ export function SpendingReport({
                     >
                       {truncateName(node.name, sourceLabelMaxChars)}
                     </text>
-                    <text
-                      data-testid="sankey-income-amount"
-                      x={sankey.sourceLabelX}
-                      y={node.h >= 26 ? labelY + 13 : labelY + 7}
-                      fontSize={11}
-                      textAnchor="end"
-                      fill="var(--y-ink-faint)"
-                      className="y-num"
-                      opacity={dim ? 0.4 : 1}
-                      style={{ pointerEvents: "none" }}
-                    >
-                      {fmt(node.value)} · {r.flowPct}%
-                    </text>
+                    {twoLine && (
+                      <text
+                        data-testid="sankey-income-amount"
+                        x={sankey.sourceLabelX}
+                        y={labelY + 13}
+                        fontSize={11}
+                        textAnchor="end"
+                        fill="var(--y-ink-faint)"
+                        className="y-num"
+                        opacity={dim ? 0.4 : 1}
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {fmt(node.value)} · {r.flowPct}%
+                      </text>
+                    )}
                   </g>
                 );
               })}

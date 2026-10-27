@@ -57,6 +57,15 @@ export function shade(hex: string, amt: number): string {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
+// Target-half shade for a Sankey ribbon: the source node's color darkened
+// toward black, so each ribbon starts in its source color and settles into
+// a shade of that same hue at the target end. Darkening (not lightening)
+// keeps the ribbon readable at ribbon opacity over a light background.
+// Pure hex → hex.
+export function sankeyRibbonShade(hex: string): string {
+  return shade(hex, 0.55);
+}
+
 export function fmtShort(cents: number): string {
   const dollars = cents / 100;
   const abs = Math.abs(dollars);

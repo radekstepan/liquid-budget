@@ -35,7 +35,7 @@
 ## Gotchas
 
 - E2E runs a production server (`next start`) on port 3100 against `budget.test.db` — build first, and always run via root `yarn e2e` so a stale server can't poison the run.
-- Agent sessions need `--sandbox-network enabled` (or `--disable-sandbox`) at launch to run `yarn e2e` — the default network sandbox denies `listen()`, so `next start` fails with `EPERM` on port 3100.
+- Agent sessions need `--sandbox-network enabled` (or `--disable-sandbox`) at launch to run `yarn e2e` — the default network sandbox denies `listen()`, so `next start` fails with `EPERM` on port 3100. Even with networking, the sandboxed Chromium headless shell can SIGSEGV at `browserType.launch` (all browser specs fail identically, API-contract specs pass) — that is an environment block, not a regression; confirm `yarn e2e` in a normal terminal.
 - `/api/reset` returns 403 unless `RESET_ENABLED=true`.
 - `DATABASE_URL` overrides the DB path; unit tests use `:memory:`.
 - Optional AI rename suggestions need both `LLM_API_KEY` and `LLM_MODEL` (see `apps/web/.env.example`).

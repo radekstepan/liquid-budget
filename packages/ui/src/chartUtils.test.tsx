@@ -5,6 +5,7 @@ import {
   niceCeil,
   NO_BREAK,
   quantile,
+  sankeyRibbonShade,
 } from "./chartUtils.js";
 
 describe("quantile", () => {
@@ -65,5 +66,23 @@ describe("computeOutlierBreak", () => {
 
   it("ignores non-positive values", () => {
     expect(computeOutlierBreak([0, -5, 100, 100, 100, 100, 100])).toBe(NO_BREAK);
+  });
+});
+
+describe("sankeyRibbonShade", () => {
+  it("derives a darker shade of the same hue", () => {
+    expect(sankeyRibbonShade("#2f7fb0")).toBe("#1a4661");
+  });
+
+  it("never brightens a channel and keeps valid hex", () => {
+    for (const hex of ["#e8a33d", "#8bc34a", "#78909c", "#ffffff"]) {
+      const out = sankeyRibbonShade(hex);
+      expect(out).toMatch(/^#[0-9a-f]{6}$/);
+      for (let i = 0; i < 3; i++) {
+        const inp = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+        const got = parseInt(out.slice(1 + i * 2, 3 + i * 2), 16);
+        expect(got).toBeLessThanOrEqual(inp);
+      }
+    }
   });
 });

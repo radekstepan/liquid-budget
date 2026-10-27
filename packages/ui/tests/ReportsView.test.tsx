@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
+import { sankeyRibbonGradientId } from "../src/SpendingReport.js";
+import { colorForName, sankeyRibbonShade } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
 
@@ -698,6 +700,61 @@ describe("ReportsView", () => {
     // The dangling group still draws its (fully unfunded) middle bar.
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
     expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
+  });
+
+  it("Spending sankey hides amounts on tiny income bars and tints ribbons by source", () => {
+    const data = makeData();
+    data.transactions.push(txn("2026-06", 15, "Bonus", 1));
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+
+    // Both income names render, but the $1 Bonus bar is too short for two
+    // lines, so only Payroll keeps its amount.
+    const bars = svg.querySelectorAll('[data-testid="sankey-income"]');
+    const labels = svg.querySelectorAll('[data-testid="sankey-income-label"]');
+    expect(bars).toHaveLength(2);
+    expect(labels).toHaveLength(2);
+    expect(within(panel).getByText("Bonus")).toBeInTheDocument();
+    expect(svg.querySelectorAll('[data-testid="sankey-income-amount"]')).toHaveLength(1);
+    // The name-only label sits centered on its bar.
+    const barY = Number(bars[1]!.getAttribute("y"));
+    const barH = Number(bars[1]!.getAttribute("height"));
+    expect(barH).toBeLessThan(26);
+    expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
+
+    // Left ribbons fill from their income source's gradient, right ribbons
+    // from their middle group's gradient — never a flat target color.
+    const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
+    const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
+    expect(left.length).toBeGreaterThan(0);
+    expect(right.length).toBeGreaterThan(0);
+    for (const link of left) {
+      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-left-\d+\)$/);
+    }
+    for (const link of right) {
+      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-right-\d+\)$/);
+    }
+    // One gradient per source bar plus one per middle bar.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(3);
+    // Each gradient holds its source color through the midpoint, then
+    // settles into a shade of that same hue at the target end.
+    const payroll = colorForName("Payroll");
+    const grad = svg.querySelector(`#${sankeyRibbonGradientId("left", 0)}`)!;
+    const stops = Array.from(grad.querySelectorAll("stop"));
+    expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
+    expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
+      payroll,
+      payroll,
+      sankeyRibbonShade(payroll),
+    ]);
+    const midGrad = svg.querySelector(`#${sankeyRibbonGradientId("right", 0)}`)!;
+    const midStops = Array.from(midGrad.querySelectorAll("stop"));
+    expect(midStops[0]!.getAttribute("stop-color")).toBe(colorForName("Everyday"));
+    expect(midStops[2]!.getAttribute("stop-color")).toBe(
+      sankeyRibbonShade(colorForName("Everyday"))
+    );
   });
 });
 

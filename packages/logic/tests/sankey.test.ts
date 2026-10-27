@@ -12,6 +12,8 @@ import {
   OTHER_BUCKET_LABEL,
   REMAINING_LABEL,
   sankeyContentHeight,
+  SANKEY_SOURCE_AMOUNT_MIN_HEIGHT,
+  showSankeySourceAmount,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_MIDDLE_LABEL_GAP,
   SANKEY_MIN_PITCH,
@@ -1775,5 +1777,17 @@ describe("layoutGroupedIncomeSankey", () => {
       expect(Number.isFinite(node.y)).toBe(true);
       expect(Number.isFinite(node.h)).toBe(true);
     }
+  });
+});
+
+describe("showSankeySourceAmount", () => {
+  it("shows name + amount at or above the minimum label height", () => {
+    expect(showSankeySourceAmount(SANKEY_SOURCE_AMOUNT_MIN_HEIGHT)).toBe(true);
+    expect(showSankeySourceAmount(SANKEY_SOURCE_AMOUNT_MIN_HEIGHT + 100)).toBe(true);
+  });
+
+  it("shows name only when the source bar is too short for two lines", () => {
+    expect(showSankeySourceAmount(SANKEY_SOURCE_AMOUNT_MIN_HEIGHT - 0.01)).toBe(false);
+    expect(showSankeySourceAmount(0)).toBe(false);
   });
 });

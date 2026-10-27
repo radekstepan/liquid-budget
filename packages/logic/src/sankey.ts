@@ -587,6 +587,21 @@ export const SANKEY_LEFT_LABEL_INSET = 8;
  * than SANKEY_LEFT_LABEL_INSET to x=0.
  */
 export const SANKEY_SOURCE_GUTTER = 160;
+/**
+ * Minimum left-column source bar height (px) that fits a two-line
+ * (name + amount) label. Shorter bars render the name only so tiny income
+ * sources stay legible instead of crushing two lines into a sliver.
+ */
+export const SANKEY_SOURCE_AMOUNT_MIN_HEIGHT = 26;
+
+/**
+ * Whether a left-column source bar of `nodeHeight` px fits a two-line
+ * label. Pure (decides from the rendered node height) so the view rule is
+ * unit-testable.
+ */
+export function showSankeySourceAmount(nodeHeight: number): boolean {
+  return nodeHeight >= SANKEY_SOURCE_AMOUNT_MIN_HEIGHT;
+}
 
 /**
  * Chart height honoring the minimum pitch: grows past the container (the
