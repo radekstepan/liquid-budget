@@ -141,6 +141,71 @@ describe("computeSpendingBreakdown", () => {
     ]);
   });
 
+  it("excludes credit-card payoff transfers in category mode (money flows through once)", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 3, name: "Visa", kind: "credit", groupLabel: "Credit", balance: "0", onBudget: true, sort: 2 }
+    );
+    data.transactions.push(
+      // Original card purchase: the one true spending record.
+      txn("2026-06-08", "Whole Foods", -20000, 10, { accountId: 3 }),
+      // Payoff from income: flows through, must not double-count.
+      txn("2026-06-15", "Transfer : Visa", -20000, null, { transferAccountId: 3 }),
+      // Even a (mis)categorized payoff is movement, not spending.
+      txn("2026-06-16", "Transfer : Visa", -5000, 10, { transferAccountId: 3 })
+    );
+    const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
+    expect(items).toEqual([{ name: "Groceries", value: 25000 }]);
+  });
+
+  it("excludes credit-card payoff transfers in merchant mode (no Transfer expense)", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 3, name: "Visa", kind: "credit", groupLabel: "Credit", balance: "0", onBudget: true, sort: 2 }
+    );
+    data.transactions.push(
+      txn("2026-06-08", "Whole Foods", -20000, 10, { accountId: 3 }),
+      txn("2026-06-15", "Transfer : Visa", -20000, null, { transferAccountId: 3 })
+    );
+    const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants");
+    expect(items).toEqual([{ name: "Whole Foods", value: 25000 }]);
+    expect(items.some((i) => i.name.startsWith("Transfer"))).toBe(false);
+  });
+
+  it("keeps payments to off-budget (tracking) credit accounts as spending", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 4, name: "Tracking Loan", kind: "credit", groupLabel: "Loans", balance: "0", onBudget: false, sort: 3 }
+    );
+    // Boundary outflow: money really leaves the budget, and the loan's own
+    // activity never hit budget categories, so there is nothing to double-count.
+    data.transactions.push(
+      txn("2026-06-15", "Transfer : Tracking Loan", -20000, 10, { transferAccountId: 4 })
+    );
+    const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
+    expect(items).toEqual([{ name: "Groceries", value: 25000 }]);
+  });
+
+  it("counts investment contributions once and excludes the withdrawal from spending", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", -30000, 10, { transferAccountId: 5 }),
+      txn("2026-06-20", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 })
+    );
+    // The contribution is the outflow allocation; the withdrawal is income, so
+    // it must not net against spending here.
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Groceries", value: 35000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Transfer : Wealthsimple Trade", value: 30000 },
+      { name: "Whole Foods", value: 5000 },
+    ]);
+  });
+
   it("returns an empty array when nothing matches", () => {
     expect(computeSpendingBreakdown(makeData(), "2020-01", "2020-02", "categories")).toEqual([]);
     expect(computeSpendingBreakdown(makeData(), "2020-01", "2020-02", "merchants")).toEqual([]);
@@ -367,6 +432,46 @@ describe("computeIncomeBreakdown", () => {
       { name: "Payroll", value: 300000 },
       { name: "Bonus", value: 20000 },
     ]);
+  });
+
+  it("counts investment withdrawals back into the budget as income, categorized or not", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 }),
+      txn("2026-06-11", "Transfer : Wealthsimple Trade", 50000, null, { transferAccountId: 5 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Transfer : Wealthsimple Trade", value: 150000 },
+    ]);
+  });
+
+  it("counts withdrawals recorded on the off-budget leg at their budget value", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    // Same withdrawal, recorded on the investment account side: the amount is
+    // negative there, but the budget impact (+75000) is the income.
+    data.transactions.push(
+      txn("2026-06-12", "Transfer : Chequing", -75000, null, { accountId: 5, transferAccountId: 1 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Transfer : Chequing", value: 75000 },
+    ]);
+  });
+
+  it("does not count investment contributions as income", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", -30000, 10, { transferAccountId: 5 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
   });
 
   it("returns an empty array when nothing matches", () => {

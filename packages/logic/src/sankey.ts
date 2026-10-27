@@ -10,6 +10,7 @@
 import type { BudgetData } from "./types.js";
 import { num } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
+import { isCreditPayoffTransfer, transferNetOnBudgetDelta } from "./transfers.js";
 
 export type SpendingDimension = "categories" | "merchants";
 
@@ -32,6 +33,13 @@ export type SpendingBreakdownItem = {
  * - Categorized transfers count as spending in category mode (matches the
  *   legacy Spending by Category tab); in merchant mode every non-income
  *   outflow row counts, categorized or not.
+ * - Credit-card payoff transfers (internal moves touching an on-budget
+ *   credit account) are excluded in both dimensions: the spending was
+ *   already captured by the original card purchases, so money flows THROUGH
+ *   instead of appearing as a second "Transfer" expense.
+ * - Boundary-inflow transfers (money returning INTO the budget, e.g. an
+ *   investment withdrawal) are excluded here: they count as income, never
+ *   as negative spending.
  *
  * Returns items sorted by value descending.
  */
@@ -56,6 +64,8 @@ export function computeSpendingBreakdown(
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
+    if (isCreditPayoffTransfer(t, accountMap)) continue;
+    if (transferNetOnBudgetDelta(t, accountMap) > 0) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
@@ -85,6 +95,13 @@ export function computeSpendingBreakdown(
  * uncategorized rows are outflows, not corrections, so they are excluded
  * here (merchant spending picks them up instead).
  *
+ * Additionally, boundary-inflow transfers — money returning INTO the budget
+ * from an off-budget account, e.g. liquidating an investment account — count
+ * as income even when categorized (withdrawing is income when the money
+ * re-enters the budget; the contribution was already counted as an outflow
+ * allocation on the way in). Transfer rows are valued at their net
+ * on-budget delta so withdrawals recorded on either leg count positively.
+ *
  * Returns items sorted by value descending.
  */
 export function computeIncomeBreakdown(
@@ -105,13 +122,17 @@ export function computeIncomeBreakdown(
   const bySource = new Map<string, number>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
-    if (!isIncomeTransaction(t, accountMap)) continue;
+    const netTransferDelta = transferNetOnBudgetDelta(t, accountMap);
+    if (!isIncomeTransaction(t, accountMap) && !(netTransferDelta > 0)) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
     const payee = t.payee.trim();
     const name = payee === "" ? "—" : payee;
-    bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
+    // Transfer rows are valued at their budget impact: a withdrawal recorded
+    // on the off-budget leg carries a negative amount but is positive income.
+    const value = t.transferAccountId != null ? netTransferDelta : num(t.amount);
+    bySource.set(name, (bySource.get(name) ?? 0) + value);
   }
 
   return [...bySource.entries()]
