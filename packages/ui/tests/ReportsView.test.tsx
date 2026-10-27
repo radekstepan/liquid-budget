@@ -316,9 +316,9 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
-    // 2 incomes x 2 middles (Everyday + Remaining plug) plus 2 group
-    // ribbons into Groceries + Other.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
+    // 2 incomes x 1 group plus 2 full-width Remaining ribbons on the
+    // left; 2 cells (Groceries + Other) x 2 incomes on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(8);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -702,7 +702,7 @@ describe("ReportsView", () => {
     expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
   });
 
-  it("Spending sankey hides amounts on tiny income bars and tints ribbons by source", () => {
+  it("Spending sankey hides amounts on tiny income bars and runs ribbons through in income colors", () => {
     const data = makeData();
     data.transactions.push(txn("2026-06", 15, "Bonus", 1));
     renderView({ data });
@@ -724,24 +724,28 @@ describe("ReportsView", () => {
     expect(barH).toBeLessThan(26);
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
-    // Left ribbons fill from their income source's gradient, right ribbons
-    // from their middle group's gradient — never a flat target color.
+    // Left ribbons and right sub-ribbons alike fill from an income
+    // gradient: the income color runs through the middle column to the
+    // right, never split into a source segment plus a group segment.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
-    expect(left.length).toBeGreaterThan(0);
-    expect(right.length).toBeGreaterThan(0);
-    for (const link of left) {
-      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-left-\d+\)$/);
+    // 2 incomes x 1 group plus 2 Remaining ribbons on the left; 2 cells
+    // x 2 incomes on the right.
+    expect(left).toHaveLength(4);
+    expect(right).toHaveLength(4);
+    for (const link of [...left, ...right]) {
+      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-\d+\)$/);
     }
     for (const link of right) {
-      expect(link.getAttribute("fill")).toMatch(/^url\(#sankey-ribbon-right-\d+\)$/);
+      const income = Number(link.getAttribute("data-income"));
+      expect(link.getAttribute("fill")).toBe(`url(#${sankeyRibbonGradientId(income)})`);
     }
-    // One gradient per source bar plus one per middle bar.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(3);
-    // Each gradient holds its source color through the midpoint, then
+    // One gradient per income bar — no middle-group gradients.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
+    // Each gradient holds its income color through the midpoint, then
     // settles into a shade of that same hue at the target end.
     const payroll = colorForName("Payroll");
-    const grad = svg.querySelector(`#${sankeyRibbonGradientId("left", 0)}`)!;
+    const grad = svg.querySelector(`#${sankeyRibbonGradientId(0)}`)!;
     const stops = Array.from(grad.querySelectorAll("stop"));
     expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
     expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
@@ -749,11 +753,11 @@ describe("ReportsView", () => {
       payroll,
       sankeyRibbonShade(payroll),
     ]);
-    const midGrad = svg.querySelector(`#${sankeyRibbonGradientId("right", 0)}`)!;
-    const midStops = Array.from(midGrad.querySelectorAll("stop"));
-    expect(midStops[0]!.getAttribute("stop-color")).toBe(colorForName("Everyday"));
-    expect(midStops[2]!.getAttribute("stop-color")).toBe(
-      sankeyRibbonShade(colorForName("Everyday"))
+    const bonusGrad = svg.querySelector(`#${sankeyRibbonGradientId(1)}`)!;
+    const bonusStops = Array.from(bonusGrad.querySelectorAll("stop"));
+    expect(bonusStops[0]!.getAttribute("stop-color")).toBe(colorForName("Bonus"));
+    expect(bonusStops[2]!.getAttribute("stop-color")).toBe(
+      sankeyRibbonShade(colorForName("Bonus"))
     );
   });
 });

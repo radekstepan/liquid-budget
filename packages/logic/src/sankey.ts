@@ -1027,6 +1027,19 @@ export function layoutDirectIncomeSankey(
 /** Middle-column node: same funded/unfunded shape as a right-column target. */
 export type GroupedSankeyMiddleNode = DirectSankeyTargetNode;
 
+/**
+ * Right-hop link: one income's share of a middle→target cell. The right hop
+ * is subdivided per income source (in source order at both ends) so every
+ * ribbon keeps its income source's color all the way from the left column
+ * through the middle to the right — one solid through-color, never a
+ * source-colored segment plus a group-colored segment. Sub-bands tile their
+ * parent cell exactly: values and pixel heights sum to the cell's.
+ */
+export type GroupedRightLinkLayout = DirectSankeyLinkLayout & {
+  /** Index into sources: the income source funding (and coloring) this sub-ribbon. */
+  incomeIndex: number;
+};
+
 export type GroupedIncomeSankeyLayout = {
   incomeTotal: number;
   spendingTotal: number;
@@ -1057,10 +1070,11 @@ export type GroupedIncomeSankeyLayout = {
    */
   linksLeft: DirectSankeyLinkLayout[];
   /**
-   * Right ribbons: middle → spending, exact rollup attribution
-   * (sourceIndex into middles, targetIndex into targets).
+   * Right sub-ribbons: middle → spending, exact rollup attribution split
+   * per income (sourceIndex into middles, targetIndex into targets,
+   * incomeIndex into sources). Sorted by (middle, target, income).
    */
-  linksRight: DirectSankeyLinkLayout[];
+  linksRight: GroupedRightLinkLayout[];
   /** x for end-anchored income labels (left of the source column). */
   sourceLabelX: number;
   /** x for start-anchored group labels (right of the middle column). */
@@ -1085,10 +1099,13 @@ export type GroupedIncomeSankeyLayout = {
  *   long tail of small spending rows keeps the minimum label pitch.
  * - Right ribbon heights subdivide each target bar's funded region in
  *   proportion to their values; Remaining bands subdivide the Remaining
- *   bar's (fully funded) region. Every ribbon has equal height at both ends
- *   (no taper): bands within a target run in middle order (source order for
- *   the Remaining plug), bands within a middle run in target order on the
- *   way out and in source order on the way in.
+ *   bar's (fully funded) region. Each middle→target cell ribbon subdivides
+ *   further into one sub-ribbon per income source (source order at both
+ *   ends), so sub-bands tile their parent cell exactly. Every ribbon has
+ *   equal height at both ends (no taper): bands within a target run in
+ *   (middle, income) order (source order for the Remaining plug), bands
+ *   within a middle run in (target, income) order on the way out and in
+ *   source order on the way in.
  * - Middle bars wrap their outgoing bands plus an unfunded segment at the
  *   bottom (top-aligned funded region, like the right column); with no
  *   income there are no ribbons and every bar is fully unfunded.
@@ -1416,14 +1433,40 @@ export function layoutGroupedIncomeSankey(
     }
   }
 
-  const linksRight: DirectSankeyLinkLayout[] = rightVals.map((l) => ({
-    name: tgtItems[l.targetIndex]?.name ?? "",
-    value: l.value,
+  // Through-color subdivision: each cell ribbon splits into one
+  // sub-ribbon per income source (cell-major, so linksRight runs in
+  // (middle, target, income) order). Shares sum to 1, so each cell's
+  // sub-bands tile it exactly at both ends. With no income there are no
+  // cells (coverage is 0), so subs is empty — never a sourceless ribbon.
+  const shares = incomeTotal > 0 ? srcItems.map((s) => s.value / incomeTotal) : [];
+  const subs = rightVals.flatMap((l, k) =>
+    shares.map((share, incomeIndex) => ({
+      middleIndex: l.middleIndex,
+      targetIndex: l.targetIndex,
+      incomeIndex,
+      value: l.value * share,
+      h: (linkRH[k] ?? 0) * share,
+    }))
+  );
+  // rightVals is (middle, target) sorted and subs are cell-major, so these
+  // run in (target, income) order within a middle and (middle, income)
+  // order within a target — each cell's sub-bands stay contiguous.
+  const midOutSub: number[][] = grpItems.map(() => []);
+  const tgtInSub: number[][] = tgtItems.map(() => []);
+  subs.forEach((sub, si) => {
+    midOutSub[sub.middleIndex]?.push(si);
+    tgtInSub[sub.targetIndex]?.push(si);
+  });
+
+  const linksRight: GroupedRightLinkLayout[] = subs.map((sub) => ({
+    name: tgtItems[sub.targetIndex]?.name ?? "",
+    value: sub.value,
     mergedCount: 1,
-    sourceIndex: l.middleIndex,
-    targetIndex: l.targetIndex,
-    sourceName: grpItems[l.middleIndex]?.name ?? "",
-    targetName: tgtItems[l.targetIndex]?.name ?? "",
+    sourceIndex: sub.middleIndex,
+    targetIndex: sub.targetIndex,
+    incomeIndex: sub.incomeIndex,
+    sourceName: grpItems[sub.middleIndex]?.name ?? "",
+    targetName: tgtItems[sub.targetIndex]?.name ?? "",
     sy0: 0,
     sy1: 0,
     ty0: 0,
@@ -1434,19 +1477,19 @@ export function layoutGroupedIncomeSankey(
   }));
   for (let i = 0; i < midNodes.length; i++) {
     let sy = midNodes[i]!.y;
-    for (const k of midOut[i] ?? []) {
-      const h = linkRH[k] ?? 0;
-      linksRight[k]!.sy0 = sy;
-      linksRight[k]!.sy1 = sy + h;
+    for (const si of midOutSub[i] ?? []) {
+      const h = subs[si]?.h ?? 0;
+      linksRight[si]!.sy0 = sy;
+      linksRight[si]!.sy1 = sy + h;
       sy += h;
     }
   }
   for (let j = 0; j < tgtItems.length; j++) {
     let ty = tgtNodes[j]!.y;
-    for (const k of tgtIn[j] ?? []) {
-      const h = linkRH[k] ?? 0;
-      linksRight[k]!.ty0 = ty;
-      linksRight[k]!.ty1 = ty + h;
+    for (const si of tgtInSub[j] ?? []) {
+      const h = subs[si]?.h ?? 0;
+      linksRight[si]!.ty0 = ty;
+      linksRight[si]!.ty1 = ty + h;
       ty += h;
     }
   }

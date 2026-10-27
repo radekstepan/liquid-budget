@@ -40,8 +40,10 @@ type Hover =
   | { kind: "node"; idx: number; x: number; y: number }
   // Left ribbon: a = income index, b = middle index (or the plug index,
   // one past the last middle, for full-width Remaining ribbons). Right
-  // ribbon: a = middle index, b = target index.
-  | { kind: "link"; side: "left" | "right"; a: number; b: number; x: number; y: number }
+  // sub-ribbon: a = middle index, b = target index, c = income index whose
+  // color the sub-ribbon carries through the middle.
+  | { kind: "link"; side: "left"; a: number; b: number; x: number; y: number }
+  | { kind: "link"; side: "right"; a: number; b: number; c: number; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
@@ -57,11 +59,12 @@ function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
 }
 
-// One shared gradient per ribbon source bar (income sources on the left,
-// middle groups on the right): every ribbon leaving that bar fades from its
-// color to a shade of it. Exported so tests can pin the defs.
-export function sankeyRibbonGradientId(side: "left" | "right", sourceIndex: number): string {
-  return `sankey-ribbon-${side}-${sourceIndex}`;
+// One shared gradient per income source: every ribbon carrying that
+// income's flow — left-hop ribbons and right-hop sub-ribbons alike — holds
+// the income color through its midpoint, then settles into a shade of that
+// same hue toward the target end. Exported so tests can pin the defs.
+export function sankeyRibbonGradientId(incomeIndex: number): string {
+  return `sankey-ribbon-${incomeIndex}`;
 }
 
 export function SpendingReport({
@@ -223,9 +226,11 @@ export function SpendingReport({
         flowPct:
           totals.flowTotal !== 0 ? Math.round((m.value / totals.flowTotal) * 100) : 0,
         color: colorForName(m.name),
-        // How many right-column rows this group feeds (each target draws
-        // at most one ribbon per group).
-        memberCount: sankey?.linksRight.filter((l) => l.sourceIndex === i).length ?? 0,
+        // How many right-column rows this group feeds (distinct targets:
+        // each target draws one sub-ribbon per income).
+        memberCount: new Set(
+          sankey?.linksRight.filter((l) => l.sourceIndex === i).map((l) => l.targetIndex)
+        ).size,
         i,
       })),
     [sankey, totals.flowTotal]
@@ -315,9 +320,10 @@ export function SpendingReport({
       }
       const m = midRows[hover.a];
       const t = tgtRows[hover.b];
-      if (!m || !t) return null;
+      const s = srcRows[hover.c];
+      if (!m || !t || !s) return null;
       const link = sankey?.linksRight.find(
-        (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b
+        (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b && l.incomeIndex === hover.c
       );
       if (!link) return null;
       // Share of the target's funded amount (under a shortfall the expense
@@ -327,14 +333,20 @@ export function SpendingReport({
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            {`${m.name} → ${t.name}`}
+            {`${s.name} → ${t.name}`}
           </div>
           <TipLabel
-            color={m.color}
+            color={s.color}
             label="Flows"
             value={fmt(link.value)}
             pct={fundedPct + "%"}
           />
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>via {m.name}</span>
+          </div>
           <div
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
             style={{ color: "rgba(242,245,247,0.65)" }}
@@ -471,8 +483,11 @@ export function SpendingReport({
 
   // Connected-highlight sets per hover (null = unconstrained, everything
   // stays full opacity). Hovering any bar or ribbon spotlights its flow
-  // path — a target lights its group, the group ribbon, and the income
-  // ribbons feeding that group — and dims the rest.
+  // path — a target lights its groups, the sub-ribbons feeding it, and the
+  // income ribbons feeding those groups — and dims the rest. Ribbon hovers
+  // trace the through-line end to end: a right sub-ribbon lights its
+  // income bar and the left ribbon feeding its middle, and a left ribbon
+  // lights the sub-ribbons continuing its income through that middle.
   const hl = useMemo(() => {
     const none = {
       src: null as Set<number> | null,
@@ -483,9 +498,11 @@ export function SpendingReport({
     };
     if (!hover || hover.kind === "bar" || !sankey) return none;
     const key = (a: number, b: number) => `${a}:${b}`;
+    const rkey = (a: number, b: number, c: number) => `${a}:${b}:${c}`;
     const midCount = sankey.middles.length;
     if (hover.kind === "income") {
       const ll = new Set<string>();
+      const rl = new Set<string>();
       const mid = new Set<number>();
       const tgt = new Set<number>();
       for (const l of sankey.linksLeft) {
@@ -494,7 +511,11 @@ export function SpendingReport({
         if (l.targetIndex < midCount) mid.add(l.targetIndex);
         else if (sankey.remainingTargetIndex != null) tgt.add(sankey.remainingTargetIndex);
       }
-      return { src: new Set([hover.idx]), mid, tgt, ll, rl: new Set<string>() };
+      for (const l of sankey.linksRight) {
+        if (l.incomeIndex !== hover.idx) continue;
+        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
+      }
+      return { src: new Set([hover.idx]), mid, tgt, ll, rl };
     }
     if (hover.kind === "group") {
       const ll = new Set<string>();
@@ -508,7 +529,7 @@ export function SpendingReport({
       }
       for (const l of sankey.linksRight) {
         if (l.sourceIndex !== hover.idx) continue;
-        rl.add(key(l.sourceIndex, l.targetIndex));
+        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
         tgt.add(l.targetIndex);
       }
       return { src, mid: new Set([hover.idx]), tgt, ll, rl };
@@ -518,7 +539,7 @@ export function SpendingReport({
       const mid = new Set<number>();
       for (const l of sankey.linksRight) {
         if (l.targetIndex !== hover.idx) continue;
-        rl.add(key(l.sourceIndex, l.targetIndex));
+        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
         mid.add(l.sourceIndex);
       }
       const ll = new Set<string>();
@@ -535,23 +556,30 @@ export function SpendingReport({
     // Ribbon hover: the ribbon plus its endpoint bars.
     if (hover.side === "left") {
       const isPlug = hover.b >= midCount;
+      // A group-bound left ribbon continues through its middle as that
+      // income's sub-ribbons; a plug ribbon ends at Remaining.
+      const cont = isPlug
+        ? []
+        : sankey.linksRight.filter(
+            (l) => l.sourceIndex === hover.b && l.incomeIndex === hover.a
+          );
       return {
         src: new Set([hover.a]),
         mid: isPlug ? new Set<number>() : new Set([hover.b]),
         tgt:
           isPlug && sankey.remainingTargetIndex != null
             ? new Set([sankey.remainingTargetIndex])
-            : new Set<number>(),
+            : new Set(cont.map((l) => l.targetIndex)),
         ll: new Set([key(hover.a, hover.b)]),
-        rl: new Set<string>(),
+        rl: new Set(cont.map((l) => rkey(l.sourceIndex, l.targetIndex, l.incomeIndex))),
       };
     }
     return {
-      src: new Set<number>(),
+      src: new Set([hover.c]),
       mid: new Set([hover.a]),
       tgt: new Set([hover.b]),
-      ll: new Set<string>(),
-      rl: new Set([key(hover.a, hover.b)]),
+      ll: new Set([key(hover.c, hover.a)]),
+      rl: new Set([rkey(hover.a, hover.b, hover.c)]),
     };
   }, [hover, sankey]);
 
@@ -569,8 +597,14 @@ export function SpendingReport({
         (hover.side === "left" &&
           hover.b >= (sankey?.middles.length ?? 0) &&
           sankey?.remainingTargetIndex === idx)));
-  const isLinkHover = (side: "left" | "right", a: number, b: number) =>
-    hover?.kind === "link" && hover.side === side && hover.a === a && hover.b === b;
+  const isLeftLinkHover = (a: number, b: number) =>
+    hover?.kind === "link" && hover.side === "left" && hover.a === a && hover.b === b;
+  const isRightLinkHover = (a: number, b: number, c: number) =>
+    hover?.kind === "link" &&
+    hover.side === "right" &&
+    hover.a === a &&
+    hover.b === b &&
+    hover.c === c;
   const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
 
   return (
@@ -821,22 +855,8 @@ export function SpendingReport({
               <defs>
                 {srcRows.map((r) => (
                   <linearGradient
-                    key={`sgrad-l-${r.i}`}
-                    id={sankeyRibbonGradientId("left", r.i)}
-                    x1="0"
-                    y1="0"
-                    x2="1"
-                    y2="0"
-                  >
-                    <stop offset="0" stopColor={r.color} />
-                    <stop offset="0.5" stopColor={r.color} />
-                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
-                  </linearGradient>
-                ))}
-                {midRows.map((r) => (
-                  <linearGradient
-                    key={`sgrad-r-${r.i}`}
-                    id={sankeyRibbonGradientId("right", r.i)}
+                    key={`sgrad-${r.i}`}
+                    id={sankeyRibbonGradientId(r.i)}
                     x1="0"
                     y1="0"
                     x2="1"
@@ -849,11 +869,12 @@ export function SpendingReport({
                 ))}
               </defs>
               {sankey.linksLeft.map((link) => {
-                // Ribbons carry their source bar's color: each ribbon holds
-                // the source color through its midpoint, then settles into
-                // a shade of that same hue toward the target end.
-                const fill = `url(#${sankeyRibbonGradientId("left", link.sourceIndex)})`;
-                const isHover = isLinkHover("left", link.sourceIndex, link.targetIndex);
+                // Ribbons carry their income source's color on both hops:
+                // each ribbon holds the source color through its midpoint,
+                // then settles into a shade of that same hue toward the
+                // target end — one solid through-color, no per-hop split.
+                const fill = `url(#${sankeyRibbonGradientId(link.sourceIndex)})`;
+                const isHover = isLeftLinkHover(link.sourceIndex, link.targetIndex);
                 const dim =
                   hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
                 return (
@@ -881,15 +902,24 @@ export function SpendingReport({
                 );
               })}
               {sankey.linksRight.map((link) => {
-                const fill = `url(#${sankeyRibbonGradientId("right", link.sourceIndex)})`;
-                const isHover = isLinkHover("right", link.sourceIndex, link.targetIndex);
+                // Through-color: each sub-ribbon fills from its own income's
+                // gradient, so the income color runs uninterrupted from the
+                // left source through the middle group to the right target.
+                const fill = `url(#${sankeyRibbonGradientId(link.incomeIndex)})`;
+                const isHover = isRightLinkHover(
+                  link.sourceIndex,
+                  link.targetIndex,
+                  link.incomeIndex
+                );
                 const dim =
-                  hl.rl != null && !hl.rl.has(`${link.sourceIndex}:${link.targetIndex}`);
+                  hl.rl != null &&
+                  !hl.rl.has(`${link.sourceIndex}:${link.targetIndex}:${link.incomeIndex}`);
                 return (
                   <path
-                    key={`rl-${link.sourceIndex}-${link.targetIndex}`}
+                    key={`rl-${link.sourceIndex}-${link.targetIndex}-${link.incomeIndex}`}
                     data-testid="sankey-link"
                     data-side="right"
+                    data-income={link.incomeIndex}
                     d={link.d}
                     fill={fill}
                     fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
@@ -901,6 +931,7 @@ export function SpendingReport({
                         side: "right",
                         a: link.sourceIndex,
                         b: link.targetIndex,
+                        c: link.incomeIndex,
                         x: e.clientX,
                         y: e.clientY,
                       })

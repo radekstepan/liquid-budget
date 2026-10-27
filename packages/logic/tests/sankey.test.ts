@@ -1375,7 +1375,12 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.targets.map((t) => t.name)).toEqual(["A"]);
     expect(layout.remainingTargetIndex).toBeNull();
     expect(layout.linksRight).toHaveLength(1);
-    expect(layout.linksRight[0]).toMatchObject({ sourceIndex: 0, targetIndex: 0, value: 5000 });
+    expect(layout.linksRight[0]).toMatchObject({
+      sourceIndex: 0,
+      targetIndex: 0,
+      incomeIndex: 0,
+      value: 5000,
+    });
     for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
       expect(Number.isFinite(node.y)).toBe(true);
       expect(Number.isFinite(node.h)).toBe(true);
@@ -1394,21 +1399,39 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.middles.map((m) => m.name)).toEqual(["G1", "G2"]);
     expect(layout.targets).toHaveLength(3);
     // Left hop is dense (2 sources x 2 middles, middle-major); the right
-    // hop draws exactly the input rollup cells at full coverage.
+    // hop subdivides each exact rollup cell per income source (middle,
+    // target, income order), so ribbons keep the income color through the
+    // middle: Pay funds 80% of every cell, Gig 20%.
     expect(layout.linksLeft.map((l) => [l.sourceIndex, l.targetIndex])).toEqual([
       [0, 0],
       [1, 0],
       [0, 1],
       [1, 1],
     ]);
-    expect(layout.linksRight.map((l) => [l.sourceIndex, l.targetIndex, l.value])).toEqual([
-      [0, 0, 5000],
-      [0, 1, 1000],
-      [1, 1, 2000],
-      [1, 2, 2000],
+    expect(
+      layout.linksRight.map((l) => [l.sourceIndex, l.targetIndex, l.incomeIndex])
+    ).toEqual([
+      [0, 0, 0],
+      [0, 0, 1],
+      [0, 1, 0],
+      [0, 1, 1],
+      [1, 1, 0],
+      [1, 1, 1],
+      [1, 2, 0],
+      [1, 2, 1],
     ]);
+    const cellValue = new Map(gLinks.map((l) => [`${l.groupIndex}:${l.targetIndex}`, l.value]));
+    for (const l of layout.linksRight) {
+      const cell = cellValue.get(`${l.sourceIndex}:${l.targetIndex}`)!;
+      const share = gSources[l.incomeIndex]!.value / 10000;
+      expect(l.value).toBeCloseTo(cell * share, 9);
+    }
     expect(layout.linksLeft[0]).toMatchObject({ sourceName: "Pay", targetName: "G1" });
-    expect(layout.linksRight[0]).toMatchObject({ sourceName: "G1", targetName: "A" });
+    expect(layout.linksRight[0]).toMatchObject({
+      sourceName: "G1",
+      targetName: "A",
+      incomeIndex: 0,
+    });
   });
 
   it("appends Remaining as a trailing target fed directly from income, bypassing groups", () => {
@@ -1522,6 +1545,41 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
+  it("conserves each income separately through the middle (through-color math)", () => {
+    const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
+      width: 800,
+      height: 400,
+    });
+    // Every income's outflow through a middle on the right equals its
+    // inflow on the left: the same dollars in the same color on both hops.
+    for (let i = 0; i < layout.middles.length; i++) {
+      for (let s = 0; s < layout.sources.length; s++) {
+        const left = layout.linksLeft.find(
+          (l) => l.sourceIndex === s && l.targetIndex === i
+        )!;
+        const right = layout.linksRight
+          .filter((l) => l.sourceIndex === i && l.incomeIndex === s)
+          .reduce((sum, l) => sum + l.value, 0);
+        expect(right).toBeCloseTo(left.value, 9);
+      }
+    }
+    // Each cell's sub-bands tile it exactly: one per income in source
+    // order, values summing to the cell, bands contiguous at both ends
+    // with no taper.
+    for (const cell of gLinks) {
+      const subs = layout.linksRight.filter(
+        (l) => l.sourceIndex === cell.groupIndex && l.targetIndex === cell.targetIndex
+      );
+      expect(subs.map((l) => l.incomeIndex)).toEqual([0, 1]);
+      expect(subs.reduce((sum, l) => sum + l.value, 0)).toBeCloseTo(cell.value, 9);
+      expect(subs[1]!.sy0).toBeCloseTo(subs[0]!.sy1, 6);
+      expect(subs[1]!.ty0).toBeCloseTo(subs[0]!.ty1, 6);
+      for (const sub of subs) {
+        expect(sub.sy1 - sub.sy0).toBeCloseTo(sub.ty1 - sub.ty0, 6);
+      }
+    }
+  });
+
   it("runs every ribbon bar-to-bar with no taper and closed paths", () => {
     const layout = layoutGroupedIncomeSankey(gSources, gGroups, gTargets, gLinks, {
       width: 800,
@@ -1571,16 +1629,26 @@ describe("layoutGroupedIncomeSankey", () => {
       expect(outH).toBeCloseTo(mid.h, 6);
       expect(inBands[0]!.ty0).toBeCloseTo(mid.y, 6);
       expect(outBands[0]!.sy0).toBeCloseTo(mid.y, 6);
-      // Bands run in source order on the way in, target order on the way out.
+      // Bands run in source order on the way in, (target, income) order
+      // on the way out: each cell's sub-bands stay contiguous.
       expect(inBands.map((l) => l.sourceIndex)).toEqual([0, 1]);
       const outs = outBands.map((l) => l.targetIndex);
       expect(outs).toEqual([...outs].sort((a, b) => a - b));
+      for (const t of new Set(outs)) {
+        expect(
+          outBands.filter((l) => l.targetIndex === t).map((l) => l.incomeIndex)
+        ).toEqual([0, 1]);
+      }
       expect(mid.unfundedH).toBe(0);
     }
-    // Bands within a target run in middle order: B draws from G1 then G2.
+    // Bands within a target run in (middle, income) order: B draws from G1
+    // (Pay, then Gig) and then G2 (Pay, then Gig), contiguously.
     const intoB = layout.linksRight.filter((l) => l.targetIndex === 1);
-    expect(intoB.map((l) => l.sourceIndex)).toEqual([0, 1]);
-    expect(intoB[1]!.ty0).toBeCloseTo(intoB[0]!.ty1, 6);
+    expect(intoB.map((l) => l.sourceIndex)).toEqual([0, 0, 1, 1]);
+    expect(intoB.map((l) => l.incomeIndex)).toEqual([0, 1, 0, 1]);
+    for (let k = 1; k < intoB.length; k++) {
+      expect(intoB[k]!.ty0).toBeCloseTo(intoB[k - 1]!.ty1, 6);
+    }
   });
 
   it("stacks all three columns top-down inside the padded plot area", () => {
@@ -1757,11 +1825,12 @@ describe("layoutGroupedIncomeSankey", () => {
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
-    // 60 targets, no Remaining (spending exceeds income); 2 x 3 left ribbons.
+    // 60 targets, no Remaining (spending exceeds income); 2 x 3 left
+    // ribbons and 60 cells x 2 incomes right sub-ribbons.
     expect(layout.targets).toHaveLength(60);
     expect(layout.middles).toHaveLength(3);
     expect(layout.linksLeft).toHaveLength(6);
-    expect(layout.linksRight).toHaveLength(60);
+    expect(layout.linksRight).toHaveLength(120);
     for (let i = 1; i < layout.targets.length; i++) {
       expect(layout.targets[i]!.y - layout.targets[i - 1]!.y).toBeGreaterThanOrEqual(
         SANKEY_MIN_PITCH - 1e-9

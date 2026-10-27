@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { SANKEY_LEFT_LABEL_INSET, type SpendingGroupFlow } from "@ynab/logic";
 import {
   SpendingReport,
+  sankeyRibbonGradientId,
   SOURCE_AMOUNT_PX_PER_CHAR,
   SOURCE_NAME_PX_PER_CHAR,
   type SpendingItem,
@@ -304,11 +305,18 @@ describe("SpendingReport", () => {
     expect(screen.getByText("(5 in Other)")).toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Left: Payroll + Other; middle: Bills + Other; right: Mortgage +
-    // Other + Remaining. Left ribbons run 2 x 3, right ribbons 3.
+    // Other + Remaining. Left ribbons run 2 x 3, right sub-ribbons run
+    // 3 cells x 2 incomes.
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
     expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(9);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(12);
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    ).toHaveLength(6);
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    ).toHaveLength(6);
     expect(within(svg as unknown as HTMLElement).getAllByText("Other")).toHaveLength(3);
     expect(within(svg as unknown as HTMLElement).getByText("$350.00 · 15%")).toBeInTheDocument();
     // In total is unchanged by merging.
@@ -393,9 +401,12 @@ describe("SpendingReport", () => {
     fireEvent.mouseMove(link, { clientX: 500, clientY: 120 });
     const tip = document.querySelector(".y-tip")!;
     expect(tip).toBeInTheDocument();
+    // Through-color: the sub-ribbon reads as its income flowing into the
+    // target, with the middle group as the via context.
     expect(
-      within(tip as unknown as HTMLElement).getByText("Bills → Mortgage Interest")
+      within(tip as unknown as HTMLElement).getByText("Payroll → Mortgage Interest")
     ).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("via Bills")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$1,000.00")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("(100%)")).toBeInTheDocument();
     expect(
@@ -415,13 +426,49 @@ describe("SpendingReport", () => {
     const tip = document.querySelector(".y-tip")!;
     expect(tip).toBeInTheDocument();
     expect(
-      within(tip as unknown as HTMLElement).getByText("Everyday → Whole Foods")
+      within(tip as unknown as HTMLElement).getByText("Payroll → Whole Foods")
+    ).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("via Everyday")
     ).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$300.00")).toBeInTheDocument();
     expect(
       within(tip as unknown as HTMLElement).getByText("The merchant's exact share in this group")
     ).toBeInTheDocument();
     fireEvent.mouseLeave(link);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("runs every right sub-ribbon in its own income's color through the middle", () => {
+    const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Bonus", value: 50000 },
+    ]);
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // 3 cells x 2 incomes: each cell draws one sub-ribbon per income.
+    const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
+    expect(right).toHaveLength(6);
+    // One gradient per income — no middle-group gradients — and every
+    // right sub-ribbon fills from its own income's gradient, so the
+    // income color runs uninterrupted to the right column.
+    const incomes = ["Payroll", "Bonus"];
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
+    for (const link of right) {
+      const income = Number(link.getAttribute("data-income"));
+      expect(link.getAttribute("fill")).toBe(`url(#${sankeyRibbonGradientId(income)})`);
+      const grad = svg.querySelector(`#${sankeyRibbonGradientId(income)}`)!;
+      expect(grad.querySelector("stop")!.getAttribute("stop-color")).toBe(
+        colorForName(incomes[income]!)
+      );
+    }
+    // The group tooltip still counts distinct targets, not sub-ribbons.
+    const group = svg.querySelectorAll('[data-testid="sankey-group"]')[0]!;
+    fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(
+      within(tip as unknown as HTMLElement).getByText("2 categories · 74% of $1,550.00 spending")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(group);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
