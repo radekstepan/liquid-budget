@@ -67,10 +67,4 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-The Spending by Category sankey was done wrong. Each expense needs to be a sankey from an income. Right now we have income on the left then a big vertical bar called "Total flow", then the expenses. That is NOT useful to me.
-Then, the "Under" slider should apply on incomes too.
-I do not understand what "Overspent" means as income. I didn't magically make money.
-The legend on the left is cutoff even when ellipsis is used for e.g. Canada Revenue Agency. The $ income amounts are dangerously close to the left too.
-I don't know how to deal with transfers but it needs to be reworked. E.g. I pay with a credit card, then I transfer money from my income to pay for credit card. I want the money to flow through instead of being marked as a "Transfer".
-Also consider when I have accounts like my Wealthsimple Trade where I was putting money in, and at some point I withdrew it all. Is that an income now? Maybe.
-
+The Spending by Category sankey was done wrong. On the left it hags Money in, on the right categories or merchants. And in the middle is has to have category groups! The middle piece is missing.
