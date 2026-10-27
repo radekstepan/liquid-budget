@@ -67,5 +67,10 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Rework the spending by category from the current donut chart. Instead it should be a sankey. There should be a toggle for Categories and Merchants. A slider that would merge smaller expenses under e.g. $50 etc.
-It should respect the month(s) in view and onhover show useful informaiton in a tooltip (or sidebar, you decide). Make sure tooltips don't show cutoff. Make sure to use good consistent colors.
+The Spending by Category sankey was done wrong. Each expense needs to be a sankey from an income. Right now we have income on the left then a big vertical bar called "Total flow", then the expenses. That is NOT useful to me.
+Then, the "Under" slider should apply on incomes too.
+I do not understand what "Overspent" means as income. I didn't magically make money.
+The legend on the left is cutoff even when ellipsis is used for e.g. Canada Revenue Agency. The $ income amounts are dangerously close to the left too.
+I don't know how to deal with transfers but it needs to be reworked. E.g. I pay with a credit card, then I transfer money from my income to pay for credit card. I want the money to flow through instead of being marked as a "Transfer".
+Also consider when I have accounts like my Wealthsimple Trade where I was putting money in, and at some point I withdrew it all. Is that an income now? Maybe.
+
