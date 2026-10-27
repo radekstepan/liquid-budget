@@ -67,6 +67,10 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-The Spending by Category sankey has issues. The sources on the left are sometimes so small that you can't fit income names with amounts both. So stop showing amounts if there is not enough space. The other issue is that iw ant the snakey lines have the same color and highlight all the way from source. If you can do shades of that color from half way that'd be even better. So income might be my job, category needs (all blue) and then the lines turn shades of blue to reach the actual needs subcategories. That'd be ideal.
-It still doesn't work that way. I see SAP Concur in brown which goes to Wants which is blue. This needs to be a solid line going throiugh, not 2 segments.
-In addition there is extreme amount of jitter when I open the chart.
+The Spending by Category sankey has issues:
+- the under slider needs to have a higher amount, make it jump in larger chunks (slow to start, then larger)
+- the color of the sankey is of the final category/merchant on the right, not of the income on the left; and hovering on an income on the left should highlight all the categories benefiting all the way on the right including the sankey lines
+- I do not understand what "shortfall" means
+- I see Transfers on the left and if I turn on Merchnats I see Transfers on the right. I am still confused. Yes I have deposited income into say Wealthsimple Trade. And then later withdrew. So is the stuff on the left pure surplus?? Also this means there is "Uncategorized" which I don't understand as a parent category
+- I need tooltips onhover labels and not just chart
+Overall, think about UX - what would make sense. What would be useful for the user to understand
