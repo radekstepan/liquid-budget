@@ -67,9 +67,10 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey has these issues:
-- onhover category/merchant shows black border
-- onhover category/merchant or sankey does NOT highlight parent category the same bright color
-- income bar on the left onhover has black border and it should be more subtle perhaps a gradient of the colors that extend from it, that would be ideal (top to bottom gradient with some overlap and not hard edges)
-- if a sankey is say 20px tall, why is the category/merchant on the right much taller than that? I don't get it. Should ideally match sankey and have a minimum "height" so we can show title and (amount) subtitle
-- be able to sort by parent category (to match order in the Budget) or by (current) amount
+Spending by Category - Sankey has these issues (which you keep fucking not fixing):
+- income bar is grey = ugly, should use a gradient. Gradient (onhover) has a glassy look and rounded borders where they shouldn't be
+- black text with yellow border on parent categories is unreadable
+- by default the chart is too "opaque"
+- the category/merchant box uses rounded borders where they shouldn't be and the lines leading into it do NOT match color
+- how to read should not be a button if we can't click it
+- we need affordance to sort by amount (category/merchant) or by order of that category in the parent category in Budget, you did NOT implement it
