@@ -68,9 +68,16 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey has these issues:
-- the default colors are too opaque
-- the gradients on the left for incomes do not match the sankey lines, try without the "bleed" if you can fix the gradient
-- more money should be a darker color rather than other way round
-- I do not like the border on incomes or categories/merchants
-- You do not need to say "Proportional split - money is fungible"
-- I switched to Merchants and highlighted "TD Bank", for some reason incomes on the left that have NOTHING to do with it get highlighted. Same with "DLA Piper" or "Airbnb"; I do not see the same issue if I toggle from Merchants to Categories
+- onhover category/merchant is slightly bigger than the sankey leading into it, like a 1px border or something
+- the sankey is too fucking opaque, make it almost as solid as onhover!!!
+- you need to calculate flow through. If salary -> investment account and then investment account -> vacation. Figure out how much salary -> vacation instead. Yes inevstment account will be "income", but that's just the profit in that account over the years. Figure it fucking out
+- remove the "merchant's share" and "spending exceeded", "includes money moved" and other inane information
+- remove "how to read"
+- onhover parent category briefly flashes lighter color than the sankey itself
+- onhover switching between mechants or categories I see flashing in the backgrounded sankey arms even if they didn't actually change; stop making slop code, there should be NO flash of content if the content didn't fucking change
+
+Spending by Category - Bars has these issues:
+- I used to like the colors shown here, now they are too dark
+- you stack the bars one after another, don't make them show with gaps in between, don't worry about vertical scrollbar
+- onhover is useless here
+- other (merged, under) should have the same pattern as in the sankey
