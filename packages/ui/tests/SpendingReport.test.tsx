@@ -141,6 +141,18 @@ describe("SpendingReport", () => {
     expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
+  it("shows no explainer tooltip on the Left / Over header readout", () => {
+    renderReport();
+    // The header readout is factual data only — hovering it explains nothing.
+    fireEvent.mouseOver(screen.getByText("Left:"));
+    expect(
+      screen.queryByText(
+        "Unspent income — lands in the render-only Remaining row on the right"
+      )
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("defaults to the 3-column Sankey with income→group→expense ribbons", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]');
@@ -445,10 +457,10 @@ describe("SpendingReport", () => {
     const otherNode = container.querySelectorAll('[data-testid="sankey-node"]')[1]!;
     fireEvent.mouseMove(otherNode, { clientX: 600, clientY: 200 });
     expect(screen.getByText("2 smaller categories under $500.00")).toBeInTheDocument();
-    // Other is the Under threshold's doing, not a real row.
+    // No explainer lines: the tooltip carries only factual data.
     expect(
-      screen.getByText("Render-only — grouped by the Under threshold")
-    ).toBeInTheDocument();
+      screen.queryByText("Render-only — grouped by the Under threshold")
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(otherNode);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -483,14 +495,15 @@ describe("SpendingReport", () => {
     ).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$1,000.00")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("(100%)")).toBeInTheDocument();
+    // No explainer lines: the tooltip carries only factual data.
     expect(
-      within(tip as unknown as HTMLElement).getByText("Rolls up into its group — no splitting")
-    ).toBeInTheDocument();
+      within(tip as unknown as HTMLElement).queryByText("Rolls up into its group — no splitting")
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(link);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("shows the merchant share wording when hovering a group→merchant ribbon", () => {
+  it("shows only factual flow data when hovering a group→merchant ribbon", () => {
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
     // Right ribbons: [Bills→Bank of Example, Everyday→Whole Foods, ...].
@@ -503,9 +516,10 @@ describe("SpendingReport", () => {
       within(tip as unknown as HTMLElement).getByText("Everyday → Whole Foods")
     ).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$300.00")).toBeInTheDocument();
+    // No explainer lines: the tooltip carries only factual data.
     expect(
-      within(tip as unknown as HTMLElement).getByText("The merchant's exact share in this group")
-    ).toBeInTheDocument();
+      within(tip as unknown as HTMLElement).queryByText("The merchant's exact share in this group")
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(link);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -807,10 +821,10 @@ describe("SpendingReport", () => {
     const remaining = nodes[nodes.length - 1]!;
     fireEvent.mouseMove(remaining, { clientX: 600, clientY: 350 });
     expect(screen.getByText("Unspent of $2,000.00 income")).toBeInTheDocument();
-    // Remaining is surplus, not a real row: the tooltip says so outright.
+    // No explainer lines: the tooltip carries only factual data.
     expect(
-      screen.getByText("Render-only row — unspent income, not a real category")
-    ).toBeInTheDocument();
+      screen.queryByText("Render-only row — unspent income, not a real category")
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(remaining);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -903,11 +917,12 @@ describe("SpendingReport", () => {
     expect(within(tip as unknown as HTMLElement).getByText("Over income")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).queryByText("Unfunded")).not.toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).queryByText("Shortfall")).not.toBeInTheDocument();
+    // No explainer lines: the Over-income amount carries the gap.
     expect(
-      within(tip as unknown as HTMLElement).getByText(
+      within(tip as unknown as HTMLElement).queryByText(
         "Spending exceeded income by $550.00 — covered from savings or debt"
       )
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(node);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -1037,7 +1052,7 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("shows the over-income gap and its explainer when hovering a group under a shortfall", () => {
+  it("shows the over-income gap when hovering a group under a shortfall", () => {
     const { container } = render(
       <SpendingReport
         categoryFlow={sampleCategoryFlow}
@@ -1051,11 +1066,12 @@ describe("SpendingReport", () => {
     expect(tip).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("Everyday")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("Over income")).toBeInTheDocument();
+    // No explainer lines: the Over-income amount carries the gap.
     expect(
-      within(tip as unknown as HTMLElement).getByText(
+      within(tip as unknown as HTMLElement).queryByText(
         "Spending exceeded income by $550.00 — covered from savings or debt"
       )
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(group);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -1195,7 +1211,7 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("labels each column and explains it on hover", () => {
+  it("labels each column as plain text with no hover tooltip", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const heads = svg.querySelectorAll('[data-testid="sankey-colhead"]');
@@ -1205,19 +1221,14 @@ describe("SpendingReport", () => {
       "GROUPS",
       "CATEGORIES",
     ]);
-    // Hovering a header explains the column without dimming the chart.
+    // Headers are plain labels: hovering one shows no tooltip and leaves
+    // the chart untouched.
     const incomeHead = svg.querySelector('[data-testid="sankey-colhead"][data-col="income"]')!;
     fireEvent.mouseMove(incomeHead, { clientX: 160, clientY: 20 });
-    const tip = document.querySelector(".y-tip")!;
-    expect(tip).toBeInTheDocument();
-    expect(
-      within(tip as unknown as HTMLElement).getByText("Money received this period.")
-    ).toBeInTheDocument();
+    expect(document.querySelector(".y-tip")).toBeNull();
     for (const bar of svg.querySelectorAll('[data-testid="sankey-node"]')) {
       expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
     }
-    fireEvent.mouseLeave(incomeHead);
-    expect(document.querySelector(".y-tip")).toBeNull();
     // The right header follows the dimension toggle.
     fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
     expect(
@@ -1225,12 +1236,15 @@ describe("SpendingReport", () => {
     ).toBe("MERCHANTS");
   });
 
-  it("explains transfer money on both sides of the chart", () => {
+  it("shows no transfer-money lines on either side of the chart", () => {
+    // Flow-through attribution traces money through off-budget accounts
+    // instead of counting either transfer leg, so no row carries a
+    // transfer flag and no tooltip mentions moved money.
     const flow: SpendingGroupFlow = {
       groups: [{ name: "Bills", value: 100000 }],
       targets: [
         { name: "Mortgage Interest", value: 70000 },
-        { name: "Transfer : Broker", value: 30000, transfer: true },
+        { name: "Brokerage", value: 30000 },
       ],
       links: [
         { groupIndex: 0, targetIndex: 0, value: 70000 },
@@ -1239,29 +1253,22 @@ describe("SpendingReport", () => {
     };
     const { container } = renderReport(flow, emptyFlow, [
       { name: "Payroll", value: 200000 },
-      { name: "Transfer : Broker", value: 50000, transfer: true },
+      { name: "Dividends", value: 50000 },
     ]);
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Left: the withdrawal counts as income.
     const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
     fireEvent.mouseMove(incomes[1]!, { clientX: 100, clientY: 300 });
     expect(
-      screen.getByText("Includes withdrawals from off-budget accounts")
-    ).toBeInTheDocument();
+      screen.queryByText("Includes withdrawals from off-budget accounts")
+    ).not.toBeInTheDocument();
     fireEvent.mouseLeave(incomes[1]!);
-    // Right: the contribution counts as spending.
     const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
     fireEvent.mouseMove(nodes[1]!, { clientX: 600, clientY: 200 });
     expect(
-      screen.getByText("Includes money moved to off-budget accounts")
-    ).toBeInTheDocument();
-    fireEvent.mouseLeave(nodes[1]!);
-    // Plain rows carry no transfer line.
-    fireEvent.mouseMove(nodes[0]!, { clientX: 600, clientY: 100 });
-    expect(
       screen.queryByText("Includes money moved to off-budget accounts")
     ).not.toBeInTheDocument();
-    fireEvent.mouseLeave(nodes[0]!);
+    fireEvent.mouseLeave(nodes[1]!);
+    expect(document.querySelector(".y-tip")).toBeNull();
   });
 
   it("explains the Uncategorized pseudo-group as spending with no category", () => {

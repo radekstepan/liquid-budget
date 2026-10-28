@@ -54,7 +54,6 @@ type Hover =
   // the target's color.
   | { kind: "link"; side: "left"; a: number; b: number; x: number; y: number }
   | { kind: "link"; side: "right"; a: number; b: number; x: number; y: number }
-  | { kind: "head"; col: "income" | "group" | "target"; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
 const LABEL_ZONE = 190;
@@ -462,22 +461,6 @@ export function SpendingReport({
                 : `${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
           </div>
-          {isOther && (
-            <div
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>Render-only — grouped by the Under threshold</span>
-            </div>
-          )}
-          {r.transfer === true && (
-            <div
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>Includes withdrawals from off-budget accounts</span>
-            </div>
-          )}
         </div>
       );
     }
@@ -534,16 +517,6 @@ export function SpendingReport({
             value={fmt(link.value)}
             pct={fundedPct + "%"}
           />
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>
-              {dimension === "categories"
-                ? "Rolls up into its group — no splitting"
-                : "The merchant's exact share in this group"}
-            </span>
-          </div>
         </div>
       );
     }
@@ -581,30 +554,12 @@ export function SpendingReport({
                 : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
             </span>
           </div>
-          {isOther && (
-            <div
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>Render-only — grouped by the Under threshold</span>
-            </div>
-          )}
           {r.name === UNCATEGORIZED_GROUP_LABEL && (
             <div
               className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
               style={{ color: "rgba(242,245,247,0.65)" }}
             >
               <span>Spending with no category set</span>
-            </div>
-          )}
-          {r.unfundedValue > 0 && (
-            <div
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>
-                {`Spending exceeded income by ${fmt(totals.spendingTotal - totals.incomeTotal)} — covered from savings or debt`}
-              </span>
             </div>
           )}
         </div>
@@ -646,48 +601,6 @@ export function SpendingReport({
         </div>
       );
     }
-    if (hover.kind === "head") {
-      const heads = {
-        income: {
-          title: "Income",
-          lines: [
-            "Money received this period.",
-            "Off-budget accounts add profit only.",
-          ],
-        },
-        group: {
-          title: "Category groups",
-          lines: [
-            "Income splits across groups,",
-            "then flows into spending.",
-          ],
-        },
-        target: {
-          title: dimension === "categories" ? "Spending by category" : "Spending by merchant",
-          lines: [
-            "Where the money went.",
-            "Unspent income lands in Remaining.",
-          ],
-        },
-      } as const;
-      const head = heads[hover.col];
-      return (
-        <div className="space-y-[3px]">
-          <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            {head.title}
-          </div>
-          {head.lines.map((line) => (
-            <div
-              key={line}
-              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-              style={{ color: "rgba(242,245,247,0.65)" }}
-            >
-              <span>{line}</span>
-            </div>
-          ))}
-        </div>
-      );
-    }
     const r = tgtRows[hover.idx];
     if (!r) return null;
     const isOther = r.bucket === true;
@@ -724,40 +637,6 @@ export function SpendingReport({
                 : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
-        {isOther && (
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>Render-only — grouped by the Under threshold</span>
-          </div>
-        )}
-        {isRemaining && (
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>{`Render-only row — unspent income, not a real ${nounSingular}`}</span>
-          </div>
-        )}
-        {r.transfer === true && !isRemaining && (
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>Includes money moved to off-budget accounts</span>
-          </div>
-        )}
-        {r.unfundedValue > 0 && (
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>
-              {`Spending exceeded income by ${fmt(totals.spendingTotal - totals.incomeTotal)} — covered from savings or debt`}
-            </span>
-          </div>
-        )}
       </div>
     );
   })();
@@ -786,7 +665,7 @@ export function SpendingReport({
       ll: null as Set<string> | null,
       rl: null as Set<string> | null,
     };
-    if (!hover || hover.kind === "bar" || hover.kind === "head" || !sankey) return none;
+    if (!hover || hover.kind === "bar" || !sankey) return none;
     const key = (a: number, b: number) => `${a}:${b}`;
     const midCount = sankey.middles.length;
     if (hover.kind === "income") {
@@ -951,20 +830,12 @@ export function SpendingReport({
           </span>
         </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
-        <Tooltip
-          tip={
-            remaining >= 0
-              ? `Unspent income — lands in the render-only Remaining row on the right`
-              : `Spending exceeded income by ${fmt(Math.abs(remaining))} — covered from savings or debt`
-          }
-        >
-          <span style={{ color: "var(--y-ink-soft)" }}>
-            {remaining >= 0 ? "Left: " : "Over: "}
-            <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-              {fmt(Math.abs(remaining))}
-            </span>
+        <span style={{ color: "var(--y-ink-soft)" }}>
+          {remaining >= 0 ? "Left: " : "Over: "}
+          <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+            {fmt(Math.abs(remaining))}
           </span>
-        </Tooltip>
+        </span>
         <span style={{ color: "var(--y-ink-faint)" }}>·</span>
         <span style={{ color: "var(--y-ink-soft)" }}>
           {rows.length} {rows.length === 1 ? nounSingular : nounPlural}
@@ -1292,7 +1163,7 @@ export function SpendingReport({
               {/* Column headers: each column names what it holds, so the
                   chart reads without prior knowledge (left is income
                   received — not surplus — middle groups route it, right is
-                  where it went). Hovering a header explains the column. */}
+                  where it went). Plain labels — no hover. */}
               {(
                 [
                   { col: "income" as const, label: "Income", node: sankey.sources[0] },
@@ -1315,11 +1186,7 @@ export function SpendingReport({
                       fontSize={10}
                       textAnchor="middle"
                       fill="var(--y-ink-faint)"
-                      style={{ cursor: "pointer", letterSpacing: "0.08em" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "head", col: h.col, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => setHover(null)}
+                      style={{ letterSpacing: "0.08em" }}
                     >
                       {h.label.toUpperCase()}
                     </text>

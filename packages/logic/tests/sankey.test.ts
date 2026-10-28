@@ -152,9 +152,8 @@ describe("computeSpendingBreakdown", () => {
       { name: "Rent", value: 50000 },
       { name: "Groceries", value: 5000 },
     ]);
-    // Internal same-boundary move: counted as spending (legacy semantics)
-    // but not off-budget money, so no transfer flag.
-    expect(items.every((i) => i.transfer === undefined)).toBe(true);
+    // Internal same-boundary move: counted as spending (legacy semantics).
+    // The exact-shape assertion above pins the rows (no vestigial flags).
   });
 
   it("excludes credit-card payoff transfers in category mode (money flows through once)", () => {
@@ -604,7 +603,7 @@ describe("mergeGroupFlow", () => {
     expect(merged.otherValue).toBe(0);
   });
 
-  it("carries transfer flags through both columns into their Other buckets", () => {
+  it("merges both columns into plain Other buckets with no vestigial flags", () => {
     const merged = mergeGroupFlow(
       [
         { name: "Big", value: 9000 },
@@ -612,7 +611,7 @@ describe("mergeGroupFlow", () => {
       ],
       [
         { name: "Kept", value: 9000 },
-        { name: "Moved Out", value: 1000, transfer: true },
+        { name: "Moved Out", value: 1000 },
       ],
       [
         { groupIndex: 0, targetIndex: 0, value: 9000 },
@@ -620,11 +619,9 @@ describe("mergeGroupFlow", () => {
       ],
       5000
     );
-    // The flagged target folds, so the target Other bucket inherits the
-    // flag; the group Other bucket holds a plain row and stays unflagged.
     expect(merged.targets).toEqual([
       { name: "Kept", value: 9000, mergedCount: 1 },
-      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true, transfer: true },
+      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
     ]);
     expect(merged.groups).toEqual([
       { name: "Big", value: 9000, mergedCount: 1 },
@@ -863,33 +860,22 @@ describe("mergeBelowThreshold", () => {
     expect(merged.otherValue).toBe(0);
   });
 
-  it("keeps transfer flags on kept rows and folds them into the Other bucket", () => {
+  it("keeps kept rows and the Other bucket free of vestigial flags", () => {
     const merged = mergeBelowThreshold(
       [
-        { name: "Big", value: 10000, transfer: true },
+        { name: "Big", value: 10000 },
         { name: "Mid", value: 4000 },
-        { name: "Small", value: 1000, transfer: true },
-      ],
-      5000
-    );
-    expect(merged.items).toEqual([
-      { name: "Big", value: 10000, mergedCount: 1, transfer: true },
-      { name: OTHER_BUCKET_LABEL, value: 5000, mergedCount: 2, bucket: true, transfer: true },
-    ]);
-  });
-
-  it("leaves the Other bucket unflagged when no folded row is a transfer", () => {
-    const merged = mergeBelowThreshold(
-      [
-        { name: "Big", value: 10000, transfer: true },
         { name: "Small", value: 1000 },
       ],
       5000
     );
     expect(merged.items).toEqual([
-      { name: "Big", value: 10000, mergedCount: 1, transfer: true },
-      { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
+      { name: "Big", value: 10000, mergedCount: 1 },
+      { name: OTHER_BUCKET_LABEL, value: 5000, mergedCount: 2, bucket: true },
     ]);
+    for (const item of merged.items) {
+      expect(item).not.toHaveProperty("transfer");
+    }
   });
 });
 
@@ -2541,17 +2527,17 @@ describe("over-income wording", () => {
   });
 });
 
-describe("sankey transfer flags on layout nodes", () => {
-  it("copies the transfer flag from merged rows onto their bars", () => {
+describe("sankey layout nodes carry no vestigial flags", () => {
+  it("emits bars without a transfer flag on any column", () => {
     const layout = layoutGroupedIncomeSankey(
       [
         { name: "Payroll", value: 200000, mergedCount: 1 },
-        { name: "Withdrawal", value: 50000, mergedCount: 1, transfer: true },
+        { name: "Withdrawal", value: 50000, mergedCount: 1 },
       ],
       [{ name: "Everyday", value: 100000, mergedCount: 1 }],
       [
         { name: "Groceries", value: 70000, mergedCount: 1 },
-        { name: "Moved Out", value: 30000, mergedCount: 1, transfer: true },
+        { name: "Moved Out", value: 30000, mergedCount: 1 },
       ],
       [
         { groupIndex: 0, targetIndex: 0, value: 70000 },
@@ -2559,15 +2545,9 @@ describe("sankey transfer flags on layout nodes", () => {
       ],
       { width: 800, height: 400 }
     );
-    expect(layout.sources[0]).not.toHaveProperty("transfer");
-    expect(layout.sources[1]).toHaveProperty("transfer", true);
-    expect(layout.middles[0]).not.toHaveProperty("transfer");
-    expect(layout.targets[0]).not.toHaveProperty("transfer");
-    expect(layout.targets[1]).toHaveProperty("transfer", true);
-    // The surplus plug is never transfer money.
-    const plug = layout.remainingTargetIndex;
-    expect(plug).not.toBeNull();
-    expect(layout.targets[plug!]).not.toHaveProperty("transfer");
+    for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
+      expect(node).not.toHaveProperty("transfer");
+    }
   });
 });
 

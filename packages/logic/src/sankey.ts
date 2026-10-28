@@ -18,16 +18,6 @@ export type SpendingBreakdownItem = {
   name: string;
   /** Net outflow in cents (always > 0). */
   value: number;
-  /**
-   * Legacy marker for rows that included transfer money. Flow-through
-   * attribution traces money through off-budget accounts instead of
-   * counting either transfer leg, so the flow computation no longer sets
-   * this — it stays on the type (and propagates through merging and layout)
-   * only so existing views keep compiling until they drop the tooltips.
-   * Absent (never false) when no transfer contributed, so plain rows keep
-   * their exact `{ name, value }` shape.
-   */
-  transfer?: boolean;
 };
 
 /**
@@ -453,12 +443,10 @@ export function mergeBelowThreshold(
   const kept: MergedSpendingItem[] = [];
   let otherCount = 0;
   let otherValue = 0;
-  let otherTransfer = false;
   for (const it of items) {
     if (it.value < thresholdCents) {
       otherCount += 1;
       otherValue += it.value;
-      if (it.transfer === true) otherTransfer = true;
     } else {
       kept.push({ ...it, mergedCount: 1 });
     }
@@ -469,7 +457,6 @@ export function mergeBelowThreshold(
       value: otherValue,
       mergedCount: otherCount,
       bucket: true,
-      ...(otherTransfer ? { transfer: true as const } : {}),
     });
   }
   return { items: kept, otherCount, otherValue };
@@ -520,12 +507,10 @@ export function mergeGroupFlow(
     const remap: number[] = new Array<number>(items.length).fill(-1);
     let otherCount = 0;
     let otherValue = 0;
-    let otherTransfer = false;
     items.forEach((it, i) => {
       if (thresholdCents > 0 && it.value < thresholdCents) {
         otherCount += 1;
         otherValue += it.value;
-        if (it.transfer === true) otherTransfer = true;
       } else {
         remap[i] = merged.length;
         merged.push({ ...it, mergedCount: 1 });
@@ -538,7 +523,6 @@ export function mergeGroupFlow(
         value: otherValue,
         mergedCount: otherCount,
         bucket: true,
-        ...(otherTransfer ? { transfer: true as const } : {}),
       });
       for (let i = 0; i < remap.length; i++) {
         if (remap[i]! < 0) remap[i] = otherIndex;
@@ -774,12 +758,6 @@ export type SankeyNodeLayout = {
   mergedCount: number;
   /** True only for merged "Other" bucket bars (copied from the item). */
   bucket: boolean;
-  /**
-   * True when the row includes transfer money (copied from the item):
-   * withdrawals back into the budget on the income side, allocations out
-   * to off-budget accounts on the spending side. Absent otherwise.
-   */
-  transfer?: boolean;
   share: number;
   x: number;
   y: number;
@@ -1082,7 +1060,7 @@ export function layoutSankey(
     const it = items[i]!;
     const h = Math.max(0, heights[i] ?? 0);
     const share = total !== 0 ? it.value / total : 0;
-    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, ...(it.transfer === true ? { transfer: true as const } : {}), share, x: nodeX, y, w: nodeWidth, h });
+    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, share, x: nodeX, y, w: nodeWidth, h });
     const sy0 = sy;
     const sy1 = sy + h;
     const ty0 = y;
@@ -1280,7 +1258,6 @@ export function layoutDirectIncomeSankey(
     value: s.value,
     mergedCount: s.mergedCount,
     bucket: s.bucket === true,
-    ...(s.transfer === true ? { transfer: true as const } : {}),
     share: s.value / flowTotal,
     x: padLeft,
     y: 0, // placed by the stacking pass below
@@ -1292,7 +1269,6 @@ export function layoutDirectIncomeSankey(
     value: t.value,
     mergedCount: t.mergedCount,
     bucket: t.bucket === true,
-    ...(t.transfer === true ? { transfer: true as const } : {}),
     share: t.value / flowTotal,
     x: nodeX,
     y: 0, // placed by the stacking pass below
@@ -1672,7 +1648,6 @@ export function layoutGroupedIncomeSankey(
     value: s.value,
     mergedCount: s.mergedCount,
     bucket: s.bucket === true,
-    ...(s.transfer === true ? { transfer: true as const } : {}),
     share: s.value / flowTotal,
     x: padLeft,
     y: 0, // placed by the stacking pass below
@@ -1684,7 +1659,6 @@ export function layoutGroupedIncomeSankey(
     value: g.value,
     mergedCount: g.mergedCount,
     bucket: g.bucket === true,
-    ...(g.transfer === true ? { transfer: true as const } : {}),
     share: g.value / flowTotal,
     x: midX,
     y: 0, // placed by the stacking pass below
@@ -1699,7 +1673,6 @@ export function layoutGroupedIncomeSankey(
     value: t.value,
     mergedCount: t.mergedCount,
     bucket: t.bucket === true,
-    ...(t.transfer === true ? { transfer: true as const } : {}),
     share: t.value / flowTotal,
     x: nodeX,
     y: 0, // placed by the stacking pass below
