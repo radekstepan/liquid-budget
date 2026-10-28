@@ -77,12 +77,15 @@ function truncateName(name: string, max = 26): string {
 // side never colors a ribbon. Exported so tests can pin the fills.
 //
 // Spotlight scale: at rest every ribbon and every bar sits at
-// SANKEY_RIBBON_OPACITY; while a flow path is hovered the path's ribbons
-// and bars brighten to SANKEY_RIBBON_HOVER_OPACITY (ribbons render above
-// the rest) and everything outside the path dims to
-// SANKEY_RIBBON_DIM_OPACITY. Bars share their ribbons' exact fill at the
-// same steps, so the line into a bar always matches the bar.
-export const SANKEY_RIBBON_OPACITY = 0.18;
+// SANKEY_RIBBON_OPACITY — nearly as solid as the hover step, one small
+// step below it so the spotlight still reads as a brightening; while a
+// flow path is hovered the path's ribbons and bars brighten to
+// SANKEY_RIBBON_HOVER_OPACITY (ribbons render above the rest) and
+// everything outside the path dims to SANKEY_RIBBON_DIM_OPACITY, kept
+// far below rest so the off-path wash stays clearly dimmer. Bars share
+// their ribbons' exact fill at the same steps, so the line into a bar
+// always matches the bar.
+export const SANKEY_RIBBON_OPACITY = 0.75;
 export const SANKEY_RIBBON_DIM_OPACITY = 0.12;
 export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 

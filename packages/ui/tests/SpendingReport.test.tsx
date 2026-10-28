@@ -1354,6 +1354,15 @@ describe("SpendingReport", () => {
     expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
+  it("renders rest ribbons nearly as solid as hover, with a clearly dimmer off-path step", () => {
+    // Rest sits one small step below hover so the chart reads solid at a
+    // glance while the spotlight still brightens; the dim step stays far
+    // below rest so the off-path wash never passes for the resting chart.
+    expect(SANKEY_RIBBON_OPACITY).toBeLessThan(SANKEY_RIBBON_HOVER_OPACITY);
+    expect(SANKEY_RIBBON_HOVER_OPACITY - SANKEY_RIBBON_OPACITY).toBeLessThanOrEqual(0.15);
+    expect(SANKEY_RIBBON_DIM_OPACITY).toBeLessThan(SANKEY_RIBBON_OPACITY / 2);
+  });
+
   it("pins the chart scroll container so scrollbars can never shift the geometry", () => {
     // The SVG is sized exactly to the container's client box, so a
     // horizontal scrollbar is never legitimate — but fractionally-wide flex
