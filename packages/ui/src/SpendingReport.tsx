@@ -1044,6 +1044,25 @@ export function SpendingReport({
               (growRows ? "flex h-full min-h-0 flex-col justify-center" : "")
             }
           >
+            {/* Shared hatch def for bucket bars: the SAME pattern element
+                the Sankey overlays on its render-only rows (identical
+                angles, spacing, and colors — the two views cannot drift).
+                Bars and Sankey never render together, so this id stays
+                unique in the document. Zero-size and out of flow: no
+                layout effect. */}
+            {rows.some((r) => r.bucket === true) && (
+              <svg
+                data-testid="bars-bucket-hatch-defs"
+                aria-hidden="true"
+                width={0}
+                height={0}
+                style={{ position: "absolute" }}
+              >
+                <defs>
+                  <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
+                </defs>
+              </svg>
+            )}
             {empty && <div className="grid place-items-center py-12 y-hint">No data for this timeframe.</div>}
             {rows.map((r) => {
               const isHover = hoverBarIdx === r.i;
@@ -1092,13 +1111,42 @@ export function SpendingReport({
                       const displayWidth = Math.round(Math.max(r.pctOfMax, r.value > 0 ? 1 : 0) * 100) / 100;
                       return (
                         <div
-                          className="relative h-full rounded-[3px] transition-[width] duration-150"
+                          className={
+                            "relative h-full rounded-[3px] transition-[width] duration-150" +
+                            // Bucket rows clip the hatch overlay to the bar's
+                            // rounded corners; normal rows keep no children.
+                            (r.bucket === true ? " overflow-hidden" : "")
+                          }
                           style={{
                             width: `${displayWidth}%`,
                             background: `linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0)) , ${r.color}`,
                             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.18)",
                           }}
-                        />
+                        >
+                          {/* Merged Other buckets carry the shared Sankey
+                              hatch above the bar color (the same pattern def
+                              the Sankey paints on its render-only rows — Bars
+                              render no Remaining plug, so only `bucket` rows
+                              qualify). The row hover highlight paints the row
+                              behind the bar, so the hatch reads in rest and
+                              hover alike. */}
+                          {r.bucket === true && (
+                            <svg
+                              data-testid="bars-bucket-hatch"
+                              aria-hidden="true"
+                              className="absolute inset-0 h-full w-full"
+                              pointerEvents="none"
+                            >
+                              <rect
+                                x={0}
+                                y={0}
+                                width="100%"
+                                height="100%"
+                                fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                              />
+                            </svg>
+                          )}
+                        </div>
                       );
                     })()}
                   </div>

@@ -2000,4 +2000,47 @@ describe("SpendingReport", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
     checkGapless(many.container, 16);
   });
+
+  it("paints Bars Other buckets with the shared Sankey hatch in rest and hover", () => {
+    // Task-34: the merged Other bucket bar reuses the Sankey's exact hatch
+    // pattern def (same id, same geometry — not a lookalike), so the two
+    // views cannot drift. The row hover highlight paints behind the bar, so
+    // the hatch reads in rest and hover alike; normal rows carry no hatch.
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    // Mortgage Interest + the merged Other bucket.
+    const tracks = container.querySelectorAll(".y-bar-track");
+    expect(tracks).toHaveLength(2);
+    // Exactly one hatch overlay: on the bucket bar, none on the normal row.
+    expect(container.querySelectorAll('[data-testid="bars-bucket-hatch"]')).toHaveLength(1);
+    expect(tracks[0]!.querySelector('[data-testid="bars-bucket-hatch"]')).toBeNull();
+    const overlay = tracks[1]!.querySelector('[data-testid="bars-bucket-hatch"]')!;
+    expect(overlay.querySelector("rect")!.getAttribute("fill")).toBe(
+      `url(#${SANKEY_BUCKET_HATCH_ID})`
+    );
+    // The shared def is the Sankey's exact pattern: same spacing, angle,
+    // line color, and line width.
+    const def = container.querySelector(`#${SANKEY_BUCKET_HATCH_ID}`)!;
+    expect(def.tagName).toBe("pattern");
+    expect(def.getAttribute("width")).toBe("6");
+    expect(def.getAttribute("height")).toBe("6");
+    expect(def.getAttribute("patternTransform")).toBe("rotate(45)");
+    const line = def.querySelector("line")!;
+    expect(line.getAttribute("stroke")).toBe("rgba(255,255,255,0.65)");
+    expect(line.getAttribute("stroke-width")).toBe("1.6");
+    // Hovering the bucket row keeps the hatch painted above the highlight.
+    const row = tracks[1]!.parentElement!;
+    fireEvent.mouseMove(row, { clientX: 400, clientY: 240 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    expect(row.style.background).toBe("var(--y-row-sel)");
+    const overlayAfter = tracks[1]!.querySelector('[data-testid="bars-bucket-hatch"]')!;
+    expect(overlayAfter.querySelector("rect")!.getAttribute("fill")).toBe(
+      `url(#${SANKEY_BUCKET_HATCH_ID})`
+    );
+    fireEvent.mouseLeave(row);
+    expect(document.querySelector(".y-tip")).toBeNull();
+    expect(tracks[1]!.querySelector('[data-testid="bars-bucket-hatch"]')).not.toBeNull();
+  });
 });
