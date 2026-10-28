@@ -16,6 +16,7 @@ import {
   sankeyContentHeight,
   sankeyThresholdStep,
   sankeyThresholdStops,
+  sortMergedGroupFlow,
   SANKEY_THRESHOLD_STOPS,
   SANKEY_SOURCE_AMOUNT_MIN_HEIGHT,
   showSankeySourceAmount,
@@ -591,6 +592,136 @@ describe("mergeGroupFlow", () => {
       { name: OTHER_BUCKET_LABEL, value: 1000, mergedCount: 1, bucket: true },
     ]);
     expectConserved(merged);
+  });
+});
+
+describe("sortMergedGroupFlow", () => {
+  function mrow(name: string, value: number): MergedSpendingItem {
+    return { name, value, mergedCount: 1 };
+  }
+
+  const flow = {
+    groups: [mrow("G-big", 6000), mrow("G-mid", 3000), mrow("G-small", 1000)],
+    targets: [mrow("A", 5000), mrow("C", 3000), mrow("B", 1000), mrow("D", 1000)],
+    links: [
+      { groupIndex: 0, targetIndex: 0, value: 5000 },
+      { groupIndex: 1, targetIndex: 1, value: 3000 },
+      { groupIndex: 0, targetIndex: 2, value: 1000 },
+      { groupIndex: 2, targetIndex: 3, value: 1000 },
+    ],
+    otherCount: 0,
+    otherValue: 0,
+  };
+
+  it("passes the flow through unchanged in amount mode", () => {
+    expect(sortMergedGroupFlow(flow, ["G-small", "G-big", "G-mid"], "amount")).toBe(flow);
+  });
+
+  it("orders both columns by Budget group order, value-descending within a group", () => {
+    // Budget order reverses the amount order: G-small first, G-mid last.
+    const sorted = sortMergedGroupFlow(flow, ["G-small", "G-big", "G-mid"], "group");
+    expect(sorted.groups.map((g) => g.name)).toEqual(["G-small", "G-big", "G-mid"]);
+    // Right column groups by dominant parent (D under G-small; A then B
+    // under G-big by amount; C under G-mid).
+    expect(sorted.targets.map((t) => t.name)).toEqual(["D", "A", "B", "C"]);
+    // Links remap onto the new indices, still (group, target) sorted.
+    expect(sorted.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 1000 },
+      { groupIndex: 1, targetIndex: 1, value: 5000 },
+      { groupIndex: 1, targetIndex: 2, value: 1000 },
+      { groupIndex: 2, targetIndex: 3, value: 3000 },
+    ]);
+    // Both marginals still hold: a permutation moves cells, never values.
+    for (let i = 0; i < sorted.groups.length; i++) {
+      const out = sorted.links
+        .filter((l) => l.groupIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(sorted.groups[i]!.value, 9);
+    }
+    for (let j = 0; j < sorted.targets.length; j++) {
+      const into = sorted.links
+        .filter((l) => l.targetIndex === j)
+        .reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(sorted.targets[j]!.value, 9);
+    }
+    expect(sorted.otherCount).toBe(0);
+    expect(sorted.otherValue).toBe(0);
+  });
+
+  it("attributes a split merchant to its dominant group and breaks ties deterministically", () => {
+    const split = {
+      groups: [mrow("First", 5000), mrow("Second", 5000)],
+      targets: [mrow("Split", 4000), mrow("Tied", 2000), mrow("Plain", 4000)],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 3000 },
+        { groupIndex: 1, targetIndex: 0, value: 1000 },
+        { groupIndex: 0, targetIndex: 1, value: 1000 },
+        { groupIndex: 1, targetIndex: 1, value: 1000 },
+        { groupIndex: 1, targetIndex: 2, value: 4000 },
+      ],
+      otherCount: 0,
+      otherValue: 0,
+    };
+    // Budget order puts Second first: Split still sorts under First (its
+    // dominant $3000 link), Tied keeps the first link's group on the tie.
+    const sorted = sortMergedGroupFlow(split, ["Second", "First"], "group");
+    expect(sorted.groups.map((g) => g.name)).toEqual(["Second", "First"]);
+    expect(sorted.targets.map((t) => t.name)).toEqual(["Plain", "Split", "Tied"]);
+  });
+
+  it("sorts unknown groups after known ones and keeps Other buckets last", () => {
+    const mixed = {
+      groups: [
+        mrow("Known", 5000),
+        mrow(UNCATEGORIZED_GROUP_LABEL, 4000),
+        { name: OTHER_BUCKET_LABEL, value: 3000, mergedCount: 2, bucket: true as const },
+      ],
+      targets: [
+        mrow("K", 5000),
+        mrow("U", 4000),
+        { name: OTHER_BUCKET_LABEL, value: 3000, mergedCount: 2, bucket: true as const },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 5000 },
+        { groupIndex: 1, targetIndex: 1, value: 4000 },
+        { groupIndex: 2, targetIndex: 2, value: 3000 },
+      ],
+      otherCount: 4,
+      otherValue: 6000,
+    };
+    const sorted = sortMergedGroupFlow(mixed, ["Known"], "group");
+    // The Uncategorized pseudo-group is not a Budget group, so it follows
+    // the known groups; the render-only buckets stay last on both columns.
+    expect(sorted.groups.map((g) => g.name)).toEqual([
+      "Known",
+      UNCATEGORIZED_GROUP_LABEL,
+      OTHER_BUCKET_LABEL,
+    ]);
+    expect(sorted.targets.map((t) => t.name)).toEqual([
+      "K",
+      "U",
+      OTHER_BUCKET_LABEL,
+    ]);
+    expect(sorted.otherCount).toBe(4);
+    expect(sorted.otherValue).toBe(6000);
+  });
+
+  it("sorts unlinked targets after grouped ones and handles empty flows", () => {
+    const dangling = {
+      groups: [mrow("G", 1000)],
+      targets: [mrow("Linked", 1000), mrow("Stray", 500)],
+      links: [{ groupIndex: 0, targetIndex: 0, value: 1000 }],
+      otherCount: 0,
+      otherValue: 0,
+    };
+    const sorted = sortMergedGroupFlow(dangling, ["G"], "group");
+    expect(sorted.targets.map((t) => t.name)).toEqual(["Linked", "Stray"]);
+    const empty = sortMergedGroupFlow(
+      { groups: [], targets: [], links: [], otherCount: 0, otherValue: 0 },
+      ["G"],
+      "group"
+    );
+    expect(empty).toEqual({ groups: [], targets: [], links: [], otherCount: 0, otherValue: 0 });
   });
 });
 
@@ -1748,7 +1879,7 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
-  it("renders the shortfall as unfunded segments at the bottom of middle and right bars", () => {
+  it("sizes bars to their funded flow with no unfunded segment under a shortfall", () => {
     const layout = layoutGroupedIncomeSankey(
       [merged("Pay", 5000)],
       gGroups,
@@ -1759,30 +1890,102 @@ describe("layoutGroupedIncomeSankey", () => {
     // $5000 income over $10000 spending: uniform half coverage, no Remaining.
     expect(layout.middles.map((m) => m.name)).toEqual(["G1", "G2"]);
     for (const mid of layout.middles) {
+      // The cents split survives for tooltips, but the geometry carries no
+      // unfunded segment: the bar wraps its funded bands exactly.
       expect(mid.fundedValue).toBeCloseTo(mid.value / 2, 9);
       expect(mid.unfundedValue).toBeCloseTo(mid.value / 2, 9);
-      expect(mid.unfundedH).toBeCloseTo(mid.h / 2, 6);
-      // Incoming bands fill exactly the funded (top) half.
+      expect(mid.unfundedH).toBe(0);
       const inBands = layout.linksLeft.filter((l) => l.targetIndex === layout.middles.indexOf(mid));
       const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
-      expect(inH).toBeCloseTo(mid.h - mid.unfundedH, 6);
+      expect(inH).toBeCloseTo(mid.h, 6);
+      expect(inBands[0]!.ty0).toBeCloseTo(mid.y, 6);
+      const outBands = layout.linksRight.filter(
+        (l) => l.sourceIndex === layout.middles.indexOf(mid)
+      );
+      const outH = outBands.reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+      expect(outH).toBeCloseTo(mid.h, 6);
     }
     for (const tgt of layout.targets) {
       expect(tgt.fundedValue).toBeCloseTo(tgt.value / 2, 9);
       expect(tgt.unfundedValue).toBeCloseTo(tgt.value / 2, 9);
-      expect(tgt.unfundedH).toBeCloseTo(tgt.h / 2, 6);
+      expect(tgt.unfundedH).toBe(0);
       const inBands = layout.linksRight.filter(
         (l) => l.targetIndex === layout.targets.indexOf(tgt)
       );
       const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
-      expect(inH).toBeCloseTo(tgt.h - tgt.unfundedH, 6);
+      expect(inH).toBeCloseTo(tgt.h, 6);
       expect(inBands[0]!.ty0).toBeCloseTo(tgt.y, 6);
     }
+    // Half coverage on a 372px band over a $10000 flow: bars are exactly
+    // their funded share (2500 → 93px, 1500 → 55.8px, 1000 → 37.2px).
+    const heights = layout.targets.map((t) => t.h);
+    expect(heights).toHaveLength(3);
+    expect(heights[0]).toBeCloseTo(93, 6);
+    expect(heights[1]).toBeCloseTo(55.8, 6);
+    expect(heights[2]).toBeCloseTo(37.2, 6);
     // Right ribbons carry the exact cells at half coverage.
     expect(layout.linksRight.map((l) => l.value)).toEqual([2500, 500, 1000, 1000]);
   });
 
-  it("renders fully-unfunded bars with no ribbons when there is no income", () => {
+  it("floors tiny shortfall bars at the minimum label height with bands filling each bar", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 5000)],
+      [merged("G", 10000)],
+      [merged("A", 9900), merged("B", 100)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9900 },
+        { groupIndex: 0, targetIndex: 1, value: 100 },
+      ],
+      { width: 800, height: 400, minNodeHeight: 24 }
+    );
+    // B's funded flow ($50 of $10000 over a 378px band) is under 2px, so
+    // the minimum lifts it to a legible bar; A keeps its flow height.
+    const [a, b] = [layout.targets[0]!, layout.targets[1]!];
+    expect(b.h).toBe(24);
+    expect(a.h).toBeCloseTo((4950 / 10000) * 378, 6);
+    // Bands still fill each bar exactly — the bar matches its ribbon stack.
+    for (const tgt of layout.targets) {
+      const inH = layout.linksRight
+        .filter((l) => l.targetIndex === layout.targets.indexOf(tgt))
+        .reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      expect(inH).toBeCloseTo(tgt.h, 6);
+      expect(tgt.unfundedH).toBe(0);
+    }
+  });
+
+  it("funds minimums from the largest bars when minimums plus near-full flows overflow", () => {
+    // Near-full coverage (99%) with a long tiny tail: minimums plus flows
+    // exceed the band, so the largest bar gives up height to keep every
+    // row at the label minimum.
+    const targets = [merged("Big", 9100)];
+    for (let i = 0; i < 9; i++) targets.push(merged(`T${i}`, 100));
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 9900)],
+      [merged("G", 10000)],
+      targets,
+      targets.map((t, j) => ({ groupIndex: 0, targetIndex: j, value: t.value })),
+      { width: 800, height: 400, minNodeHeight: 24 }
+    );
+    // Every row keeps the minimum; the tail sits exactly on it.
+    for (const tgt of layout.targets) {
+      expect(tgt.h).toBeGreaterThanOrEqual(24 - 1e-9);
+    }
+    expect(layout.targets.slice(1).every((t) => Math.abs(t.h - 24) < 1e-9)).toBe(true);
+    // The donor shrank below its absolute flow height to fund the minimums.
+    const bandH = 400 - 8 - 8 - 6 * (10 - 1);
+    expect(layout.targets[0]!.h).toBeLessThan(((9100 * 0.99) / 10000) * bandH);
+    // Bands fill each bar exactly and the column still fits the plot.
+    for (const tgt of layout.targets) {
+      const inH = layout.linksRight
+        .filter((l) => l.targetIndex === layout.targets.indexOf(tgt))
+        .reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      expect(inH).toBeCloseTo(tgt.h, 6);
+    }
+    const last = layout.targets[layout.targets.length - 1]!;
+    expect(last.y + last.h).toBeLessThanOrEqual(400 - 8 + 1e-6);
+  });
+
+  it("renders minimum-height bars with no ribbons when there is no income", () => {
     const layout = layoutGroupedIncomeSankey([], gGroups, gTargets, gLinks, {
       width: 800,
       height: 400,
@@ -1790,21 +1993,22 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.sources).toEqual([]);
     expect(layout.linksLeft).toEqual([]);
     expect(layout.linksRight).toEqual([]);
+    // Zero flow renders at the minimum label height (the default 8px here):
+    // uniform bars with no unfunded segment and no ribbons.
     for (const mid of layout.middles) {
       expect(mid.fundedValue).toBe(0);
       expect(mid.unfundedValue).toBe(mid.value);
-      expect(mid.unfundedH).toBeCloseTo(mid.h, 9);
+      expect(mid.unfundedH).toBe(0);
+      expect(mid.h).toBe(8);
+      expect(Number.isFinite(mid.y)).toBe(true);
     }
     for (const tgt of layout.targets) {
       expect(tgt.fundedValue).toBe(0);
       expect(tgt.unfundedValue).toBe(tgt.value);
-      expect(tgt.unfundedH).toBeCloseTo(tgt.h, 9);
+      expect(tgt.unfundedH).toBe(0);
+      expect(tgt.h).toBe(8);
       expect(Number.isFinite(tgt.y)).toBe(true);
-      expect(Number.isFinite(tgt.h)).toBe(true);
     }
-    // Right bars fall back to the middle scale, so heights stay proportional.
-    const [a, b] = [layout.targets[0]!, layout.targets[1]!];
-    expect(a.h / b.h).toBeCloseTo(5000 / 3000, 9);
   });
 
   it("routes all income to a lone Remaining target when there is no spending", () => {

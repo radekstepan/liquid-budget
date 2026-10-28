@@ -439,6 +439,63 @@ export function SankeyBucketHatchPattern({ id }: { id: string }) {
   );
 }
 
+/** One outgoing ribbon band across an income bar: vertical span + ribbon color. */
+export type SankeyHoverBand = { y0: number; y1: number; color: string };
+/** One linear-gradient stop: fractional offset + color. */
+export type SankeyGradientStop = { offset: number; color: string };
+
+/**
+ * Feathered top-to-bottom gradient stops for a hovered Sankey income bar,
+ * built from the colors of the ribbons extending from it: each band keeps
+ * its ribbon's destination color through its span, and adjacent bands melt
+ * into each other across a feathered boundary instead of meeting at a hard
+ * edge. Pure geometry → stops.
+ *
+ * - Band order is the gradient order (top to bottom); zero-height bands
+ *   are skipped.
+ * - Offsets are strictly ascending within [0, 1]: no two stops share an
+ *   offset, so a hard edge can never form.
+ * - A single band (or none, defensively) yields a solid fill.
+ */
+export function sankeyHoverGradientStops(
+  barY0: number,
+  barY1: number,
+  bands: readonly SankeyHoverBand[]
+): SankeyGradientStop[] {
+  const h = barY1 - barY0;
+  const live = bands.filter((b) => b.y1 > b.y0 && h > 0);
+  if (live.length === 0) {
+    return [
+      { offset: 0, color: SANKEY_INCOME_COLOR },
+      { offset: 1, color: SANKEY_INCOME_COLOR },
+    ];
+  }
+  if (live.length === 1) {
+    return [
+      { offset: 0, color: live[0]!.color },
+      { offset: 1, color: live[0]!.color },
+    ];
+  }
+  const frac = (y: number) => (y - barY0) / h;
+  const spans = live.map((b) => ({ o0: frac(b.y0), o1: frac(b.y1), color: b.color }));
+  const minSpan = Math.min(...spans.map((s) => s.o1 - s.o0));
+  // Feather each internal boundary over a fraction of the bar, capped so
+  // adjacent transitions can never meet (which would re-create a hard edge).
+  const f = Math.min(0.12, (minSpan / 2) * 0.9);
+  const clamp01 = (o: number) => Math.min(1, Math.max(0, o));
+  const stops: SankeyGradientStop[] = [{ offset: 0, color: spans[0]!.color }];
+  for (let i = 1; i < spans.length; i++) {
+    const b = spans[i]!.o0;
+    stops.push({ offset: clamp01(b - f), color: spans[i - 1]!.color });
+    stops.push({ offset: clamp01(b + f), color: spans[i]!.color });
+  }
+  stops.push({ offset: 1, color: spans[spans.length - 1]!.color });
+  stops.sort((a, b) => a.offset - b.offset);
+  // Collapse coincident offsets (clamped boundary stops can land on an
+  // endpoint): the first stop wins, so no offset carries two colors.
+  return stops.filter((s, i) => i === 0 || s.offset !== stops[i - 1]!.offset);
+}
+
 // ---------------------------------------------------------------------------
 // Outlier detection (Tukey IQR fence) — ported from the SVG bar-chart outlier
 // playground. Robust: quartiles cannot be distorted by the outlier itself.

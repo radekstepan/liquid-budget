@@ -547,6 +547,113 @@ export function mergeGroupFlow(
 }
 
 /**
+ * Right-column sort mode for the Spending Sankey: by current amount (the
+ * long-standing value-descending order on every column) or by parent
+ * category group (Budget view group order, value-descending within).
+ */
+export type SankeyTargetSort = "amount" | "group";
+
+/**
+ * Reorder a merged group flow for the Sankey's sort control. `"amount"` is
+ * a pass-through (returns the input flow unchanged). `"group"` orders the
+ * middle column by `groupOrder` — the Budget view's group names in
+ * `group.sort` order — and the right column by each target's dominant
+ * (largest-link) parent group in that same order, value-descending within
+ * a group (name, then current position, break ties deterministically).
+ *
+ * - Names missing from `groupOrder` (the Uncategorized pseudo-group, the
+ *   "—" fallback) sort after the known groups, keeping current order.
+ * - The render-only Other buckets stay last on both columns.
+ * - Targets with no incoming link (defensive: well-formed flows never
+ *   produce them) sort after the grouped targets, value-descending.
+ * - Links are remapped onto the new indices and re-sorted by
+ *   (groupIndex, targetIndex); both marginals still hold (a permutation
+ *   moves cells, never values).
+ */
+export function sortMergedGroupFlow(
+  flow: MergedGroupFlow,
+  groupOrder: readonly string[],
+  sort: SankeyTargetSort
+): MergedGroupFlow {
+  if (sort === "amount") return flow;
+  const orderIndex = new Map<string, number>();
+  groupOrder.forEach((name, i) => {
+    if (!orderIndex.has(name)) orderIndex.set(name, i);
+  });
+  const rankOf = (name: string): number => orderIndex.get(name) ?? groupOrder.length;
+
+  const groupPerm = flow.groups
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ga = flow.groups[a]!;
+      const gb = flow.groups[b]!;
+      const ba = ga.bucket === true ? 1 : 0;
+      const bb = gb.bucket === true ? 1 : 0;
+      if (ba !== bb) return ba - bb;
+      const ra = rankOf(ga.name);
+      const rb = rankOf(gb.name);
+      if (ra !== rb) return ra - rb;
+      return a - b;
+    });
+
+  // Dominant parent per target (largest incoming link wins; ties keep the
+  // first link in input order so the result is deterministic).
+  const dominant = new Array<number>(flow.targets.length).fill(-1);
+  const best = new Array<number>(flow.targets.length).fill(0);
+  for (const l of flow.links) {
+    if (l.targetIndex < 0 || l.targetIndex >= flow.targets.length) continue;
+    if (l.groupIndex < 0 || l.groupIndex >= flow.groups.length) continue;
+    if (!(l.value > 0)) continue;
+    if (dominant[l.targetIndex] === -1 || l.value > (best[l.targetIndex] ?? 0)) {
+      dominant[l.targetIndex] = l.groupIndex;
+      best[l.targetIndex] = l.value;
+    }
+  }
+
+  const targetPerm = flow.targets
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ta = flow.targets[a]!;
+      const tb = flow.targets[b]!;
+      const ba = ta.bucket === true ? 1 : 0;
+      const bb = tb.bucket === true ? 1 : 0;
+      if (ba !== bb) return ba - bb;
+      const da = dominant[a] ?? -1;
+      const db = dominant[b] ?? -1;
+      const la = da < 0 ? 1 : 0;
+      const lb = db < 0 ? 1 : 0;
+      if (la !== lb) return la - lb;
+      if (da >= 0 && db >= 0) {
+        const ra = rankOf(flow.groups[da]?.name ?? "");
+        const rb = rankOf(flow.groups[db]?.name ?? "");
+        if (ra !== rb) return ra - rb;
+      }
+      if (ta.value !== tb.value) return tb.value - ta.value;
+      if (ta.name !== tb.name) return ta.name < tb.name ? -1 : 1;
+      return a - b;
+    });
+
+  const gRemap = new Map(groupPerm.map((old, next) => [old, next]));
+  const tRemap = new Map(targetPerm.map((old, next) => [old, next]));
+  const links = flow.links
+    .map((l) => ({
+      groupIndex: gRemap.get(l.groupIndex) ?? -1,
+      targetIndex: tRemap.get(l.targetIndex) ?? -1,
+      value: l.value,
+    }))
+    .filter((l) => l.groupIndex >= 0 && l.targetIndex >= 0)
+    .sort((a, b) => a.groupIndex - b.groupIndex || a.targetIndex - b.targetIndex);
+
+  return {
+    groups: groupPerm.map((i) => flow.groups[i]!),
+    targets: targetPerm.map((i) => flow.targets[i]!),
+    links,
+    otherCount: flow.otherCount,
+    otherValue: flow.otherValue,
+  };
+}
+
+/**
  * Canonical "Under" threshold stops in whole dollars. The slider walks these
  * positions (0 = off) instead of raw dollars, so the first steps merge in
  * small increments ($10, $25, $50…) where rows are dense and later steps
@@ -809,6 +916,40 @@ function resolveNodeHeights(values: number[], bandH: number, minNodeHeight: numb
   return heights;
 }
 
+/**
+ * Resolve per-node pixel heights for a column whose bars wrap their FLOW
+ * (funded) values on an absolute scale: each bar is its share
+ * `flowValues[i] / scaleTotal` of `bandH`, floored at the minimum label
+ * height so tiny flows stay legible — the bar matches its ribbon stack
+ * unless the floor lifts it. When income covers spending the flows sum to
+ * the scale total and this agrees with resolveNodeHeights exactly; under a
+ * shortfall the column only fills its funded share of the band, leaving
+ * honest empty space instead of padding bars with an unfunded segment.
+ *
+ * When minimums plus near-full flows would overflow the band (a long tiny
+ * tail near full coverage), falls back to resolveNodeHeights, which funds
+ * the minimums by stealing from the largest nodes first: labels keep their
+ * pitch, and bands still fill each bar exactly because they derive from
+ * these heights. The result always fits `bandH` and never contains NaN.
+ */
+function resolveFlowHeights(
+  flowValues: number[],
+  scaleTotal: number,
+  bandH: number,
+  minNodeHeight: number
+): number[] {
+  const n = flowValues.length;
+  if (n === 0 || bandH <= 0) return flowValues.map(() => 0);
+  const minH = Math.min(minNodeHeight, bandH / n);
+  const absolute =
+    scaleTotal > 0
+      ? flowValues.map((v) => (v / scaleTotal) * bandH)
+      : flowValues.map(() => 0);
+  const floored = absolute.map((h) => Math.max(h, minH));
+  if (floored.reduce((s, h) => s + h, 0) <= bandH) return floored;
+  return resolveNodeHeights(flowValues, bandH, minNodeHeight);
+}
+
 /** Closed bezier ribbon path from the source band to the target band. */
 function ribbonPath(
   x0: number,
@@ -933,7 +1074,12 @@ export type DirectSankeyTargetNode = SankeyNodeLayout & {
   fundedValue: number;
   /** Unfunded cents (0 unless spending exceeds income). */
   unfundedValue: number;
-  /** Height of the unfunded segment at the node's bottom edge (px). */
+  /**
+   * Height of the unfunded segment at the node's bottom edge (px). Always
+   * 0 in the grouped layout, whose bars wrap their funded flow (the
+   * shortfall shows in tooltips and the header only); the legacy direct
+   * layout still reserves the segment.
+   */
   unfundedH: number;
 };
 
@@ -1243,19 +1389,25 @@ export type GroupedIncomeSankeyLayout = {
  *
  * Geometry contract (covered by unit tests):
  * - The right column owns the pixel scale (targets plus Remaining always
- *   sum to flowTotal): right bars resolve via resolveNodeHeights, so the
- *   long tail of small spending rows keeps the minimum label pitch.
- * - Right ribbon heights subdivide each target bar's funded region in
- *   proportion to their values; Remaining bands subdivide the Remaining
- *   bar's (fully funded) region. Each middle→target cell draws as ONE
- *   ribbon carrying the full cell value — no per-income subdivision, so no
- *   split lines inside a cell. Every ribbon has equal height at both ends
- *   (no taper): bands within a target run in middle order (source order
- *   for the Remaining plug), bands within a middle run in target order on
- *   the way out and in source order on the way in.
- * - Middle bars wrap their outgoing bands plus an unfunded segment at the
- *   bottom (top-aligned funded region, like the right column); with no
- *   income there are no ribbons and every bar is fully unfunded.
+ *   sum to flowTotal): right bars wrap their funded flow on that absolute
+ *   scale (resolveFlowHeights), floored at the minimum label height, so a
+ *   bar matches its ribbon stack and the long tail of small spending rows
+ *   keeps the minimum label pitch. Under a shortfall the column only
+ *   fills its funded share of the plot.
+ * - Right ribbon heights subdivide each target bar in proportion to their
+ *   values; Remaining bands subdivide the Remaining bar. Each
+ *   middle→target cell draws as ONE ribbon carrying the full cell value —
+ *   no per-income subdivision, so no split lines inside a cell. Every
+ *   ribbon has equal height at both ends (no taper): bands within a
+ *   target run in middle order (source order for the Remaining plug),
+ *   bands within a middle run in target order on the way out and in
+ *   source order on the way in.
+ * - Middle bars wrap their outgoing bands, water-filled to the minimum
+ *   label height from leftover plot space (never overflowing it); with no
+ *   income there are no ribbons and every bar renders at the minimum.
+ * - There is no unfunded segment in the geometry (unfundedH is always 0):
+ *   the shortfall shows in tooltips and the header only. fundedValue and
+ *   unfundedValue still report the funded/unfunded split in cents.
  * - Source bars wrap their outgoing bands exactly (group ribbons plus any
  *   full-width Remaining ribbons), water-filled up to the minimum node
  *   height from leftover plot space (never overflowing it).
@@ -1370,11 +1522,10 @@ export function layoutGroupedIncomeSankey(
   const bandH = Math.max(0, availH - gap * (nMax - 1));
 
   // Right owns the scale; targets plus Remaining always sum to flowTotal.
-  const rightH = resolveNodeHeights(
-    rightItems.map((t) => t.value),
-    bandH,
-    minNodeHeight
-  );
+  // Bars wrap their funded flow on that absolute scale (floored at the
+  // minimum label height), so a bar matches its ribbon stack instead of
+  // padding out to its full value with an unfunded segment.
+  const rightH = resolveFlowHeights(rightFunded, flowTotal, bandH, minNodeHeight);
 
   // Right hop values: exact rollup cells at the uniform coverage ratio.
   // Sorted by (middle, target) so bands run in target order within a
@@ -1405,54 +1556,55 @@ export function layoutGroupedIncomeSankey(
     tgtIn[l.targetIndex]?.push(k);
   });
 
-  // Ribbon pixel heights derive from the right bars so bands exactly fill
-  // each bar's funded region.
+  // Ribbon pixel heights derive from the bars so bands exactly fill each
+  // bar: the whole bar is the funded region now (bars wrap their flow), so
+  // there is no unfunded segment in the geometry — the shortfall shows in
+  // tooltips and the header only.
   const linkRH = new Array<number>(rightVals.length).fill(0);
   const linkLH = new Array<number>(left.links.length).fill(0);
-  const rightUnfundedH: number[] = rightItems.map((t, j) => {
+  const rightUnfundedH: number[] = rightItems.map((_t, j) => {
     const nodeH = rightH[j] ?? 0;
-    const fundedPx = t.value > 0 ? nodeH * ((rightFunded[j] ?? 0) / t.value) : 0;
     const fj = rightFunded[j] ?? 0;
     if (fj > 0) {
       if (remainingTargetIndex === j) {
         for (const k of remIn) {
-          linkLH[k] = fundedPx * ((left.links[k]?.value ?? 0) / fj);
+          linkLH[k] = nodeH * ((left.links[k]?.value ?? 0) / fj);
         }
       } else {
         for (const k of tgtIn[j] ?? []) {
-          linkRH[k] = fundedPx * ((rightVals[k]?.value ?? 0) / fj);
+          linkRH[k] = nodeH * ((rightVals[k]?.value ?? 0) / fj);
         }
       }
     }
-    return Math.max(0, nodeH - fundedPx);
+    return 0;
   });
 
-  // Middle bars wrap their outgoing bands plus the unfunded segment below
-  // (funded/total share of the bar, like the right column). With no income
-  // there are no bands, so bars fall back to the right scale.
-  const totalRightH = rightH.reduce((s, h) => s + h, 0);
-  const rightScale = totalRightH / flowTotal;
+  // Middle bars wrap their outgoing (funded) bands, water-filled to the
+  // minimum label height from leftover plot space — the same pattern as the
+  // left column — so a bar never exceeds its flow except to stay legible.
+  // With no income there are no bands and every bar renders at the
+  // (fitting) minimum.
   const outStack = grpItems.map((_, i) =>
     (midOut[i] ?? []).reduce((s, k) => s + (linkRH[k] ?? 0), 0)
   );
-  const midH = grpItems.map((g, i) =>
-    coverage > 0 ? (outStack[i] ?? 0) / coverage : rightScale * g.value
-  );
+  const totalOut = outStack.reduce((s, b) => s + b, 0);
+  const gapsMid = gap * Math.max(0, nM - 1);
+  const midMinH = nM > 0 ? Math.min(minNodeHeight, (availH - gapsMid) / nM) : 0;
+  const midTiny = outStack.filter((b) => b < midMinH).length;
+  const midExtra = Math.max(0, availH - gapsMid - totalOut);
+  const midEffMin = midTiny > 0 ? Math.min(midMinH, midExtra / midTiny) : midMinH;
+  const midH = outStack.map((b) => Math.max(b, midEffMin));
   const midFunded = grpItems.map((g) => g.value * coverage);
-  const midUnfundedH = grpItems.map((_, i) =>
-    Math.max(0, (midH[i] ?? 0) - (outStack[i] ?? 0))
-  );
+  const midUnfundedH = grpItems.map(() => 0);
 
-  // Left group-ribbon heights subdivide each middle bar's funded region in
-  // proportion to their values (Remaining bands were sized from the right).
+  // Left group-ribbon heights subdivide each middle bar in proportion to
+  // their values (Remaining bands were sized from the right).
   for (let i = 0; i < grpItems.length; i++) {
     const nodeH = midH[i] ?? 0;
-    const g = grpItems[i]!;
-    const fundedPx = g.value > 0 ? nodeH * ((midFunded[i] ?? 0) / g.value) : 0;
     const fj = midFunded[i] ?? 0;
     if (fj > 0) {
       for (const k of midIn[i] ?? []) {
-        linkLH[k] = fundedPx * ((left.links[k]?.value ?? 0) / fj);
+        linkLH[k] = nodeH * ((left.links[k]?.value ?? 0) / fj);
       }
     }
   }

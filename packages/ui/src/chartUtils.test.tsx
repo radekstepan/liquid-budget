@@ -10,7 +10,9 @@ import {
   quantile,
   REMAINING_COLOR,
   sankeyFamilyShade,
+  sankeyHoverGradientStops,
   sankeyTargetColors,
+  SANKEY_INCOME_COLOR,
   shade,
   useElementSize,
 } from "./chartUtils.js";
@@ -253,5 +255,66 @@ describe("useElementSize", () => {
     });
     expect(renders).toBe(settledRenders + 1);
     expect(container.firstElementChild!.getAttribute("data-w")).toBe("1024");
+  });
+});
+
+describe("sankeyHoverGradientStops", () => {
+  it("stacks band colors top-to-bottom with feathered, strictly ascending offsets", () => {
+    const stops = sankeyHoverGradientStops(100, 300, [
+      { y0: 100, y1: 160, color: "#aaaaaa" },
+      { y0: 160, y1: 240, color: "#bbbbbb" },
+      { y0: 240, y1: 300, color: "#cccccc" },
+    ]);
+    // Opens with the first band's color at 0, closes with the last at 1.
+    expect(stops[0]).toEqual({ offset: 0, color: "#aaaaaa" });
+    expect(stops[stops.length - 1]).toEqual({ offset: 1, color: "#cccccc" });
+    // Strictly ascending within [0, 1]: no two stops share an offset, so
+    // no hard edge can form.
+    for (let i = 1; i < stops.length; i++) {
+      expect(stops[i]!.offset).toBeGreaterThan(stops[i - 1]!.offset);
+      expect(stops[i]!.offset).toBeLessThanOrEqual(1);
+      expect(stops[i]!.offset).toBeGreaterThanOrEqual(0);
+    }
+    // The 0.7 boundary feathers across itself: the upper color extends
+    // just past it, the lower color starts just before it.
+    const around = stops.filter((s) => s.offset > 0.5 && s.offset < 0.9);
+    expect(around).toEqual([
+      { offset: 0.7 - 0.12, color: "#bbbbbb" },
+      { offset: 0.7 + 0.12, color: "#cccccc" },
+    ]);
+  });
+
+  it("keeps every band's color in order without collapsing neighbors", () => {
+    const stops = sankeyHoverGradientStops(0, 100, [
+      { y0: 0, y1: 50, color: "#111111" },
+      { y0: 50, y1: 100, color: "#222222" },
+    ]);
+    expect(stops.map((s) => s.color)).toEqual(["#111111", "#111111", "#222222", "#222222"]);
+    expect(stops.map((s) => s.offset)).toEqual([0, 0.5 - 0.12, 0.5 + 0.12, 1]);
+  });
+
+  it("renders a solid fill for a single band and skips zero-height bands", () => {
+    expect(
+      sankeyHoverGradientStops(0, 100, [{ y0: 0, y1: 100, color: "#123456" }])
+    ).toEqual([
+      { offset: 0, color: "#123456" },
+      { offset: 1, color: "#123456" },
+    ]);
+    // The zero-height band drops out, leaving its neighbors to feather.
+    const stops = sankeyHoverGradientStops(0, 100, [
+      { y0: 0, y1: 50, color: "#111111" },
+      { y0: 50, y1: 50, color: "#999999" },
+      { y0: 50, y1: 100, color: "#222222" },
+    ]);
+    expect(stops.every((s) => s.color !== "#999999")).toBe(true);
+    expect(stops[0]).toEqual({ offset: 0, color: "#111111" });
+    expect(stops[stops.length - 1]).toEqual({ offset: 1, color: "#222222" });
+  });
+
+  it("falls back to the neutral income gray with no bands", () => {
+    expect(sankeyHoverGradientStops(0, 100, [])).toEqual([
+      { offset: 0, color: SANKEY_INCOME_COLOR },
+      { offset: 1, color: SANKEY_INCOME_COLOR },
+    ]);
   });
 });

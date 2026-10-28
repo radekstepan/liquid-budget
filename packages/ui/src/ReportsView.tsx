@@ -149,6 +149,13 @@ export const ReportsView = memo(function ReportsView({
     [data, actualStart, actualEnd]
   );
 
+  // Budget view group order (by group.sort, like the Budget view itself) —
+  // the Spending Sankey's "Group" sort mode orders its columns by this.
+  const groupOrder = useMemo(
+    () => [...data.groups].sort((a, b) => a.sort - b.sort).map((g) => g.name),
+    [data.groups]
+  );
+
   const netWorthData: NetWorthPoint[] = useMemo(() => {
     return computeNetWorthReport(data, actualStart, actualEnd);
   }, [data, actualStart, actualEnd]);
@@ -258,6 +265,7 @@ export const ReportsView = memo(function ReportsView({
               categoryFlow={categoryFlow}
               merchantFlow={merchantFlow}
               income={incomeItems}
+              groupOrder={groupOrder}
             />
           </div>
         )}

@@ -12,6 +12,7 @@ import {
   sankeyThresholdStep,
   sankeyThresholdStops,
   showSankeySourceAmount,
+  sortMergedGroupFlow,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -20,6 +21,7 @@ import {
   SANKEY_SOURCE_GUTTER,
   UNCATEGORIZED_GROUP_LABEL,
   type MergedSpendingItem,
+  type SankeyTargetSort,
   type SpendingBreakdownItem,
   type SpendingDimension,
   type SpendingGroupFlow,
@@ -28,6 +30,7 @@ import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   ChartTip,
   colorForName,
+  sankeyHoverGradientStops,
   sankeyTargetColors,
   SankeyBucketHatchPattern,
   SANKEY_INCOME_COLOR,
@@ -87,6 +90,16 @@ export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 export const SANKEY_BUCKET_DASH = "4 2";
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
+// Hovered category/merchant bars keep their thin neutral stroke and gain a
+// soft halo in their own fill color (this opacity) — never a black border.
+export const SANKEY_NODE_HOVER_STROKE_OPACITY = 0.55;
+
+// Hovered income bars keep their thin neutral stroke and gain a translucent
+// overlay (this opacity) filled with a feathered top-to-bottom gradient
+// built from their outgoing ribbons' destination colors — never a border.
+export const SANKEY_INCOME_HOVER_GRADIENT_ID = "sankey-income-hover-gradient";
+export const SANKEY_INCOME_HOVER_OPACITY = 0.65;
+
 // Session flag for the Under auto-fit: it runs at most once per tab session —
 // on the first Sankey paint with a measured container — and never again after
 // the user drags the slider themselves. Report tab switches remount this
@@ -119,12 +132,16 @@ export function SpendingReport({
   categoryFlow,
   merchantFlow,
   income,
+  // Budget view group names in Budget order (group.sort) — the "Group"
+  // sort mode orders the Sankey's middle and right columns by this.
+  groupOrder = [],
   initialView = "sankey",
   initialDimension = "categories",
 }: {
   categoryFlow: SpendingGroupFlow;
   merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
+  groupOrder?: readonly string[];
   initialView?: SpendingViewMode;
   initialDimension?: SpendingDimension;
 }) {
@@ -142,6 +159,13 @@ export function SpendingReport({
     "ynab:reports:spendingThreshold",
     0,
     (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0
+  );
+  // Sankey-only column order: by current amount, or by parent group in
+  // Budget view order. Bars always stay by amount.
+  const [sort, setSort] = useLocalStorage<SankeyTargetSort>(
+    "ynab:reports:spendingSort",
+    "amount",
+    (v): v is SankeyTargetSort => v === "amount" || v === "group"
   );
   const [hover, setHover] = useState<Hover | null>(null);
   // Mousemove fires far more often than the display refreshes; coalescing
@@ -177,6 +201,12 @@ export function SpendingReport({
   const mergedIncome = useMemo(
     () => mergeBelowThreshold(income, Math.round(activeThreshold * 100)),
     [income, activeThreshold]
+  );
+  // Column order for the Sankey layout (a permutation — sums and marginals
+  // are untouched, so the header totals and Bars rows read `merged`).
+  const ordered = useMemo(
+    () => sortMergedGroupFlow(merged, groupOrder, sort),
+    [merged, groupOrder, sort]
   );
   // The header "(N in Other)" note covers all three merged columns.
   const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
@@ -248,7 +278,7 @@ export function SpendingReport({
 
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
-    return layoutGroupedIncomeSankey(incomeRows, merged.groups, merged.targets, merged.links, {
+    return layoutGroupedIncomeSankey(incomeRows, ordered.groups, ordered.targets, ordered.links, {
       width: chartSize.width,
       height: contentH,
       padLeft: SANKEY_SOURCE_GUTTER,
@@ -258,7 +288,7 @@ export function SpendingReport({
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
     });
-  }, [incomeRows, merged.groups, merged.targets, merged.links, chartSize.width, chartSize.height, contentH]);
+  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH]);
 
   // Initial-load auto-fit: raise the Under threshold to the smallest stop
   // whose merged columns fit the measured container, so the Sankey shows
@@ -370,6 +400,37 @@ export function SpendingReport({
       i,
     }));
   }, [sankey, totals.flowTotal]);
+
+  // Flat destination color of a left-hop ribbon: its middle group's color —
+  // except the full-width surplus ribbons, which carry the Remaining plug's
+  // green straight through to the right. Shared by the ribbon fills and the
+  // income hover gradient so the bar melts into exactly its ribbons' colors.
+  const leftFillFor = (targetIndex: number, targetName: string): string => {
+    const plugTarget = sankey?.remainingTargetIndex;
+    return targetIndex >= midRows.length && plugTarget != null
+      ? (tgtRows[plugTarget]?.color ?? colorForName(targetName))
+      : (midRows[targetIndex]?.color ?? colorForName(targetName));
+  };
+
+  // Hovered income bar (directly, or as a left ribbon's endpoint): its
+  // overlay gradient stacks its outgoing ribbons' destination colors
+  // top-to-bottom with feathered boundaries — no hard edges, no border.
+  const hoverIncomeIdx =
+    hover != null && hover.kind === "income"
+      ? hover.idx
+      : hover != null && hover.kind === "link" && hover.side === "left"
+        ? hover.a
+        : null;
+  const incomeHoverStops = useMemo(() => {
+    if (hoverIncomeIdx == null || sankey == null) return [];
+    const bar = sankey.sources[hoverIncomeIdx];
+    if (bar == null) return [];
+    const bands = sankey.linksLeft
+      .filter((l) => l.sourceIndex === hoverIncomeIdx)
+      .map((l) => ({ y0: l.sy0, y1: l.sy1, color: leftFillFor(l.targetIndex, l.targetName) }));
+    return sankeyHoverGradientStops(bar.y, bar.y + bar.h, bands);
+    // leftFillFor closes over the layout-derived rows, hence their deps.
+  }, [hoverIncomeIdx, sankey, midRows, tgtRows]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -978,6 +1039,39 @@ export function SpendingReport({
               </Tooltip>
             </div>
           </div>
+          {viewMode === "sankey" && (
+            <div className="flex items-center gap-1.5">
+              <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>Sort</span>
+              <div className="y-seg">
+                <Tooltip tip={`Sort ${nounPlural} by current amount`}>
+                  <Button
+                    size="sm"
+                    variant={sort === "amount" ? "primary" : "default"}
+                    active={sort === "amount"}
+                    onClick={() => {
+                      setSort("amount");
+                      setHover(null);
+                    }}
+                  >
+                    Amount
+                  </Button>
+                </Tooltip>
+                <Tooltip tip={`Sort ${nounPlural} by parent group, in Budget view order`}>
+                  <Button
+                    size="sm"
+                    variant={sort === "group" ? "primary" : "default"}
+                    active={sort === "group"}
+                    onClick={() => {
+                      setSort("group");
+                      setHover(null);
+                    }}
+                  >
+                    Group
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <Tooltip
               tip={
@@ -1164,6 +1258,19 @@ export function SpendingReport({
             >
               <defs>
                 <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
+                {hoverIncomeIdx != null && incomeHoverStops.length > 0 && (
+                  <linearGradient
+                    id={SANKEY_INCOME_HOVER_GRADIENT_ID}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    {incomeHoverStops.map((s, k) => (
+                      <stop key={k} offset={s.offset} stopColor={s.color} />
+                    ))}
+                  </linearGradient>
+                )}
               </defs>
               {/* Column headers: each column names what it holds, so the
                   chart reads without prior knowledge (left is income
@@ -1202,16 +1309,9 @@ export function SpendingReport({
                   )
               )}
               {orderedLinksLeft.map((link) => {
-                // Flat destination color through the whole length: left-hop
-                // ribbons take their middle group's color — except the
-                // full-width surplus ribbons, which take the Remaining
-                // plug's green straight through to the right. The income
-                // side never colors a ribbon.
-                const plugTarget = sankey.remainingTargetIndex;
-                const fill =
-                  link.targetIndex >= midRows.length && plugTarget != null
-                    ? (tgtRows[plugTarget]?.color ?? colorForName(link.targetName))
-                    : (midRows[link.targetIndex]?.color ?? colorForName(link.targetName));
+                // Flat destination color through the whole length (see
+                // leftFillFor): the income side never colors a ribbon.
+                const fill = leftFillFor(link.targetIndex, link.targetName);
                 const lit = leftLit(link.sourceIndex, link.targetIndex);
                 return (
                   <path
@@ -1274,7 +1374,9 @@ export function SpendingReport({
                 const r = srcRows[idx]!;
                 // One neutral gray for every income bar: no series colors on
                 // the left. The merged Other bucket adds the render-only
-                // dashed border plus hatch.
+                // dashed border plus hatch. Hovering never adds a border —
+                // the bar gains a translucent gradient overlay built from its
+                // outgoing ribbons' colors instead.
                 const color = r.color;
                 const isBucket = r.bucket === true;
                 const isHover = isSrcHover(idx);
@@ -1294,8 +1396,8 @@ export function SpendingReport({
                       rx={2}
                       fill={color}
                       fillOpacity={dim ? 0.35 : 1}
-                      stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
-                      strokeWidth={isHover ? 2 : 1}
+                      stroke="rgba(0,0,0,0.15)"
+                      strokeWidth={1}
                       strokeDasharray={isBucket ? SANKEY_BUCKET_DASH : undefined}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
@@ -1303,6 +1405,19 @@ export function SpendingReport({
                       }
                       onMouseLeave={() => setHover(null)}
                     />
+                    {isHover && incomeHoverStops.length > 0 && (
+                      <rect
+                        data-testid="sankey-income-hover"
+                        x={node.x}
+                        y={node.y}
+                        width={node.w}
+                        height={Math.max(0, node.h)}
+                        rx={2}
+                        fill={`url(#${SANKEY_INCOME_HOVER_GRADIENT_ID})`}
+                        fillOpacity={SANKEY_INCOME_HOVER_OPACITY}
+                        pointerEvents="none"
+                      />
+                    )}
                     {isBucket && (
                       <rect
                         data-testid="sankey-bucket-hatch"
@@ -1358,19 +1473,26 @@ export function SpendingReport({
                 const r = midRows[idx]!;
                 const color = r.color;
                 const isBucket = r.bucket === true;
+                // Parent groups join the flow-path spotlight at the ribbons'
+                // own brightness steps: rest opacity at rest, bright when the
+                // hovered path runs through them, dimmed otherwise.
+                const lit = hl.mid != null && hl.mid.has(idx);
                 const dim = hl.mid != null && !hl.mid.has(idx);
+                const barOpacity = hl.mid == null
+                  ? SANKEY_RIBBON_OPACITY
+                  : lit
+                    ? SANKEY_RIBBON_HOVER_OPACITY
+                    : SANKEY_RIBBON_DIM_OPACITY;
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`mid-${node.name}-${idx}`}>
                     {/* Parent groups read as one color with their ribbons:
-                        the same fill at the same rest opacity, always — no
-                        brighter highlight variant, no dimming. Hovering one
-                        spotlights its ribbons instead; only the labels dim
-                        to trace the path. The merged Other bucket adds the
-                        render-only dashed border plus hatch. The bar's full
-                        height is the group's value; when spending exceeds
-                        income the gap shows in the tooltip, not as a grey
-                        segment. */}
+                        the same fill at the same rest opacity — and the same
+                        bright color while the hovered path runs through them.
+                        The merged Other bucket adds the render-only dashed
+                        border plus hatch. The bar wraps the group's funded
+                        flow; when spending exceeds income the gap shows in
+                        the tooltip, not as a grey segment. */}
                     <rect
                       data-testid="sankey-group"
                       x={node.x}
@@ -1379,7 +1501,7 @@ export function SpendingReport({
                       height={Math.max(0, node.h)}
                       rx={2}
                       fill={color}
-                      fillOpacity={SANKEY_RIBBON_OPACITY}
+                      fillOpacity={barOpacity}
                       stroke={isBucket ? "rgba(0,0,0,0.35)" : "none"}
                       strokeWidth={isBucket ? 1 : undefined}
                       strokeDasharray={isBucket ? SANKEY_BUCKET_DASH : undefined}
@@ -1398,7 +1520,7 @@ export function SpendingReport({
                         height={Math.max(0, node.h)}
                         rx={2}
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
-                        fillOpacity={SANKEY_RIBBON_OPACITY}
+                        fillOpacity={barOpacity}
                         pointerEvents="none"
                       />
                     )}
@@ -1451,9 +1573,10 @@ export function SpendingReport({
                 // from an income to this bar reads as one color throughout.
                 // Render-only rows — the merged Other bucket and the
                 // Remaining surplus plug — add the dashed border plus hatch.
-                // The bar's full height is the row's value; when spending
-                // exceeds income the gap shows in the tooltip, not as a grey
-                // segment.
+                // Hovering adds a soft halo in the bar's own color, never a
+                // black border. The bar wraps the row's funded flow; when
+                // spending exceeds income the gap shows in the tooltip, not
+                // as a grey segment.
                 const color = r.color;
                 const isComputed = r.bucket === true || r.isPlug;
                 const isHover = isTgtHover(idx);
@@ -1470,7 +1593,8 @@ export function SpendingReport({
                       rx={2}
                       fill={color}
                       fillOpacity={dim ? 0.35 : 1}
-                      stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
+                      stroke={isHover ? color : "rgba(0,0,0,0.15)"}
+                      strokeOpacity={isHover ? SANKEY_NODE_HOVER_STROKE_OPACITY : 1}
                       strokeWidth={isHover ? 2 : 1}
                       strokeDasharray={isComputed ? SANKEY_BUCKET_DASH : undefined}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}

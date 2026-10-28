@@ -53,6 +53,7 @@ yarn e2e:install  # install browser binaries (first-time setup)
 - **No parallelism in web unit tests** (`fileParallelism: false`) and **serial E2E** (`workers: 1`): suites mutate a shared DB, so parallel runs race and corrupt absolute-value assertions.
 - **E2E never touches the dev DB**: it runs with `DATABASE_URL=../../budget.test.db` on port 3100; unit tests use `DATABASE_URL=:memory:`. The dev `budget.db` on port 3000 is only for manual development.
 - **Always run E2E via root `yarn e2e`**: Playwright's `reuseExistingServer` silently reuses a stale server on port 3100 (stale bundle, dirty DB handle); `e2e:clean` kills it first.
+- **Never trust a gate's exit code through a pipe**: `yarn test | tail` reports `tail`'s exit code, so a red suite looks green — redirect to a file (`yarn e2e > /tmp/e2e.log 2>&1; echo $?`) and inspect the log instead. This masked a failing `yarn e2e` as exit 0 during task-21.
 - **`/api/reset` needs `RESET_ENABLED=true`** (set by the Playwright `webServer` command); without it the route returns 403 and the E2E `global-setup`/import specs fail.
 - **Sidebar e2e clicks must target the account name** (`span.truncate`), not the row center — the "new" badge pill is a nested clickable that intercepts center clicks and applies the Is:New filter instead of toggling selection.
 - **Never assert absolute rename-candidate counts after a page load** — page-load auto-post materializes overdue scheduled rows into the rename pool, so ambient scheduled payees join freshly imported ones.
