@@ -83,7 +83,11 @@ function truncateName(name: string, max = 26): string {
 // everything outside the path dims to SANKEY_RIBBON_DIM_OPACITY, kept
 // far below rest so the off-path wash stays clearly dimmer. Bars share
 // their ribbons' exact fill at the same steps, so the line into a bar
-// always matches the bar.
+// always matches the bar. No CSS transition on these opacities: the
+// spotlight z-reorder paints instantly (DOM order is not transitionable),
+// so a fading opacity would show final z-order with pre-transition
+// brightness — the hovered bar flashing lighter than its own ribbons.
+// Instant changes keep the whole spotlight atomic in the first frame.
 export const SANKEY_RIBBON_OPACITY = 0.75;
 export const SANKEY_RIBBON_DIM_OPACITY = 0.12;
 export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
@@ -1165,7 +1169,7 @@ export function SpendingReport({
                     fill={fill}
                     fillOpacity={ribbonOpacity(lit, hl.ll != null)}
                     stroke="none"
-                    style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                    style={{ cursor: "pointer" }}
                     onMouseMove={(e) =>
                       pushHover({
                         kind: "link",
@@ -1198,7 +1202,7 @@ export function SpendingReport({
                     fill={fill}
                     fillOpacity={ribbonOpacity(lit, hl.rl != null)}
                     stroke="none"
-                    style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                    style={{ cursor: "pointer" }}
                     onMouseMove={(e) =>
                       pushHover({
                         kind: "link",
@@ -1243,7 +1247,7 @@ export function SpendingReport({
                       fill={`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx})`}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                      style={{ cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                       }
@@ -1332,7 +1336,7 @@ export function SpendingReport({
                       fill={color}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                      style={{ cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
@@ -1430,7 +1434,7 @@ export function SpendingReport({
                       fill={color}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
+                      style={{ cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }

@@ -782,6 +782,45 @@ describe("SpendingReport", () => {
     expect(groups[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
+  it("lands the group spotlight with no transition so the bar matches its ribbons from the first frame", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // The spotlight z-reorder paints instantly (DOM order is not
+    // transitionable), so any opacity transition would show final z-order
+    // with pre-transition brightness — the hovered bar flashing lighter
+    // than its own ribbons. No element on the spotlight path may carry a
+    // fill-opacity transition: the whole spotlight lands atomically.
+    const spotlighted = Array.from(
+      svg.querySelectorAll(
+        '[data-testid="sankey-link"], [data-testid="sankey-group"], [data-testid="sankey-node"], [data-testid="sankey-income"]'
+      )
+    );
+    expect(spotlighted.length).toBeGreaterThan(0);
+    for (const el of spotlighted) {
+      expect(el.getAttribute("style") ?? "").not.toMatch(/fill-opacity/);
+    }
+    const group = svg.querySelectorAll('[data-testid="sankey-group"]')[0]!;
+    fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
+    // Same commit, same brightness: the bar and every ribbon on its path
+    // share the hover step, and the left-hop ribbons share the bar's exact
+    // fill (right-hop ribbons carry their target's family shade by design).
+    const barFill = group.getAttribute("fill");
+    expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    const lit = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]')).filter(
+      (l) => l.getAttribute("fill-opacity") === String(SANKEY_RIBBON_HOVER_OPACITY)
+    );
+    expect(lit.length).toBeGreaterThan(0);
+    for (const l of lit) {
+      expect(l.getAttribute("style") ?? "").not.toMatch(/fill-opacity/);
+    }
+    const leftLit = lit.filter((l) => l.getAttribute("data-side") === "left");
+    expect(leftLit.length).toBeGreaterThan(0);
+    for (const l of leftLit) {
+      expect(l.getAttribute("fill")).toBe(barFill);
+    }
+    fireEvent.mouseLeave(group);
+  });
+
   it("shows the proportional flow when hovering the full-width Remaining ribbon", () => {
     const { container } = renderReport();
     // The plug ribbon trails the left ribbons: [Payroll→Bills,
