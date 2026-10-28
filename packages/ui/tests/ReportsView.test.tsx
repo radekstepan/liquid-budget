@@ -556,7 +556,11 @@ describe("ReportsView", () => {
     expect(screen.queryByText("2031")).not.toBeInTheDocument();
   });
 
-  it("includes categorized transfers in spending", () => {
+  it("flows boundary transfers through instead of counting contributions as spending", () => {
+    // This used to assert a Chequing→RRSP contribution shows as Retirement
+    // spending — that expectation encoded the bug (task-26): with
+    // flow-through attribution the contribution is movement into an
+    // intermediate pool, and the downstream purchase is the one record.
     const data: BudgetData = {
       ...makeData(),
       accounts: [
@@ -565,10 +569,21 @@ describe("ReportsView", () => {
       ],
       categories: [
         { id: 20, groupId: 1, name: "Retirement", sort: 0, carryover: "0", goalTarget: null, linkedAccountId: null },
+        { id: 21, groupId: 1, name: "Vacation", sort: 1, carryover: "0", goalTarget: null, linkedAccountId: null },
       ],
       transactions: [
         {
           id: 1,
+          accountId: 1,
+          categoryId: null,
+          date: "2026-06-01",
+          payee: "Payroll",
+          memo: "",
+          amount: "300000",
+          status: "c",
+        },
+        {
+          id: 2,
           accountId: 1,
           transferAccountId: 2,
           categoryId: 20,
@@ -578,14 +593,27 @@ describe("ReportsView", () => {
           amount: "-50000",
           status: "c",
         },
+        {
+          id: 3,
+          accountId: 2,
+          categoryId: 21,
+          date: "2026-06-20",
+          payee: "Airline",
+          memo: "",
+          amount: "-50000",
+          status: "c",
+        },
       ],
     };
     renderView({ data });
 
-    // Spending tab must show Retirement category
+    // Spending tab shows the vacation purchase (traced to Payroll), never
+    // the contribution as a Retirement allocation.
     clickTab("Spending by Category");
-    expect(screen.getByText("Retirement")).toBeInTheDocument();
+    expect(screen.getByText("Vacation")).toBeInTheDocument();
     expect(screen.getAllByText("$500.00").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Retirement")).not.toBeInTheDocument();
+    expect(screen.getByText("Payroll")).toBeInTheDocument();
   });
 
   it("BUG-45: updates automatic date range when older transactions are imported if untouched", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyBoundaryTransfer,
   isCreditPayoffTransfer,
+  isOffBudgetTransfer,
   TransactionError,
   transferNetOnBudgetDelta,
 } from "../src/transfers.js";
@@ -244,6 +245,40 @@ describe("isCreditPayoffTransfer", () => {
     expect(isCreditPayoffTransfer(transferRow(1, 3, "-20000"), map)).toBe(true);
     expect(isCreditPayoffTransfer(transferRow(1, 3, "-20000"))).toBe(false);
     expect(isCreditPayoffTransfer(transferRow(1, 999, "-20000"), ALL_ACCOUNTS)).toBe(false);
+  });
+});
+
+describe("isOffBudgetTransfer", () => {
+  it("flags boundary crossings in either direction, recorded on either leg", () => {
+    // Contribution out to the investment account.
+    expect(isOffBudgetTransfer(transferRow(1, 5, "-30000"), ALL_ACCOUNTS)).toBe(true);
+    // Withdrawal back, recorded on the on-budget leg.
+    expect(isOffBudgetTransfer(transferRow(1, 5, "100000"), ALL_ACCOUNTS)).toBe(true);
+    // Withdrawal back, recorded on the off-budget leg.
+    expect(isOffBudgetTransfer(transferRow(5, 1, "-75000"), ALL_ACCOUNTS)).toBe(true);
+    // Contribution recorded on the off-budget leg (positive into the account).
+    expect(isOffBudgetTransfer(transferRow(5, 1, "30000"), ALL_ACCOUNTS)).toBe(true);
+  });
+
+  it("flags moves between two off-budget accounts", () => {
+    expect(isOffBudgetTransfer(transferRow(4, 5, "-1000"), ALL_ACCOUNTS)).toBe(true);
+    expect(isOffBudgetTransfer(transferRow(5, 4, "-1000"), ALL_ACCOUNTS)).toBe(true);
+  });
+
+  it("rejects on-budget internal transfers (including payoffs) and regular rows", () => {
+    expect(isOffBudgetTransfer(transferRow(1, 2, "-5000"), ALL_ACCOUNTS)).toBe(false);
+    expect(isOffBudgetTransfer(transferRow(1, 3, "-20000"), ALL_ACCOUNTS)).toBe(false);
+    expect(isOffBudgetTransfer(transferRow(1, null, "-5000"), ALL_ACCOUNTS)).toBe(false);
+    expect(isOffBudgetTransfer(transferRow(5, null, "-5000"), ALL_ACCOUNTS)).toBe(false);
+  });
+
+  it("accepts a Map of accounts and defaults missing accounts to on-budget", () => {
+    const map = new Map(ALL_ACCOUNTS.map((a) => [a.id, a]));
+    expect(isOffBudgetTransfer(transferRow(1, 5, "-30000"), map)).toBe(true);
+    // Unknown destination defaults to on-budget, so the move reads as internal.
+    expect(isOffBudgetTransfer(transferRow(1, 999, "-30000"), ALL_ACCOUNTS)).toBe(false);
+    // No accounts at all: everything reads as on-budget (never off-budget).
+    expect(isOffBudgetTransfer(transferRow(1, 5, "-30000"))).toBe(false);
   });
 });
 

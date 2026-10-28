@@ -652,7 +652,7 @@ export function SpendingReport({
           title: "Income",
           lines: [
             "Money received this period.",
-            "Includes withdrawals back into the budget.",
+            "Off-budget accounts add profit only.",
           ],
         },
         group: {

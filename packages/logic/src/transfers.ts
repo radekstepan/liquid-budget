@@ -157,6 +157,25 @@ export function transferNetOnBudgetDelta(
 }
 
 /**
+ * True when the row is a transfer touching at least one off-budget account:
+ * a boundary crossing in either direction (a contribution out to, or a
+ * withdrawal back from, an off-budget account) or a move between two
+ * off-budget accounts. Such rows are money movement between pools, never
+ * terminal income or spending: flow-through reports skip them and trace the
+ * money through the intermediate account instead (see `sankey.ts`). Missing
+ * accounts default to on-budget (matches `transferNetOnBudgetDelta`).
+ */
+export function isOffBudgetTransfer(
+  t: Transaction,
+  accountMap?: Map<number, Account> | Account[]
+): boolean {
+  if (t.transferAccountId == null) return false;
+  const onA = findAccount(accountMap, t.accountId)?.onBudget ?? true;
+  const onB = findAccount(accountMap, t.transferAccountId)?.onBudget ?? true;
+  return !onA || !onB;
+}
+
+/**
  * True when the row is an internal (same-boundary) transfer touching an
  * on-budget credit account — i.e. a credit-card payoff from the budget, a
  * cash advance back into it, or a balance transfer between cards. Such moves
@@ -164,10 +183,9 @@ export function transferNetOnBudgetDelta(
  * categorized card purchases, so reports must not count the transfer again
  * (money flows THROUGH, it is not a second expense).
  *
- * Boundary-crossing transfers are never payoffs: money really leaves or
- * enters the budget there (e.g. paying a tracking/off-budget loan from the
- * budget stays an outflow allocation, because that loan's purchases never
- * hit budget categories).
+ * Boundary-crossing transfers are never payoffs (see `isOffBudgetTransfer`):
+ * money moves between the budget and an intermediate off-budget pool there,
+ * and flow-through reports trace it instead of counting either leg.
  */
 export function isCreditPayoffTransfer(
   t: Transaction,

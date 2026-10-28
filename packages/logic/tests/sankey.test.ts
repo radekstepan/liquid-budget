@@ -188,22 +188,24 @@ describe("computeSpendingBreakdown", () => {
     expect(items.some((i) => i.name.startsWith("Transfer"))).toBe(false);
   });
 
-  it("keeps payments to off-budget (tracking) credit accounts as spending", () => {
+  it("flows payments to off-budget (tracking) credit accounts through (no terminal allocation)", () => {
     const data = makeData();
     data.accounts.push(
       { id: 4, name: "Tracking Loan", kind: "credit", groupLabel: "Loans", balance: "0", onBudget: false, sort: 3 }
     );
-    // Boundary outflow: money really leaves the budget, and the loan's own
-    // activity never hit budget categories, so there is nothing to double-count.
+    // This used to assert the payment counts as Groceries spending — that
+    // expectation encoded the bug (task-26): a boundary outflow is movement
+    // into an intermediate pool, not a terminal outflow allocation. Paying
+    // down off-budget debt is saving (net worth rises), so the leg is
+    // excluded and only the real June purchase remains.
     data.transactions.push(
       txn("2026-06-15", "Transfer : Tracking Loan", -20000, 10, { transferAccountId: 4 })
     );
     const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
-    // The boundary outflow flags the row as transfer money.
-    expect(items).toEqual([{ name: "Groceries", value: 25000, transfer: true }]);
+    expect(items).toEqual([{ name: "Groceries", value: 5000 }]);
   });
 
-  it("counts investment contributions once and excludes the withdrawal from spending", () => {
+  it("excludes both legs of an investment round-trip from spending (flow-through)", () => {
     const data = makeData();
     data.accounts.push(
       { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
@@ -212,13 +214,50 @@ describe("computeSpendingBreakdown", () => {
       txn("2026-06-10", "Transfer : Wealthsimple Trade", -30000, 10, { transferAccountId: 5 }),
       txn("2026-06-20", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 })
     );
-    // The contribution is the outflow allocation; the withdrawal is income, so
-    // it must not net against spending here.
+    // This used to assert the contribution counts once as a flagged outflow
+    // allocation — that expectation encoded the bug (task-26): with
+    // flow-through attribution neither leg is terminal, so neither may
+    // appear as spending (or net against it) in either dimension.
     expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
-      { name: "Groceries", value: 35000, transfer: true },
+      { name: "Groceries", value: 5000 },
     ]);
     expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
-      { name: "Transfer : Wealthsimple Trade", value: 30000, transfer: true },
+      { name: "Whole Foods", value: 5000 },
+    ]);
+  });
+
+  it("excludes moves between two off-budget accounts from spending in both dimensions", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 },
+      { id: 6, name: "Wealthsimple TFSA", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 5 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Wealthsimple TFSA", -30000, 10, { accountId: 5, transferAccountId: 6 })
+    );
+    // Intermediate-pool movement, not spending — even though categorized.
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Groceries", value: 5000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Whole Foods", value: 5000 },
+    ]);
+  });
+
+  it("excludes a contribution recorded on the off-budget leg from spending", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    // Same contribution as usual, recorded inside the investment account as
+    // a positive transfer row — still movement, still excluded.
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Chequing", 30000, 10, { accountId: 5, transferAccountId: 1 })
+    );
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Groceries", value: 5000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
       { name: "Whole Foods", value: 5000 },
     ]);
   });
@@ -1021,7 +1060,7 @@ describe("computeIncomeBreakdown", () => {
     ]);
   });
 
-  it("counts investment withdrawals back into the budget as income, categorized or not", () => {
+  it("excludes investment withdrawals from income, categorized or not (pass-through principal)", () => {
     const data = makeData();
     data.accounts.push(
       { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
@@ -1030,27 +1069,29 @@ describe("computeIncomeBreakdown", () => {
       txn("2026-06-10", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 }),
       txn("2026-06-11", "Transfer : Wealthsimple Trade", 50000, null, { transferAccountId: 5 })
     );
-    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
-      { name: "Transfer : Wealthsimple Trade", value: 150000, transfer: true },
-    ]);
+    // This used to assert withdrawals count as flagged income at face value —
+    // that expectation encoded the bug (task-26): a withdrawal returns
+    // pass-through principal, not new money, so money coming back must not
+    // appear as unattributed income. (The uncategorized leg is income to the
+    // budget engine — the report must exclude it anyway; see below.)
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
   });
 
-  it("counts withdrawals recorded on the off-budget leg at their budget value", () => {
+  it("excludes withdrawals recorded on the off-budget leg from income", () => {
     const data = makeData();
     data.accounts.push(
       { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
     );
-    // Same withdrawal, recorded on the investment account side: the amount is
-    // negative there, but the budget impact (+75000) is the income.
+    // This used to assert the off-budget leg counts at its budget value
+    // (+75000) — that expectation encoded the bug (task-26): whichever leg
+    // the withdrawal was recorded on, it is pass-through principal.
     data.transactions.push(
       txn("2026-06-12", "Transfer : Chequing", -75000, null, { accountId: 5, transferAccountId: 1 })
     );
-    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
-      { name: "Transfer : Chequing", value: 75000, transfer: true },
-    ]);
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
   });
 
-  it("flags only the withdrawal source when plain income mixes with transfers", () => {
+  it("keeps only plain income when it mixes with withdrawals (no flags)", () => {
     const data = makeData();
     data.accounts.push(
       { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
@@ -1059,10 +1100,112 @@ describe("computeIncomeBreakdown", () => {
       txn("2026-06-10", "Transfer : Wealthsimple Trade", 100000, 10, { transferAccountId: 5 }),
       txn("2026-06-11", "Bonus", 20000, null)
     );
+    // This used to assert the withdrawal source is kept and flagged — that
+    // expectation encoded the bug (task-26): the withdrawal is excluded and
+    // nothing is flagged anymore.
     expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
-      { name: "Transfer : Wealthsimple Trade", value: 100000, transfer: true },
       { name: "Bonus", value: 20000 },
     ]);
+  });
+
+  it("counts off-budget account profit as income under the account's own name", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    // External growth recorded directly in the account: dividends and
+    // interest with arbitrary payees — all profit, all grouped under the
+    // account name (the account is the income source), never flagged.
+    data.transactions.push(
+      txn("2026-06-10", "Dividend", 15000, null, { accountId: 5 }),
+      txn("2026-06-11", "Interest", 5000, null, { accountId: 5 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 20000 },
+    ]);
+  });
+
+  it("respects the month range and split discipline for profit rows", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-05-10", "Dividend", 15000, null, { accountId: 5 }),
+      txn("2026-06-10", "Split Profit", 40000, null, { accountId: 5, id: 900 }),
+      txn("2026-06-10", "Split Profit", 30000, null, { accountId: 5, id: 901, parentId: 900 }),
+      txn("2026-06-10", "Split Profit", 10000, 10, { accountId: 5, id: 902, parentId: 900 })
+    );
+    // May dividend only in the wide range (next to May's Payroll); the
+    // split parent never counts and the categorized child is a refund.
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 30000 },
+    ]);
+    expect(computeIncomeBreakdown(data, "2026-05", "2026-06")).toEqual([
+      { name: "Payroll", value: 300000 },
+      { name: "Wealthsimple Trade", value: 45000 },
+    ]);
+  });
+
+  it("treats categorized positives on off-budget accounts as refunds, not profit", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Airline", -80000, 10, { accountId: 5 }),
+      txn("2026-06-11", "Airline Refund", 10000, 10, { accountId: 5 })
+    );
+    // The refund must not ALSO count as income (that would double-count:
+    // +income and -spending from one $100 row).
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Groceries", value: 75000 },
+    ]);
+  });
+
+  it("treats uncategorized negatives on off-budget accounts as spending, not income corrections", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Dividend", 20000, null, { accountId: 5 }),
+      txn("2026-06-11", "Account Fee", -5000, null, { accountId: 5 })
+    );
+    // Gross presentation (matches on-budget rows): the dividend is profit
+    // income, the fee is merchant spending — the fee never nets the income.
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 20000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Whole Foods", value: 5000 },
+      { name: "Account Fee", value: 5000 },
+    ]);
+  });
+
+  it("never counts transfer rows as profit, even positive uncategorized ones on off-budget legs", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    // A contribution recorded on the off-budget leg: positive and
+    // uncategorized, but still a transfer — pass-through, not profit.
+    data.transactions.push(
+      txn("2026-06-10", "Transfer : Chequing", 30000, null, { accountId: 5, transferAccountId: 1 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
+  });
+
+  it("lets an explicit isIncome:false win over the profit predicate", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
+    );
+    data.transactions.push(
+      txn("2026-06-10", "Mystery Credit", 20000, null, { accountId: 5, isIncome: false })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
   });
 
   it("does not count investment contributions as income", () => {
@@ -1078,6 +1221,238 @@ describe("computeIncomeBreakdown", () => {
 
   it("returns an empty array when nothing matches", () => {
     expect(computeIncomeBreakdown(makeData(), "2020-01", "2020-02")).toEqual([]);
+  });
+});
+
+describe("sankey flow-through attribution", () => {
+  // Salary → investment account → vacation must read as salary → vacation:
+  // intermediate off-budget pools collapse, the final purchase is the one
+  // spending record, and each account contributes only its own profit.
+  function flowData(): BudgetData {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 },
+      { id: 6, name: "Wealthsimple TFSA", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 5 }
+    );
+    data.groups.push({ id: 2, name: "Bills", sort: 1, isCreditCardPayments: false });
+    data.categories.push(
+      { id: 12, groupId: 1, name: "Vacation", sort: 2, carryover: "0", goalTarget: null, linkedAccountId: null },
+      { id: 13, groupId: 2, name: "Dining", sort: 3, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    // Isolate the scenario: drop the shared fixture's own rows.
+    data.transactions = [];
+    return data;
+  }
+
+  function asMerged(items: { name: string; value: number }[]): MergedSpendingItem[] {
+    return items.map((i) => ({ ...i, mergedCount: 1 }));
+  }
+
+  it("traces salary through a withdrawal back into the budget (salary → vacation)", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      // Uncategorized withdrawal: income to the budget engine, but
+      // pass-through principal to the report — it must still be excluded.
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", 100000, null, { transferAccountId: 5 }),
+      txn("2026-06-12", "Airline", -100000, 12)
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([{ name: "Payroll", value: 100000 }]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toEqual([{ name: "Vacation", value: 100000 }]);
+    expect(flow.groups).toEqual([{ name: "Everyday", value: 100000 }]);
+    expect(flow.links).toEqual([{ groupIndex: 0, targetIndex: 0, value: 100000 }]);
+    // No dollar appears as both an outflow allocation and traced income:
+    // neither column names a transfer leg.
+    expect(income.some((i) => i.name.startsWith("Transfer"))).toBe(false);
+    expect(flow.targets.some((t) => t.name.startsWith("Transfer"))).toBe(false);
+    // The left hop attributes the whole vacation to the original source.
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.links).toEqual([{ sourceIndex: 0, targetIndex: 0, value: 100000 }]);
+  });
+
+  it("traces salary through direct spending from the investment account", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      txn("2026-06-12", "Airline", -100000, 12, { accountId: 5 })
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Payroll", value: 100000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Vacation", value: 100000 },
+    ]);
+    // Merchant mode names the merchant, never the contribution leg.
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Airline", value: 100000 },
+    ]);
+  });
+
+  it("counts account growth as profit-only income (partial profit)", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      txn("2026-06-08", "Dividend", 20000, null, { accountId: 5 }),
+      txn("2026-06-10", "Transfer : Wealthsimple Trade", 80000, null, { transferAccountId: 5 }),
+      txn("2026-06-12", "Airline", -80000, 12)
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    // The account is an income source for its $200 profit only — never the
+    // $1,000 pass-through principal.
+    expect(income).toEqual([
+      { name: "Payroll", value: 100000 },
+      { name: "Wealthsimple Trade", value: 20000 },
+    ]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toEqual([{ name: "Vacation", value: 80000 }]);
+    // $1,200 in, $800 out: the $400 surplus (unspent principal + unspent
+    // profit) lands in Remaining, and every source's outgoing still equals
+    // its own value (no dollar created or lost).
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.incomeTotal).toBe(120000);
+    expect(model.spendingTotal).toBe(80000);
+    expect(model.targets[1]).toEqual({ name: REMAINING_LABEL, value: 40000, mergedCount: 1 });
+    for (let i = 0; i < income.length; i++) {
+      const out = model.links
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(income[i]!.value, 9);
+    }
+    // The vacation draws pro-rata: 5/6 salary, 1/6 account profit.
+    const intoVacation = model.links.filter((l) => l.targetIndex === 0);
+    expect(intoVacation).toHaveLength(2);
+    expect(intoVacation[0]!.value).toBeCloseTo((80000 * 100000) / 120000, 9);
+    expect(intoVacation[1]!.value).toBeCloseTo((80000 * 20000) / 120000, 9);
+  });
+
+  it("breaks even with no profit source when outflows equal inflows", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      txn("2026-06-12", "Airline", -100000, 12, { accountId: 5 })
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([{ name: "Payroll", value: 100000 }]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    // Fully spent with no growth: income equals outflows, no Remaining plug.
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.incomeTotal).toBe(model.spendingTotal);
+    expect(model.targets).toHaveLength(1);
+  });
+
+  it("clamps a loss at zero and funds the shortfall pro-rata (no negative income)", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      // $1,500 out of $1,000 in: the extra $500 came from pre-period
+      // balances (there is no mark-to-market in transaction data).
+      txn("2026-06-12", "Airline", -150000, 12, { accountId: 5 })
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([{ name: "Payroll", value: 100000 }]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toEqual([{ name: "Vacation", value: 150000 }]);
+    // No negative income node is invented: the uniform coverage ratio funds
+    // every expense at 2/3 and the $500 shortfall stays unfunded, reducing
+    // the attributed source proportionally.
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.funded).toEqual([100000]);
+    expect(model.unfunded).toEqual([50000]);
+    expect(model.links).toEqual([{ sourceIndex: 0, targetIndex: 0, value: 100000 }]);
+  });
+
+  it("traces through multi-hop chains (A→B→C→spending)", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      txn("2026-06-06", "Transfer : Wealthsimple TFSA", -100000, 12, { accountId: 5, transferAccountId: 6 }),
+      txn("2026-06-10", "Transfer : Wealthsimple TFSA", 100000, null, { transferAccountId: 6 }),
+      txn("2026-06-12", "Airline", -100000, 12)
+    );
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Payroll", value: 100000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Vacation", value: 100000 },
+    ]);
+    // Every intermediate leg collapses — including the off→off hop, which
+    // merchant mode would otherwise name as a Transfer merchant.
+    const merchants = computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants");
+    expect(merchants).toEqual([{ name: "Airline", value: 100000 }]);
+  });
+
+  it("attributes mixed sources through one account to two spends", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 80000, null),
+      txn("2026-06-02", "Bonus", 20000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -80000, 12, { transferAccountId: 5 }),
+      txn("2026-06-06", "Transfer : Wealthsimple Trade", -20000, 12, { transferAccountId: 5 }),
+      txn("2026-06-12", "Airline", -60000, 12, { accountId: 5 }),
+      txn("2026-06-13", "Bistro", -40000, 13, { accountId: 5 })
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([
+      { name: "Payroll", value: 80000 },
+      { name: "Bonus", value: 20000 },
+    ]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toEqual([
+      { name: "Vacation", value: 60000 },
+      { name: "Dining", value: 40000 },
+    ]);
+    expect(flow.groups).toEqual([
+      { name: "Everyday", value: 60000 },
+      { name: "Bills", value: 40000 },
+    ]);
+    // Fungible pro-rata through the pool: each group draws 80/20, so each
+    // source's traced total still equals its own income (no double-count).
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.links).toEqual([
+      { sourceIndex: 0, targetIndex: 0, value: 48000 },
+      { sourceIndex: 1, targetIndex: 0, value: 12000 },
+      { sourceIndex: 0, targetIndex: 1, value: 32000 },
+      { sourceIndex: 1, targetIndex: 1, value: 8000 },
+    ]);
+  });
+
+  it("conserves every dollar: traced income + profit == outflows (+ Remaining)", () => {
+    const data = flowData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", -100000, 12, { transferAccountId: 5 }),
+      txn("2026-06-08", "Dividend", 20000, null, { accountId: 5 }),
+      txn("2026-06-12", "Airline", -60000, 12, { accountId: 5 }),
+      txn("2026-06-13", "Bistro", -40000, 13)
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    const incomeTotal = income.reduce((s, i) => s + i.value, 0);
+    const spendingTotal = flow.targets.reduce((s, t) => s + t.value, 0);
+    expect(incomeTotal).toBe(120000);
+    expect(spendingTotal).toBe(100000);
+    // The $200 gap is exactly the unspent remainder — nothing vanished
+    // into (or appeared from) the intermediate legs.
+    const model = computeDirectFlowLinks(asMerged(income), asMerged(flow.groups));
+    expect(model.incomeTotal).toBe(model.spendingTotal + (model.targets[2]?.value ?? 0));
+    expect(model.targets[2]).toEqual({ name: REMAINING_LABEL, value: 20000, mergedCount: 1 });
+    // Group-flow marginals still hold with off-budget spending in the mix.
+    for (let i = 0; i < flow.groups.length; i++) {
+      const out = flow.links.filter((l) => l.groupIndex === i).reduce((s, l) => s + l.value, 0);
+      expect(out).toBeCloseTo(flow.groups[i]!.value, 9);
+    }
+    for (let j = 0; j < flow.targets.length; j++) {
+      const into = flow.links.filter((l) => l.targetIndex === j).reduce((s, l) => s + l.value, 0);
+      expect(into).toBeCloseTo(flow.targets[j]!.value, 9);
+    }
   });
 });
 

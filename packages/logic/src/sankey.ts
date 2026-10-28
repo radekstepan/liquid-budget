@@ -10,7 +10,7 @@
 import type { BudgetData } from "./types.js";
 import { num } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
-import { isCreditPayoffTransfer, transferNetOnBudgetDelta } from "./transfers.js";
+import { isCreditPayoffTransfer, isOffBudgetTransfer } from "./transfers.js";
 
 export type SpendingDimension = "categories" | "merchants";
 
@@ -19,11 +19,13 @@ export type SpendingBreakdownItem = {
   /** Net outflow in cents (always > 0). */
   value: number;
   /**
-   * True when at least one contributing row crossed the budget boundary as
-   * a transfer: money returning INTO the budget (an income-side withdrawal
-   * from an off-budget account) or money moving OUT of it (a spending-side
-   * allocation to one). Absent (never false) when no transfer contributed,
-   * so plain rows keep their exact `{ name, value }` shape.
+   * Legacy marker for rows that included transfer money. Flow-through
+   * attribution traces money through off-budget accounts instead of
+   * counting either transfer leg, so the flow computation no longer sets
+   * this — it stays on the type (and propagates through merging and layout)
+   * only so existing views keep compiling until they drop the tooltips.
+   * Absent (never false) when no transfer contributed, so plain rows keep
+   * their exact `{ name, value }` shape.
    */
   transfer?: boolean;
 };
@@ -77,16 +79,23 @@ export type SpendingGroupFlow = {
  *   income rows are uncategorized by definition).
  * - Refunds/returns (positive amounts on non-income rows) net against the
  *   cell's outflows; targets netting to <= 0 are dropped.
- * - Categorized transfers count as spending in category mode (matches the
- *   legacy Spending by Category tab); in merchant mode every non-income
- *   outflow row counts, categorized or not.
+ * - Categorized on-budget transfers count as spending in category mode
+ *   (matches the legacy Spending by Category tab); in merchant mode every
+ *   non-income outflow row counts, categorized or not — except
+ *   off-budget transfers, which are excluded in both dimensions (below).
  * - Credit-card payoff transfers (internal moves touching an on-budget
  *   credit account) are excluded in both dimensions: the spending was
  *   already captured by the original card purchases, so money flows THROUGH
  *   instead of appearing as a second "Transfer" expense.
- * - Boundary-inflow transfers (money returning INTO the budget, e.g. an
- *   investment withdrawal) are excluded here: they count as income, never
- *   as negative spending.
+ * - Off-budget transfers (any transfer touching an off-budget account: a
+ *   contribution out, a withdrawal back, or a move between two off-budget
+ *   accounts) are excluded in both dimensions: off-budget accounts are
+ *   intermediate pools, so money flows THROUGH them — a contribution is
+ *   movement, not a terminal outflow allocation, and a withdrawal never
+ *   nets against spending. The final purchase (wherever its account sits)
+ *   is the one spending record, attributed to the original income sources
+ *   by the fungible left-hop allocation; an off-budget account appears as
+ *   income only for its external profit (see computeIncomeBreakdown).
  *
  * Group attribution: in category mode each target has exactly one group
  * (its category's group; a dangling category falls back to "—"), so every
@@ -126,15 +135,11 @@ export function computeSpendingGroupFlow(
 
   // Cells: target name -> group name -> net outflow cents.
   const cells = new Map<string, Map<string, number>>();
-  // Targets fed by at least one transfer row (a boundary outflow: money
-  // moved out to an off-budget account, e.g. an investment contribution).
-  const transferNames = new Set<string>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
     if (isCreditPayoffTransfer(t, accountMap)) continue;
-    const netTransferDelta = transferNetOnBudgetDelta(t, accountMap);
-    if (netTransferDelta > 0) continue;
+    if (isOffBudgetTransfer(t, accountMap)) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
@@ -150,9 +155,6 @@ export function computeSpendingGroupFlow(
       group =
         t.categoryId == null ? UNCATEGORIZED_GROUP_LABEL : groupNameFor(t.categoryId);
     }
-    // Boundary outflows only (inflows continue above; internal same-boundary
-    // moves are not off-budget money and stay unflagged).
-    if (netTransferDelta !== 0) transferNames.add(name);
     let row = cells.get(name);
     if (!row) {
       row = new Map();
@@ -204,11 +206,7 @@ export function computeSpendingGroupFlow(
 
   return {
     groups,
-    targets: targets.map(({ name, value }) => ({
-      name,
-      value,
-      ...(transferNames.has(name) ? { transfer: true as const } : {}),
-    })),
+    targets: targets.map(({ name, value }) => ({ name, value })),
     links: outLinks,
   };
 }
@@ -232,18 +230,48 @@ export function computeSpendingBreakdown(
 
 /**
  * Aggregate income over a contiguous month range (inclusive), grouped by
- * source (payee) name. Mirrors computeSpendingBreakdown with the predicate
- * flipped: only income rows (uncategorized, positive, on-budget — see
- * isIncomeTransaction) count; split parents are excluded. Negative
- * uncategorized rows are outflows, not corrections, so they are excluded
- * here (merchant spending picks them up instead).
+ * source name. Two source kinds feed the Sankey's income column:
  *
- * Additionally, boundary-inflow transfers — money returning INTO the budget
- * from an off-budget account, e.g. liquidating an investment account — count
- * as income even when categorized (withdrawing is income when the money
- * re-enters the budget; the contribution was already counted as an outflow
- * allocation on the way in). Transfer rows are valued at their net
- * on-budget delta so withdrawals recorded on either leg count positively.
+ * - Plain income rows (uncategorized, positive, on-budget, non-transfer —
+ *   see isIncomeTransaction), grouped by payee. Transfer rows are never
+ *   plain income here even when the budget engine classifies an
+ *   uncategorized withdrawal as income: withdrawals are pass-through
+ *   principal, not new money (see below).
+ * - Off-budget account profit: external growth recorded directly in an
+ *   off-budget account (dividends, interest, deposits) — positive,
+ *   uncategorized, non-transfer rows on an off-budget account — grouped
+ *   under the ACCOUNT name. The account is the income source, valued at
+ *   profit only, never at pass-through principal.
+ *
+ * Flow-through attribution: money is fungible, so every outflow from an
+ * intermediate off-budget account is funded pro-rata by that account's
+ * traced inflow sources — which, with every pool fungible, is exactly the
+ * report-wide proportional allocation the left hop already computes
+ * (computeDirectFlowLinks). The legs themselves are movement, never
+ * terminal flows: contributions are excluded from spending (see
+ * computeSpendingGroupFlow) and withdrawals are excluded from income, so
+ * if salary funded the investment account and the investment account
+ * later funded vacation spending, the Sankey shows salary → vacation
+ * (attributed to the original income source), not
+ * investment-account → vacation. Chains of arbitrary depth collapse the
+ * same way: every intermediate leg is skipped, the final purchase is the
+ * one spending record, and each account contributes only its own profit.
+ *
+ * Loss / break-even display decision: an account with no external inflows
+ * contributes no income source at all (clamped at zero — there is no
+ * mark-to-market in transaction data, so a "loss" is just outflows
+ * exceeding period inflows, funded from pre-period balances). The
+ * shortfall surfaces through the existing uniform-coverage shortfall:
+ * every expense is funded pro-rata and the remainder stays unfunded
+ * (OVER_INCOME_LABEL), which reduces every attributed source
+ * proportionally instead of inventing a negative income node.
+ *
+ * Split parents are excluded; negative uncategorized rows are outflows,
+ * not corrections, so they are excluded here (merchant spending picks
+ * them up instead). Categorized positive rows on off-budget accounts are
+ * refunds, not profit: they net against spending and must not also count
+ * as income. An explicit `isIncome: false` always wins (matches
+ * isIncomeTransaction).
  *
  * Returns items sorted by value descending.
  */
@@ -263,33 +291,33 @@ export function computeIncomeBreakdown(
   const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   const bySource = new Map<string, number>();
-  // Sources fed by at least one transfer row (a boundary inflow: money
-  // returning into the budget, e.g. an investment withdrawal).
-  const transferSources = new Set<string>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
-    const netTransferDelta = transferNetOnBudgetDelta(t, accountMap);
-    if (!isIncomeTransaction(t, accountMap) && !(netTransferDelta > 0)) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
-    const payee = t.payee.trim();
-    const name = payee === "" ? "—" : payee;
-    // Boundary inflows only; plain income rows carry no transfer delta.
-    if (netTransferDelta > 0) transferSources.add(name);
-    // Transfer rows are valued at their budget impact: a withdrawal recorded
-    // on the off-budget leg carries a negative amount but is positive income.
-    const value = t.transferAccountId != null ? netTransferDelta : num(t.amount);
-    bySource.set(name, (bySource.get(name) ?? 0) + value);
+    if (t.transferAccountId == null && isIncomeTransaction(t, accountMap)) {
+      const payee = t.payee.trim();
+      const name = payee === "" ? "—" : payee;
+      bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
+    } else if (
+      t.transferAccountId == null &&
+      t.categoryId == null &&
+      t.isIncome !== false &&
+      num(t.amount) > 0 &&
+      (accountMap.get(t.accountId)?.onBudget ?? true) === false
+    ) {
+      // External profit in an off-budget account, grouped under the
+      // account's own name (the account is the source).
+      const raw = accountMap.get(t.accountId)?.name.trim() ?? "";
+      const name = raw === "" ? "—" : raw;
+      bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
+    }
   }
 
   return [...bySource.entries()]
     .filter(([, v]) => v > 0)
-    .map(([name, value]) => ({
-      name,
-      value,
-      ...(transferSources.has(name) ? { transfer: true as const } : {}),
-    }))
+    .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 }
 
