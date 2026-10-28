@@ -1848,4 +1848,45 @@ describe("SpendingReport", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sankey", exact: true }));
     expect(screen.getByRole("button", { name: "Group", exact: true })).toBeInTheDocument();
   });
+
+  it("stacks Bars rows gaplessly and scrolls naturally on overflow", () => {
+    // Task-32: rows stack directly one after another — each row's bottom
+    // edge touches the next row's top edge — and a long list scrolls instead
+    // of compressing, shrinking, or truncating. jsdom performs no layout, so
+    // this pins the class contract the geometry derives from (no inter-row
+    // gap/space utilities on the list, no vertical margins on the rows —
+    // consecutive rows' offsets then differ by exactly one row height in the
+    // browser) plus the scroller's overflow behavior.
+    const checkGapless = (container: HTMLElement, rowCount: number) => {
+      const tracks = container.querySelectorAll(".y-bar-track");
+      expect(tracks).toHaveLength(rowCount);
+      const rows = Array.from(tracks, (t) => t.parentElement!);
+      const list = rows[0]!.parentElement!;
+      expect(list.className).not.toMatch(/gap-|space-/);
+      for (const row of rows) {
+        expect(row.className).not.toMatch(/(^|\s)m[xytrbl]?-/);
+      }
+      const scroller = list.parentElement!;
+      expect(scroller.className).toMatch(/overflow-y-auto/);
+      expect(scroller.className).not.toMatch(/overflow-y-(hidden|clip)/);
+    };
+    // Few rows: the stretching branch.
+    const few = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    checkGapless(few.container, 3);
+    few.unmount();
+    // Many rows: the overflowing branch (growRows ends past 14 rows).
+    const targets: SpendingItem[] = Array.from({ length: 16 }, (_, i) => ({
+      name: `Category ${i}`,
+      value: (16 - i) * 1000,
+    }));
+    const manyFlow: SpendingGroupFlow = {
+      groups: [{ name: "Group", value: targets.reduce((s, t) => s + t.value, 0) }],
+      targets,
+      links: targets.map((t, i) => ({ groupIndex: 0, targetIndex: i, value: t.value })),
+    };
+    const many = renderReport(manyFlow, emptyFlow, sampleIncome);
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    checkGapless(many.container, 16);
+  });
 });

@@ -998,10 +998,14 @@ export function SpendingReport({
             (growRows ? "flex flex-col" : "")
           }
         >
+          {/* Bars rows stack gaplessly: no inter-row gap, space, or margin —
+              each row's bottom edge touches the next row's top edge. The
+              outer scroller (overflow-y-auto) handles overflow — rows never
+              compress or truncate to fit the viewport. */}
           <div
             className={
               "mx-auto w-full max-w-[1100px] " +
-              (growRows ? "flex h-full min-h-0 flex-col gap-[6px] justify-center" : "space-y-[6px]")
+              (growRows ? "flex h-full min-h-0 flex-col justify-center" : "")
             }
           >
             {empty && <div className="grid place-items-center py-12 y-hint">No data for this timeframe.</div>}
