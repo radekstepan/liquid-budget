@@ -67,10 +67,8 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey:
-- you STILL have NOT implemented this correctly. I do NOT want individual lines in a sankey from e.g. "SAvings" parent group to "Other Investments". I do not need that detail. If you hove on that "bar" it should highlight ALL the lines from all the inputs that lead to "Other Investments". Right now this happens when I hover on the category "Other Investments" but the sankey leading into it is still "split" into individual horizontal lines.
-- onhover make the sankey selected brighter (like how you highlight the parent category now) and on top of other sankey legs and the other ones more opaque
-- I do not want colors on Income on the left, just make them more neutral.
-- why is the parent category brighter???? I fucking didn't ask for this SAME FUCKING COLOR
-- I STILL don't understand the grey rectangle below each Merchant and below parent categories in Merchant view.
-- what is the Remaining category? I don' get it. How do you also group "Other" category vs expenses grouped because they are "Under"? Make them dashed border or some pattern so we know it's a render-only category that captures the "Under" spend
+Spending by Category - Sankey has these issues:
+- onhover category/merchant shows black border
+- onhover category/merchant or sankey does NOT highlight parent category the same bright color
+- income bar on the left onhover has black border and it should be more subtle perhaps a gradient of the colors that extend from it, that would be ideal (top to bottom gradient with some overlap and not hard edges)
+- if a sankey is say 20px tall, why is the category/merchant on the right much taller than that? I don't get it. Should ideally match sankey and have a minimum "height" so we can show title and (amount) subtitle
