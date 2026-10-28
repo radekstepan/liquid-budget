@@ -68,16 +68,5 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey has these issues:
-- onhover category/merchant is slightly bigger than the sankey leading into it, like a 1px border or something
-- the sankey is too fucking opaque, make it almost as solid as onhover!!!
-- you need to calculate flow through. If salary -> investment account and then investment account -> vacation. Figure out how much salary -> vacation instead. Yes inevstment account will be "income", but that's just the profit in that account over the years. Figure it fucking out
-- remove the "merchant's share" and "spending exceeded", "includes money moved" and other inane information
-- remove "how to read"
-- onhover parent category briefly flashes lighter color than the sankey itself
-- onhover switching between mechants or categories I see flashing in the backgrounded sankey arms even if they didn't actually change; stop making slop code, there should be NO flash of content if the content didn't fucking change
-
-Spending by Category - Bars has these issues:
-- I used to like the colors shown here, now they are too dark
-- you stack the bars one after another, don't make them show with gaps in between, don't worry about vertical scrollbar
-- onhover is useless here
-- other (merged, under) should have the same pattern as in the sankey
+- onhover DLA Piper I can see a line leading to it, not highlighted, in "brown". I think it connect to the "Needs" rather than "Housing" parent category. But then why is it connect to the "blue" needs. It ends in "brown", so the line needs to be brown (it is), and nees to be highlighted onhover. The category determines the color and it flows backwards and doesn't matter what the parent category is.
+- I have "Transfer: EQ Bank" at $848,748. I don't have that much in EQ Bank. Where did the money go? Do not show me transfers to an account that we ultimately withdraw from. That "Transfer: EQ Bank" should be much smaller.
