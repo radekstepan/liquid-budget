@@ -70,3 +70,15 @@ Small, task-local details stay in the changeset, not the docs.
 Spending by Category - Sankey has these issues:
 - onhover DLA Piper I can see a line leading to it, not highlighted, in "brown". I think it connect to the "Needs" rather than "Housing" parent category. But then why is it connect to the "blue" needs. It ends in "brown", so the line needs to be brown (it is), and nees to be highlighted onhover. The category determines the color and it flows backwards and doesn't matter what the parent category is.
 - I have "Transfer: EQ Bank" at $848,748. I don't have that much in EQ Bank. Where did the money go? Do not show me transfers to an account that we ultimately withdraw from. That "Transfer: EQ Bank" should be much smaller.
+- Console Error
+Encountered two children with the same key, `Other`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+../../packages/ui/src/SpendingReport.tsx (1070:17) @ <unknown>
+
+
+  1068 |               const isHover = hoverBarIdx === r.i;
+  1069 |               return (
+> 1070 |                 <div
+       |                 ^
+  1071 |                   key={r.name}
+  1072 |                   className={
+  1073 |                     "group flex cursor-default items-center gap-3 rounded-[4px] px-2 transit...
