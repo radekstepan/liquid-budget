@@ -104,10 +104,22 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
   expect((await outValue.textContent())?.trim()).toBe(outBefore);
 
+  // Sort toggle: Group mode reorders the columns by Budget order (a pure
+  // permutation — the Out total never moves), Amount mode restores
+  // value-descending.
+  await panel.getByRole("button", { name: "Group", exact: true }).click();
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
+  expect((await outValue.textContent())?.trim()).toBe(outBefore);
+  await panel.getByRole("button", { name: "Amount", exact: true }).click();
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
+  expect((await outValue.textContent())?.trim()).toBe(outBefore);
+
   // Column headers and the How-to-read explainer keep the chart
   // self-explanatory.
   await expect(panel.getByTestId("sankey-colhead")).toHaveCount(3);
-  await expect(panel.getByRole("button", { name: "How to read this chart" })).toBeVisible();
+  // The explainer is plain hint text — nothing to click, so not a button.
+  await expect(panel.getByTestId("sankey-how-to-read")).toBeVisible();
+  await expect(panel.getByRole("button", { name: /how to read/i })).toHaveCount(0);
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

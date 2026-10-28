@@ -9,10 +9,11 @@ import {
   SpendingReport,
   SANKEY_BUCKET_DASH,
   SANKEY_BUCKET_HATCH_ID,
-  SANKEY_INCOME_HOVER_GRADIENT_ID,
-  SANKEY_INCOME_HOVER_OPACITY,
+  SANKEY_INCOME_GRADIENT_ID_PREFIX,
   SANKEY_NODE_HOVER_STROKE_OPACITY,
+  SANKEY_RIBBON_DIM_OPACITY,
   SANKEY_RIBBON_HOVER_OPACITY,
+  SANKEY_RIBBON_OPACITY,
   SOURCE_AMOUNT_PX_PER_CHAR,
   SOURCE_NAME_PX_PER_CHAR,
   type SpendingItem,
@@ -108,7 +109,8 @@ function renderReport(
   categoryFlow: SpendingGroupFlow = sampleCategoryFlow,
   merchantFlow: SpendingGroupFlow = sampleMerchantFlow,
   income: SpendingItem[] = sampleIncome,
-  groupOrder: readonly string[] = []
+  groupOrder: readonly string[] = [],
+  categoryOrder: readonly string[] = []
 ) {
   return render(
     <SpendingReport
@@ -116,6 +118,7 @@ function renderReport(
       merchantFlow={merchantFlow}
       income={income}
       groupOrder={groupOrder}
+      categoryOrder={categoryOrder}
     />
   );
 }
@@ -195,9 +198,10 @@ describe("SpendingReport", () => {
       expect(Number(label.getAttribute("x"))).toBe(
         Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")) + 6
       );
-      // Light halo so the text stays readable over the ribbons.
+      // Fully opaque halo so the text stays readable over the ribbons —
+      // no ribbon color can bleed through and tint it.
       expect(label.getAttribute("paint-order")).toBe("stroke");
-      expect(label.getAttribute("stroke")).toBe("rgba(255,255,255,0.9)");
+      expect(label.getAttribute("stroke")).toBe("#ffffff");
     }
   });
 
@@ -524,9 +528,13 @@ describe("SpendingReport", () => {
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     // 2 incomes x 2 groups plus 2 full-width Remaining ribbons on the left.
     expect(left).toHaveLength(6);
-    // No gradients: each ribbon carries one flat color through its whole
-    // length, exactly its destination node's fill.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
+    // Each ribbon carries one flat color through its whole length,
+    // exactly its destination node's fill — gradients live only on the
+    // income bars (one per bar), never on a ribbon.
+    for (const link of svg.querySelectorAll('[data-testid="sankey-link"]')) {
+      expect(link.getAttribute("fill")).not.toMatch(/^url\(/);
+    }
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
     const bills = colorForName("Bills");
     const everyday = colorForName("Everyday");
     // Right ribbons fill with their target's family shade, cell-major:
@@ -591,18 +599,18 @@ describe("SpendingReport", () => {
     const income = svg.querySelectorAll('[data-testid="sankey-income"]')[0]!;
     fireEvent.mouseMove(income, { clientX: 100, clientY: 200 });
     // Every group sits on Payroll's path, so every group bar brightens to
-    // the spotlight level with its ribbons; every right bar stays lit (all
-    // benefit from Payroll).
+    // the spotlight level with its ribbons; every right bar brightens too
+    // (all benefit from Payroll) — same steps as the ribbons.
     for (const bar of svg.querySelectorAll('[data-testid="sankey-group"]')) {
-      expect(bar.getAttribute("fill-opacity")).toBe("0.85");
+      expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     }
     for (const bar of svg.querySelectorAll('[data-testid="sankey-node"]')) {
-      expect(bar.getAttribute("fill-opacity")).toBe("1");
+      expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     }
-    // Payroll's own bar stays lit; the Bonus bar dims.
+    // Payroll's own bar brightens; the Bonus bar dims.
     const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
-    expect(incomes[0]!.getAttribute("fill-opacity")).toBe("1");
-    expect(incomes[1]!.getAttribute("fill-opacity")).toBe("0.35");
+    expect(incomes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
     // Payroll's left ribbons brighten and render above the dimmed Bonus
     // ribbons (spotlight z-order: dimmed legs first, lit legs last).
     const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
@@ -633,7 +641,7 @@ describe("SpendingReport", () => {
     // brightens — one ribbon per cell, never split per income.
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[1]!;
     fireEvent.mouseMove(node, { clientX: 600, clientY: 200 });
-    expect(node.getAttribute("fill-opacity")).toBe("1");
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     // Right ribbons run cell-major (Bills→Mortgage, Bills→Electric,
     // Everyday→Groceries): only the Groceries cell brightens, rendered
     // above the dimmed rest.
@@ -658,8 +666,8 @@ describe("SpendingReport", () => {
     ]);
     // Sibling targets dim.
     const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
-    expect(nodes[0]!.getAttribute("fill-opacity")).toBe("0.35");
-    expect(nodes[2]!.getAttribute("fill-opacity")).toBe("0.35");
+    expect(nodes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(nodes[2]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
     fireEvent.mouseLeave(node);
   });
 
@@ -673,7 +681,7 @@ describe("SpendingReport", () => {
     expect(group.getAttribute("stroke-width")).toBeNull();
     // The bar matches its ribbons exactly: same fill, same rest opacity.
     expect(group.getAttribute("fill")).toBe(colorForName("Bills"));
-    expect(group.getAttribute("fill-opacity")).toBe("0.35");
+    expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     expect(group.getAttribute("stroke")).toBe("none");
     expect(group.getAttribute("stroke-width")).toBeNull();
@@ -690,8 +698,8 @@ describe("SpendingReport", () => {
     expect(links[5]!.getAttribute("fill-opacity")).toBe("0.85");
     fireEvent.mouseLeave(group);
     // Rest state returns once the hover clears.
-    expect(group.getAttribute("fill-opacity")).toBe("0.35");
-    expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.35");
+    expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+    expect(groups[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
   it("shows the proportional flow when hovering the full-width Remaining ribbon", () => {
@@ -744,21 +752,23 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("renders every income bar in one neutral gray with no series colors", () => {
+  it("fills each income bar with its own ribbon-color gradient, never flat gray", () => {
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Bonus", value: 50000 },
     ]);
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Both bars share the neutral income gray — neither takes its name
-    // color — so the income side never competes with the right side.
+    // One gradient per bar, painted from its own def — neither bar takes
+    // flat gray nor its name color.
     const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
     expect(incomes).toHaveLength(2);
-    for (const bar of incomes) {
-      expect(bar.getAttribute("fill")).toBe(SANKEY_INCOME_COLOR);
-      expect(bar.getAttribute("fill")).not.toBe(colorForName("Payroll"));
-    }
-    // The tooltip dot matches the neutral bar.
+    incomes.forEach((bar, i) => {
+      expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}${i})`);
+      expect(bar.getAttribute("fill")).not.toBe(SANKEY_INCOME_COLOR);
+    });
+    expect(incomes[0]!.getAttribute("fill")).not.toBe(incomes[1]!.getAttribute("fill"));
+    // The tooltip dot stays neutral gray: no single color can stand for
+    // a gradient bar.
     fireEvent.mouseMove(incomes[0]!, { clientX: 100, clientY: 200 });
     const tip = document.querySelector(".y-tip")!;
     expect(
@@ -1041,8 +1051,8 @@ describe("SpendingReport", () => {
     expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.85");
     expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.12");
     const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
-    expect(nodes[0]!.getAttribute("fill-opacity")).toBe("1");
-    expect(nodes[1]!.getAttribute("fill-opacity")).toBe("0.35");
+    expect(nodes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
     fireEvent.mouseLeave(group);
   });
 
@@ -1144,7 +1154,7 @@ describe("SpendingReport", () => {
       within(tip as unknown as HTMLElement).getByText("Money received this period.")
     ).toBeInTheDocument();
     for (const bar of svg.querySelectorAll('[data-testid="sankey-node"]')) {
-      expect(bar.getAttribute("fill-opacity")).toBe("1");
+      expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
     }
     fireEvent.mouseLeave(incomeHead);
     expect(document.querySelector(".y-tip")).toBeNull();
@@ -1222,11 +1232,66 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("offers a How-to-read explainer in the header", () => {
+  it("offers a How-to-read explainer as plain hint text, not a button", () => {
     renderReport();
-    expect(
-      screen.getByRole("button", { name: "How to read this chart" })
-    ).toBeInTheDocument();
+    // There is nothing to click, so it must not pose as a button — plain
+    // focusable hint text with the explainer on hover/focus.
+    const hint = screen.getByTestId("sankey-how-to-read");
+    expect(hint.tagName).toBe("SPAN");
+    expect(hint).toHaveTextContent("How to read");
+    expect(screen.queryByRole("button", { name: /how to read/i })).not.toBeInTheDocument();
+    fireEvent.focus(hint);
+    expect(screen.getByText("How to read this chart")).toBeInTheDocument();
+    fireEvent.blur(hint);
+    expect(screen.queryByText("How to read this chart")).not.toBeInTheDocument();
+  });
+
+  it("draws every Sankey bar and hatch with square corners", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Rectangular nodes take no rounding: bars, bucket hatches, and the
+    // income gradients all paint square.
+    const rects = svg.querySelectorAll(
+      '[data-testid="sankey-income"], [data-testid="sankey-group"], ' +
+        '[data-testid="sankey-node"], [data-testid="sankey-bucket-hatch"]'
+    );
+    expect(rects.length).toBeGreaterThan(0);
+    for (const rect of rects) {
+      expect(rect.getAttribute("rx")).toBeNull();
+      expect(rect.getAttribute("ry")).toBeNull();
+    }
+  });
+
+  it("matches each right-column bar to its incoming ribbons in every spotlight state", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // At rest every node shares its ribbons' fill at the shared rest step.
+    const restLinks = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(restLinks.length).toBeGreaterThan(0);
+    for (const link of restLinks) {
+      expect(link.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+    }
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    // Bills→Mortgage is links[0]: same fill and opacity as the Mortgage bar.
+    expect(restLinks[0]!.getAttribute("fill")).toBe(nodes[0]!.getAttribute("fill"));
+    expect(restLinks[0]!.getAttribute("fill-opacity")).toBe(
+      nodes[0]!.getAttribute("fill-opacity")
+    );
+    // Hovering the Groceries cell keeps the match at the bright step for
+    // the on-path pair and at the dim step for the off-path pair.
+    fireEvent.mouseMove(restLinks[2]!, { clientX: 500, clientY: 200 });
+    expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(restLinks[2]!.getAttribute("fill-opacity")).toBe(
+      nodes[1]!.getAttribute("fill-opacity")
+    );
+    expect(nodes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(restLinks[0]!.getAttribute("fill-opacity")).toBe(
+      nodes[0]!.getAttribute("fill-opacity")
+    );
+    fireEvent.mouseLeave(restLinks[2]!);
+    expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
   it("pins the chart scroll container so scrollbars can never shift the geometry", () => {
@@ -1385,29 +1450,22 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(leftLink);
   });
 
-  it("tints a hovered income bar with a feathered gradient of its ribbons' colors, with no border", () => {
+  it("stacks each income bar's outgoing ribbon colors into its gradient at rest, with no overlay", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const bar = svg.querySelector('[data-testid="sankey-income"]')!;
-    // At rest there is no gradient anywhere in the chart.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
-    fireEvent.mouseMove(bar, { clientX: 100, clientY: 200 });
-    // The bar's own stroke never changes: still thin and neutral.
+    // The gradient is the bar's fill from the first paint — no hover
+    // overlay, no translucent glass on top of gray.
+    expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0)`);
+    expect(svg.querySelector('[data-testid="sankey-income-hover"]')).toBeNull();
+    // The bar's own stroke stays thin and neutral, hovered or not.
     expect(bar.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
     expect(bar.getAttribute("stroke-width")).toBe("1");
-    // Instead a translucent overlay melts the bar into its ribbons.
-    const overlay = svg.querySelector('[data-testid="sankey-income-hover"]')!;
-    expect(overlay.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_HOVER_GRADIENT_ID})`);
-    expect(overlay.getAttribute("fill-opacity")).toBe(String(SANKEY_INCOME_HOVER_OPACITY));
-    expect(overlay.getAttribute("pointer-events")).toBe("none");
-    for (const attr of ["x", "y", "width", "height"] as const) {
-      expect(overlay.getAttribute(attr)).toBe(bar.getAttribute(attr));
-    }
     // Payroll's three outgoing bands run Bills, Everyday, Remaining: the
     // gradient stacks those destination colors top-to-bottom with strictly
     // ascending offsets — soft overlap, no hard edges.
     const stops = Array.from(
-      svg.querySelectorAll(`#${SANKEY_INCOME_HOVER_GRADIENT_ID} stop`)
+      svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
     ).map((s) => ({
       offset: Number(s.getAttribute("offset")),
       color: s.getAttribute("stop-color"),
@@ -1426,9 +1484,16 @@ describe("SpendingReport", () => {
     for (let i = 1; i < stops.length; i++) {
       expect(stops[i]!.offset).toBeGreaterThan(stops[i - 1]!.offset);
     }
-    fireEvent.mouseLeave(bar);
+    // Hovering brightens the bar through the spotlight steps without
+    // swapping its fill: gradient in, gradient out.
+    expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+    fireEvent.mouseMove(bar, { clientX: 100, clientY: 200 });
+    expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0)`);
+    expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(bar.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
     expect(svg.querySelector('[data-testid="sankey-income-hover"]')).toBeNull();
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
+    fireEvent.mouseLeave(bar);
+    expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
   it("sizes shortfall bars to their funded flow with a legible minimum", () => {
@@ -1492,6 +1557,31 @@ describe("SpendingReport", () => {
     fireEvent.click(screen.getByRole("button", { name: "Amount", exact: true }));
     expect(targetLabels()).toEqual(["Mortgage Interest", "Groceries", "Electric Bill", "Remaining"]);
     expect(groupLabels()).toEqual(["Bills", "Everyday"]);
+  });
+
+  it("orders categories within their parent group by Budget category order in Group mode", () => {
+    // Electric Bill ($150) trails Mortgage Interest ($1,000) by amount,
+    // but Budget order lists it first inside Bills.
+    const { container } = renderReport(
+      sampleCategoryFlow,
+      sampleMerchantFlow,
+      sampleIncome,
+      ["Bills", "Everyday"],
+      ["Electric Bill", "Mortgage Interest", "Groceries"]
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const targetLabels = () =>
+      Array.from(svg.querySelectorAll('[data-testid="sankey-target-label"]')).map(
+        (t) => t.textContent
+      );
+    // Amount mode ignores Budget order.
+    expect(targetLabels()).toEqual(["Mortgage Interest", "Groceries", "Electric Bill", "Remaining"]);
+    fireEvent.click(screen.getByRole("button", { name: "Group", exact: true }));
+    // Group mode follows it: Electric Bill leads the Bills family, the
+    // Remaining plug still trails.
+    expect(targetLabels()).toEqual(["Electric Bill", "Mortgage Interest", "Groceries", "Remaining"]);
+    fireEvent.click(screen.getByRole("button", { name: "Amount", exact: true }));
+    expect(targetLabels()).toEqual(["Mortgage Interest", "Groceries", "Electric Bill", "Remaining"]);
   });
 
   it("shows the sort control only in the Sankey view", () => {

@@ -558,8 +558,12 @@ export type SankeyTargetSort = "amount" | "group";
  * a pass-through (returns the input flow unchanged). `"group"` orders the
  * middle column by `groupOrder` — the Budget view's group names in
  * `group.sort` order — and the right column by each target's dominant
- * (largest-link) parent group in that same order, value-descending within
- * a group (name, then current position, break ties deterministically).
+ * (largest-link) parent group in that same order, then by `categoryOrder`
+ * rank within a group (the Budget view's category names in group-major
+ * `sort` order, so each category follows its position in its parent
+ * group). Targets missing from `categoryOrder` — merchants, which have no
+ * Budget position — sort after the known names, value-descending (name,
+ * then current position, break ties deterministically).
  *
  * - Names missing from `groupOrder` (the Uncategorized pseudo-group, the
  *   "—" fallback) sort after the known groups, keeping current order.
@@ -573,7 +577,8 @@ export type SankeyTargetSort = "amount" | "group";
 export function sortMergedGroupFlow(
   flow: MergedGroupFlow,
   groupOrder: readonly string[],
-  sort: SankeyTargetSort
+  sort: SankeyTargetSort,
+  categoryOrder: readonly string[] = []
 ): MergedGroupFlow {
   if (sort === "amount") return flow;
   const orderIndex = new Map<string, number>();
@@ -581,6 +586,12 @@ export function sortMergedGroupFlow(
     if (!orderIndex.has(name)) orderIndex.set(name, i);
   });
   const rankOf = (name: string): number => orderIndex.get(name) ?? groupOrder.length;
+  const categoryIndex = new Map<string, number>();
+  categoryOrder.forEach((name, i) => {
+    if (!categoryIndex.has(name)) categoryIndex.set(name, i);
+  });
+  const categoryRankOf = (name: string): number =>
+    categoryIndex.get(name) ?? Number.MAX_SAFE_INTEGER;
 
   const groupPerm = flow.groups
     .map((_, i) => i)
@@ -628,6 +639,11 @@ export function sortMergedGroupFlow(
         const rb = rankOf(flow.groups[db]?.name ?? "");
         if (ra !== rb) return ra - rb;
       }
+      // Within a parent group, categories follow their Budget position;
+      // merchants (absent from categoryOrder) stay value-descending.
+      const ca = categoryRankOf(ta.name);
+      const cb = categoryRankOf(tb.name);
+      if (ca !== cb) return ca - cb;
       if (ta.value !== tb.value) return tb.value - ta.value;
       if (ta.name !== tb.name) return ta.name < tb.name ? -1 : 1;
       return a - b;

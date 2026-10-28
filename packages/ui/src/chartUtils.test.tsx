@@ -10,7 +10,7 @@ import {
   quantile,
   REMAINING_COLOR,
   sankeyFamilyShade,
-  sankeyHoverGradientStops,
+  sankeyIncomeGradientStops,
   sankeyTargetColors,
   SANKEY_INCOME_COLOR,
   shade,
@@ -258,9 +258,9 @@ describe("useElementSize", () => {
   });
 });
 
-describe("sankeyHoverGradientStops", () => {
+describe("sankeyIncomeGradientStops", () => {
   it("stacks band colors top-to-bottom with feathered, strictly ascending offsets", () => {
-    const stops = sankeyHoverGradientStops(100, 300, [
+    const stops = sankeyIncomeGradientStops(100, 300, [
       { y0: 100, y1: 160, color: "#aaaaaa" },
       { y0: 160, y1: 240, color: "#bbbbbb" },
       { y0: 240, y1: 300, color: "#cccccc" },
@@ -285,7 +285,7 @@ describe("sankeyHoverGradientStops", () => {
   });
 
   it("keeps every band's color in order without collapsing neighbors", () => {
-    const stops = sankeyHoverGradientStops(0, 100, [
+    const stops = sankeyIncomeGradientStops(0, 100, [
       { y0: 0, y1: 50, color: "#111111" },
       { y0: 50, y1: 100, color: "#222222" },
     ]);
@@ -295,13 +295,13 @@ describe("sankeyHoverGradientStops", () => {
 
   it("renders a solid fill for a single band and skips zero-height bands", () => {
     expect(
-      sankeyHoverGradientStops(0, 100, [{ y0: 0, y1: 100, color: "#123456" }])
+      sankeyIncomeGradientStops(0, 100, [{ y0: 0, y1: 100, color: "#123456" }])
     ).toEqual([
       { offset: 0, color: "#123456" },
       { offset: 1, color: "#123456" },
     ]);
     // The zero-height band drops out, leaving its neighbors to feather.
-    const stops = sankeyHoverGradientStops(0, 100, [
+    const stops = sankeyIncomeGradientStops(0, 100, [
       { y0: 0, y1: 50, color: "#111111" },
       { y0: 50, y1: 50, color: "#999999" },
       { y0: 50, y1: 100, color: "#222222" },
@@ -312,7 +312,7 @@ describe("sankeyHoverGradientStops", () => {
   });
 
   it("falls back to the neutral income gray with no bands", () => {
-    expect(sankeyHoverGradientStops(0, 100, [])).toEqual([
+    expect(sankeyIncomeGradientStops(0, 100, [])).toEqual([
       { offset: 0, color: SANKEY_INCOME_COLOR },
       { offset: 1, color: SANKEY_INCOME_COLOR },
     ]);

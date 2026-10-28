@@ -30,7 +30,7 @@ import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   ChartTip,
   colorForName,
-  sankeyHoverGradientStops,
+  sankeyIncomeGradientStops,
   sankeyTargetColors,
   SankeyBucketHatchPattern,
   SANKEY_INCOME_COLOR,
@@ -76,11 +76,13 @@ function truncateName(name: string, max = 26): string {
 // ribbons their final category's or merchant's family shade. The income
 // side never colors a ribbon. Exported so tests can pin the fills.
 //
-// Spotlight scale: at rest every ribbon sits at SANKEY_RIBBON_OPACITY;
-// while a flow path is hovered its ribbons brighten to
-// SANKEY_RIBBON_HOVER_OPACITY and render above the rest, and everything
-// outside the path dims to SANKEY_RIBBON_DIM_OPACITY.
-export const SANKEY_RIBBON_OPACITY = 0.35;
+// Spotlight scale: at rest every ribbon and every bar sits at
+// SANKEY_RIBBON_OPACITY; while a flow path is hovered the path's ribbons
+// and bars brighten to SANKEY_RIBBON_HOVER_OPACITY (ribbons render above
+// the rest) and everything outside the path dims to
+// SANKEY_RIBBON_DIM_OPACITY. Bars share their ribbons' exact fill at the
+// same steps, so the line into a bar always matches the bar.
+export const SANKEY_RIBBON_OPACITY = 0.25;
 export const SANKEY_RIBBON_DIM_OPACITY = 0.12;
 export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 
@@ -94,11 +96,11 @@ export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 // soft halo in their own fill color (this opacity) — never a black border.
 export const SANKEY_NODE_HOVER_STROKE_OPACITY = 0.55;
 
-// Hovered income bars keep their thin neutral stroke and gain a translucent
-// overlay (this opacity) filled with a feathered top-to-bottom gradient
-// built from their outgoing ribbons' destination colors — never a border.
-export const SANKEY_INCOME_HOVER_GRADIENT_ID = "sankey-income-hover-gradient";
-export const SANKEY_INCOME_HOVER_OPACITY = 0.65;
+// Income bars fill with a feathered top-to-bottom gradient built from
+// their outgoing ribbons' destination colors — one gradient per bar, so
+// each bar melts into exactly its ribbons' colors. Bar i paints from
+// `${SANKEY_INCOME_GRADIENT_ID_PREFIX}${i}`.
+export const SANKEY_INCOME_GRADIENT_ID_PREFIX = "sankey-income-gradient-";
 
 // Session flag for the Under auto-fit: it runs at most once per tab session —
 // on the first Sankey paint with a measured container — and never again after
@@ -133,8 +135,12 @@ export function SpendingReport({
   merchantFlow,
   income,
   // Budget view group names in Budget order (group.sort) — the "Group"
-  // sort mode orders the Sankey's middle and right columns by this.
+  // sort mode orders the Sankey's middle column by this.
   groupOrder = [],
+  // Budget view category names in group-major sort order — the "Group"
+  // sort mode orders categories within their parent group by this.
+  // Merchants have no Budget position and stay value-descending.
+  categoryOrder = [],
   initialView = "sankey",
   initialDimension = "categories",
 }: {
@@ -142,6 +148,7 @@ export function SpendingReport({
   merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
   groupOrder?: readonly string[];
+  categoryOrder?: readonly string[];
   initialView?: SpendingViewMode;
   initialDimension?: SpendingDimension;
 }) {
@@ -205,8 +212,8 @@ export function SpendingReport({
   // Column order for the Sankey layout (a permutation — sums and marginals
   // are untouched, so the header totals and Bars rows read `merged`).
   const ordered = useMemo(
-    () => sortMergedGroupFlow(merged, groupOrder, sort),
-    [merged, groupOrder, sort]
+    () => sortMergedGroupFlow(merged, groupOrder, sort, categoryOrder),
+    [merged, groupOrder, sort, categoryOrder]
   );
   // The header "(N in Other)" note covers all three merged columns.
   const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
@@ -346,8 +353,9 @@ export function SpendingReport({
         ...s,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((s.value / totals.flowTotal) * 100) : 0,
-        // One neutral gray for every income bar (and its tooltip dot): the
-        // income side carries no series colors.
+        // Neutral gray for the income tooltip dot only: the bars
+        // themselves fill with their outgoing ribbons' colors. No single
+        // color can stand for a gradient bar.
         color: SANKEY_INCOME_COLOR,
         i,
       })),
@@ -404,7 +412,7 @@ export function SpendingReport({
   // Flat destination color of a left-hop ribbon: its middle group's color —
   // except the full-width surplus ribbons, which carry the Remaining plug's
   // green straight through to the right. Shared by the ribbon fills and the
-  // income hover gradient so the bar melts into exactly its ribbons' colors.
+  // income bar gradients so each bar melts into exactly its ribbons' colors.
   const leftFillFor = (targetIndex: number, targetName: string): string => {
     const plugTarget = sankey?.remainingTargetIndex;
     return targetIndex >= midRows.length && plugTarget != null
@@ -412,25 +420,20 @@ export function SpendingReport({
       : (midRows[targetIndex]?.color ?? colorForName(targetName));
   };
 
-  // Hovered income bar (directly, or as a left ribbon's endpoint): its
-  // overlay gradient stacks its outgoing ribbons' destination colors
-  // top-to-bottom with feathered boundaries — no hard edges, no border.
-  const hoverIncomeIdx =
-    hover != null && hover.kind === "income"
-      ? hover.idx
-      : hover != null && hover.kind === "link" && hover.side === "left"
-        ? hover.a
-        : null;
-  const incomeHoverStops = useMemo(() => {
-    if (hoverIncomeIdx == null || sankey == null) return [];
-    const bar = sankey.sources[hoverIncomeIdx];
-    if (bar == null) return [];
-    const bands = sankey.linksLeft
-      .filter((l) => l.sourceIndex === hoverIncomeIdx)
-      .map((l) => ({ y0: l.sy0, y1: l.sy1, color: leftFillFor(l.targetIndex, l.targetName) }));
-    return sankeyHoverGradientStops(bar.y, bar.y + bar.h, bands);
+  // One fill gradient per income bar: each bar stacks its outgoing
+  // ribbons' destination colors top-to-bottom with feathered boundaries —
+  // no hard edges, no border, no gray. A bar with no outgoing bands
+  // (defensive) falls back to the solid neutral income gray.
+  const incomeGradients = useMemo(() => {
+    if (sankey == null) return [];
+    return sankey.sources.map((bar, idx) => {
+      const bands = sankey.linksLeft
+        .filter((l) => l.sourceIndex === idx)
+        .map((l) => ({ y0: l.sy0, y1: l.sy1, color: leftFillFor(l.targetIndex, l.targetName) }));
+      return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands);
+    });
     // leftFillFor closes over the layout-derived rows, hence their deps.
-  }, [hoverIncomeIdx, sankey, midRows, tgtRows]);
+  }, [sankey, midRows, tgtRows]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -878,9 +881,6 @@ export function SpendingReport({
     };
   }, [hover, sankey]);
 
-  const isSrcHover = (idx: number) =>
-    (hover?.kind === "income" && hover.idx === idx) ||
-    (hover?.kind === "link" && hover.side === "left" && hover.a === idx);
   const isTgtHover = (idx: number) =>
     (hover?.kind === "node" && hover.idx === idx) ||
     (hover?.kind === "link" &&
@@ -1056,7 +1056,13 @@ export function SpendingReport({
                     Amount
                   </Button>
                 </Tooltip>
-                <Tooltip tip={`Sort ${nounPlural} by parent group, in Budget view order`}>
+                <Tooltip
+                  tip={
+                    dimension === "categories"
+                      ? "Sort categories by Budget order: parent group, then each category's position in its group"
+                      : `Sort ${nounPlural} by parent group in Budget view order (amount within a group)`
+                  }
+                >
                   <Button
                     size="sm"
                     variant={sort === "group" ? "primary" : "default"}
@@ -1136,9 +1142,20 @@ export function SpendingReport({
               </span>
             }
           >
-            <Button size="sm" variant="default" aria-label="How to read this chart">
+            {/* Plain hint text, deliberately not a button: there is nothing
+                to click — the explainer shows on hover (or keyboard focus). */}
+            <span
+              data-testid="sankey-how-to-read"
+              tabIndex={0}
+              className="cursor-help text-[11px] whitespace-nowrap"
+              style={{
+                color: "var(--y-ink-faint)",
+                textDecoration: "underline dotted",
+                textUnderlineOffset: "3px",
+              }}
+            >
               How to read
-            </Button>
+            </span>
           </Tooltip>
         </div>
       </div>
@@ -1258,19 +1275,20 @@ export function SpendingReport({
             >
               <defs>
                 <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
-                {hoverIncomeIdx != null && incomeHoverStops.length > 0 && (
+                {incomeGradients.map((stops, idx) => (
                   <linearGradient
-                    id={SANKEY_INCOME_HOVER_GRADIENT_ID}
+                    key={idx}
+                    id={`${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx}`}
                     x1="0"
                     y1="0"
                     x2="0"
                     y2="1"
                   >
-                    {incomeHoverStops.map((s, k) => (
+                    {stops.map((s, k) => (
                       <stop key={k} offset={s.offset} stopColor={s.color} />
                     ))}
                   </linearGradient>
-                )}
+                ))}
               </defs>
               {/* Column headers: each column names what it holds, so the
                   chart reads without prior knowledge (left is income
@@ -1372,15 +1390,19 @@ export function SpendingReport({
               })}
               {sankey.sources.map((node, idx) => {
                 const r = srcRows[idx]!;
-                // One neutral gray for every income bar: no series colors on
-                // the left. The merged Other bucket adds the render-only
-                // dashed border plus hatch. Hovering never adds a border —
-                // the bar gains a translucent gradient overlay built from its
-                // outgoing ribbons' colors instead.
-                const color = r.color;
+                // Each income bar fills with its own gradient of outgoing
+                // ribbon colors — never flat gray, never a hover overlay.
+                // The merged Other bucket adds the render-only dashed border
+                // plus hatch. The bar joins the flow-path spotlight at the
+                // ribbons' own brightness steps.
                 const isBucket = r.bucket === true;
-                const isHover = isSrcHover(idx);
+                const lit = hl.src != null && hl.src.has(idx);
                 const dim = hl.src != null && !hl.src.has(idx);
+                const barOpacity = hl.src == null
+                  ? SANKEY_RIBBON_OPACITY
+                  : lit
+                    ? SANKEY_RIBBON_HOVER_OPACITY
+                    : SANKEY_RIBBON_DIM_OPACITY;
                 const labelY = node.y + node.h / 2;
                 // Bars too short for two lines show the name only, centered
                 // on the bar; taller bars keep name + amount.
@@ -1393,9 +1415,8 @@ export function SpendingReport({
                       y={node.y}
                       width={node.w}
                       height={Math.max(0, node.h)}
-                      rx={2}
-                      fill={color}
-                      fillOpacity={dim ? 0.35 : 1}
+                      fill={`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx})`}
+                      fillOpacity={barOpacity}
                       stroke="rgba(0,0,0,0.15)"
                       strokeWidth={1}
                       strokeDasharray={isBucket ? SANKEY_BUCKET_DASH : undefined}
@@ -1405,19 +1426,6 @@ export function SpendingReport({
                       }
                       onMouseLeave={() => setHover(null)}
                     />
-                    {isHover && incomeHoverStops.length > 0 && (
-                      <rect
-                        data-testid="sankey-income-hover"
-                        x={node.x}
-                        y={node.y}
-                        width={node.w}
-                        height={Math.max(0, node.h)}
-                        rx={2}
-                        fill={`url(#${SANKEY_INCOME_HOVER_GRADIENT_ID})`}
-                        fillOpacity={SANKEY_INCOME_HOVER_OPACITY}
-                        pointerEvents="none"
-                      />
-                    )}
                     {isBucket && (
                       <rect
                         data-testid="sankey-bucket-hatch"
@@ -1425,9 +1433,8 @@ export function SpendingReport({
                         y={node.y}
                         width={node.w}
                         height={Math.max(0, node.h)}
-                        rx={2}
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
-                        fillOpacity={dim ? 0.35 : 1}
+                        fillOpacity={barOpacity}
                         pointerEvents="none"
                       />
                     )}
@@ -1499,7 +1506,6 @@ export function SpendingReport({
                       y={node.y}
                       width={node.w}
                       height={Math.max(0, node.h)}
-                      rx={2}
                       fill={color}
                       fillOpacity={barOpacity}
                       stroke={isBucket ? "rgba(0,0,0,0.35)" : "none"}
@@ -1518,14 +1524,14 @@ export function SpendingReport({
                         y={node.y}
                         width={node.w}
                         height={Math.max(0, node.h)}
-                        rx={2}
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
                         fillOpacity={barOpacity}
                         pointerEvents="none"
                       />
                     )}
                     {/* Middle labels sit in the ribbon zone, so they carry
-                        a light halo to stay readable over the ribbons. */}
+                        a fully opaque halo: no ribbon color can bleed
+                        through and tint it. */}
                     <text
                       data-testid="sankey-group-label"
                       x={sankey.middleLabelX}
@@ -1533,7 +1539,7 @@ export function SpendingReport({
                       fontSize={12}
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
-                      stroke="rgba(255,255,255,0.9)"
+                      stroke="#ffffff"
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
@@ -1552,7 +1558,7 @@ export function SpendingReport({
                       fill="var(--y-ink-faint)"
                       className="y-num"
                       opacity={dim ? 0.4 : 1}
-                      stroke="rgba(255,255,255,0.9)"
+                      stroke="#ffffff"
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
@@ -1580,7 +1586,16 @@ export function SpendingReport({
                 const color = r.color;
                 const isComputed = r.bucket === true || r.isPlug;
                 const isHover = isTgtHover(idx);
+                // Like the middle bars: the same fill at the ribbons' own
+                // rest/bright/dim steps, so each incoming line matches the
+                // bar exactly in every spotlight state.
+                const lit = hl.tgt != null && hl.tgt.has(idx);
                 const dim = hl.tgt != null && !hl.tgt.has(idx);
+                const barOpacity = hl.tgt == null
+                  ? SANKEY_RIBBON_OPACITY
+                  : lit
+                    ? SANKEY_RIBBON_HOVER_OPACITY
+                    : SANKEY_RIBBON_DIM_OPACITY;
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`tgt-${node.name}-${idx}`}>
@@ -1590,9 +1605,8 @@ export function SpendingReport({
                       y={node.y}
                       width={node.w}
                       height={Math.max(0, node.h)}
-                      rx={2}
                       fill={color}
-                      fillOpacity={dim ? 0.35 : 1}
+                      fillOpacity={barOpacity}
                       stroke={isHover ? color : "rgba(0,0,0,0.15)"}
                       strokeOpacity={isHover ? SANKEY_NODE_HOVER_STROKE_OPACITY : 1}
                       strokeWidth={isHover ? 2 : 1}
@@ -1610,9 +1624,8 @@ export function SpendingReport({
                         y={node.y}
                         width={node.w}
                         height={Math.max(0, node.h)}
-                        rx={2}
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
-                        fillOpacity={dim ? 0.35 : 1}
+                        fillOpacity={barOpacity}
                         pointerEvents="none"
                       />
                     )}

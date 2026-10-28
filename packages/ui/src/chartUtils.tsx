@@ -440,14 +440,14 @@ export function SankeyBucketHatchPattern({ id }: { id: string }) {
 }
 
 /** One outgoing ribbon band across an income bar: vertical span + ribbon color. */
-export type SankeyHoverBand = { y0: number; y1: number; color: string };
+export type SankeyIncomeBand = { y0: number; y1: number; color: string };
 /** One linear-gradient stop: fractional offset + color. */
 export type SankeyGradientStop = { offset: number; color: string };
 
 /**
- * Feathered top-to-bottom gradient stops for a hovered Sankey income bar,
- * built from the colors of the ribbons extending from it: each band keeps
- * its ribbon's destination color through its span, and adjacent bands melt
+ * Feathered top-to-bottom gradient stops for a Sankey income bar, built
+ * from the colors of the ribbons extending from it: each band keeps its
+ * ribbon's destination color through its span, and adjacent bands melt
  * into each other across a feathered boundary instead of meeting at a hard
  * edge. Pure geometry → stops.
  *
@@ -457,10 +457,10 @@ export type SankeyGradientStop = { offset: number; color: string };
  *   offset, so a hard edge can never form.
  * - A single band (or none, defensively) yields a solid fill.
  */
-export function sankeyHoverGradientStops(
+export function sankeyIncomeGradientStops(
   barY0: number,
   barY1: number,
-  bands: readonly SankeyHoverBand[]
+  bands: readonly SankeyIncomeBand[]
 ): SankeyGradientStop[] {
   const h = barY1 - barY0;
   const live = bands.filter((b) => b.y1 > b.y0 && h > 0);

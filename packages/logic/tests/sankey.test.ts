@@ -706,6 +706,36 @@ describe("sortMergedGroupFlow", () => {
     expect(sorted.otherValue).toBe(6000);
   });
 
+  it("orders targets within a group by Budget category order", () => {
+    // B ($1,000) trails A ($5,000) by amount, but Budget order lists it
+    // first inside G-big.
+    const sorted = sortMergedGroupFlow(flow, ["G-small", "G-big", "G-mid"], "group", [
+      "B",
+      "D",
+      "C",
+      "A",
+    ]);
+    expect(sorted.groups.map((g) => g.name)).toEqual(["G-small", "G-big", "G-mid"]);
+    expect(sorted.targets.map((t) => t.name)).toEqual(["D", "B", "A", "C"]);
+    // Links remap onto the new indices, still (group, target) sorted.
+    expect(sorted.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 1000 },
+      { groupIndex: 1, targetIndex: 1, value: 1000 },
+      { groupIndex: 1, targetIndex: 2, value: 5000 },
+      { groupIndex: 2, targetIndex: 3, value: 3000 },
+    ]);
+  });
+
+  it("sorts names missing from the category order after known ones, value-descending", () => {
+    // Merchants have no Budget position: with no category order at all
+    // the within-group order stays value-descending.
+    const plain = sortMergedGroupFlow(flow, ["G-small", "G-big", "G-mid"], "group");
+    expect(plain.targets.map((t) => t.name)).toEqual(["D", "A", "B", "C"]);
+    // A known name leads its group even when a larger unknown follows.
+    const mixed = sortMergedGroupFlow(flow, ["G-small", "G-big", "G-mid"], "group", ["B"]);
+    expect(mixed.targets.map((t) => t.name)).toEqual(["D", "B", "A", "C"]);
+  });
+
   it("sorts unlinked targets after grouped ones and handles empty flows", () => {
     const dangling = {
       groups: [mrow("G", 1000)],

@@ -742,8 +742,12 @@ describe("ReportsView", () => {
     // per cell (2) on the right — never one per income.
     expect(left).toHaveLength(4);
     expect(right).toHaveLength(2);
-    // No gradients: flat destination fills only, no income colors.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
+    // Flat destination fills on every ribbon — gradients live only on
+    // the two income bars, never on a ribbon.
+    for (const link of svg.querySelectorAll('[data-testid="sankey-link"]')) {
+      expect(link.getAttribute("fill")).not.toMatch(/^url\(/);
+    }
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
     const everyday = colorForName("Everyday");
     const leftFills = [everyday, everyday, REMAINING_COLOR, REMAINING_COLOR];
     left.forEach((link, k) => {
