@@ -50,30 +50,64 @@ test("changing the selectors narrows the range and re-totals Spending Trends", a
   expect(narrowTotal).not.toBe(fullTotal);
 });
 
-test("Spending by Category tab renders the top spender with a percent bar and toggles Bars/Donut view", async ({ page }) => {
+test("Spending by Category tab renders the Sankey flow and toggles view, dimension, and merge threshold", async ({ page }) => {
   await page.getByRole("button", { name: "Spending by Category", exact: true }).click();
   const panel = page.locator(".y-panel-head").filter({ hasText: "Spending by Category" }).locator("..");
-  // The seed's top spender category is Mortgage Interest.
+  // The Sankey view is the default: income sources on the left flow
+  // through category groups in the middle into categories or merchants on
+  // the right. The seed's top spender category is Mortgage Interest.
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
+  await expect(panel.getByTestId("sankey-total")).toHaveCount(0);
+  await expect(panel.getByTestId("sankey-in-link")).toHaveCount(0);
+  await expect(panel.getByTestId("sankey-income").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-group").first()).toBeVisible();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
-  // Percent labels now render without parenthesised percent (e.g. "54%").
-  await expect(panel.getByText(/\b\d+%/).first()).toBeVisible();
-  await expect(panel.locator(".y-bar-track").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-link").first()).toBeVisible();
+  // Every expense bar is fed by at least one group ribbon.
+  const linkCount = await panel.getByTestId("sankey-link").count();
+  const nodeCount = await panel.getByTestId("sankey-node").count();
+  expect(nodeCount).toBeGreaterThan(0);
+  expect(linkCount).toBeGreaterThanOrEqual(nodeCount);
+  await expect(panel.getByText("In:")).toBeVisible();
+  await expect(panel.getByText("Out:")).toBeVisible();
 
-  // Toggle buttons
+  // View toggle buttons
+  const sankeyBtn = panel.getByRole("button", { name: "Sankey", exact: true });
   const barsBtn = panel.getByRole("button", { name: "Bars", exact: true });
-  const donutBtn = panel.getByRole("button", { name: "Donut", exact: true });
+  await expect(sankeyBtn).toBeVisible();
   await expect(barsBtn).toBeVisible();
-  await expect(donutBtn).toBeVisible();
 
-  // Switch to Donut view
-  await donutBtn.click();
-  await expect(panel.locator("svg")).toBeVisible();
-  await expect(panel.getByText("TOTAL", { exact: true })).toBeVisible();
-  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
-
-  // Switch back to Bars view
+  // Switch to Bars view and back
   await barsBtn.click();
   await expect(panel.locator(".y-bar-track").first()).toBeVisible();
+  await expect(panel.getByTestId("sankey-svg")).toHaveCount(0);
+  await sankeyBtn.click();
+  await expect(panel.getByTestId("sankey-svg")).toBeVisible();
+
+  // Dimension toggle: Merchants view retitles the panel and lists payees.
+  await panel.getByRole("button", { name: "Merchants", exact: true }).click();
+  await expect(
+    page.locator(".y-panel-head").filter({ hasText: "Spending by Merchant" })
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "Categories", exact: true }).click();
+  await expect(panel.getByText("Mortgage Interest")).toBeVisible();
+
+  // Threshold slider merges smaller groups into Other without changing
+  // the Out total. The slider walks stepped stops (positions, not dollars),
+  // so drive it to its top stop, which always merges the smaller rows.
+  const outValue = panel.locator("span").filter({ hasText: /^Out:/ }).locator(".y-num");
+  const outBefore = (await outValue.textContent())?.trim();
+  const slider = panel.getByRole("slider", { name: /merge smaller groups/i });
+  const sliderMax = await slider.getAttribute("max");
+  await slider.fill(sliderMax ?? "0");
+  await expect(panel.getByText("Other")).toBeVisible();
+  await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
+  expect((await outValue.textContent())?.trim()).toBe(outBefore);
+
+  // Column headers and the How-to-read explainer keep the chart
+  // self-explanatory.
+  await expect(panel.getByTestId("sankey-colhead")).toHaveCount(3);
+  await expect(panel.getByRole("button", { name: "How to read this chart" })).toBeVisible();
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

@@ -1,8 +1,18 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
+import { sankeyRibbonGradientId } from "../src/SpendingReport.js";
+import { colorForName, sankeyRibbonShade } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
+import { sankeyThresholdStops } from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
+
+// The Under slider walks stepped stops, not raw dollars: resolve the slider
+// position for a dollar threshold from the stops covering `maxDollars` (the
+// fixture's largest row on any column — the same input the report uses).
+function stepFor(maxDollars: number, dollars: number): string {
+  return String(sankeyThresholdStops(maxDollars).indexOf(dollars));
+}
 
 class MockResizeObserver {
   cb: () => void;
@@ -197,6 +207,7 @@ describe("ReportsView", () => {
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     expectPanelBodyIsFlexColumn(panel);
+    fireEvent.click(within(panel).getByRole("button", { name: "Bars" }));
     const scope = within(panel);
     // Groceries ($350, 54%) is top, Rent ($300, 46%) second.
     const names = scope.getAllByText(/Groceries|Rent/).map((el) => el.textContent);
@@ -206,33 +217,117 @@ describe("ReportsView", () => {
     expect(scope.getByText("46%")).toBeInTheDocument();
   });
 
-  it("Spending by Category tab toggles between Bars and Donut view modes", () => {
+  it("Spending by Category defaults to the Sankey view and toggles to Bars", () => {
     renderView();
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
     expect(panel).toBeTruthy();
     expectPanelBodyIsFlexColumn(panel);
 
+    const sankeyBtn = within(panel).getByRole("button", { name: "Sankey" });
     const barsBtn = within(panel).getByRole("button", { name: "Bars" });
-    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
+    expect(sankeyBtn).toBeInTheDocument();
     expect(barsBtn).toBeInTheDocument();
-    expect(donutBtn).toBeInTheDocument();
 
-    // Default is Bars view with bar tracks
-    expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
-    expect(panel.querySelector("svg")).toBeNull();
-
-    // Toggle to Donut view
-    fireEvent.click(donutBtn);
-    expect(panel.querySelector("svg")).not.toBeNull();
-    expect(within(panel).getByText("TOTAL")).toBeInTheDocument();
+    // Default is the three-column Sankey flow: the income feeds the
+    // Everyday group plus the full-width Remaining ribbon (income exceeds
+    // spending), and the group fans out to Groceries and Rent.
+    const svg = panel.querySelector('[data-testid="sankey-svg"]');
+    expect(svg).not.toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
+    expect(svg!.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
+    expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
+    expect(svg!.querySelectorAll('[data-testid="sankey-in-link"]')).toHaveLength(0);
+    expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
     expect(within(panel).getByText("Groceries")).toBeInTheDocument();
     expect(within(panel).getByText("Rent")).toBeInTheDocument();
+    expect(within(panel).getByText("Everyday")).toBeInTheDocument();
+    expect(within(panel).getByText("Remaining")).toBeInTheDocument();
+    expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
 
-    // Toggle back to Bars view
+    // Toggle to Bars view
     fireEvent.click(barsBtn);
-    expect(panel.querySelector("svg")).toBeNull();
+    expect(panel.querySelector('[data-testid="sankey-svg"]')).toBeNull();
     expect(panel.querySelectorAll(".y-bar-track").length).toBeGreaterThan(0);
+
+    // Toggle back to Sankey view
+    fireEvent.click(sankeyBtn);
+    expect(panel.querySelector('[data-testid="sankey-svg"]')).not.toBeNull();
+    expect(panel.querySelectorAll(".y-bar-track")).toHaveLength(0);
+  });
+
+  it("Spending tab toggles between Categories and Merchants dimensions", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    fireEvent.click(within(panel).getByRole("button", { name: "Merchants" }));
+
+    // Panel retitles; uncategorized "Shop B" counts as a merchant but
+    // income payee "Payroll" stays on the income side only (one label: the
+    // income column — never duplicated into merchant spending).
+    expect(findPanel("Spending by Merchant")).toBeTruthy();
+    expect(within(panel).getByText("Shop B")).toBeInTheDocument();
+    expect(within(panel).getAllByText("Payroll")).toHaveLength(1);
+    expect(within(panel).getByText("3 merchants")).toBeInTheDocument();
+    // Uncategorized Shop B routes through the Uncategorized pseudo-group.
+    expect(within(panel).getByText("Uncategorized")).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Categories" }));
+    expect(findPanel("Spending by Category")).toBeTruthy();
+    expect(within(panel).queryByText("Shop B")).not.toBeInTheDocument();
+  });
+
+  it("Spending tab re-totals the Sankey when the From month is narrowed", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    // Full range spends $650.00 across Groceries + Rent (Out readout only —
+    // the chart carries no total caption anymore).
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
+    pickFromOpenDropdownByValue(/from month/i, "5");
+    // June only: $50.00 of Groceries; Rent drops out entirely.
+    expect(within(panel).getAllByText("$50.00")).toHaveLength(1);
+    expect(within(panel).queryByText("Rent")).not.toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    // Groceries plus the Remaining plug (June income exceeds June spending),
+    // routed through the Everyday group: two left ribbons, one right ribbon.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(3);
+  });
+
+  it("Spending tab merges smaller groups into Other via the threshold slider", () => {
+    renderView();
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
+    // Groceries $350 is kept, Rent $300 folds into Other at a $350 stop
+    // (the $9,000 Payroll drives the stops).
+    fireEvent.change(slider, { target: { value: stepFor(9000, 350) } });
+    expect(within(panel).getByText("Other")).toBeInTheDocument();
+    expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    // Groceries + Other + Remaining on the right, all through Everyday.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    // Out total is unchanged by merging.
+    expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
+  });
+
+  it("Spending tab merges small incomes into Other with the same threshold", () => {
+    const data = makeData();
+    data.transactions.push(txn("2026-06", 15, "Bonus", 100));
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
+    // $350 stop: Rent ($300) folds into Other on the right, Bonus ($100)
+    // into Other on the left; Groceries ($350) and Payroll stay.
+    fireEvent.change(slider, { target: { value: stepFor(9000, 350) } });
+    expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
+    // 2 incomes x 1 group plus 2 full-width Remaining ribbons on the
+    // left; 2 cells (Groceries + Other) x 2 incomes on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(8);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -333,9 +428,9 @@ describe("ReportsView", () => {
     }
   });
 
-  it("Spending by Category in Donut mode draws slices as explicit arc paths so tiny slices cannot render a dash 'bow'", () => {
-    // "Fees" is a tiny share — the slice whose sub-pixel stroke-dasharray used
-    // to rasterize as a ragged multi-colour sliver at the ring seam.
+  it("Spending by Category draws one closed ribbon per group and keeps tiny flows hoverable", () => {
+    // "Fees" is a dust share ($0.01 of $650.01) — without a minimum node
+    // height it would collapse to a sub-pixel sliver no cursor can hit.
     const data = makeData();
     data.categories.push({
       id: 12,
@@ -350,27 +445,33 @@ describe("ReportsView", () => {
     renderView({ data });
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
-    const donutBtn = within(panel).getByRole("button", { name: "Donut" });
-    fireEvent.click(donutBtn);
 
-    const svg = panel.querySelector("svg")!;
-    const circles = svg.querySelectorAll("circle");
-    const paths = svg.querySelectorAll("path");
-    // Wedges are explicit <path> arcs; the only <circle> left is the background fill.
-    expect(circles.length).toBe(1);
-    expect(paths.length).toBe(3);
-    // No slice may use stroke-dasharray/dashoffset — the source of the "bow".
-    for (const c of Array.from(circles)) {
-      expect(c.getAttribute("stroke-dasharray")).toBeNull();
-      expect(c.getAttribute("stroke-dashoffset")).toBeNull();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
+    const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
+    // Groceries + Rent + Fees + the Remaining plug (income exceeds spending),
+    // all routed through the single Everyday group: two left ribbons (group
+    // + full-width Remaining) and three right ribbons.
+    expect(links).toHaveLength(5);
+    expect(nodes).toHaveLength(4);
+    expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
+    // Each ribbon is a closed bezier path running left-to-right.
+    for (const link of links) {
+      const d = link.getAttribute("d") ?? "";
+      expect(d).toMatch(/^M .* C .* Z$/);
     }
-    // Each wedge closes along the ring's inner edge: its path data must contain
-    // an arc drawn in the reverse (sweep 0) direction. A missing/incorrectly
-    // swept inner arc renders slices as an "outer arc with no inner band".
-    for (const p of Array.from(paths)) {
-      const d = p.getAttribute("d");
-      expect(d).toMatch(/A [\d.]+ [\d.]+ 0 [01] 0 /);
+    // Every node (including dust) is tall enough to hover, and the bands
+    // stack without overlap inside the 400px-tall mock viewport.
+    let prevBottom = 8;
+    for (const node of nodes) {
+      const y = Number(node.getAttribute("y"));
+      const h = Number(node.getAttribute("height"));
+      expect(h).toBeGreaterThanOrEqual(8);
+      expect(y).toBeGreaterThanOrEqual(prevBottom - 1e-6);
+      expect(y + h).toBeLessThanOrEqual(400 - 8 + 1e-6);
+      prevBottom = y + h + 6;
     }
+    expect(within(panel).getByText("Fees")).toBeInTheDocument();
   });
 
   it("Spending by Category renders proportional bars with no truncation breaks", () => {
@@ -395,6 +496,7 @@ describe("ReportsView", () => {
     renderView({ data });
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
+    fireEvent.click(within(panel).getByRole("button", { name: "Bars" }));
 
     // No truncation / break UI on any bar: no masks, markers, or caps.
     expect(panel.querySelector('[data-testid="axis-break"]')).toBeNull();
@@ -591,10 +693,91 @@ describe("ReportsView", () => {
     const panel = findPanel("Spending by Category")!;
     expect(panel).toBeInTheDocument();
 
-    // Net spend is $50.00 ($200 - $150), total is $50.00
+    // Net spend is $50.00 ($200 - $150). No income in range, so there are
+    // no income bars — the expense bar is fully unfunded instead of the
+    // income side inventing an Overspent source.
     expect(within(panel).getByText("Clothing")).toBeInTheDocument();
     expect(within(panel).getAllByText("$50.00")).toHaveLength(2);
-    expect(within(panel).getByText("Total:")).toBeInTheDocument();
+    expect(within(panel).getByText("Out:")).toBeInTheDocument();
+    expect(within(panel).getByText("Over:")).toBeInTheDocument();
+    expect(within(panel).queryByText("Overspent")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Remaining")).not.toBeInTheDocument();
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(0);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
+    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(1);
+    // The dangling group still draws its (fully unfunded) middle bar.
+    expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
+  });
+
+  it("Spending sankey hides amounts on tiny income bars and colors ribbons by destination", () => {
+    const data = makeData();
+    data.transactions.push(txn("2026-06", 15, "Bonus", 1));
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
+
+    // Both income names render, but the $1 Bonus bar is too short for two
+    // lines, so only Payroll keeps its amount.
+    const bars = svg.querySelectorAll('[data-testid="sankey-income"]');
+    const labels = svg.querySelectorAll('[data-testid="sankey-income-label"]');
+    expect(bars).toHaveLength(2);
+    expect(labels).toHaveLength(2);
+    expect(within(panel).getByText("Bonus")).toBeInTheDocument();
+    expect(svg.querySelectorAll('[data-testid="sankey-income-amount"]')).toHaveLength(1);
+    // The name-only label sits centered on its bar.
+    const barY = Number(bars[1]!.getAttribute("y"));
+    const barH = Number(bars[1]!.getAttribute("height"));
+    expect(barH).toBeLessThan(26);
+    expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
+
+    // Left ribbons take their middle group's color and right sub-ribbons
+    // their final category's: each ribbon reads as where the money lands.
+    const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
+    const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
+    // 2 incomes x 1 group plus 2 Remaining ribbons on the left; 2 cells
+    // x 2 incomes on the right.
+    expect(left).toHaveLength(4);
+    expect(right).toHaveLength(4);
+    // One gradient per middle and per target (Everyday + Groceries, Rent,
+    // Remaining) — no income gradients.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(1 + 3);
+    const leftFills = [
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("middle", 0),
+      sankeyRibbonGradientId("target", 2),
+      sankeyRibbonGradientId("target", 2),
+    ];
+    left.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(`url(#${leftFills[k]!})`);
+    });
+    // Right sub-bands fill from their target's gradient, cell-major.
+    const targetOrder = [0, 0, 1, 1];
+    right.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(
+        `url(#${sankeyRibbonGradientId("target", targetOrder[k]!)})`
+      );
+      expect(link.getAttribute("data-income")).toBe(String(k % 2));
+    });
+    // Each gradient holds its node color through the midpoint, then settles
+    // into a shade of that same hue at the target end.
+    const everyday = colorForName("Everyday");
+    const grad = svg.querySelector(`#${sankeyRibbonGradientId("middle", 0)}`)!;
+    const stops = Array.from(grad.querySelectorAll("stop"));
+    expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
+    expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
+      everyday,
+      everyday,
+      sankeyRibbonShade(everyday),
+    ]);
+    const groceriesGrad = svg.querySelector(`#${sankeyRibbonGradientId("target", 0)}`)!;
+    const groceriesStops = Array.from(groceriesGrad.querySelectorAll("stop"));
+    expect(groceriesStops[0]!.getAttribute("stop-color")).toBe(colorForName("Groceries"));
+    expect(groceriesStops[2]!.getAttribute("stop-color")).toBe(
+      sankeyRibbonShade(colorForName("Groceries"))
+    );
   });
 });
 
