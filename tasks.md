@@ -67,3 +67,9 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
+Spending by Category - Sankey:
+- if I hover over a group on the right, it needs to highlight it and all lines leading into it, not just an individual transfer
+- conversely if I hover on an income on the left, it needs to highlight all the lines leading from it
+- the color on the right dictates a color on the left. It doesn't matter what the Income color is/ignore it, a line connecting income to category/merchant HAS TO be the same color throughout
+- make sure for each parent category all the subcategories/merchants are shades of that single color
+- the parent group highlight/bar should NOT have a black highlight border. Make the parent categories more subtle, just a vertical bar is enough
