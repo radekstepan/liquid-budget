@@ -28,7 +28,7 @@ import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   ChartTip,
   colorForName,
-  sankeyRibbonShade,
+  sankeyTargetColors,
   TipLabel,
   OVER_INCOME_COLOR,
   useElementSize,
@@ -65,14 +65,33 @@ function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
 }
 
-// One shared gradient per downstream node: each ribbon takes the color
-// of the node it flows INTO — left-hop ribbons the middle group's (or the
-// Remaining plug's green for the full-width surplus ribbons), right-hop
-// sub-ribbons their final category's or merchant's — holding that color
-// through the midpoint, then settling into a shade of the same hue toward
-// the target end. Exported so tests can pin the defs.
-export function sankeyRibbonGradientId(side: "middle" | "target", index: number): string {
-  return `sankey-ribbon-${side === "middle" ? "m" : "t"}${index}`;
+// Each ribbon carries one flat color — the color of the node it flows
+// INTO — through its whole length: left-hop ribbons the middle group's (or
+// the Remaining plug's green for the full-width surplus ribbons), right-hop
+// sub-ribbons their final category's or merchant's family shade. The income
+// side never colors a ribbon. Exported so tests can pin the fills.
+export const SANKEY_RIBBON_OPACITY = 0.35;
+export const SANKEY_RIBBON_DIM_OPACITY = 0.18;
+export const SANKEY_RIBBON_HOVER_OPACITY = 0.65;
+
+// Collapse the per-income right-hop sub-bands back into their parent
+// middle→target cells (summing values), so family colors attribute each
+// target to its dominant parent group. Pure.
+export function aggregateSankeyRightCells(
+  links: { sourceIndex: number; targetIndex: number; value: number }[]
+): { middleIndex: number; targetIndex: number; value: number }[] {
+  const acc = new Map<string, { middleIndex: number; targetIndex: number; value: number }>();
+  for (const l of links) {
+    const prev = acc.get(`${l.sourceIndex}:${l.targetIndex}`);
+    if (prev) prev.value += l.value;
+    else
+      acc.set(`${l.sourceIndex}:${l.targetIndex}`, {
+        middleIndex: l.sourceIndex,
+        targetIndex: l.targetIndex,
+        value: l.value,
+      });
+  }
+  return [...acc.values()];
 }
 
 // Session flag for the Under auto-fit: it runs at most once per tab session —
@@ -183,17 +202,27 @@ export function SpendingReport({
   }, [merged.targets, mergedIncome.items]);
   const spentTotal = totals.spendingTotal;
 
-  // Bars rows: spending shares (unchanged by the income side).
+  // Bars rows: spending shares (unchanged by the income side). Bars share
+  // the Sankey's family colors so a category keeps its color across views.
   const rows = useMemo(() => {
     const maxSpend = merged.targets.reduce((m, s) => Math.max(m, s.value), 1);
+    const colors = sankeyTargetColors(
+      merged.groups.map((g) => ({ name: g.name, bucket: g.bucket === true })),
+      merged.targets.map((t) => ({ name: t.name, bucket: t.bucket === true, isPlug: false })),
+      merged.links.map((l) => ({
+        middleIndex: l.groupIndex,
+        targetIndex: l.targetIndex,
+        value: l.value,
+      }))
+    );
     return merged.targets.map((s, i) => {
       const share = spentTotal !== 0 ? s.value / spentTotal : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
-      const color = colorForName(s.name);
+      const color = colors[i] ?? colorForName(s.name);
       return { ...s, share, pctOfTotal, pctOfMax, color, i };
     });
-  }, [merged.targets, spentTotal]);
+  }, [merged, spentTotal]);
 
   // Income rows for the layout: the same Under threshold folds small
   // income sources into an Other bucket on the left, and the proportional
@@ -315,20 +344,33 @@ export function SpendingReport({
       })),
     [sankey, totals.flowTotal]
   );
-  const tgtRows = useMemo(
-    () =>
-      (sankey?.targets ?? []).map((t, i) => ({
-        ...t,
-        flowPct:
-          totals.flowTotal !== 0 ? Math.round((t.value / totals.flowTotal) * 100) : 0,
-        color: colorForName(t.name),
-        // By position, never by name: a literal "Remaining" category is
-        // still just a category.
-        isPlug: sankey?.remainingTargetIndex === i,
-        i,
-      })),
-    [sankey, totals.flowTotal]
-  );
+  const tgtRows = useMemo(() => {
+    const targets = sankey?.targets ?? [];
+    // Family colors attribute each target to its dominant parent group
+    // (cells re-aggregated from the layout's own sub-bands, so the mapping
+    // is aligned with the drawn columns by construction).
+    const colors = sankey
+      ? sankeyTargetColors(
+          sankey.middles.map((m) => ({ name: m.name, bucket: m.bucket })),
+          targets.map((t, i) => ({
+            name: t.name,
+            bucket: t.bucket,
+            isPlug: sankey.remainingTargetIndex === i,
+          })),
+          aggregateSankeyRightCells(sankey.linksRight)
+        )
+      : [];
+    return targets.map((t, i) => ({
+      ...t,
+      flowPct:
+        totals.flowTotal !== 0 ? Math.round((t.value / totals.flowTotal) * 100) : 0,
+      color: colors[i] ?? colorForName(t.name),
+      // By position, never by name: a literal "Remaining" category is
+      // still just a category.
+      isPlug: sankey?.remainingTargetIndex === i,
+      i,
+    }));
+  }, [sankey, totals.flowTotal]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -633,12 +675,14 @@ export function SpendingReport({
   })();
 
   // Connected-highlight sets per hover (null = unconstrained, everything
-  // stays full opacity). Hovering any bar or ribbon spotlights its flow
-  // path and dims the rest: an income lights its left ribbons, every group
-  // and target they reach (money is fungible, so that is every category),
-  // and its own share of each right-hop cell; a target lights its groups,
-  // the sub-ribbons feeding it, and the income ribbons feeding those
-  // groups. Ribbon hovers trace the through-line end to end: a right
+  // stays full opacity). Hovering any bar spotlights its full flow path and
+  // dims the rest: an income lights every line leading from it — its left
+  // ribbons plus its full downstream contribution, every right-hop cell in
+  // full (money is fungible, so that is every group and target) — and only
+  // the other incomes' bars and bands dim; a target lights itself, every
+  // line leading into it, its groups, and the income ribbons feeding those
+  // groups; a group lights its incoming and outgoing ribbons with the bars
+  // on both ends. Ribbon hovers trace the through-line end to end: a right
   // sub-ribbon lights its income bar and the left ribbon feeding its
   // middle, and a left ribbon lights the sub-ribbons continuing its income
   // through that middle.
@@ -665,8 +709,10 @@ export function SpendingReport({
         if (l.targetIndex < midCount) mid.add(l.targetIndex);
         else if (sankey.remainingTargetIndex != null) tgt.add(sankey.remainingTargetIndex);
       }
+      // Every cell carries this income's money (fungible proportional
+      // split), so the full downstream contribution lights in full — not
+      // just this income's own band of each cell.
       for (const l of sankey.linksRight) {
-        if (l.incomeIndex !== hover.idx) continue;
         rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
         tgt.add(l.targetIndex);
       }
@@ -741,10 +787,6 @@ export function SpendingReport({
   const isSrcHover = (idx: number) =>
     (hover?.kind === "income" && hover.idx === idx) ||
     (hover?.kind === "link" && hover.side === "left" && hover.a === idx);
-  const isMidHover = (idx: number) =>
-    (hover?.kind === "group" && hover.idx === idx) ||
-    (hover?.kind === "link" &&
-      ((hover.side === "left" && hover.b === idx) || (hover.side === "right" && hover.a === idx)));
   const isTgtHover = (idx: number) =>
     (hover?.kind === "node" && hover.idx === idx) ||
     (hover?.kind === "link" &&
@@ -1052,36 +1094,6 @@ export function SpendingReport({
               height={contentH}
               className="block"
             >
-              <defs>
-                {midRows.map((r) => (
-                  <linearGradient
-                    key={`mgrad-${r.i}`}
-                    id={sankeyRibbonGradientId("middle", r.i)}
-                    x1="0"
-                    y1="0"
-                    x2="1"
-                    y2="0"
-                  >
-                    <stop offset="0" stopColor={r.color} />
-                    <stop offset="0.5" stopColor={r.color} />
-                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
-                  </linearGradient>
-                ))}
-                {tgtRows.map((r) => (
-                  <linearGradient
-                    key={`tgrad-${r.i}`}
-                    id={sankeyRibbonGradientId("target", r.i)}
-                    x1="0"
-                    y1="0"
-                    x2="1"
-                    y2="0"
-                  >
-                    <stop offset="0" stopColor={r.color} />
-                    <stop offset="0.5" stopColor={r.color} />
-                    <stop offset="1" stopColor={sankeyRibbonShade(r.color)} />
-                  </linearGradient>
-                ))}
-              </defs>
               {/* Column headers: each column names what it holds, so the
                   chart reads without prior knowledge (left is income
                   received — not surplus — middle groups route it, right is
@@ -1119,14 +1131,16 @@ export function SpendingReport({
                   )
               )}
               {sankey.linksLeft.map((link) => {
-                // Left-hop ribbons take their middle group's color — except
-                // the full-width surplus ribbons, which take the Remaining
-                // plug's green straight through to the right.
+                // Flat destination color through the whole length: left-hop
+                // ribbons take their middle group's color — except the
+                // full-width surplus ribbons, which take the Remaining
+                // plug's green straight through to the right. The income
+                // side never colors a ribbon.
                 const plugTarget = sankey.remainingTargetIndex;
                 const fill =
                   link.targetIndex >= midRows.length && plugTarget != null
-                    ? `url(#${sankeyRibbonGradientId("target", plugTarget)})`
-                    : `url(#${sankeyRibbonGradientId("middle", link.targetIndex)})`;
+                    ? (tgtRows[plugTarget]?.color ?? colorForName(link.targetName))
+                    : (midRows[link.targetIndex]?.color ?? colorForName(link.targetName));
                 const isHover = isLeftLinkHover(link.sourceIndex, link.targetIndex);
                 const dim =
                   hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
@@ -1137,7 +1151,13 @@ export function SpendingReport({
                     data-side="left"
                     d={link.d}
                     fill={fill}
-                    fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
+                    fillOpacity={
+                      isHover
+                        ? SANKEY_RIBBON_HOVER_OPACITY
+                        : dim
+                          ? SANKEY_RIBBON_DIM_OPACITY
+                          : SANKEY_RIBBON_OPACITY
+                    }
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
@@ -1155,12 +1175,14 @@ export function SpendingReport({
                 );
               })}
               {sankey.linksRight.map((link) => {
-                // Destination color: every sub-band in a cell fills from
-                // the final category's or merchant's gradient, so each
-                // ribbon reads as where the money lands. The per-income
-                // split stays invisible until an income hover spotlights
-                // its own share of every cell.
-                const fill = `url(#${sankeyRibbonGradientId("target", link.targetIndex)})`;
+                // Flat destination color through the whole length: every
+                // sub-band in a cell fills with the final category's or
+                // merchant's family shade, so each ribbon reads as where
+                // the money lands. The per-income split stays invisible —
+                // all bands in a cell share one color — until hovering one
+                // sub-band traces its through-line end to end.
+                const fill =
+                  tgtRows[link.targetIndex]?.color ?? colorForName(link.targetName);
                 const isHover = isRightLinkHover(
                   link.sourceIndex,
                   link.targetIndex,
@@ -1177,7 +1199,13 @@ export function SpendingReport({
                     data-income={link.incomeIndex}
                     d={link.d}
                     fill={fill}
-                    fillOpacity={isHover ? 0.65 : dim ? 0.18 : 0.35}
+                    fillOpacity={
+                      isHover
+                        ? SANKEY_RIBBON_HOVER_OPACITY
+                        : dim
+                          ? SANKEY_RIBBON_DIM_OPACITY
+                          : SANKEY_RIBBON_OPACITY
+                    }
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
@@ -1263,12 +1291,14 @@ export function SpendingReport({
               })}
               {sankey.middles.map((node, idx) => {
                 const color = colorForName(node.name);
-                const isHover = isMidHover(idx);
                 const dim = hl.mid != null && !hl.mid.has(idx);
                 const r = midRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`mid-${node.name}-${idx}`}>
+                    {/* Parent groups stay subtle: just a vertical bar, never
+                        a highlight border — hovering one spotlights its
+                        ribbons instead. */}
                     <rect
                       data-testid="sankey-group"
                       x={node.x}
@@ -1278,8 +1308,7 @@ export function SpendingReport({
                       rx={2}
                       fill={color}
                       fillOpacity={dim ? 0.35 : 1}
-                      stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
-                      strokeWidth={isHover ? 2 : 1}
+                      stroke="none"
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
@@ -1350,10 +1379,12 @@ export function SpendingReport({
                 );
               })}
               {sankey.targets.map((node, idx) => {
-                const color = colorForName(node.name);
+                const r = tgtRows[idx]!;
+                // Family shade shared with the incoming ribbons, so the line
+                // from an income to this bar reads as one color throughout.
+                const color = r.color;
                 const isHover = isTgtHover(idx);
                 const dim = hl.tgt != null && !hl.tgt.has(idx);
-                const r = tgtRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`tgt-${node.name}-${idx}`}>

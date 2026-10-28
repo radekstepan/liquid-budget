@@ -1,8 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
-import { sankeyRibbonGradientId } from "../src/SpendingReport.js";
-import { colorForName, sankeyRibbonShade } from "../src/chartUtils.js";
+import { colorForName, REMAINING_COLOR, sankeyFamilyShade } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { sankeyThresholdStops } from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
@@ -734,50 +733,35 @@ describe("ReportsView", () => {
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
     // Left ribbons take their middle group's color and right sub-ribbons
-    // their final category's: each ribbon reads as where the money lands.
+    // their final category's family shade: each ribbon reads as where the
+    // money lands, in one flat color through its whole length.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
     // 2 incomes x 1 group plus 2 Remaining ribbons on the left; 2 cells
     // x 2 incomes on the right.
     expect(left).toHaveLength(4);
     expect(right).toHaveLength(4);
-    // One gradient per middle and per target (Everyday + Groceries, Rent,
-    // Remaining) — no income gradients.
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(1 + 3);
-    const leftFills = [
-      sankeyRibbonGradientId("middle", 0),
-      sankeyRibbonGradientId("middle", 0),
-      sankeyRibbonGradientId("target", 2),
-      sankeyRibbonGradientId("target", 2),
-    ];
+    // No gradients: flat destination fills only, no income colors.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
+    const everyday = colorForName("Everyday");
+    const leftFills = [everyday, everyday, REMAINING_COLOR, REMAINING_COLOR];
     left.forEach((link, k) => {
-      expect(link.getAttribute("fill")).toBe(`url(#${leftFills[k]!})`);
+      expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
-    // Right sub-bands fill from their target's gradient, cell-major.
-    const targetOrder = [0, 0, 1, 1];
+    // Right sub-bands fill with their target's family shade, cell-major:
+    // Groceries keeps the Everyday color, Rent darkens one rank.
+    const targetFills = [everyday, everyday, sankeyFamilyShade(everyday, 1), sankeyFamilyShade(everyday, 1)];
     right.forEach((link, k) => {
-      expect(link.getAttribute("fill")).toBe(
-        `url(#${sankeyRibbonGradientId("target", targetOrder[k]!)})`
-      );
+      expect(link.getAttribute("fill")).toBe(targetFills[k]);
       expect(link.getAttribute("data-income")).toBe(String(k % 2));
     });
-    // Each gradient holds its node color through the midpoint, then settles
-    // into a shade of that same hue at the target end.
-    const everyday = colorForName("Everyday");
-    const grad = svg.querySelector(`#${sankeyRibbonGradientId("middle", 0)}`)!;
-    const stops = Array.from(grad.querySelectorAll("stop"));
-    expect(stops.map((s) => s.getAttribute("offset"))).toEqual(["0", "0.5", "1"]);
-    expect(stops.map((s) => s.getAttribute("stop-color"))).toEqual([
-      everyday,
-      everyday,
-      sankeyRibbonShade(everyday),
-    ]);
-    const groceriesGrad = svg.querySelector(`#${sankeyRibbonGradientId("target", 0)}`)!;
-    const groceriesStops = Array.from(groceriesGrad.querySelectorAll("stop"));
-    expect(groceriesStops[0]!.getAttribute("stop-color")).toBe(colorForName("Groceries"));
-    expect(groceriesStops[2]!.getAttribute("stop-color")).toBe(
-      sankeyRibbonShade(colorForName("Groceries"))
+    // Ribbon fills equal their destination bars' fills exactly.
+    const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
+      (n) => n.getAttribute("fill")
     );
+    expect(nodeFills).toEqual([everyday, sankeyFamilyShade(everyday, 1), REMAINING_COLOR]);
+    const groupFill = svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill");
+    expect(groupFill).toBe(everyday);
   });
 });
 

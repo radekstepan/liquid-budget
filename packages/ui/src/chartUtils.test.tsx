@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, render } from "@testing-library/react";
 import {
+  colorForName,
   computeOutlierBreak,
   iqrFence,
   niceCeil,
   NO_BREAK,
+  OTHER_BUCKET_COLOR,
   quantile,
-  sankeyRibbonShade,
+  REMAINING_COLOR,
+  sankeyFamilyShade,
+  sankeyTargetColors,
+  shade,
   useElementSize,
 } from "./chartUtils.js";
 
@@ -71,21 +76,114 @@ describe("computeOutlierBreak", () => {
   });
 });
 
-describe("sankeyRibbonShade", () => {
-  it("derives a darker shade of the same hue", () => {
-    expect(sankeyRibbonShade("#2f7fb0")).toBe("#1a4661");
+describe("sankeyFamilyShade", () => {
+  it("keeps the parent color exactly at rank 0", () => {
+    expect(sankeyFamilyShade("#2f7fb0", 0)).toBe("#2f7fb0");
+    expect(sankeyFamilyShade("#2f7fb0", -1)).toBe("#2f7fb0");
   });
 
-  it("never brightens a channel and keeps valid hex", () => {
-    for (const hex of ["#e8a33d", "#8bc34a", "#78909c", "#ffffff"]) {
-      const out = sankeyRibbonShade(hex);
+  it("darkens by rank without brightening any channel", () => {
+    const base = "#2f7fb0";
+    const shades = [1, 2, 3, 4, 5, 6, 10].map((r) => sankeyFamilyShade(base, r));
+    expect(shades[0]).toBe(shade(base, 0.87));
+    for (const out of shades) {
       expect(out).toMatch(/^#[0-9a-f]{6}$/);
       for (let i = 0; i < 3; i++) {
-        const inp = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+        const inp = parseInt(base.slice(1 + i * 2, 3 + i * 2), 16);
         const got = parseInt(out.slice(1 + i * 2, 3 + i * 2), 16);
         expect(got).toBeLessThanOrEqual(inp);
       }
     }
+    // Monotonic: each deeper rank is no brighter than the last.
+    const lum = (hex: string) =>
+      [0, 1, 2].reduce((s, i) => s + parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16), 0);
+    for (let i = 1; i < shades.length; i++) {
+      expect(lum(shades[i]!)).toBeLessThanOrEqual(lum(shades[i - 1]!));
+    }
+  });
+});
+
+describe("sankeyTargetColors", () => {
+  const groups = [
+    { name: "Bills", bucket: false },
+    { name: "Everyday", bucket: false },
+  ];
+  const bills = colorForName("Bills");
+  const everyday = colorForName("Everyday");
+
+  it("colors each target as a shade of its parent group", () => {
+    const colors = sankeyTargetColors(
+      groups,
+      [
+        { name: "Mortgage Interest", bucket: false, isPlug: false },
+        { name: "Groceries", bucket: false, isPlug: false },
+        { name: "Electric Bill", bucket: false, isPlug: false },
+      ],
+      [
+        { middleIndex: 0, targetIndex: 0, value: 100000 },
+        { middleIndex: 0, targetIndex: 2, value: 15000 },
+        { middleIndex: 1, targetIndex: 1, value: 40000 },
+      ]
+    );
+    // Largest sibling keeps the parent color exactly; later siblings darken.
+    expect(colors).toEqual([
+      bills,
+      everyday,
+      sankeyFamilyShade(bills, 1),
+    ]);
+  });
+
+  it("attributes a multi-group target to its dominant group", () => {
+    const colors = sankeyTargetColors(
+      groups,
+      [{ name: "Amazon", bucket: false, isPlug: false }],
+      [
+        { middleIndex: 0, targetIndex: 0, value: 100 },
+        { middleIndex: 1, targetIndex: 0, value: 900 },
+      ]
+    );
+    expect(colors).toEqual([everyday]);
+  });
+
+  it("keeps the Remaining plug green and Other buckets slate by flag, never by name", () => {
+    const colors = sankeyTargetColors(
+      groups,
+      [
+        // A literal "Remaining" category joins its own family.
+        { name: "Remaining", bucket: false, isPlug: false },
+        // A literal "Other" merchant joins its own family.
+        { name: "Other", bucket: false, isPlug: false },
+        { name: "Other", bucket: true, isPlug: false },
+        { name: "Remaining", bucket: false, isPlug: true },
+      ],
+      [
+        { middleIndex: 0, targetIndex: 0, value: 10 },
+        { middleIndex: 0, targetIndex: 1, value: 5 },
+        { middleIndex: 0, targetIndex: 2, value: 3 },
+      ]
+    );
+    expect(colors[0]).toBe(bills);
+    expect(colors[1]).toBe(sankeyFamilyShade(bills, 1));
+    expect(colors[2]).toBe(OTHER_BUCKET_COLOR);
+    expect(colors[3]).toBe(REMAINING_COLOR);
+  });
+
+  it("shades targets routed through the merged Other group in slate", () => {
+    const colors = sankeyTargetColors(
+      [{ name: "Other", bucket: true }],
+      [{ name: "Kept Category", bucket: false, isPlug: false }],
+      [{ middleIndex: 0, targetIndex: 0, value: 100 }]
+    );
+    expect(colors).toEqual([OTHER_BUCKET_COLOR]);
+  });
+
+  it("falls back to the stable name color for targets with no incoming link", () => {
+    const colors = sankeyTargetColors(
+      groups,
+      [{ name: "Orphan", bucket: false, isPlug: false }],
+      []
+    );
+    expect(colors).toEqual([colorForName("Orphan")]);
   });
 });
 

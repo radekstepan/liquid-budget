@@ -58,13 +58,65 @@ export function shade(hex: string, amt: number): string {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
-// Target-half shade for a Sankey ribbon: the source node's color darkened
-// toward black, so each ribbon starts in its source color and settles into
-// a shade of that same hue at the target end. Darkening (not lightening)
-// keeps the ribbon readable at ribbon opacity over a light background.
-// Pure hex → hex.
-export function sankeyRibbonShade(hex: string): string {
-  return shade(hex, 0.55);
+// Sankey family colors: each middle (parent group) node owns one hue, and
+// every target it feeds is a shade of that hue — the largest child keeps the
+// parent color exactly, smaller siblings darken by rank. Darkening (not
+// lightening) keeps bars and ribbons readable at ribbon opacity over a light
+// background. Pure hex → hex.
+const SANKEY_FAMILY_SHADE_STEPS = [1, 0.87, 0.76, 0.67, 0.6, 0.54];
+
+export function sankeyFamilyShade(base: string, rank: number): string {
+  if (rank <= 0) return base;
+  const step =
+    rank < SANKEY_FAMILY_SHADE_STEPS.length
+      ? (SANKEY_FAMILY_SHADE_STEPS[rank] ?? 0.54)
+      : Math.max(0.35, 0.54 * Math.pow(0.92, rank - SANKEY_FAMILY_SHADE_STEPS.length + 1));
+  return shade(base, step);
+}
+
+export type SankeyFamilyGroup = { name: string; bucket: boolean };
+export type SankeyFamilyTarget = { name: string; bucket: boolean; isPlug: boolean };
+export type SankeyFamilyLink = { middleIndex: number; targetIndex: number; value: number };
+
+/**
+ * One color per right-column target, aligned with `targets`: each target
+ * takes a shade of its dominant (largest-value) parent group's color, with
+ * siblings darkened by column order (see sankeyFamilyShade). A target fed by
+ * several groups (a merchant split across groups) joins its dominant group's
+ * family; ties keep the first link in input order so the result is
+ * deterministic. The Remaining plug stays green and merged Other buckets
+ * stay slate — both by flag, never by name, so a literal "Remaining" or
+ * "Other" row still joins its own family. Targets with no incoming link
+ * (defensive: well-formed flows never produce them) fall back to their
+ * stable name color. Pure data → hex colors.
+ */
+export function sankeyTargetColors(
+  groups: SankeyFamilyGroup[],
+  targets: SankeyFamilyTarget[],
+  links: SankeyFamilyLink[]
+): string[] {
+  const dominant = new Array<number | null>(targets.length).fill(null);
+  const best = new Array<number>(targets.length).fill(0);
+  for (const l of links) {
+    if (l.middleIndex < 0 || l.targetIndex < 0 || l.targetIndex >= targets.length) continue;
+    if (!(l.value > 0)) continue;
+    if (dominant[l.targetIndex] == null || l.value > (best[l.targetIndex] ?? 0)) {
+      dominant[l.targetIndex] = l.middleIndex;
+      best[l.targetIndex] = l.value;
+    }
+  }
+  const seen = new Map<number, number>();
+  return targets.map((t, i) => {
+    if (t.isPlug) return REMAINING_COLOR;
+    if (t.bucket) return OTHER_BUCKET_COLOR;
+    const m = dominant[i];
+    const g = m != null ? groups[m] : undefined;
+    if (g == null || m == null) return colorForName(t.name);
+    const base = g.bucket ? OTHER_BUCKET_COLOR : colorForName(g.name);
+    const rank = seen.get(m) ?? 0;
+    seen.set(m, rank + 1);
+    return sankeyFamilyShade(base, rank);
+  });
 }
 
 export function fmtShort(cents: number): string {
