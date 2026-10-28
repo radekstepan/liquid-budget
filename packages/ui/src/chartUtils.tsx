@@ -63,10 +63,11 @@ export function shade(hex: string, amt: number): string {
 }
 
 // Sankey family colors: each middle (parent group) node owns one hue, and
-// every target it feeds is a shade of that hue — the largest child keeps the
-// parent color exactly, smaller siblings darken by rank. Darkening (not
-// lightening) keeps bars and ribbons readable at ribbon opacity over a light
-// background. Pure hex → hex.
+// every target it feeds is a shade of that hue — the largest child takes the
+// darkest shade and smaller siblings lighten toward the parent color by rank,
+// so more money reads darker (single children keep the parent color). Shades
+// only darken from the base, never lighten past it, which keeps bars and
+// ribbons readable at ribbon opacity over a light background. Pure hex → hex.
 const SANKEY_FAMILY_SHADE_STEPS = [1, 0.87, 0.76, 0.67, 0.6, 0.54];
 
 export function sankeyFamilyShade(base: string, rank: number): string {
@@ -85,8 +86,10 @@ export type SankeyFamilyLink = { middleIndex: number; targetIndex: number; value
 /**
  * One color per right-column target, aligned with `targets`: each target
  * takes a shade of its dominant (largest-value) parent group's color, with
- * siblings darkened by column order (see sankeyFamilyShade). A target fed by
- * several groups (a merchant split across groups) joins its dominant group's
+ * siblings shaded darkest-first by column order (see sankeyFamilyShade) —
+ * in Amount sort the column runs largest-first, so more money reads darker
+ * and the smallest sibling keeps the parent color. A target fed by several
+ * groups (a merchant split across groups) joins its dominant group's
  * family; ties keep the first link in input order so the result is
  * deterministic. The Remaining plug stays green and merged Other buckets
  * stay slate — both by flag, never by name, so a literal "Remaining" or
@@ -109,6 +112,15 @@ export function sankeyTargetColors(
       best[l.targetIndex] = l.value;
     }
   }
+  // Family sizes first: the darkest shade goes to the first (largest, in
+  // Amount sort) sibling, so each member's rank counts down from the end.
+  const familySize = new Map<number, number>();
+  targets.forEach((t, i) => {
+    if (t.isPlug || t.bucket) return;
+    const m = dominant[i];
+    if (m == null || groups[m] == null) return;
+    familySize.set(m, (familySize.get(m) ?? 0) + 1);
+  });
   const seen = new Map<number, number>();
   return targets.map((t, i) => {
     if (t.isPlug) return REMAINING_COLOR;
@@ -117,9 +129,9 @@ export function sankeyTargetColors(
     const g = m != null ? groups[m] : undefined;
     if (g == null || m == null) return colorForName(t.name);
     const base = g.bucket ? OTHER_BUCKET_COLOR : colorForName(g.name);
-    const rank = seen.get(m) ?? 0;
-    seen.set(m, rank + 1);
-    return sankeyFamilyShade(base, rank);
+    const pos = seen.get(m) ?? 0;
+    seen.set(m, pos + 1);
+    return sankeyFamilyShade(base, (familySize.get(m) ?? 1) - 1 - pos);
   });
 }
 
@@ -445,16 +457,18 @@ export type SankeyIncomeBand = { y0: number; y1: number; color: string };
 export type SankeyGradientStop = { offset: number; color: string };
 
 /**
- * Feathered top-to-bottom gradient stops for a Sankey income bar, built
+ * Hard-edged top-to-bottom gradient stops for a Sankey income bar, built
  * from the colors of the ribbons extending from it: each band keeps its
- * ribbon's destination color through its span, and adjacent bands melt
- * into each other across a feathered boundary instead of meeting at a hard
- * edge. Pure geometry → stops.
+ * ribbon's destination color through its exact span, and adjacent bands
+ * meet at a hard edge on their shared boundary — so every bar segment
+ * matches the ribbon leaving it. (An earlier feathered blend smeared each
+ * boundary across the bar and the bar stopped matching its ribbons.) Pure
+ * geometry → stops.
  *
  * - Band order is the gradient order (top to bottom); zero-height bands
  *   are skipped.
- * - Offsets are strictly ascending within [0, 1]: no two stops share an
- *   offset, so a hard edge can never form.
+ * - Shared boundary offsets are kept, not collapsed: the duplicate offset
+ *   is what renders the hard edge between two bands.
  * - A single band (or none, defensively) yields a solid fill.
  */
 export function sankeyIncomeGradientStops(
@@ -477,23 +491,17 @@ export function sankeyIncomeGradientStops(
     ];
   }
   const frac = (y: number) => (y - barY0) / h;
-  const spans = live.map((b) => ({ o0: frac(b.y0), o1: frac(b.y1), color: b.color }));
-  const minSpan = Math.min(...spans.map((s) => s.o1 - s.o0));
-  // Feather each internal boundary over a fraction of the bar, capped so
-  // adjacent transitions can never meet (which would re-create a hard edge).
-  const f = Math.min(0.12, (minSpan / 2) * 0.9);
   const clamp01 = (o: number) => Math.min(1, Math.max(0, o));
-  const stops: SankeyGradientStop[] = [{ offset: 0, color: spans[0]!.color }];
-  for (let i = 1; i < spans.length; i++) {
-    const b = spans[i]!.o0;
-    stops.push({ offset: clamp01(b - f), color: spans[i - 1]!.color });
-    stops.push({ offset: clamp01(b + f), color: spans[i]!.color });
+  const stops: SankeyGradientStop[] = [];
+  for (const b of live) {
+    stops.push({ offset: clamp01(frac(b.y0)), color: b.color });
+    stops.push({ offset: clamp01(frac(b.y1)), color: b.color });
   }
-  stops.push({ offset: 1, color: spans[spans.length - 1]!.color });
+  // Bands arrive top-to-bottom, so this sort is a no-op on well-formed
+  // input; stability keeps each shared boundary's outgoing color before
+  // the incoming one, which is what renders the hard edge.
   stops.sort((a, b) => a.offset - b.offset);
-  // Collapse coincident offsets (clamped boundary stops can land on an
-  // endpoint): the first stop wins, so no offset carries two colors.
-  return stops.filter((s, i) => i === 0 || s.offset !== stops[i - 1]!.offset);
+  return stops;
 }
 
 // ---------------------------------------------------------------------------

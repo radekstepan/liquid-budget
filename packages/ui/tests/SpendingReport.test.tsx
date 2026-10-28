@@ -7,7 +7,6 @@ import {
 } from "@ynab/logic";
 import {
   SpendingReport,
-  SANKEY_BUCKET_DASH,
   SANKEY_BUCKET_HATCH_ID,
   SANKEY_INCOME_GRADIENT_ID_PREFIX,
   SANKEY_NODE_HOVER_STROKE_OPACITY,
@@ -210,13 +209,14 @@ describe("SpendingReport", () => {
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
     const bills = colorForName("Bills");
-    // Mortgage Interest is the first Bills child, so it keeps the parent
-    // color exactly; Electric Bill is the second, so it darkens one rank;
-    // Groceries is the only Everyday child. Remaining stays green.
+    // Darkest-first: Mortgage Interest is the first (largest) Bills child,
+    // so it takes the darkest shade; Electric Bill is the second, so it
+    // keeps the parent color; Groceries is the only Everyday child.
+    // Remaining stays green.
     expect(nodes.map((n) => n.getAttribute("fill"))).toEqual([
-      bills,
-      colorForName("Everyday"),
       sankeyFamilyShade(bills, 1),
+      colorForName("Everyday"),
+      bills,
       REMAINING_COLOR,
     ]);
     // The middle bars carry the family base colors the children shade from.
@@ -465,9 +465,6 @@ describe("SpendingReport", () => {
     expect(within(tip as unknown as HTMLElement).getByText("Payroll → Everyday")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$400.00")).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("(100%)")).toBeInTheDocument();
-    expect(
-      within(tip as unknown as HTMLElement).getByText("Proportional split — money is fungible")
-    ).toBeInTheDocument();
     fireEvent.mouseLeave(link);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -538,8 +535,9 @@ describe("SpendingReport", () => {
     const bills = colorForName("Bills");
     const everyday = colorForName("Everyday");
     // Right ribbons fill with their target's family shade, cell-major:
-    // Bills→Mortgage, Bills→Electric, Everyday→Groceries.
-    const targetFills = [bills, sankeyFamilyShade(bills, 1), everyday];
+    // Bills→Mortgage, Bills→Electric, Everyday→Groceries. Darkest-first:
+    // the largest sibling (Mortgage) takes the darkest shade.
+    const targetFills = [sankeyFamilyShade(bills, 1), bills, everyday];
     right.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
       // Cells carry every income's money: no per-income identity survives.
@@ -563,7 +561,7 @@ describe("SpendingReport", () => {
     const groupFills = Array.from(svg.querySelectorAll('[data-testid="sankey-group"]')).map(
       (g) => g.getAttribute("fill")
     );
-    expect(nodeFills).toEqual([bills, everyday, sankeyFamilyShade(bills, 1), REMAINING_COLOR]);
+    expect(nodeFills).toEqual([sankeyFamilyShade(bills, 1), everyday, bills, REMAINING_COLOR]);
     right.forEach((link, k) => {
       const targetIndex = [0, 2, 1][k]!;
       expect(link.getAttribute("fill")).toBe(nodeFills[targetIndex]);
@@ -671,6 +669,75 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(node);
   });
 
+  it("spotlights only the dominant path when hovering a merchant split across groups", () => {
+    // Airbnb draws mostly from Everyday ($900) with a small Bills cell
+    // ($100): hovering it must trace only the Everyday path — lighting
+    // every group's full funding fan would highlight income flows that
+    // have nothing to do with it. Categories (one group each) already
+    // behave this way; merchants must match.
+    const merchantFlow: SpendingGroupFlow = {
+      groups: [
+        { name: "Bills", value: 110000 },
+        { name: "Everyday", value: 140000 },
+      ],
+      targets: [
+        { name: "Airbnb", value: 100000 },
+        { name: "Bank of Example", value: 100000 },
+        { name: "Whole Foods", value: 50000 },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 10000 },
+        { groupIndex: 0, targetIndex: 1, value: 100000 },
+        { groupIndex: 1, targetIndex: 0, value: 90000 },
+        { groupIndex: 1, targetIndex: 2, value: 50000 },
+      ],
+    };
+    const { container } = renderReport(sampleCategoryFlow, merchantFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Bonus", value: 50000 },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
+    fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
+    // The merchant itself brightens; siblings dim.
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(nodes[2]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    // Only the dominant (Everyday) cell brightens — the small Bills cell
+    // dims with the off-path rest, rendered before it in the DOM.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.12",
+      "0.12",
+      "0.12",
+      "0.85",
+    ]);
+    // Only the dominant group joins the spotlight; Bills dims.
+    const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
+    expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.12");
+    expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.85");
+    // Only the dominant group's income fan brightens: the Bills ribbons
+    // from both incomes dim.
+    const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.12",
+      "0.12",
+      "0.85",
+      "0.85",
+    ]);
+    // Every income funds every group proportionally, so both income bars
+    // join the dominant fan's spotlight — the same contract as hovering
+    // a category in Categories view.
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    expect(incomes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    fireEvent.mouseLeave(node);
+  });
+
   it("renders parent groups in the same bright color as their ribbons while hovered", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
@@ -715,9 +782,6 @@ describe("SpendingReport", () => {
       within(tip as unknown as HTMLElement).getByText("Payroll → Remaining")
     ).toBeInTheDocument();
     expect(within(tip as unknown as HTMLElement).getByText("$450.00")).toBeInTheDocument();
-    expect(
-      within(tip as unknown as HTMLElement).getByText("Proportional split — money is fungible")
-    ).toBeInTheDocument();
     fireEvent.mouseLeave(link);
     expect(document.querySelector(".y-tip")).toBeNull();
   });
@@ -778,7 +842,7 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("marks render-only bars with a dashed border and hatch", () => {
+  it("marks render-only bars with a hatch and no border", () => {
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Side Gig", value: 30000 },
@@ -789,18 +853,15 @@ describe("SpendingReport", () => {
     // Cashback left, Everyday middle, Groceries + Electric right).
     fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Buckets carry the dashed border; real bars carry none.
-    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
-    expect(incomes[0]!.getAttribute("stroke-dasharray")).toBeNull();
-    expect(incomes[1]!.getAttribute("stroke-dasharray")).toBe(SANKEY_BUCKET_DASH);
-    const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
-    expect(groups[0]!.getAttribute("stroke-dasharray")).toBeNull();
-    expect(groups[1]!.getAttribute("stroke-dasharray")).toBe(SANKEY_BUCKET_DASH);
-    // Right column is Mortgage, Other, Remaining: both computed rows dash.
-    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
-    expect(nodes[0]!.getAttribute("stroke-dasharray")).toBeNull();
-    expect(nodes[1]!.getAttribute("stroke-dasharray")).toBe(SANKEY_BUCKET_DASH);
-    expect(nodes[2]!.getAttribute("stroke-dasharray")).toBe(SANKEY_BUCKET_DASH);
+    // No borders on any bars — real or computed: the hatch alone marks the
+    // render-only rows.
+    for (const bar of svg.querySelectorAll(
+      '[data-testid="sankey-income"], [data-testid="sankey-group"], [data-testid="sankey-node"]'
+    )) {
+      expect(bar.getAttribute("stroke")).toBe("none");
+      expect(bar.getAttribute("stroke-dasharray")).toBeNull();
+      expect(bar.getAttribute("stroke-width")).toBeNull();
+    }
     // One hatch overlay per computed bar, painted from the shared pattern.
     const hatches = svg.querySelectorAll('[data-testid="sankey-bucket-hatch"]');
     expect(hatches).toHaveLength(4);
@@ -1391,9 +1452,9 @@ describe("SpendingReport", () => {
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
     const fill = node.getAttribute("fill")!;
-    // Thin neutral stroke at rest.
-    expect(node.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
-    expect(node.getAttribute("stroke-width")).toBe("1");
+    // No border at rest.
+    expect(node.getAttribute("stroke")).toBe("none");
+    expect(node.getAttribute("stroke-width")).toBeNull();
     fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
     // Hovered: the bar's own color at a soft opacity — no black border.
     expect(node.getAttribute("stroke")).toBe(fill);
@@ -1401,8 +1462,8 @@ describe("SpendingReport", () => {
     expect(node.getAttribute("stroke-width")).toBe("2");
     expect(node.getAttribute("stroke-opacity")).toBe(String(SANKEY_NODE_HOVER_STROKE_OPACITY));
     fireEvent.mouseLeave(node);
-    expect(node.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
-    expect(node.getAttribute("stroke-width")).toBe("1");
+    expect(node.getAttribute("stroke")).toBe("none");
+    expect(node.getAttribute("stroke-width")).toBeNull();
   });
 
   it("halos a ribbon's endpoint node in its own color instead of a black border", () => {
@@ -1417,7 +1478,7 @@ describe("SpendingReport", () => {
     expect(node.getAttribute("stroke")).not.toBe("var(--y-ink)");
     expect(node.getAttribute("stroke-opacity")).toBe(String(SANKEY_NODE_HOVER_STROKE_OPACITY));
     fireEvent.mouseLeave(link);
-    expect(node.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
+    expect(node.getAttribute("stroke")).toBe("none");
   });
 
   it("highlights the parent group in the same bright color when hovering a ribbon", () => {
@@ -1458,19 +1519,20 @@ describe("SpendingReport", () => {
     // overlay, no translucent glass on top of gray.
     expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0)`);
     expect(svg.querySelector('[data-testid="sankey-income-hover"]')).toBeNull();
-    // The bar's own stroke stays thin and neutral, hovered or not.
-    expect(bar.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
-    expect(bar.getAttribute("stroke-width")).toBe("1");
+    // No border on the bar, hovered or not.
+    expect(bar.getAttribute("stroke")).toBe("none");
+    expect(bar.getAttribute("stroke-width")).toBeNull();
     // Payroll's three outgoing bands run Bills, Everyday, Remaining: the
-    // gradient stacks those destination colors top-to-bottom with strictly
-    // ascending offsets — soft overlap, no hard edges.
+    // gradient stacks those destination colors top-to-bottom with hard
+    // edges on the ribbon boundaries — two stops per band, sharing the
+    // boundary offsets — so each bar segment matches its ribbon exactly.
     const stops = Array.from(
       svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
     ).map((s) => ({
       offset: Number(s.getAttribute("offset")),
       color: s.getAttribute("stop-color"),
     }));
-    expect(stops.length).toBeGreaterThan(2);
+    expect(stops).toHaveLength(6);
     expect(stops[0]).toEqual({ offset: 0, color: colorForName("Bills") });
     expect(stops[stops.length - 1]).toEqual({ offset: 1, color: REMAINING_COLOR });
     expect(stops.some((s) => s.color === colorForName("Everyday"))).toBe(true);
@@ -1482,15 +1544,20 @@ describe("SpendingReport", () => {
       colorOrder.lastIndexOf(REMAINING_COLOR)
     );
     for (let i = 1; i < stops.length; i++) {
-      expect(stops[i]!.offset).toBeGreaterThan(stops[i - 1]!.offset);
+      expect(stops[i]!.offset).toBeGreaterThanOrEqual(stops[i - 1]!.offset);
     }
+    // The shared boundary offsets are the hard edges between bands.
+    expect(stops[1]!.offset).toBe(stops[2]!.offset);
+    expect(stops[1]!.color).not.toBe(stops[2]!.color);
+    expect(stops[3]!.offset).toBe(stops[4]!.offset);
+    expect(stops[3]!.color).not.toBe(stops[4]!.color);
     // Hovering brightens the bar through the spotlight steps without
     // swapping its fill: gradient in, gradient out.
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
     fireEvent.mouseMove(bar, { clientX: 100, clientY: 200 });
     expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0)`);
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
-    expect(bar.getAttribute("stroke")).toBe("rgba(0,0,0,0.15)");
+    expect(bar.getAttribute("stroke")).toBe("none");
     expect(svg.querySelector('[data-testid="sankey-income-hover"]')).toBeNull();
     fireEvent.mouseLeave(bar);
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));

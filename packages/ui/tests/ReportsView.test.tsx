@@ -753,9 +753,10 @@ describe("ReportsView", () => {
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
-    // Right ribbons fill with their target's family shade, cell-major:
-    // Groceries keeps the Everyday color, Rent darkens one rank.
-    const targetFills = [everyday, sankeyFamilyShade(everyday, 1)];
+    // Right ribbons fill with their target's family shade, cell-major.
+    // Darkest-first: the larger sibling (Groceries) takes the darker
+    // shade, Rent keeps the Everyday color.
+    const targetFills = [sankeyFamilyShade(everyday, 1), everyday];
     right.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
       expect(link.getAttribute("data-income")).toBeNull();
@@ -764,7 +765,7 @@ describe("ReportsView", () => {
     const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
       (n) => n.getAttribute("fill")
     );
-    expect(nodeFills).toEqual([everyday, sankeyFamilyShade(everyday, 1), REMAINING_COLOR]);
+    expect(nodeFills).toEqual([sankeyFamilyShade(everyday, 1), everyday, REMAINING_COLOR]);
     const groupFill = svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill");
     expect(groupFill).toBe(everyday);
   });

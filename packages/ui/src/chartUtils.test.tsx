@@ -127,12 +127,37 @@ describe("sankeyTargetColors", () => {
         { middleIndex: 1, targetIndex: 1, value: 40000 },
       ]
     );
-    // Largest sibling keeps the parent color exactly; later siblings darken.
+    // Darkest-first: the first (largest, in Amount sort) sibling takes the
+    // darkest shade and later siblings lighten toward the parent color, so
+    // more money reads darker; single children keep the parent color.
     expect(colors).toEqual([
-      bills,
-      everyday,
       sankeyFamilyShade(bills, 1),
+      everyday,
+      bills,
     ]);
+  });
+
+  it("reads more money as a darker color within a family", () => {
+    const colors = sankeyTargetColors(
+      groups,
+      [
+        { name: "Big", bucket: false, isPlug: false },
+        { name: "Mid", bucket: false, isPlug: false },
+        { name: "Small", bucket: false, isPlug: false },
+      ],
+      [
+        { middleIndex: 0, targetIndex: 0, value: 900 },
+        { middleIndex: 0, targetIndex: 1, value: 500 },
+        { middleIndex: 0, targetIndex: 2, value: 100 },
+      ]
+    );
+    // Amount sort runs largest-first down the column: luminance must rise
+    // down the column — the largest sibling is the darkest.
+    const lum = (hex: string) =>
+      [0, 1, 2].reduce((s, i) => s + parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16), 0);
+    expect(lum(colors[0]!)).toBeLessThan(lum(colors[1]!));
+    expect(lum(colors[1]!)).toBeLessThan(lum(colors[2]!));
+    expect(colors[2]).toBe(bills);
   });
 
   it("attributes a multi-group target to its dominant group", () => {
@@ -164,8 +189,8 @@ describe("sankeyTargetColors", () => {
         { middleIndex: 0, targetIndex: 2, value: 3 },
       ]
     );
-    expect(colors[0]).toBe(bills);
-    expect(colors[1]).toBe(sankeyFamilyShade(bills, 1));
+    expect(colors[0]).toBe(sankeyFamilyShade(bills, 1));
+    expect(colors[1]).toBe(bills);
     expect(colors[2]).toBe(OTHER_BUCKET_COLOR);
     expect(colors[3]).toBe(REMAINING_COLOR);
   });
@@ -259,29 +284,30 @@ describe("useElementSize", () => {
 });
 
 describe("sankeyIncomeGradientStops", () => {
-  it("stacks band colors top-to-bottom with feathered, strictly ascending offsets", () => {
+  it("stacks band colors top-to-bottom with hard edges on the ribbon boundaries", () => {
     const stops = sankeyIncomeGradientStops(100, 300, [
       { y0: 100, y1: 160, color: "#aaaaaa" },
       { y0: 160, y1: 240, color: "#bbbbbb" },
       { y0: 240, y1: 300, color: "#cccccc" },
     ]);
-    // Opens with the first band's color at 0, closes with the last at 1.
-    expect(stops[0]).toEqual({ offset: 0, color: "#aaaaaa" });
-    expect(stops[stops.length - 1]).toEqual({ offset: 1, color: "#cccccc" });
-    // Strictly ascending within [0, 1]: no two stops share an offset, so
-    // no hard edge can form.
+    // Each band keeps its ribbon's color through its exact span; adjacent
+    // bands share their boundary offset, which renders the hard edge — so
+    // every bar segment matches the ribbon leaving it.
+    const o = (y: number) => (y - 100) / 200;
+    expect(stops).toEqual([
+      { offset: 0, color: "#aaaaaa" },
+      { offset: o(160), color: "#aaaaaa" },
+      { offset: o(160), color: "#bbbbbb" },
+      { offset: o(240), color: "#bbbbbb" },
+      { offset: o(240), color: "#cccccc" },
+      { offset: 1, color: "#cccccc" },
+    ]);
+    // Ascending within [0, 1].
     for (let i = 1; i < stops.length; i++) {
-      expect(stops[i]!.offset).toBeGreaterThan(stops[i - 1]!.offset);
+      expect(stops[i]!.offset).toBeGreaterThanOrEqual(stops[i - 1]!.offset);
       expect(stops[i]!.offset).toBeLessThanOrEqual(1);
       expect(stops[i]!.offset).toBeGreaterThanOrEqual(0);
     }
-    // The 0.7 boundary feathers across itself: the upper color extends
-    // just past it, the lower color starts just before it.
-    const around = stops.filter((s) => s.offset > 0.5 && s.offset < 0.9);
-    expect(around).toEqual([
-      { offset: 0.7 - 0.12, color: "#bbbbbb" },
-      { offset: 0.7 + 0.12, color: "#cccccc" },
-    ]);
   });
 
   it("keeps every band's color in order without collapsing neighbors", () => {
@@ -290,7 +316,7 @@ describe("sankeyIncomeGradientStops", () => {
       { y0: 50, y1: 100, color: "#222222" },
     ]);
     expect(stops.map((s) => s.color)).toEqual(["#111111", "#111111", "#222222", "#222222"]);
-    expect(stops.map((s) => s.offset)).toEqual([0, 0.5 - 0.12, 0.5 + 0.12, 1]);
+    expect(stops.map((s) => s.offset)).toEqual([0, 0.5, 0.5, 1]);
   });
 
   it("renders a solid fill for a single band and skips zero-height bands", () => {
@@ -300,15 +326,18 @@ describe("sankeyIncomeGradientStops", () => {
       { offset: 0, color: "#123456" },
       { offset: 1, color: "#123456" },
     ]);
-    // The zero-height band drops out, leaving its neighbors to feather.
+    // The zero-height band drops out; its neighbors meet at a hard edge.
     const stops = sankeyIncomeGradientStops(0, 100, [
       { y0: 0, y1: 50, color: "#111111" },
       { y0: 50, y1: 50, color: "#999999" },
       { y0: 50, y1: 100, color: "#222222" },
     ]);
-    expect(stops.every((s) => s.color !== "#999999")).toBe(true);
-    expect(stops[0]).toEqual({ offset: 0, color: "#111111" });
-    expect(stops[stops.length - 1]).toEqual({ offset: 1, color: "#222222" });
+    expect(stops).toEqual([
+      { offset: 0, color: "#111111" },
+      { offset: 0.5, color: "#111111" },
+      { offset: 0.5, color: "#222222" },
+      { offset: 1, color: "#222222" },
+    ]);
   });
 
   it("falls back to the neutral income gray with no bands", () => {
