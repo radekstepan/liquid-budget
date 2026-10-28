@@ -91,10 +91,6 @@ export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 // border), so computed rows never read as real ones.
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
-// Hovered category/merchant bars keep their thin neutral stroke and gain a
-// soft halo in their own fill color (this opacity) — never a black border.
-export const SANKEY_NODE_HOVER_STROKE_OPACITY = 0.55;
-
 // Income bars fill with a hard-edged top-to-bottom gradient built from
 // their outgoing ribbons' destination colors — one gradient per bar, so
 // each bar segment matches its ribbon exactly. Bar i paints from
@@ -888,13 +884,6 @@ export function SpendingReport({
     };
   }, [hover, sankey]);
 
-  const isTgtHover = (idx: number) =>
-    (hover?.kind === "node" && hover.idx === idx) ||
-    (hover?.kind === "link" &&
-      ((hover.side === "right" && hover.b === idx) ||
-        (hover.side === "left" &&
-          hover.b >= (sankey?.middles.length ?? 0) &&
-          sankey?.remainingTargetIndex === idx)));
   const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
 
   // Spotlight state per ribbon: while a flow path is hovered (the hl sets
@@ -1580,15 +1569,16 @@ export function SpendingReport({
                 const r = tgtRows[idx]!;
                 // Family shade shared with the incoming ribbons, so the line
                 // from an income to this bar reads as one color throughout.
-                // No borders: render-only rows — the merged Other bucket and
-                // the Remaining surplus plug — add only the hatch. Hovering
-                // adds a soft halo in the bar's own color, never a black
-                // border. The bar wraps the row's funded flow; when spending
-                // exceeds income the gap shows in the tooltip, not as a grey
-                // segment.
+                // No borders, hovered or not: render-only rows — the merged
+                // Other bucket and the Remaining surplus plug — add only the
+                // hatch, and hovering brightens via the spotlight instead of
+                // stroking (an SVG stroke centers on the edge, so even a
+                // same-color stroke would paint 1px outside the bar and make
+                // it look bigger than the ribbon stack feeding it). The bar
+                // wraps the row's funded flow; when spending exceeds income
+                // the gap shows in the tooltip, not as a grey segment.
                 const color = r.color;
                 const isComputed = r.bucket === true || r.isPlug;
-                const isHover = isTgtHover(idx);
                 // Like the middle bars: the same fill at the ribbons' own
                 // rest/bright/dim steps, so each incoming line matches the
                 // bar exactly in every spotlight state.
@@ -1610,9 +1600,7 @@ export function SpendingReport({
                       height={Math.max(0, node.h)}
                       fill={color}
                       fillOpacity={barOpacity}
-                      stroke={isHover ? color : "none"}
-                      strokeOpacity={isHover ? SANKEY_NODE_HOVER_STROKE_OPACITY : undefined}
-                      strokeWidth={isHover ? 2 : undefined}
+                      stroke="none"
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })

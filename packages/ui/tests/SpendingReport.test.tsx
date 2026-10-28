@@ -9,7 +9,6 @@ import {
   SpendingReport,
   SANKEY_BUCKET_HATCH_ID,
   SANKEY_INCOME_GRADIENT_ID_PREFIX,
-  SANKEY_NODE_HOVER_STROKE_OPACITY,
   SANKEY_RIBBON_DIM_OPACITY,
   SANKEY_RIBBON_HOVER_OPACITY,
   SANKEY_RIBBON_OPACITY,
@@ -1447,38 +1446,67 @@ describe("SpendingReport", () => {
     expect(Number(svg.getAttribute("height"))).toBeGreaterThan(400);
   });
 
-  it("highlights a hovered category node with a soft halo in its own color, never a black border", () => {
+  it("keeps a hovered category/merchant bar's geometry identical — no stroke, only brightness", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
-    const fill = node.getAttribute("fill")!;
     // No border at rest.
     expect(node.getAttribute("stroke")).toBe("none");
     expect(node.getAttribute("stroke-width")).toBeNull();
+    const rest = {
+      x: node.getAttribute("x"),
+      y: node.getAttribute("y"),
+      width: node.getAttribute("width"),
+      height: node.getAttribute("height"),
+    };
     fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
-    // Hovered: the bar's own color at a soft opacity — no black border.
-    expect(node.getAttribute("stroke")).toBe(fill);
-    expect(node.getAttribute("stroke")).not.toBe("var(--y-ink)");
-    expect(node.getAttribute("stroke-width")).toBe("2");
-    expect(node.getAttribute("stroke-opacity")).toBe(String(SANKEY_NODE_HOVER_STROKE_OPACITY));
+    // Hovered: still no stroke of any kind — an SVG stroke centers on the
+    // edge, so even a same-color stroke would paint 1px outside the bar and
+    // make it look bigger than the ribbon stack feeding it. Geometry stays
+    // pixel-identical; brightness carries the highlight instead.
+    expect(node.getAttribute("stroke")).toBe("none");
+    expect(node.getAttribute("stroke-width")).toBeNull();
+    expect(node.getAttribute("stroke-opacity")).toBeNull();
+    expect({
+      x: node.getAttribute("x"),
+      y: node.getAttribute("y"),
+      width: node.getAttribute("width"),
+      height: node.getAttribute("height"),
+    }).toEqual(rest);
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     fireEvent.mouseLeave(node);
     expect(node.getAttribute("stroke")).toBe("none");
     expect(node.getAttribute("stroke-width")).toBeNull();
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
-  it("halos a ribbon's endpoint node in its own color instead of a black border", () => {
+  it("keeps a ribbon's endpoint node strokeless with identical geometry while hovered", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Right ribbons trail the left ones: Bills→Mortgage is links[3].
     const link = container.querySelectorAll('[data-testid="sankey-link"]')[3]!;
     expect(link.getAttribute("data-side")).toBe("right");
-    fireEvent.mouseMove(link, { clientX: 500, clientY: 120 });
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
-    expect(node.getAttribute("stroke")).toBe(node.getAttribute("fill"));
-    expect(node.getAttribute("stroke")).not.toBe("var(--y-ink)");
-    expect(node.getAttribute("stroke-opacity")).toBe(String(SANKEY_NODE_HOVER_STROKE_OPACITY));
+    const rest = {
+      x: node.getAttribute("x"),
+      y: node.getAttribute("y"),
+      width: node.getAttribute("width"),
+      height: node.getAttribute("height"),
+    };
+    fireEvent.mouseMove(link, { clientX: 500, clientY: 120 });
+    expect(node.getAttribute("stroke")).toBe("none");
+    expect(node.getAttribute("stroke-width")).toBeNull();
+    expect(node.getAttribute("stroke-opacity")).toBeNull();
+    expect({
+      x: node.getAttribute("x"),
+      y: node.getAttribute("y"),
+      width: node.getAttribute("width"),
+      height: node.getAttribute("height"),
+    }).toEqual(rest);
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     fireEvent.mouseLeave(link);
     expect(node.getAttribute("stroke")).toBe("none");
+    expect(node.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
   it("highlights the parent group in the same bright color when hovering a ribbon", () => {
