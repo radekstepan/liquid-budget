@@ -821,6 +821,94 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(group);
   });
 
+  it("switches node hover A → B in one commit: unchanged arms keep attributes and DOM identity", () => {
+    // Real browsers deliver rAF asynchronously, so a leave(A)+move(B) pair
+    // lands in one frame; the suite's synchronous rAF mock would commit
+    // each push separately, so queue frames here and flush by hand.
+    const syncRaf = globalThis.requestAnimationFrame;
+    let queued: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      queued.push(cb);
+      return queued.length;
+    };
+    try {
+      const { container } = renderReport();
+      const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+      const flush = () => {
+        const q = queued;
+        queued = [];
+        for (const cb of q) cb(0);
+      };
+      const nodes = () => Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
+      const leftLinks = () =>
+        Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+      const labels = () =>
+        Array.from(svg.querySelectorAll('[data-testid="sankey-target-label"]'));
+      // The plug ribbon carries the Remaining green; find it by fill, not
+      // by index — the spotlight z-reorder moves lit ribbons above dim ones.
+      const plugLink = () => leftLinks().find((l) => l.getAttribute("fill") === REMAINING_COLOR)!;
+
+      // Hover Mortgage Interest (node 0, a Bills child).
+      fireEvent.mouseMove(nodes()[0]!, { clientX: 700, clientY: 100 });
+      act(() => {
+        flush();
+      });
+      expect(nodes()[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+      expect(nodes()[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+
+      // Arms dimmed under BOTH spotlights: Electric Bill (node 2, a Bills
+      // child — never on Groceries' Everyday path) and the full-width
+      // Remaining plug ribbon (plug ribbons never join a node path).
+      const electric = nodes()[2]!;
+      const electricLabel = labels()[2]!;
+      const plug = plugLink();
+      expect(electric.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      expect(plug.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      const electricFill = electric.getAttribute("fill");
+      const electricLabelOpacity = electricLabel.getAttribute("opacity");
+
+      // Direct A → B switch, as the browser delivers it: leave(A) then
+      // move(B) before the next frame. The leave must not clear
+      // synchronously — that would flash every unchanged arm to rest
+      // (dim → rest → dim) for a frame in between.
+      fireEvent.mouseLeave(nodes()[0]!);
+      fireEvent.mouseMove(nodes()[1]!, { clientX: 700, clientY: 150 });
+      // No intermediate rest frame: A's spotlight is still painted.
+      expect(nodes()[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+      expect(nodes()[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      act(() => {
+        flush();
+      });
+      // B's spotlight, landed directly: no rest frame in between.
+      expect(nodes()[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+      expect(nodes()[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      // Unchanged arms: identical paint attributes AND identical DOM nodes
+      // — no remount, no reorder of the bars, no repaint trigger.
+      const nodesAfter = nodes();
+      expect(nodesAfter[2]).toBe(electric);
+      expect(nodesAfter[2]!.getAttribute("fill")).toBe(electricFill);
+      expect(nodesAfter[2]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      expect(labels()[2]).toBe(electricLabel);
+      expect(labels()[2]!.getAttribute("opacity")).toBe(electricLabelOpacity);
+      expect(plugLink()).toBe(plug);
+      expect(plugLink().getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+
+      // Hover-leave back to rest is one commit too: the unchanged arm's
+      // node survives the round trip with rest attributes.
+      fireEvent.mouseLeave(nodesAfter[1]!);
+      act(() => {
+        flush();
+      });
+      const nodesRest = nodes();
+      expect(nodesRest[2]).toBe(electric);
+      expect(nodesRest[2]!.getAttribute("fill")).toBe(electricFill);
+      expect(nodesRest[2]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+      expect(nodesRest[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+    } finally {
+      globalThis.requestAnimationFrame = syncRaf;
+    }
+  });
+
   it("shows the proportional flow when hovering the full-width Remaining ribbon", () => {
     const { container } = renderReport();
     // The plug ribbon trails the left ribbons: [Payroll→Bills,

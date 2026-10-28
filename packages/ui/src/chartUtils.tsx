@@ -248,7 +248,11 @@ export function useElementSize<T extends HTMLElement>() {
 
 // Throttle frequent state updates (e.g. mousemove-hover) to at most one per
 // animation frame. Always delivers the latest value (coalesced), so no
-// intermediate cursor positions are lost during fast sweeps.
+// intermediate cursor positions are lost during fast sweeps. A pending clear
+// (null) is a real value, not the absence of one: hover-leaves route through
+// the same throttle so a leave(A)+move(B) pair coalesces into one commit —
+// clearing synchronously while sets wait for the frame would flash every
+// unchanged arm to rest (dim → rest → dim) in between.
 export function useRafThrottledSet<T>(set: (v: T) => void): (v: T) => void {
   const rafRef = useRef<number | null>(null);
   // Gating flag (not the rAF id): with a synchronous requestAnimationFrame
@@ -256,24 +260,34 @@ export function useRafThrottledSet<T>(set: (v: T) => void): (v: T) => void {
   // ref would clobber the callback's own reset and wedge later pushes off.
   const scheduledRef = useRef(false);
   const pendingRef = useRef<T | null>(null);
+  // Whether a value is waiting — null payloads (hover clears) must commit,
+  // so the pending slot doubling as the "nothing waiting" marker can't tell
+  // "clear queued" from "idle".
+  const hasPendingRef = useRef(false);
   const setRef = useRef(set);
   setRef.current = set;
 
   const push = useCallback((value: T) => {
     pendingRef.current = value;
+    hasPendingRef.current = true;
     if (scheduledRef.current) return;
     scheduledRef.current = true;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       scheduledRef.current = false;
-      const v = pendingRef.current;
-      if (v !== null) setRef.current(v);
+      if (!hasPendingRef.current) return;
+      hasPendingRef.current = false;
+      const v = pendingRef.current as T;
+      pendingRef.current = null;
+      setRef.current(v);
     });
   }, []);
 
   useEffect(() => () => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     scheduledRef.current = false;
+    hasPendingRef.current = false;
+    pendingRef.current = null;
   }, []);
 
   return push;

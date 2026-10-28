@@ -179,7 +179,10 @@ export function SpendingReport({
   // Mousemove fires far more often than the display refreshes; coalescing
   // hover commits to one per frame (latest wins) keeps cursor sweeps from
   // queuing a full multi-hundred-element re-render per event — the same
-  // throttle the other reports use. Clears stay synchronous.
+  // throttle the other reports use. The Sankey's hover-leaves ride the same
+  // throttle (never a synchronous clear): moving directly from one element
+  // to another delivers leave+move as one commit, so arms that stay dimmed
+  // never flash through rest in between.
   const pushHover = useRafThrottledSet(setHover);
   const { ref: chartRef, size: chartSize } = useElementSize<HTMLDivElement>();
 
@@ -1094,7 +1097,7 @@ export function SpendingReport({
             // new data) never steps the width: the first paint is final.
             scrollbarGutter: "stable",
           }}
-          onMouseLeave={() => setHover(null)}
+          onMouseLeave={() => pushHover(null)}
         >
           {empty && (
             <div className="grid h-full place-items-center y-hint">No data for this timeframe.</div>
@@ -1180,7 +1183,7 @@ export function SpendingReport({
                         y: e.clientY,
                       })
                     }
-                    onMouseLeave={() => setHover(null)}
+                    onMouseLeave={() => pushHover(null)}
                   />
                 );
               })}
@@ -1213,7 +1216,7 @@ export function SpendingReport({
                         y: e.clientY,
                       })
                     }
-                    onMouseLeave={() => setHover(null)}
+                    onMouseLeave={() => pushHover(null)}
                   />
                 );
               })}
@@ -1251,7 +1254,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     />
                     {isBucket && (
                       <rect
@@ -1277,7 +1280,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     >
                       {truncateName(node.name, sourceLabelMaxChars)}
                     </text>
@@ -1295,7 +1298,7 @@ export function SpendingReport({
                         onMouseMove={(e) =>
                           pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                         }
-                        onMouseLeave={() => setHover(null)}
+                        onMouseLeave={() => pushHover(null)}
                       >
                         {fmt(node.value)} · {r.flowPct}%
                       </text>
@@ -1340,7 +1343,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     />
                     {isBucket && (
                       <rect
@@ -1372,7 +1375,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     >
                       {truncateName(node.name)}
                     </text>
@@ -1391,7 +1394,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
@@ -1438,7 +1441,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     />
                     {isComputed && (
                       <rect
@@ -1463,7 +1466,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     >
                       {truncateName(node.name)}
                     </text>
@@ -1478,7 +1481,7 @@ export function SpendingReport({
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => pushHover(null)}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
