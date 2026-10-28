@@ -72,3 +72,4 @@ Spending by Category - Sankey has these issues:
 - onhover category/merchant or sankey does NOT highlight parent category the same bright color
 - income bar on the left onhover has black border and it should be more subtle perhaps a gradient of the colors that extend from it, that would be ideal (top to bottom gradient with some overlap and not hard edges)
 - if a sankey is say 20px tall, why is the category/merchant on the right much taller than that? I don't get it. Should ideally match sankey and have a minimum "height" so we can show title and (amount) subtitle
+- be able to sort by parent category (to match order in the Budget) or by (current) amount
