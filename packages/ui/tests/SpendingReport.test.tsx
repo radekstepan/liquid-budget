@@ -1299,18 +1299,13 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("offers a How-to-read explainer as plain hint text, not a button", () => {
+  it("renders no How-to-read explainer in the Sankey header", () => {
     renderReport();
-    // There is nothing to click, so it must not pose as a button — plain
-    // focusable hint text with the explainer on hover/focus.
-    const hint = screen.getByTestId("sankey-how-to-read");
-    expect(hint.tagName).toBe("SPAN");
-    expect(hint).toHaveTextContent("How to read");
+    // The explainer was removed entirely: no hint text, no button, no
+    // tooltip content.
+    expect(screen.queryByTestId("sankey-how-to-read")).not.toBeInTheDocument();
+    expect(screen.queryByText(/how to read/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /how to read/i })).not.toBeInTheDocument();
-    fireEvent.focus(hint);
-    expect(screen.getByText("How to read this chart")).toBeInTheDocument();
-    fireEvent.blur(hint);
-    expect(screen.queryByText("How to read this chart")).not.toBeInTheDocument();
   });
 
   it("draws every Sankey bar and hatch with square corners", () => {

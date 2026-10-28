@@ -114,12 +114,11 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   await expect(panel.getByTestId("sankey-svg")).toBeVisible();
   expect((await outValue.textContent())?.trim()).toBe(outBefore);
 
-  // Column headers and the How-to-read explainer keep the chart
-  // self-explanatory.
+  // Column headers keep the chart self-explanatory; the How-to-read
+  // explainer was removed entirely.
   await expect(panel.getByTestId("sankey-colhead")).toHaveCount(3);
-  // The explainer is plain hint text — nothing to click, so not a button.
-  await expect(panel.getByTestId("sankey-how-to-read")).toBeVisible();
-  await expect(panel.getByRole("button", { name: /how to read/i })).toHaveCount(0);
+  await expect(panel.getByTestId("sankey-how-to-read")).toHaveCount(0);
+  await expect(panel.getByText(/how to read/i)).toHaveCount(0);
 });
 
 test("Net Worth tab renders the full-screen chart and toggles Linear/Log scale", async ({ page }) => {

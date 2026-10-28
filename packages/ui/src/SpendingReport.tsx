@@ -986,47 +986,6 @@ export function SpendingReport({
               </label>
             </Tooltip>
           </div>
-          <Tooltip
-            tip={
-              <span className="block max-w-[280px] space-y-1 text-left text-[11px] leading-snug">
-                <span className="block font-bold">How to read this chart</span>
-                <span className="block">
-                  Income (left) flows through category groups (middle) into spending (right).
-                </span>
-                <span className="block">
-                  Remaining is unspent income in a render-only row — not a real{" "}
-                  {dimension === "categories" ? "category" : "merchant"}. Over income is spending
-                  beyond income — covered from savings or debt.
-                </span>
-                <span className="block">
-                  Other is a render-only bucket for rows under the Under threshold — the
-                  dashed, hatched bars are computed, not real rows.
-                </span>
-                <span className="block">
-                  Moving money out to investments counts as spending; bringing it back counts
-                  as income.
-                </span>
-                <span className="block">
-                  Uncategorized is spending with no category (Merchants view).
-                </span>
-              </span>
-            }
-          >
-            {/* Plain hint text, deliberately not a button: there is nothing
-                to click — the explainer shows on hover (or keyboard focus). */}
-            <span
-              data-testid="sankey-how-to-read"
-              tabIndex={0}
-              className="cursor-help text-[11px] whitespace-nowrap"
-              style={{
-                color: "var(--y-ink-faint)",
-                textDecoration: "underline dotted",
-                textUnderlineOffset: "3px",
-              }}
-            >
-              How to read
-            </span>
-          </Tooltip>
         </div>
       </div>
 
