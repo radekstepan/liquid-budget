@@ -325,8 +325,8 @@ describe("ReportsView", () => {
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
     // 2 incomes x 1 group plus 2 full-width Remaining ribbons on the
-    // left; 2 cells (Groceries + Other) x 2 incomes on the right.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(8);
+    // left; one ribbon per cell (Groceries + Other) on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -704,10 +704,11 @@ describe("ReportsView", () => {
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(0);
     expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
-    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(1);
+    // No grey shortfall segments: the unfunded state shows in tooltips.
+    expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(0);
     // The dangling group still draws its (fully unfunded) middle bar.
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
-    expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(1);
+    expect(svg.querySelectorAll('[data-testid="sankey-group-shortfall"]')).toHaveLength(0);
   });
 
   it("Spending sankey hides amounts on tiny income bars and colors ribbons by destination", () => {
@@ -732,15 +733,15 @@ describe("ReportsView", () => {
     expect(barH).toBeLessThan(26);
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
-    // Left ribbons take their middle group's color and right sub-ribbons
+    // Left ribbons take their middle group's color and right ribbons
     // their final category's family shade: each ribbon reads as where the
     // money lands, in one flat color through its whole length.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
-    // 2 incomes x 1 group plus 2 Remaining ribbons on the left; 2 cells
-    // x 2 incomes on the right.
+    // 2 incomes x 1 group plus 2 Remaining ribbons on the left; one ribbon
+    // per cell (2) on the right — never one per income.
     expect(left).toHaveLength(4);
-    expect(right).toHaveLength(4);
+    expect(right).toHaveLength(2);
     // No gradients: flat destination fills only, no income colors.
     expect(svg.querySelectorAll("linearGradient")).toHaveLength(0);
     const everyday = colorForName("Everyday");
@@ -748,12 +749,12 @@ describe("ReportsView", () => {
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
-    // Right sub-bands fill with their target's family shade, cell-major:
+    // Right ribbons fill with their target's family shade, cell-major:
     // Groceries keeps the Everyday color, Rent darkens one rank.
-    const targetFills = [everyday, everyday, sankeyFamilyShade(everyday, 1), sankeyFamilyShade(everyday, 1)];
+    const targetFills = [everyday, sankeyFamilyShade(everyday, 1)];
     right.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
-      expect(link.getAttribute("data-income")).toBe(String(k % 2));
+      expect(link.getAttribute("data-income")).toBeNull();
     });
     // Ribbon fills equal their destination bars' fills exactly.
     const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(

@@ -29,6 +29,8 @@ import {
   ChartTip,
   colorForName,
   sankeyTargetColors,
+  SankeyBucketHatchPattern,
+  SANKEY_INCOME_COLOR,
   TipLabel,
   OVER_INCOME_COLOR,
   useElementSize,
@@ -45,10 +47,10 @@ type Hover =
   | { kind: "node"; idx: number; x: number; y: number }
   // Left ribbon: a = income index, b = middle index (or the plug index,
   // one past the last middle, for full-width Remaining ribbons). Right
-  // sub-ribbon: a = middle index, b = target index, c = income index
-  // funding this sub-band (the band renders in the target's color).
+  // ribbon: a = middle index, b = target index — one ribbon per cell, in
+  // the target's color.
   | { kind: "link"; side: "left"; a: number; b: number; x: number; y: number }
-  | { kind: "link"; side: "right"; a: number; b: number; c: number; x: number; y: number }
+  | { kind: "link"; side: "right"; a: number; b: number; x: number; y: number }
   | { kind: "head"; col: "income" | "group" | "target"; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
@@ -68,31 +70,22 @@ function truncateName(name: string, max = 26): string {
 // Each ribbon carries one flat color — the color of the node it flows
 // INTO — through its whole length: left-hop ribbons the middle group's (or
 // the Remaining plug's green for the full-width surplus ribbons), right-hop
-// sub-ribbons their final category's or merchant's family shade. The income
+// ribbons their final category's or merchant's family shade. The income
 // side never colors a ribbon. Exported so tests can pin the fills.
+//
+// Spotlight scale: at rest every ribbon sits at SANKEY_RIBBON_OPACITY;
+// while a flow path is hovered its ribbons brighten to
+// SANKEY_RIBBON_HOVER_OPACITY and render above the rest, and everything
+// outside the path dims to SANKEY_RIBBON_DIM_OPACITY.
 export const SANKEY_RIBBON_OPACITY = 0.35;
-export const SANKEY_RIBBON_DIM_OPACITY = 0.18;
-export const SANKEY_RIBBON_HOVER_OPACITY = 0.65;
+export const SANKEY_RIBBON_DIM_OPACITY = 0.12;
+export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 
-// Collapse the per-income right-hop sub-bands back into their parent
-// middle→target cells (summing values), so family colors attribute each
-// target to its dominant parent group. Pure.
-export function aggregateSankeyRightCells(
-  links: { sourceIndex: number; targetIndex: number; value: number }[]
-): { middleIndex: number; targetIndex: number; value: number }[] {
-  const acc = new Map<string, { middleIndex: number; targetIndex: number; value: number }>();
-  for (const l of links) {
-    const prev = acc.get(`${l.sourceIndex}:${l.targetIndex}`);
-    if (prev) prev.value += l.value;
-    else
-      acc.set(`${l.sourceIndex}:${l.targetIndex}`, {
-        middleIndex: l.sourceIndex,
-        targetIndex: l.targetIndex,
-        value: l.value,
-      });
-  }
-  return [...acc.values()];
-}
+// Render-only bars — the merged "Other" buckets on every column and the
+// "Remaining" surplus plug — carry a dashed border (this dash) plus a
+// light hatch, so computed rows never read as real ones.
+export const SANKEY_BUCKET_DASH = "4 2";
+export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
 // Session flag for the Under auto-fit: it runs at most once per tab session —
 // on the first Sankey paint with a measured container — and never again after
@@ -323,7 +316,9 @@ export function SpendingReport({
         ...s,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((s.value / totals.flowTotal) * 100) : 0,
-        color: colorForName(s.name),
+        // One neutral gray for every income bar (and its tooltip dot): the
+        // income side carries no series colors.
+        color: SANKEY_INCOME_COLOR,
         i,
       })),
     [sankey, totals.flowTotal]
@@ -335,8 +330,8 @@ export function SpendingReport({
         flowPct:
           totals.flowTotal !== 0 ? Math.round((m.value / totals.flowTotal) * 100) : 0,
         color: colorForName(m.name),
-        // How many right-column rows this group feeds (distinct targets:
-        // each target draws one sub-ribbon per income).
+        // How many right-column rows this group feeds (distinct targets —
+        // one ribbon per group→target cell).
         memberCount: new Set(
           sankey?.linksRight.filter((l) => l.sourceIndex === i).map((l) => l.targetIndex)
         ).size,
@@ -347,8 +342,8 @@ export function SpendingReport({
   const tgtRows = useMemo(() => {
     const targets = sankey?.targets ?? [];
     // Family colors attribute each target to its dominant parent group
-    // (cells re-aggregated from the layout's own sub-bands, so the mapping
-    // is aligned with the drawn columns by construction).
+    // (cells taken straight from the layout's own right-hop ribbons, so the
+    // mapping is aligned with the drawn columns by construction).
     const colors = sankey
       ? sankeyTargetColors(
           sankey.middles.map((m) => ({ name: m.name, bucket: m.bucket })),
@@ -357,7 +352,11 @@ export function SpendingReport({
             bucket: t.bucket,
             isPlug: sankey.remainingTargetIndex === i,
           })),
-          aggregateSankeyRightCells(sankey.linksRight)
+          sankey.linksRight.map((l) => ({
+            middleIndex: l.sourceIndex,
+            targetIndex: l.targetIndex,
+            value: l.value,
+          }))
         )
       : [];
     return targets.map((t, i) => ({
@@ -401,6 +400,14 @@ export function SpendingReport({
                 : `${incomePct}% of ${fmt(totals.incomeTotal)} income`}
             </span>
           </div>
+          {isOther && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Render-only — grouped by the Under threshold</span>
+            </div>
+          )}
           {r.transfer === true && (
             <div
               className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
@@ -450,10 +457,9 @@ export function SpendingReport({
       }
       const m = midRows[hover.a];
       const t = tgtRows[hover.b];
-      const s = srcRows[hover.c];
-      if (!m || !t || !s) return null;
+      if (!m || !t) return null;
       const link = sankey?.linksRight.find(
-        (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b && l.incomeIndex === hover.c
+        (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b
       );
       if (!link) return null;
       // Share of the target's funded amount (when spending exceeds income
@@ -464,7 +470,7 @@ export function SpendingReport({
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
-            {`${s.name} → ${t.name}`}
+            {`${m.name} → ${t.name}`}
           </div>
           <TipLabel
             color={t.color}
@@ -472,12 +478,6 @@ export function SpendingReport({
             value={fmt(link.value)}
             pct={fundedPct + "%"}
           />
-          <div
-            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
-            style={{ color: "rgba(242,245,247,0.65)" }}
-          >
-            <span>via {m.name}</span>
-          </div>
           <div
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
             style={{ color: "rgba(242,245,247,0.65)" }}
@@ -525,6 +525,14 @@ export function SpendingReport({
                 : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
             </span>
           </div>
+          {isOther && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Render-only — grouped by the Under threshold</span>
+            </div>
+          )}
           {r.name === UNCATEGORIZED_GROUP_LABEL && (
             <div
               className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
@@ -571,6 +579,14 @@ export function SpendingReport({
                 : `of ${fmt(spentTotal)} total`}
             </span>
           </div>
+          {isOther && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Render-only — grouped by the Under threshold</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -652,6 +668,22 @@ export function SpendingReport({
                 : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
+        {isOther && (
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>Render-only — grouped by the Under threshold</span>
+          </div>
+        )}
+        {isRemaining && (
+          <div
+            className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+            style={{ color: "rgba(242,245,247,0.65)" }}
+          >
+            <span>{`Render-only row — unspent income, not a real ${nounSingular}`}</span>
+          </div>
+        )}
         {r.transfer === true && !isRemaining && (
           <div
             className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
@@ -675,17 +707,19 @@ export function SpendingReport({
   })();
 
   // Connected-highlight sets per hover (null = unconstrained, everything
-  // stays full opacity). Hovering any bar spotlights its full flow path and
-  // dims the rest: an income lights every line leading from it — its left
-  // ribbons plus its full downstream contribution, every right-hop cell in
-  // full (money is fungible, so that is every group and target) — and only
-  // the other incomes' bars and bands dim; a target lights itself, every
-  // line leading into it, its groups, and the income ribbons feeding those
-  // groups; a group lights its incoming and outgoing ribbons with the bars
-  // on both ends. Ribbon hovers trace the through-line end to end: a right
-  // sub-ribbon lights its income bar and the left ribbon feeding its
-  // middle, and a left ribbon lights the sub-ribbons continuing its income
-  // through that middle.
+  // stays at rest opacity). Hovering any bar spotlights its full flow path:
+  // an income lights every line leading from it — its left ribbons plus its
+  // full downstream contribution, every right-hop cell in full (money is
+  // fungible, so that is every group and target) — and only the other
+  // incomes' bars dim; a target lights itself, every line leading into it,
+  // its groups, and the income ribbons feeding those groups; a group lights
+  // every line leading into it from every income plus every line leading
+  // out of it, with the bars on both ends. Ribbon hovers trace the
+  // through-line end to end: a right ribbon lights its group and target
+  // plus every left ribbon feeding that group (a merged cell carries every
+  // income's money, so one income cannot be traced through it), and a left
+  // ribbon lights every cell continuing through its middle. Spotlighted
+  // ribbons brighten and render above the dimmed rest.
   const hl = useMemo(() => {
     const none = {
       src: null as Set<number> | null,
@@ -696,7 +730,6 @@ export function SpendingReport({
     };
     if (!hover || hover.kind === "bar" || hover.kind === "head" || !sankey) return none;
     const key = (a: number, b: number) => `${a}:${b}`;
-    const rkey = (a: number, b: number, c: number) => `${a}:${b}:${c}`;
     const midCount = sankey.middles.length;
     if (hover.kind === "income") {
       const ll = new Set<string>();
@@ -710,10 +743,9 @@ export function SpendingReport({
         else if (sankey.remainingTargetIndex != null) tgt.add(sankey.remainingTargetIndex);
       }
       // Every cell carries this income's money (fungible proportional
-      // split), so the full downstream contribution lights in full — not
-      // just this income's own band of each cell.
+      // split), so the full downstream contribution lights in full.
       for (const l of sankey.linksRight) {
-        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
+        rl.add(key(l.sourceIndex, l.targetIndex));
         tgt.add(l.targetIndex);
       }
       return { src: new Set([hover.idx]), mid, tgt, ll, rl };
@@ -730,7 +762,7 @@ export function SpendingReport({
       }
       for (const l of sankey.linksRight) {
         if (l.sourceIndex !== hover.idx) continue;
-        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
+        rl.add(key(l.sourceIndex, l.targetIndex));
         tgt.add(l.targetIndex);
       }
       return { src, mid: new Set([hover.idx]), tgt, ll, rl };
@@ -740,7 +772,7 @@ export function SpendingReport({
       const mid = new Set<number>();
       for (const l of sankey.linksRight) {
         if (l.targetIndex !== hover.idx) continue;
-        rl.add(rkey(l.sourceIndex, l.targetIndex, l.incomeIndex));
+        rl.add(key(l.sourceIndex, l.targetIndex));
         mid.add(l.sourceIndex);
       }
       const ll = new Set<string>();
@@ -757,13 +789,11 @@ export function SpendingReport({
     // Ribbon hover: the ribbon plus its endpoint bars.
     if (hover.side === "left") {
       const isPlug = hover.b >= midCount;
-      // A group-bound left ribbon continues through its middle as that
-      // income's sub-ribbons; a plug ribbon ends at Remaining.
+      // A group-bound left ribbon continues through its middle as every
+      // cell out of that middle; a plug ribbon ends at Remaining.
       const cont = isPlug
         ? []
-        : sankey.linksRight.filter(
-            (l) => l.sourceIndex === hover.b && l.incomeIndex === hover.a
-          );
+        : sankey.linksRight.filter((l) => l.sourceIndex === hover.b);
       return {
         src: new Set([hover.a]),
         mid: isPlug ? new Set<number>() : new Set([hover.b]),
@@ -772,15 +802,18 @@ export function SpendingReport({
             ? new Set([sankey.remainingTargetIndex])
             : new Set(cont.map((l) => l.targetIndex)),
         ll: new Set([key(hover.a, hover.b)]),
-        rl: new Set(cont.map((l) => rkey(l.sourceIndex, l.targetIndex, l.incomeIndex))),
+        rl: new Set(cont.map((l) => key(l.sourceIndex, l.targetIndex))),
       };
     }
+    // A merged cell carries every income's money: the through-line runs
+    // back through every left ribbon feeding its middle.
+    const back = sankey.linksLeft.filter((l) => l.targetIndex === hover.a);
     return {
-      src: new Set([hover.c]),
+      src: new Set(back.map((l) => l.sourceIndex)),
       mid: new Set([hover.a]),
       tgt: new Set([hover.b]),
-      ll: new Set([key(hover.c, hover.a)]),
-      rl: new Set([rkey(hover.a, hover.b, hover.c)]),
+      ll: new Set(back.map((l) => key(l.sourceIndex, l.targetIndex))),
+      rl: new Set([key(hover.a, hover.b)]),
     };
   }, [hover, sankey]);
 
@@ -794,15 +827,45 @@ export function SpendingReport({
         (hover.side === "left" &&
           hover.b >= (sankey?.middles.length ?? 0) &&
           sankey?.remainingTargetIndex === idx)));
-  const isLeftLinkHover = (a: number, b: number) =>
-    hover?.kind === "link" && hover.side === "left" && hover.a === a && hover.b === b;
-  const isRightLinkHover = (a: number, b: number, c: number) =>
-    hover?.kind === "link" &&
-    hover.side === "right" &&
-    hover.a === a &&
-    hover.b === b &&
-    hover.c === c;
   const hoverBarIdx = hover != null && hover.kind === "bar" ? hover.idx : null;
+
+  // Spotlight state per ribbon: while a flow path is hovered (the hl sets
+  // are non-null) ribbons in the path brighten and the rest dims; with no
+  // path hover every ribbon sits at rest opacity.
+  const leftLit = (a: number, b: number) =>
+    hl.ll != null && hl.ll.has(`${a}:${b}`);
+  const rightLit = (a: number, b: number) =>
+    hl.rl != null && hl.rl.has(`${a}:${b}`);
+  const ribbonOpacity = (lit: boolean, active: boolean) =>
+    !active
+      ? SANKEY_RIBBON_OPACITY
+      : lit
+        ? SANKEY_RIBBON_HOVER_OPACITY
+        : SANKEY_RIBBON_DIM_OPACITY;
+
+  // Z-order: spotlighted ribbons render after (above) the dimmed rest, so
+  // the selected path is never buried under other legs. Stable: with no
+  // hover the layout order passes through unchanged.
+  const orderedLinksLeft = useMemo(() => {
+    const links = sankey?.linksLeft ?? [];
+    if (hl.ll == null) return links;
+    const lit: typeof links = [];
+    const dim: typeof links = [];
+    for (const l of links) {
+      (hl.ll.has(`${l.sourceIndex}:${l.targetIndex}`) ? lit : dim).push(l);
+    }
+    return [...dim, ...lit];
+  }, [sankey, hl]);
+  const orderedLinksRight = useMemo(() => {
+    const links = sankey?.linksRight ?? [];
+    if (hl.rl == null) return links;
+    const lit: typeof links = [];
+    const dim: typeof links = [];
+    for (const l of links) {
+      (hl.rl.has(`${l.sourceIndex}:${l.targetIndex}`) ? lit : dim).push(l);
+    }
+    return [...dim, ...lit];
+  }, [sankey, hl]);
 
   return (
     <Panel
@@ -831,7 +894,7 @@ export function SpendingReport({
         <Tooltip
           tip={
             remaining >= 0
-              ? `Unspent income — lands in Remaining on the right`
+              ? `Unspent income — lands in the render-only Remaining row on the right`
               : `Spending exceeded income by ${fmt(Math.abs(remaining))} — covered from savings or debt`
           }
         >
@@ -961,8 +1024,13 @@ export function SpendingReport({
                   Income (left) flows through category groups (middle) into spending (right).
                 </span>
                 <span className="block">
-                  Remaining is unspent income. Over income is spending beyond income — covered
-                  from savings or debt.
+                  Remaining is unspent income in a render-only row — not a real{" "}
+                  {dimension === "categories" ? "category" : "merchant"}. Over income is spending
+                  beyond income — covered from savings or debt.
+                </span>
+                <span className="block">
+                  Other is a render-only bucket for rows under the Under threshold — the
+                  dashed, hatched bars are computed, not real rows.
                 </span>
                 <span className="block">
                   Moving money out to investments counts as spending; bringing it back counts
@@ -1094,6 +1162,9 @@ export function SpendingReport({
               height={contentH}
               className="block"
             >
+              <defs>
+                <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
+              </defs>
               {/* Column headers: each column names what it holds, so the
                   chart reads without prior knowledge (left is income
                   received — not surplus — middle groups route it, right is
@@ -1130,7 +1201,7 @@ export function SpendingReport({
                     </text>
                   )
               )}
-              {sankey.linksLeft.map((link) => {
+              {orderedLinksLeft.map((link) => {
                 // Flat destination color through the whole length: left-hop
                 // ribbons take their middle group's color — except the
                 // full-width surplus ribbons, which take the Remaining
@@ -1141,9 +1212,7 @@ export function SpendingReport({
                   link.targetIndex >= midRows.length && plugTarget != null
                     ? (tgtRows[plugTarget]?.color ?? colorForName(link.targetName))
                     : (midRows[link.targetIndex]?.color ?? colorForName(link.targetName));
-                const isHover = isLeftLinkHover(link.sourceIndex, link.targetIndex);
-                const dim =
-                  hl.ll != null && !hl.ll.has(`${link.sourceIndex}:${link.targetIndex}`);
+                const lit = leftLit(link.sourceIndex, link.targetIndex);
                 return (
                   <path
                     key={`ll-${link.sourceIndex}-${link.targetIndex}`}
@@ -1151,13 +1220,7 @@ export function SpendingReport({
                     data-side="left"
                     d={link.d}
                     fill={fill}
-                    fillOpacity={
-                      isHover
-                        ? SANKEY_RIBBON_HOVER_OPACITY
-                        : dim
-                          ? SANKEY_RIBBON_DIM_OPACITY
-                          : SANKEY_RIBBON_OPACITY
-                    }
+                    fillOpacity={ribbonOpacity(lit, hl.ll != null)}
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
@@ -1174,38 +1237,23 @@ export function SpendingReport({
                   />
                 );
               })}
-              {sankey.linksRight.map((link) => {
-                // Flat destination color through the whole length: every
-                // sub-band in a cell fills with the final category's or
-                // merchant's family shade, so each ribbon reads as where
-                // the money lands. The per-income split stays invisible —
-                // all bands in a cell share one color — until hovering one
-                // sub-band traces its through-line end to end.
+              {orderedLinksRight.map((link) => {
+                // Flat destination color through the whole length: each cell
+                // ribbon fills with the final category's or merchant's
+                // family shade, so each ribbon reads as where the money
+                // lands. One ribbon per group→target cell — hovering one
+                // traces its through-line end to end.
                 const fill =
                   tgtRows[link.targetIndex]?.color ?? colorForName(link.targetName);
-                const isHover = isRightLinkHover(
-                  link.sourceIndex,
-                  link.targetIndex,
-                  link.incomeIndex
-                );
-                const dim =
-                  hl.rl != null &&
-                  !hl.rl.has(`${link.sourceIndex}:${link.targetIndex}:${link.incomeIndex}`);
+                const lit = rightLit(link.sourceIndex, link.targetIndex);
                 return (
                   <path
-                    key={`rl-${link.sourceIndex}-${link.targetIndex}-${link.incomeIndex}`}
+                    key={`rl-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
                     data-side="right"
-                    data-income={link.incomeIndex}
                     d={link.d}
                     fill={fill}
-                    fillOpacity={
-                      isHover
-                        ? SANKEY_RIBBON_HOVER_OPACITY
-                        : dim
-                          ? SANKEY_RIBBON_DIM_OPACITY
-                          : SANKEY_RIBBON_OPACITY
-                    }
+                    fillOpacity={ribbonOpacity(lit, hl.rl != null)}
                     stroke="none"
                     style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                     onMouseMove={(e) =>
@@ -1214,7 +1262,6 @@ export function SpendingReport({
                         side: "right",
                         a: link.sourceIndex,
                         b: link.targetIndex,
-                        c: link.incomeIndex,
                         x: e.clientX,
                         y: e.clientY,
                       })
@@ -1224,10 +1271,14 @@ export function SpendingReport({
                 );
               })}
               {sankey.sources.map((node, idx) => {
-                const color = colorForName(node.name);
+                const r = srcRows[idx]!;
+                // One neutral gray for every income bar: no series colors on
+                // the left. The merged Other bucket adds the render-only
+                // dashed border plus hatch.
+                const color = r.color;
+                const isBucket = r.bucket === true;
                 const isHover = isSrcHover(idx);
                 const dim = hl.src != null && !hl.src.has(idx);
-                const r = srcRows[idx]!;
                 const labelY = node.y + node.h / 2;
                 // Bars too short for two lines show the name only, centered
                 // on the bar; taller bars keep name + amount.
@@ -1245,12 +1296,26 @@ export function SpendingReport({
                       fillOpacity={dim ? 0.35 : 1}
                       stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
                       strokeWidth={isHover ? 2 : 1}
+                      strokeDasharray={isBucket ? SANKEY_BUCKET_DASH : undefined}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
+                    {isBucket && (
+                      <rect
+                        data-testid="sankey-bucket-hatch"
+                        x={node.x}
+                        y={node.y}
+                        width={node.w}
+                        height={Math.max(0, node.h)}
+                        rx={2}
+                        fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                        fillOpacity={dim ? 0.35 : 1}
+                        pointerEvents="none"
+                      />
+                    )}
                     <text
                       data-testid="sankey-income-label"
                       x={sankey.sourceLabelX}
@@ -1290,15 +1355,22 @@ export function SpendingReport({
                 );
               })}
               {sankey.middles.map((node, idx) => {
-                const color = colorForName(node.name);
-                const dim = hl.mid != null && !hl.mid.has(idx);
                 const r = midRows[idx]!;
+                const color = r.color;
+                const isBucket = r.bucket === true;
+                const dim = hl.mid != null && !hl.mid.has(idx);
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`mid-${node.name}-${idx}`}>
-                    {/* Parent groups stay subtle: just a vertical bar, never
-                        a highlight border — hovering one spotlights its
-                        ribbons instead. */}
+                    {/* Parent groups read as one color with their ribbons:
+                        the same fill at the same rest opacity, always — no
+                        brighter highlight variant, no dimming. Hovering one
+                        spotlights its ribbons instead; only the labels dim
+                        to trace the path. The merged Other bucket adds the
+                        render-only dashed border plus hatch. The bar's full
+                        height is the group's value; when spending exceeds
+                        income the gap shows in the tooltip, not as a grey
+                        segment. */}
                     <rect
                       data-testid="sankey-group"
                       x={node.x}
@@ -1307,32 +1379,27 @@ export function SpendingReport({
                       height={Math.max(0, node.h)}
                       rx={2}
                       fill={color}
-                      fillOpacity={dim ? 0.35 : 1}
-                      stroke="none"
+                      fillOpacity={SANKEY_RIBBON_OPACITY}
+                      stroke={isBucket ? "rgba(0,0,0,0.35)" : "none"}
+                      strokeWidth={isBucket ? 1 : undefined}
+                      strokeDasharray={isBucket ? SANKEY_BUCKET_DASH : undefined}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
-                    {node.unfundedH > 0 && (
+                    {isBucket && (
                       <rect
-                        data-testid="sankey-group-shortfall"
+                        data-testid="sankey-bucket-hatch"
                         x={node.x}
-                        y={node.y + Math.max(0, node.h) - node.unfundedH}
+                        y={node.y}
                         width={node.w}
-                        height={node.unfundedH}
+                        height={Math.max(0, node.h)}
                         rx={2}
-                        fill={OVER_INCOME_COLOR}
-                        fillOpacity={dim ? 0.35 : 1}
-                        stroke="rgba(0,0,0,0.35)"
-                        strokeWidth={1}
-                        strokeDasharray="3 2"
-                        style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
-                        onMouseMove={(e) =>
-                          pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
-                        }
-                        onMouseLeave={() => setHover(null)}
+                        fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                        fillOpacity={SANKEY_RIBBON_OPACITY}
+                        pointerEvents="none"
                       />
                     )}
                     {/* Middle labels sit in the ribbon zone, so they carry
@@ -1382,7 +1449,13 @@ export function SpendingReport({
                 const r = tgtRows[idx]!;
                 // Family shade shared with the incoming ribbons, so the line
                 // from an income to this bar reads as one color throughout.
+                // Render-only rows — the merged Other bucket and the
+                // Remaining surplus plug — add the dashed border plus hatch.
+                // The bar's full height is the row's value; when spending
+                // exceeds income the gap shows in the tooltip, not as a grey
+                // segment.
                 const color = r.color;
+                const isComputed = r.bucket === true || r.isPlug;
                 const isHover = isTgtHover(idx);
                 const dim = hl.tgt != null && !hl.tgt.has(idx);
                 const labelY = node.y + node.h / 2;
@@ -1399,30 +1472,24 @@ export function SpendingReport({
                       fillOpacity={dim ? 0.35 : 1}
                       stroke={isHover ? "var(--y-ink)" : "rgba(0,0,0,0.15)"}
                       strokeWidth={isHover ? 2 : 1}
+                      strokeDasharray={isComputed ? SANKEY_BUCKET_DASH : undefined}
                       style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
                       onMouseMove={(e) =>
                         pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
-                    {node.unfundedH > 0 && (
+                    {isComputed && (
                       <rect
-                        data-testid="sankey-shortfall"
+                        data-testid="sankey-bucket-hatch"
                         x={node.x}
-                        y={node.y + Math.max(0, node.h) - node.unfundedH}
+                        y={node.y}
                         width={node.w}
-                        height={node.unfundedH}
+                        height={Math.max(0, node.h)}
                         rx={2}
-                        fill={OVER_INCOME_COLOR}
+                        fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
                         fillOpacity={dim ? 0.35 : 1}
-                        stroke="rgba(0,0,0,0.35)"
-                        strokeWidth={1}
-                        strokeDasharray="3 2"
-                        style={{ transition: "fill-opacity 120ms", cursor: "pointer" }}
-                        onMouseMove={(e) =>
-                          pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
-                        }
-                        onMouseLeave={() => setHover(null)}
+                        pointerEvents="none"
                       />
                     )}
                     <text

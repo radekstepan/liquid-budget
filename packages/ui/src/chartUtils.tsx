@@ -31,6 +31,10 @@ export function colorAt(i: number): string {
 export const OTHER_BUCKET_COLOR = "#78909c";
 export const REMAINING_COLOR = "#2f9e5f";
 export const OVER_INCOME_COLOR = "#a3adb6";
+// Sankey income bars carry no series color: every left-column bar renders
+// this one neutral gray so the income side never competes with the
+// group/category colors on the right.
+export const SANKEY_INCOME_COLOR = "#9aa3ad";
 
 export function colorForName(name: string): string {
   if (name === OTHER_BUCKET_LABEL) return OTHER_BUCKET_COLOR;
@@ -418,6 +422,19 @@ export function TruncHatchPattern({ id }: { id: string }) {
   return (
     <pattern id={id} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
       <line x1="0" y1="0" x2="0" y2="4" stroke={TRUNC_HATCH_COLOR} strokeWidth="1.4" />
+    </pattern>
+  );
+}
+
+// Light diagonal hatch marking render-only Sankey bars: the merged "Other"
+// buckets on every column and the "Remaining" surplus plug are drawn by the
+// renderer, not real rows, so they carry this pattern plus a dashed border
+// to read as computed at a glance. White lines stay visible over the slate,
+// green, and gray fills those bars use.
+export function SankeyBucketHatchPattern({ id }: { id: string }) {
+  return (
+    <pattern id={id} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.65)" strokeWidth="1.6" />
     </pattern>
   );
 }
