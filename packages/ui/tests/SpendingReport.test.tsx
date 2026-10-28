@@ -1272,6 +1272,26 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
+  it("paints Bars rows in their own stable colors, not the dark Sankey family shades", () => {
+    // Bars regressed dark when they adopted the Sankey family colors
+    // (task-19, darkest-first since task-23): family shades darken toward
+    // black to stay readable at translucent ribbon opacity, but at the
+    // Bars' full opacity they read too dark. Each row keeps its own
+    // full-brightness stable color instead.
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    const swatches = container.querySelectorAll("span.h-3.w-3");
+    expect(swatches).toHaveLength(3);
+    ["Mortgage Interest", "Groceries", "Electric Bill"].forEach((name, i) => {
+      expect(swatches[i]).toHaveStyle({ background: colorForName(name) });
+    });
+    // Regression guard: the largest row must keep its own color, not the
+    // darkened shade of its parent group's.
+    expect(swatches[0]).not.toHaveStyle({
+      background: sankeyFamilyShade(colorForName("Bills"), 1),
+    });
+  });
+
   it("coalesces rapid hover updates into one commit per animation frame", () => {
     // Mousemove fires far more often than the display refreshes; committing
     // a full multi-hundred-element chart re-render per event drops frames

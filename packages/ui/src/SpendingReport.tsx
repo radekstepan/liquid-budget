@@ -236,27 +236,22 @@ export function SpendingReport({
   }, [merged.targets, mergedIncome.items]);
   const spentTotal = totals.spendingTotal;
 
-  // Bars rows: spending shares (unchanged by the income side). Bars share
-  // the Sankey's family colors so a category keeps its color across views.
+  // Bars rows: spending shares (unchanged by the income side). Each row
+  // keeps its own full-brightness stable color — NOT the Sankey family
+  // shades: those darken toward black to stay readable at translucent
+  // ribbon opacity, but at the Bars' full opacity they read too dark
+  // (task-31 restore of the pre-task-19 palette). The merged Other bucket
+  // still renders slate via colorForName's bucket branch.
   const rows = useMemo(() => {
     const maxSpend = merged.targets.reduce((m, s) => Math.max(m, s.value), 1);
-    const colors = sankeyTargetColors(
-      merged.groups.map((g) => ({ name: g.name, bucket: g.bucket === true })),
-      merged.targets.map((t) => ({ name: t.name, bucket: t.bucket === true, isPlug: false })),
-      merged.links.map((l) => ({
-        middleIndex: l.groupIndex,
-        targetIndex: l.targetIndex,
-        value: l.value,
-      }))
-    );
     return merged.targets.map((s, i) => {
       const share = spentTotal !== 0 ? s.value / spentTotal : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
-      const color = colors[i] ?? colorForName(s.name);
+      const color = colorForName(s.name);
       return { ...s, share, pctOfTotal, pctOfMax, color, i };
     });
-  }, [merged, spentTotal]);
+  }, [merged.targets, spentTotal]);
 
   // Income rows for the layout: the same Under threshold folds small
   // income sources into an Other bucket on the left, and the proportional
