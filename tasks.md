@@ -67,10 +67,10 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey has these issues (which you keep fucking not fixing):
-- income bar is grey = ugly, should use a gradient. Gradient (onhover) has a glassy look and rounded borders where they shouldn't be
-- black text with yellow border on parent categories is unreadable
-- by default the chart is too "opaque"
-- the category/merchant box uses rounded borders where they shouldn't be and the lines leading into it do NOT match color
-- how to read should not be a button if we can't click it
-- we need affordance to sort by amount (category/merchant) or by order of that category in the parent category in Budget, you did NOT implement it
+Spending by Category - Sankey has these issues:
+- the default colors are too opaque
+- the gradients on the left for incomes do not match the sankey lines, try without the "bleed" if you can fix the gradient
+- more money should be a darker color rather than other way round
+- I do not like the border on incomes or categories/merchants
+- You do not need to say "Proportional split - money is fungible"
+- I switched to Merchants and highlighted "TD Bank", for some reason incomes on the left that have NOTHING to do with it get highlighted. Same with "DLA Piper" or "Airbnb"; I do not see the same issue if I toggle from Merchants to Categories
