@@ -1272,6 +1272,117 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
+  it("highlights the hovered Bars row and names its parent group in the tooltip", () => {
+    // The old Bars tooltip restated the row (amount + share, both already
+    // visible) plus the header total — no new information. It now carries
+    // what the row cannot show: the category's parent group.
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    const tracks = container.querySelectorAll(".y-bar-track");
+    const row = tracks[0]!.parentElement!;
+    const sibling = tracks[1]!.parentElement!;
+    expect(row).toHaveStyle({ background: "transparent" });
+    fireEvent.mouseMove(row, { clientX: 400, clientY: 200 });
+    // The hovered row highlights; its siblings do not.
+    expect(row).toHaveStyle({ background: "var(--y-row-sel)" });
+    expect(sibling).toHaveStyle({ background: "transparent" });
+    const tip = within(document.querySelector(".y-tip")! as unknown as HTMLElement);
+    expect(tip.getByText("Mortgage Interest")).toBeInTheDocument();
+    expect(tip.getByText("$1,000.00")).toBeInTheDocument();
+    expect(tip.getByText("65% of $1,550.00 spending · in Bills")).toBeInTheDocument();
+    fireEvent.mouseLeave(row);
+    expect(document.querySelector(".y-tip")).toBeNull();
+    expect(row).toHaveStyle({ background: "transparent" });
+  });
+
+  it("shows the group split when hovering a Bars merchant spanning groups", () => {
+    const splitMerchantFlow: SpendingGroupFlow = {
+      groups: [
+        { name: "Bills", value: 30000 },
+        { name: "Everyday", value: 20000 },
+      ],
+      targets: [{ name: "Amazon", value: 50000 }],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 30000 },
+        { groupIndex: 1, targetIndex: 0, value: 20000 },
+      ],
+    };
+    const { container } = renderReport(sampleCategoryFlow, splitMerchantFlow);
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    const row = container.querySelectorAll(".y-bar-track")[0]!.parentElement!;
+    fireEvent.mouseMove(row, { clientX: 400, clientY: 200 });
+    const tip = within(document.querySelector(".y-tip")! as unknown as HTMLElement);
+    expect(tip.getByText("Amazon")).toBeInTheDocument();
+    expect(
+      tip.getByText("100% of $500.00 spending · across 2 groups")
+    ).toBeInTheDocument();
+    // One factual line per group, largest first: name, amount, share.
+    expect(tip.getByText("Bills")).toBeInTheDocument();
+    expect(tip.getByText("$300.00")).toBeInTheDocument();
+    expect(tip.getByText("(60%)")).toBeInTheDocument();
+    expect(tip.getByText("Everyday")).toBeInTheDocument();
+    expect(tip.getByText("$200.00")).toBeInTheDocument();
+    expect(tip.getByText("(40%)")).toBeInTheDocument();
+    fireEvent.mouseLeave(row);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("keeps the Bars Other-bucket tooltip useful under the threshold", () => {
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    // Mortgage Interest + the merged Other bucket.
+    const row = container.querySelectorAll(".y-bar-track")[1]!.parentElement!;
+    fireEvent.mouseMove(row, { clientX: 400, clientY: 240 });
+    const tip = within(document.querySelector(".y-tip")! as unknown as HTMLElement);
+    expect(tip.getByText("Other")).toBeInTheDocument();
+    expect(tip.getByText("$550.00")).toBeInTheDocument();
+    expect(tip.getByText("2 smaller categories under $500.00")).toBeInTheDocument();
+    expect(
+      tip.getByText("Render-only — grouped by the Under threshold")
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(row);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("lands a direct Bars row-to-row switch in one commit without blinking the tooltip off", () => {
+    // Bars leaves ride the same rAF throttle as the moves (never a
+    // synchronous clear): leave(A)+move(B) commits once, carrying B.
+    const queue: FrameRequestCallback[] = [];
+    const syncRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      queue.push(cb);
+      return queue.length;
+    };
+    try {
+      const { container } = renderReport();
+      fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+      const tracks = container.querySelectorAll(".y-bar-track");
+      const rowA = tracks[0]!.parentElement!;
+      const rowB = tracks[1]!.parentElement!;
+      fireEvent.mouseMove(rowA, { clientX: 400, clientY: 200 });
+      act(() => {
+        queue.splice(0).forEach((cb) => cb(0));
+      });
+      const tipOf = () =>
+        within(document.querySelector(".y-tip")! as unknown as HTMLElement);
+      expect(tipOf().getByText("Mortgage Interest")).toBeInTheDocument();
+      fireEvent.mouseLeave(rowA);
+      fireEvent.mouseMove(rowB, { clientX: 400, clientY: 240 });
+      // Nothing commits before the frame boundary — the old tooltip stays
+      // up instead of flashing to null in between.
+      expect(tipOf().getByText("Mortgage Interest")).toBeInTheDocument();
+      act(() => {
+        queue.splice(0).forEach((cb) => cb(0));
+      });
+      expect(tipOf().getByText("Groceries")).toBeInTheDocument();
+    } finally {
+      globalThis.requestAnimationFrame = syncRaf;
+    }
+  });
+
   it("paints Bars rows in their own stable colors, not the dark Sankey family shades", () => {
     // Bars regressed dark when they adopted the Sankey family colors
     // (task-19, darkest-first since task-23): family shades darken toward

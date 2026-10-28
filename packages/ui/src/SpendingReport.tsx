@@ -179,10 +179,11 @@ export function SpendingReport({
   // Mousemove fires far more often than the display refreshes; coalescing
   // hover commits to one per frame (latest wins) keeps cursor sweeps from
   // queuing a full multi-hundred-element re-render per event — the same
-  // throttle the other reports use. The Sankey's hover-leaves ride the same
-  // throttle (never a synchronous clear): moving directly from one element
-  // to another delivers leave+move as one commit, so arms that stay dimmed
-  // never flash through rest in between.
+  // throttle the other reports use. Hover-leaves ride the same throttle
+  // (never a synchronous clear — Sankey and Bars alike): moving directly
+  // from one element to another delivers leave+move as one commit, so arms
+  // that stay dimmed never flash through rest in between and the Bars
+  // tooltip never blinks off between rows.
   const pushHover = useRafThrottledSet(setHover);
   const { ref: chartRef, size: chartSize } = useElementSize<HTMLDivElement>();
 
@@ -571,6 +572,27 @@ export function SpendingReport({
       const r = rows[hover.idx];
       if (!r) return null;
       const isOther = r.bucket === true;
+      // Group attribution for this row, from the merged group→target
+      // cells (largest first): a category's single parent group, or a
+      // merchant's split across the groups it spans. Links into an Other
+      // target exist but stay hidden — the merged-bucket line below covers
+      // them. Display names mark a merged middle bucket so it never reads
+      // as a real group.
+      const cells = isOther
+        ? []
+        : merged.links
+            .filter((l) => l.targetIndex === hover.idx)
+            .map((l) => {
+              const g = merged.groups[l.groupIndex];
+              return {
+                name:
+                  g?.bucket === true ? `${g.name} (merged)` : (g?.name ?? "—"),
+                color: colorForName(g?.name ?? "—"),
+                value: l.value,
+              };
+            })
+            .sort((a, b) => b.value - a.value);
+      const multiGroup = cells.length > 1;
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
@@ -589,9 +611,23 @@ export function SpendingReport({
             <span>
               {isOther
                 ? `${r.mergedCount} smaller ${r.mergedCount === 1 ? nounSingular : nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
-                : `of ${fmt(spentTotal)} total`}
+                : cells.length === 1
+                  ? `${r.pctOfTotal}% of ${fmt(spentTotal)} spending · in ${cells[0]!.name}`
+                  : multiGroup
+                    ? `${r.pctOfTotal}% of ${fmt(spentTotal)} spending · across ${cells.length} groups`
+                    : `${r.pctOfTotal}% of ${fmt(spentTotal)} spending`}
             </span>
           </div>
+          {multiGroup &&
+            cells.map((c) => (
+              <TipLabel
+                key={c.name}
+                color={c.color}
+                label={c.name}
+                value={fmt(c.value)}
+                pct={Math.round((c.value / r.value) * 100) + "%"}
+              />
+            ))}
           {isOther && (
             <div
               className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
@@ -1020,7 +1056,7 @@ export function SpendingReport({
                   }
                   style={{ background: isHover ? "var(--y-row-sel)" : "transparent" }}
                   onMouseMove={(e) => pushHover({ kind: "bar", idx: r.i, x: e.clientX, y: e.clientY })}
-                  onMouseLeave={() => setHover(null)}
+                  onMouseLeave={() => pushHover(null)}
                 >
                   <span
                     className="inline-block h-3 w-3 shrink-0 rounded-sm"
