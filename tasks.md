@@ -68,8 +68,9 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey:
-- if I hover over a group on the right, it needs to highlight it and all lines leading into it, not just an individual transfer
-- conversely if I hover on an income on the left, it needs to highlight all the lines leading from it
-- the color on the right dictates a color on the left. It doesn't matter what the Income color is/ignore it, a line connecting income to category/merchant HAS TO be the same color throughout
-- make sure for each parent category all the subcategories/merchants are shades of that single color
-- the parent group highlight/bar should NOT have a black highlight border. Make the parent categories more subtle, just a vertical bar is enough
+- you STILL have NOT implemented this correctly. I do NOT want individual lines in a sankey from e.g. "SAvings" parent group to "Other Investments". I do not need that detail. If you hove on that "bar" it should highlight ALL the lines from all the inputs that lead to "Other Investments". Right now this happens when I hover on the category "Other Investments" but the sankey leading into it is still "split" into individual horizontal lines.
+- onhover make the sankey selected brighter (like how you highlight the parent category now) and on top of other sankey legs and the other ones more opaque
+- I do not want colors on Income on the left, just make them more neutral.
+- why is the parent category brighter???? I fucking didn't ask for this SAME FUCKING COLOR
+- I STILL don't understand the grey rectangle below each Merchant and below parent categories in Merchant view.
+- what is the Remaining category? I don' get it. How do you also group "Other" category vs expenses grouped because they are "Under"? Make them dashed border or some pattern so we know it's a render-only category that captures the "Under" spend
