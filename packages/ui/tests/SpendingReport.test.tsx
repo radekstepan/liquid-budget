@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import {
   SANKEY_LEFT_LABEL_INSET,
+  SANKEY_NODE_GAP,
   sankeyThresholdStops,
   type SpendingGroupFlow,
 } from "@ynab/logic";
@@ -1073,6 +1074,89 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
+  it("routes the Remaining ribbon through a dedicated lane below the middle column", () => {
+    const { container } = renderReport();
+    const checkLane = () => {
+      const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+      // The plug ribbon stays whole and green in both groupings.
+      const left = Array.from(
+        svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+      );
+      const plugs = left.filter((l) => l.getAttribute("fill") === REMAINING_COLOR);
+      expect(plugs).toHaveLength(1);
+      const d = plugs[0]!.getAttribute("d") ?? "";
+      // Lane shape: drop + bridge + traverse runs (three L-runs: bridge,
+      // target edge, bridge) instead of one straight diagonal bezier.
+      expect(d.split(" L ")).toHaveLength(4);
+      // The bridge runs one row gap below the last middle bar: parse the
+      // lane top (the drop's landing y) out of the path.
+      const nums = d.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      expect(nums).toHaveLength(32);
+      const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
+      const last = groups[groups.length - 1]!;
+      const midBottom = Number(last.getAttribute("y")) + Number(last.getAttribute("height"));
+      expect(nums[5]).toBeCloseTo(midBottom + SANKEY_NODE_GAP, 2);
+      // The plug bar keeps its stacked trailing spot below the last
+      // spending row — the lane is transit-only, no bar moves.
+      const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+      const spendLast = nodes[nodes.length - 2]!;
+      const plugBar = nodes[nodes.length - 1]!;
+      expect(Number(plugBar.getAttribute("y"))).toBeCloseTo(
+        Number(spendLast.getAttribute("y")) +
+          Number(spendLast.getAttribute("height")) +
+          SANKEY_NODE_GAP,
+        2
+      );
+    };
+    checkLane();
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    checkLane();
+  });
+
+  it("spotlights the Remaining flow path when hovering the Remaining plug", () => {
+    const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Bonus", value: 50000 },
+    ]);
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    const plugBar = nodes[nodes.length - 1]!;
+    fireEvent.mouseMove(plugBar, { clientX: 600, clientY: 350 });
+    // The plug bar and both lane-routed plug ribbons brighten; the plug
+    // path touches no middle or spending target, so every group and
+    // category leg dims.
+    expect(plugBar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    const plugs = left.filter((l) => l.getAttribute("fill") === REMAINING_COLOR);
+    expect(plugs).toHaveLength(2);
+    for (const p of plugs) {
+      expect(p.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    }
+    for (const l of left) {
+      if (l.getAttribute("fill") !== REMAINING_COLOR) {
+        expect(l.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      }
+    }
+    for (const l of svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')) {
+      expect(l.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    }
+    // Both income bars join the path (each feeds the surplus); groups and
+    // spending targets dim.
+    for (const bar of svg.querySelectorAll('[data-testid="sankey-income"]')) {
+      expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    }
+    for (const bar of svg.querySelectorAll('[data-testid="sankey-group"]')) {
+      expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    }
+    nodes.forEach((n, i) => {
+      if (i < nodes.length - 1) {
+        expect(n.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+      }
+    });
+    fireEvent.mouseLeave(plugBar);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
   it("fills each income bar with its own ribbon-color gradient, never flat gray", () => {
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
@@ -2083,10 +2167,15 @@ describe("SpendingReport", () => {
       expect(left.some((l) => l.getAttribute("fill") === colorForName(name))).toBe(false);
     }
     // Each sub-ribbon is a closed bezier running left-to-right; parse
-    // its source/target slices out of the path.
+    // its source/target slices out of the path. The lane-routed plug ribbon
+    // carries drop + bridge + traverse runs (32 numbers) instead of one
+    // bezier (16) — its source band still opens the path and its target
+    // band still sits at the target edge, just at wider indices.
     const slices = left.map((l) => {
       const nums = (l.getAttribute("d") ?? "").match(/-?\d+(?:\.\d+)?/g)!.map(Number);
-      return { sy0: nums[1]!, sy1: nums[15]!, ty0: nums[7]!, ty1: nums[9]! };
+      return nums.length === 32
+        ? { sy0: nums[1]!, sy1: nums[31]!, ty0: nums[15]!, ty1: nums[17]! }
+        : { sy0: nums[1]!, sy1: nums[15]!, ty0: nums[7]!, ty1: nums[9]! };
     });
     // Source slices tile the income bar edge to edge with no gaps and
     // no taper (each sub-ribbon keeps one width end to end).

@@ -1052,6 +1052,56 @@ export function ribbonPath(
 }
 
 /**
+ * Closed lane ribbon path for a Remaining plug ribbon: from its source band
+ * the ribbon drops into a dedicated lane below the middle column, bridges
+ * horizontally under the middle bars ([laneX0, laneX1] is the middle bar
+ * column), then traverses to its target band on the right. All three runs
+ * share the ribbonPath curve family (horizontal tangents at every joint, so
+ * the joints are smooth), and the bridge is straight, so the whole path
+ * reads as one ribbon that dips under the groups instead of a diagonal
+ * slash across them.
+ *
+ * The traverse run spans [laneX1, x1] — the same x-range as the middle→target
+ * ribbons — so when the lane sits below the middle column and the target
+ * band sits below the last spending target, the traverse cannot cross any
+ * category ribbon: every curve shares one x-parameterization, making each
+ * edge a convex combination of its endpoints, and both endpoints of the
+ * plug's top edge sit strictly below both endpoints of every category
+ * ribbon's bottom edge. (The drop run still crosses income→group ribbons in
+ * the left half: the plug band is buried inside its source bar while the
+ * lane sits below every middle bar, so the endpoints straddle and a crossing
+ * is topological — the same dense-bipartite crossings group ribbons already
+ * make with each other. What the lane removes is every crossing with a BAR
+ * and every crossing with a middle→target category ribbon.)
+ */
+export function remainingLanePath(
+  x0: number,
+  laneX0: number,
+  laneX1: number,
+  x1: number,
+  sy0: number,
+  sy1: number,
+  ly0: number,
+  ly1: number,
+  ty0: number,
+  ty1: number
+): string {
+  const f = (n: number) => n.toFixed(2);
+  const mDrop = (x0 + laneX0) / 2;
+  const mTrav = (laneX1 + x1) / 2;
+  return (
+    `M ${f(x0)} ${f(sy0)} ` +
+    `C ${f(mDrop)} ${f(sy0)} ${f(mDrop)} ${f(ly0)} ${f(laneX0)} ${f(ly0)} ` +
+    `L ${f(laneX1)} ${f(ly0)} ` +
+    `C ${f(mTrav)} ${f(ly0)} ${f(mTrav)} ${f(ty0)} ${f(x1)} ${f(ty0)} ` +
+    `L ${f(x1)} ${f(ty1)} ` +
+    `C ${f(mTrav)} ${f(ty1)} ${f(mTrav)} ${f(ly1)} ${f(laneX1)} ${f(ly1)} ` +
+    `L ${f(laneX0)} ${f(ly1)} ` +
+    `C ${f(mDrop)} ${f(ly1)} ${f(mDrop)} ${f(sy1)} ${f(x0)} ${f(sy1)} Z`
+  );
+}
+
+/**
  * Lay out a two-column Sankey: one source node ("Total") on the left, one
  * target node per item on the right, connected by bezier ribbons.
  *
@@ -1172,6 +1222,15 @@ export type DirectSankeyLinkLayout = SankeyLinkLayout & {
   targetIndex: number;
   sourceName: string;
   targetName: string;
+  /**
+   * Lane band vertical span at the middle-column bridge — present only on
+   * lane-routed Remaining plug ribbons (see remainingLanePath). The ribbon
+   * drops from its source band into this span, bridges under the middle
+   * bars, then traverses to its target band; spans tile the lane in source
+   * order with no taper (ly1 - ly0 equals the source and target heights).
+   */
+  ly0?: number;
+  ly1?: number;
 };
 
 export type DirectIncomeSankeyLayout = {
@@ -1437,12 +1496,31 @@ export type GroupedIncomeSankeyLayout = {
    */
   remainingTargetIndex: number | null;
   /**
+   * Top y of the dedicated Remaining lane (one row gap below the last
+   * middle bar), or null when no lane routing applies (no surplus, or no
+   * middle column to bypass — with no middles the plug ribbon has nothing
+   * to cross, so it stays a straight ribbon). Plug ribbons tile the lane
+   * in source order via their ly0/ly1 spans.
+   */
+  remainingLaneY: number | null;
+  /**
+   * Pixels the Remaining lane pokes past the plot bottom (height minus
+   * padBottom) — 0 in the common case, positive only when the middle
+   * column hangs below the last spending target. The lane is transit-only
+   * (no bar moves), so callers fit it by extending the CANVAS by this
+   * amount while keeping the layout height: the plot is absolute-scale and
+   * already full, so growing the layout height would just scale every bar
+   * up with it and never open room. Same-layout re-call not needed.
+   */
+  remainingLaneOverflow: number;
+  /**
    * Left ribbons: income → middle, fungible proportional allocation
    * (sourceIndex into sources, targetIndex into middles) — except the
    * Remaining ribbons, which carry the plug index (one past the last
-   * middle) and run full-width from their income source straight to the
-   * Remaining target, passing behind the middle column: unspent money
-   * bypasses groups.
+   * middle) and run full-width from their income source to the Remaining
+   * target through the dedicated lane below the middle column
+   * (remainingLanePath): unspent money bypasses groups without crossing a
+   * bar or a middle→target ribbon.
    */
   linksLeft: DirectSankeyLinkLayout[];
   /**
@@ -1466,8 +1544,8 @@ export type GroupedIncomeSankeyLayout = {
  * the right hop draws the exact group→target rollup cells scaled by the
  * uniform coverage ratio income/spending. Surplus income lands in a
  * trailing Remaining target on the right, fed directly from the incomes —
- * unspent money bypasses groups, so those ribbons span the full width
- * behind the middle column.
+ * unspent money bypasses groups through a dedicated lane below the middle
+ * column, so those ribbons cross no bar and no middle→target ribbon.
  *
  * Geometry contract (covered by unit tests):
  * - The right column owns the pixel scale (targets plus Remaining always
@@ -1493,6 +1571,20 @@ export type GroupedIncomeSankeyLayout = {
  * - Source bars wrap their outgoing bands exactly (group ribbons plus any
  *   full-width Remaining ribbons), water-filled up to the minimum node
  *   height from leftover plot space (never overflowing it).
+ * - Remaining plug ribbons route through a dedicated lane one row gap below
+ *   the last middle bar (remainingLaneY): each drops from its source band
+ *   into its lane span (ly0/ly1, tiling the lane in source order with no
+ *   taper), bridges under the middle bars, then traverses to its plug-bar
+ *   band — crossing no bar and no middle→target ribbon (the traverse shares
+ *   the right-hop x-range and curve family, so the crossing-freedom is
+ *   exact, not approximate). Lane crossings with income→group ribbons in
+ *   the left half remain: the endpoints straddle topologically, the same
+ *   dense-bipartite crossings group ribbons make with each other. With no
+ *   middles the plug ribbon stays a straight ribbon (nothing to bypass).
+ * - The lane is transit-only: no bar moves for it. When the middle column
+ *   hangs below the last spending target the lane pokes past the plot
+ *   bottom by remainingLaneOverflow — callers extend the canvas (not the
+ *   layout height) by that amount. In the common case the overflow is 0.
  * - Node `share` is value/flowTotal on all three columns.
  * - Degenerate input (no positive right-column values, or a non-positive
  *   dimension) yields no nodes — never NaN geometry.
@@ -1581,6 +1673,8 @@ export function layoutGroupedIncomeSankey(
       middles: [],
       targets: [],
       remainingTargetIndex: null,
+      remainingLaneY: null,
+      remainingLaneOverflow: 0,
       linksLeft: [],
       linksRight: [],
       sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,
@@ -1762,12 +1856,35 @@ export function layoutGroupedIncomeSankey(
     y += (rightH[j] ?? 0) + gap;
   }
 
-  const linksLeft: DirectSankeyLinkLayout[] = left.links.map((l) => {
+  // Dedicated Remaining lane: one row gap below the last middle bar, so
+  // plug ribbons bridge under the middle column instead of slashing
+  // diagonally across its bars and the category ribbons. Lane spans tile in
+  // remIn (source) order at the plug bands' own heights — no taper, and the
+  // lane sums to the plug bar height exactly. No lane when there is no plug
+  // or no middle column (with no middles the plug ribbon crosses nothing,
+  // so it stays a straight ribbon).
+  let remainingLaneY: number | null = null;
+  let remainingLaneOverflow = 0;
+  const laneBand = new Map<number, { ly0: number; ly1: number }>();
+  const lastMid = midNodes[midNodes.length - 1];
+  if (remainingTargetIndex != null && lastMid != null && remIn.length > 0) {
+    const laneY = lastMid.y + lastMid.h + gap;
+    remainingLaneY = laneY;
+    let ly = laneY;
+    for (const k of remIn) {
+      const h = linkLH[k] ?? 0;
+      laneBand.set(k, { ly0: ly, ly1: ly + h });
+      ly += h;
+    }
+    remainingLaneOverflow = Math.max(0, ly - (height - padBottom));
+  }
+
+  const linksLeft: DirectSankeyLinkLayout[] = left.links.map((l, k) => {
     // targetIndex keys into middles; the Remaining ribbons carry the plug
     // index (one past the last middle) and land on remainingTargetIndex.
     const isPlug = hasRemaining && l.targetIndex === plugIndex;
     const targetName = left.targets[l.targetIndex]?.name ?? "";
-    return {
+    const link: DirectSankeyLinkLayout = {
       name: targetName,
       value: l.value,
       mergedCount: 1,
@@ -1783,6 +1900,14 @@ export function layoutGroupedIncomeSankey(
       x1: isPlug ? linkRX1 : midX,
       d: "",
     };
+    // Lane-routed plug ribbons carry their lane span (keyed by left.links
+    // index — remIn collects exactly the plug entries, in order).
+    const band = isPlug ? laneBand.get(k) : undefined;
+    if (band != null) {
+      link.ly0 = band.ly0;
+      link.ly1 = band.ly1;
+    }
+    return link;
   });
   for (let i = 0; i < srcNodes.length; i++) {
     let sy = srcNodes[i]!.y;
@@ -1856,7 +1981,24 @@ export function layoutGroupedIncomeSankey(
     }
   }
   for (const l of linksLeft) {
-    l.d = ribbonPath(l.x0, l.x1, l.sy0, l.sy1, l.ty0, l.ty1);
+    // Lane-routed plug ribbons dip under the middle column (bridging its
+    // bar column [midX, linkRX0]); every other ribbon stays a straight
+    // bar-to-bar bezier.
+    l.d =
+      l.ly0 != null && l.ly1 != null
+        ? remainingLanePath(
+            l.x0,
+            midX,
+            linkRX0,
+            l.x1,
+            l.sy0,
+            l.sy1,
+            l.ly0,
+            l.ly1,
+            l.ty0,
+            l.ty1
+          )
+        : ribbonPath(l.x0, l.x1, l.sy0, l.sy1, l.ty0, l.ty1);
   }
   for (const l of linksRight) {
     l.d = ribbonPath(l.x0, l.x1, l.sy0, l.sy1, l.ty0, l.ty1);
@@ -1870,6 +2012,8 @@ export function layoutGroupedIncomeSankey(
     middles: midNodes,
     targets: tgtNodes,
     remainingTargetIndex,
+    remainingLaneY,
+    remainingLaneOverflow,
     linksLeft,
     linksRight,
     sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,

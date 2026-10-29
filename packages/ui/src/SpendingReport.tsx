@@ -1243,7 +1243,10 @@ export function SpendingReport({
             <svg
               data-testid="sankey-svg"
               width={chartSize.width}
-              height={contentH}
+              // The Remaining lane is transit-only (no bar moves), so when it
+              // pokes past the plot bottom the CANVAS extends to fit it while
+              // the layout keeps its height — same geometry, no re-layout.
+              height={contentH + (sankey?.remainingLaneOverflow ?? 0)}
               className="block"
             >
               <defs>

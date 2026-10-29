@@ -12,6 +12,7 @@ import {
   OTHER_BUCKET_LABEL,
   OVER_INCOME_LABEL,
   REMAINING_LABEL,
+  remainingLanePath,
   sankeyAutoFitThreshold,
   sankeyContentHeight,
   sankeyThresholdStep,
@@ -1947,6 +1948,8 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.middles).toEqual([]);
     expect(layout.targets).toEqual([]);
     expect(layout.remainingTargetIndex).toBeNull();
+    expect(layout.remainingLaneY).toBeNull();
+    expect(layout.remainingLaneOverflow).toBe(0);
     expect(layout.linksLeft).toEqual([]);
     expect(layout.linksRight).toEqual([]);
     for (const v of [
@@ -2058,6 +2061,14 @@ describe("layoutGroupedIncomeSankey", () => {
       targetName: "A",
       value: 5000,
     });
+    // Balanced: no plug, no lane — every link is a straight ribbon.
+    expect(layout.remainingTargetIndex).toBeNull();
+    expect(layout.remainingLaneY).toBeNull();
+    expect(layout.remainingLaneOverflow).toBe(0);
+    for (const l of [...layout.linksLeft, ...layout.linksRight]) {
+      expect(l.ly0).toBeUndefined();
+      expect(l.ly1).toBeUndefined();
+    }
   });
 
   it("appends Remaining as a trailing target fed directly from income, bypassing groups", () => {
@@ -2082,8 +2093,9 @@ describe("layoutGroupedIncomeSankey", () => {
     const plug = layout.linksLeft[2]!;
     expect(plug).toMatchObject({ sourceIndex: 0, targetIndex: 2, value: 2000 });
     expect(plug.targetName).toBe(REMAINING_LABEL);
-    // Full-width: runs from the source bar to the Remaining bar, crossing
-    // behind the middle column — and fills the plug bar exactly, no taper.
+    // Full-width: runs from the source bar to the Remaining bar through
+    // the dedicated lane below the middle column — and fills the plug bar
+    // exactly, no taper.
     expect(plug.x0).toBeCloseTo(layout.sources[0]!.x + layout.sources[0]!.w, 6);
     expect(plug.x1).toBeCloseTo(rem.x, 6);
     expect(plug.x1).toBeGreaterThan(layout.middles[0]!.x + layout.middles[0]!.w);
@@ -2091,6 +2103,229 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(plug.ty0).toBeCloseTo(rem.y, 6);
     expect(plug.ty1).toBeCloseTo(rem.y + rem.h, 6);
     expect(plug.d).toMatch(/^M .* C .* Z$/);
+  });
+
+  it("routes Remaining plug ribbons through a dedicated lane below the middle column", () => {
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 9000), merged("Gig", 3000)],
+      gGroups,
+      gTargets,
+      gLinks,
+      { width: 800, height: 400, nodeGap: 8, minNodeHeight: 24 }
+    );
+    expect(layout.remainingTargetIndex).toBe(3);
+    const lastMid = layout.middles[layout.middles.length - 1]!;
+    const rem = layout.targets[3]!;
+    // The lane sits one row gap below the last middle bar and fits the plot.
+    expect(layout.remainingLaneY).toBeCloseTo(lastMid.y + lastMid.h + 8, 9);
+    expect(layout.remainingLaneOverflow).toBe(0);
+    const laneY = layout.remainingLaneY!;
+    // Plug spans tile the lane in source order with no taper: the lane sums
+    // to the plug bar height exactly.
+    const plugs = layout.linksLeft.filter((l) => l.targetIndex === layout.middles.length);
+    expect(plugs.map((l) => l.sourceIndex)).toEqual([0, 1]);
+    expect(plugs[0]!.ly0).toBeCloseTo(laneY, 9);
+    expect(plugs[1]!.ly0).toBeCloseTo(plugs[0]!.ly1 ?? -1, 9);
+    expect(plugs[1]!.ly1).toBeCloseTo(laneY + rem.h, 9);
+    for (const p of plugs) {
+      expect((p.ly1 ?? 0) - (p.ly0 ?? 0)).toBeCloseTo(p.ty1 - p.ty0, 9);
+      expect((p.ly1 ?? 0) - (p.ly0 ?? 0)).toBeCloseTo(p.sy1 - p.sy0, 9);
+    }
+    // Only plug ribbons carry lane spans; group and category ribbons stay
+    // straight bar-to-bar beziers.
+    for (const l of layout.linksLeft) {
+      if (l.targetIndex === layout.middles.length) continue;
+      expect(l.ly0).toBeUndefined();
+      expect(l.ly1).toBeUndefined();
+      expect(l.d.split(" L ")).toHaveLength(2);
+    }
+    for (const l of layout.linksRight) {
+      expect(l.ly0).toBeUndefined();
+      expect(l.ly1).toBeUndefined();
+    }
+    // Each plug path bridges horizontally under the middle bar column: one
+    // straight run per edge (three L-runs in all: bridge, target edge,
+    // bridge) at the link's own lane span.
+    const midX = layout.middles[0]!.x;
+    const laneX1 = midX + layout.middles[0]!.w;
+    for (const p of plugs) {
+      expect(p.d.split(" L ")).toHaveLength(4);
+      expect(p.d).toContain(`L ${laneX1.toFixed(2)} ${(p.ly0 ?? 0).toFixed(2)}`);
+      expect(p.d).toContain(`L ${midX.toFixed(2)} ${(p.ly1 ?? 0).toFixed(2)}`);
+    }
+  });
+
+  it("keeps plug ribbons clear of every bar and every middle→target ribbon", () => {
+    // Lower-middle-to-top-target cell (G2→A) crosses the G1 legs in the
+    // right half, so the traverse proves itself against a crossed envelope.
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 12000), merged("Gig", 3000)],
+      [merged("G1", 6000), merged("G2", 4000)],
+      [merged("A", 5000), merged("B", 3000), merged("C", 2000)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 4000 },
+        { groupIndex: 0, targetIndex: 1, value: 2000 },
+        { groupIndex: 1, targetIndex: 0, value: 1000 },
+        { groupIndex: 1, targetIndex: 1, value: 1000 },
+        { groupIndex: 1, targetIndex: 2, value: 2000 },
+      ],
+      {
+        width: 1000,
+        height: 600,
+        padLeft: 160,
+        padRight: 190,
+        padTop: 28,
+        padBottom: 28,
+        nodeGap: 8,
+        minNodeHeight: 24,
+      }
+    );
+    expect(layout.remainingTargetIndex).toBe(3);
+    expect(layout.remainingLaneOverflow).toBe(0);
+    type Seg = { cmd: string; pts: number[] };
+    const parseD = (d: string): Seg[] => {
+      const tokens = d.trim().split(/\s+/);
+      const segs: Seg[] = [];
+      let i = 0;
+      while (i < tokens.length) {
+        const cmd = tokens[i++]!;
+        if (cmd === "Z") break;
+        const count = cmd === "C" ? 6 : 2;
+        segs.push({ cmd, pts: tokens.slice(i, i + count).map(Number) });
+        i += count;
+      }
+      return segs;
+    };
+    const cubic = (p0: number, p1: number, p2: number, p3: number, t: number): number => {
+      const u = 1 - t;
+      return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+    };
+    // Dense outline samples for one closed path (every cubic at 41 taps
+    // plus every line endpoint): bar interiors must contain none of them.
+    const outline = (d: string): { x: number; y: number }[] => {
+      const pts: { x: number; y: number }[] = [];
+      let cx = 0;
+      let cy = 0;
+      for (const s of parseD(d)) {
+        if (s.cmd === "M" || s.cmd === "L") {
+          cx = s.pts[0]!;
+          cy = s.pts[1]!;
+          pts.push({ x: cx, y: cy });
+        } else if (s.cmd === "C") {
+          const [x1, y1, x2, y2, ex, ey] = s.pts as [number, number, number, number, number, number];
+          for (let k = 1; k <= 40; k++) {
+            const t = k / 40;
+            pts.push({ x: cubic(cx, x1, x2, ex, t), y: cubic(cy, y1, y2, ey, t) });
+          }
+          cx = ex;
+          cy = ey;
+        }
+      }
+      return pts;
+    };
+    const bars = [...layout.sources, ...layout.middles, ...layout.targets];
+    const plugs = layout.linksLeft.filter((l) => l.targetIndex === layout.middles.length);
+    expect(plugs.length).toBeGreaterThan(0);
+    for (const p of plugs) {
+      // No plug outline point sits strictly inside any bar rect: bands may
+      // touch bar edges (tiling) but never enter them.
+      for (const pt of outline(p.d)) {
+        for (const b of bars) {
+          const inside =
+            pt.x > b.x + 1e-6 && pt.x < b.x + b.w - 1e-6 && pt.y > b.y + 1e-6 && pt.y < b.y + b.h - 1e-6;
+          expect(inside).toBe(false);
+        }
+      }
+      // The traverse shares the right-hop x-range and curve family
+      // exactly: same start/end x and same control-x on every curve, so
+      // equal-t samples are equal-x stations on both sides.
+      const pSegs = parseD(p.d);
+      expect(pSegs.map((s) => s.cmd)).toEqual(["M", "C", "L", "C", "L", "C", "L", "C"]);
+      const trav = pSegs[3]!;
+      const travStartX = pSegs[2]!.pts[0]!;
+      const travEndX = trav.pts[4]!;
+      for (const r of layout.linksRight) {
+        const rSegs = parseD(r.d);
+        expect(rSegs.map((s) => s.cmd)).toEqual(["M", "C", "L", "C"]);
+        const bottom = rSegs[3]!;
+        // Same x-parameterization: identical x0, control-x pair, and x1
+        // (the bottom edge runs back right-to-left, so its endpoint is x0).
+        expect(rSegs[0]!.pts[0]).toBeCloseTo(travStartX, 9);
+        expect(rSegs[2]!.pts[0]).toBeCloseTo(travEndX, 9);
+        expect(bottom.pts[0]).toBeCloseTo(trav.pts[0] ?? 0, 9);
+        expect(bottom.pts[2]).toBeCloseTo(trav.pts[2] ?? 0, 9);
+        expect(bottom.pts[4]).toBeCloseTo(travStartX, 9);
+        // The plug's top edge stays below every category ribbon's bottom
+        // edge at every station — the convex-combination proof, sampled.
+        // (The bottom edge is read in forward left-to-right form by cubic
+        // reversal symmetry, so equal-t samples are equal-x stations.)
+        const rEndY = rSegs[2]!.pts[1]!;
+        const rStartY = bottom.pts[5]!;
+        for (let k = 0; k <= 100; k++) {
+          const t = k / 100;
+          const plugY = cubic(p.ly0 ?? 0, trav.pts[1] ?? 0, trav.pts[3] ?? 0, p.ty0, t);
+          const catY = cubic(rStartY, rStartY, rEndY, rEndY, t);
+          expect(plugY).toBeGreaterThanOrEqual(catY - 1e-6);
+        }
+      }
+    }
+  });
+
+  it("reports lane overflow past the plot bottom for middle-heavy flows, keeping bars put", () => {
+    // Six groups into two targets with a surplus: the middle column hangs
+    // below the last spending target, so the lane needs canvas past the
+    // plot bottom. The lane is transit-only — bars keep their stacked spots.
+    const groups = [
+      merged("G1", 2000),
+      merged("G2", 2000),
+      merged("G3", 2000),
+      merged("G4", 2000),
+      merged("G5", 1000),
+      merged("G6", 1000),
+    ];
+    const H = 400;
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 15000)],
+      groups,
+      [merged("A", 6000), merged("B", 4000)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 2000 },
+        { groupIndex: 1, targetIndex: 0, value: 2000 },
+        { groupIndex: 2, targetIndex: 0, value: 2000 },
+        { groupIndex: 3, targetIndex: 1, value: 2000 },
+        { groupIndex: 4, targetIndex: 1, value: 1000 },
+        { groupIndex: 5, targetIndex: 1, value: 1000 },
+      ],
+      {
+        width: 1000,
+        height: H,
+        padLeft: 160,
+        padRight: 190,
+        padTop: 28,
+        padBottom: 28,
+        nodeGap: 8,
+        minNodeHeight: 24,
+      }
+    );
+    expect(layout.remainingTargetIndex).toBe(2);
+    const lastMid = layout.middles[layout.middles.length - 1]!;
+    const spendLast = layout.targets[layout.targets.length - 2]!;
+    const plugBar = layout.targets[layout.targets.length - 1]!;
+    // Middle-heavy, confirmed: the middle column ends below the last
+    // spending bar, and the plug bar keeps its stacked trailing spot.
+    expect(lastMid.y + lastMid.h).toBeGreaterThan(spendLast.y + spendLast.h);
+    expect(plugBar.y).toBeCloseTo(spendLast.y + spendLast.h + 8, 9);
+    // The lane still clears the middle column — it just needs extra canvas.
+    expect(layout.remainingLaneY).toBeCloseTo(lastMid.y + lastMid.h + 8, 9);
+    const plugs = layout.linksLeft.filter((l) => l.targetIndex === layout.middles.length);
+    expect(plugs).toHaveLength(1);
+    const laneBottom = plugs[0]!.ly1 ?? 0;
+    expect(laneBottom).toBeGreaterThan(H - 28);
+    expect(layout.remainingLaneOverflow).toBeCloseTo(laneBottom - (H - 28), 9);
+    expect(layout.remainingLaneOverflow).toBeGreaterThan(0);
+    // Values untouched: the plug still carries the full surplus.
+    expect(plugBar.value).toBe(5000);
+    expect(plugs[0]!.value).toBe(5000);
   });
 
   it("never mistakes a literal Remaining group for the surplus plug", () => {
@@ -2446,6 +2681,13 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.linksLeft[0]).toMatchObject({ sourceIndex: 0, targetIndex: 0, value: 10000 });
     // Full-width ribbon into the lone plug.
     expect(layout.linksLeft[0]!.x1).toBeCloseTo(layout.targets[0]!.x, 6);
+    // No middle column to bypass: no lane, and the plug ribbon stays a
+    // straight bar-to-bar bezier (one L-run: the target edge).
+    expect(layout.remainingLaneY).toBeNull();
+    expect(layout.remainingLaneOverflow).toBe(0);
+    expect(layout.linksLeft[0]!.ly0).toBeUndefined();
+    expect(layout.linksLeft[0]!.ly1).toBeUndefined();
+    expect(layout.linksLeft[0]!.d.split(" L ")).toHaveLength(2);
   });
 
   it("keeps label anchors clear of their bars on all three columns", () => {
@@ -2536,6 +2778,35 @@ describe("layoutGroupedIncomeSankey", () => {
     for (const node of [...layout.sources, ...layout.middles, ...layout.targets]) {
       expect(Number.isFinite(node.y)).toBe(true);
       expect(Number.isFinite(node.h)).toBe(true);
+    }
+  });
+});
+
+describe("remainingLanePath", () => {
+  it("drops from the source band into the lane, bridges, then traverses to the target", () => {
+    const d = remainingLanePath(10, 50, 60, 100, 20, 40, 100, 120, 200, 220);
+    // Drop/traverse midpoints at 30/80; every joint carries horizontal
+    // tangents, so the three runs join smoothly.
+    expect(d).toBe(
+      "M 10.00 20.00 " +
+        "C 30.00 20.00 30.00 100.00 50.00 100.00 " +
+        "L 60.00 100.00 " +
+        "C 80.00 100.00 80.00 200.00 100.00 200.00 " +
+        "L 100.00 220.00 " +
+        "C 80.00 220.00 80.00 120.00 60.00 120.00 " +
+        "L 50.00 120.00 " +
+        "C 30.00 120.00 30.00 40.00 10.00 40.00 Z"
+    );
+  });
+
+  it("stays a finite closed path on degenerate input (never NaN)", () => {
+    for (const d of [
+      remainingLanePath(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+      remainingLanePath(100, 50, 60, 10, 20, 20, 100, 100, 200, 200),
+    ]) {
+      expect(d).toMatch(/^M .* C .* Z$/);
+      expect(d).not.toContain("NaN");
+      expect(d.split(" L ")).toHaveLength(4);
     }
   });
 });
