@@ -2017,32 +2017,39 @@ describe("SpendingReport", () => {
   });
 
   it("stacks Bars rows gaplessly and scrolls naturally on overflow", () => {
-    // Task-32: rows stack directly one after another — each row's bottom
-    // edge touches the next row's top edge — and a long list scrolls instead
-    // of compressing, shrinking, or truncating. jsdom performs no layout, so
-    // this pins the class contract the geometry derives from (no inter-row
-    // gap/space utilities on the list, no vertical margins on the rows —
-    // consecutive rows' offsets then differ by exactly one row height in the
-    // browser) plus the scroller's overflow behavior.
+    // Task-32/36: rows stack directly one after another at a fixed natural
+    // height — each row's bottom edge touches the next row's top edge — and
+    // a long list scrolls instead of compressing, stretching, shrinking, or
+    // truncating. jsdom performs no layout, so this pins the class contract
+    // the geometry derives from (no inter-row gap/space utilities on the
+    // list, no vertical margins on the rows, and no flex stretching to fill
+    // the viewport — consecutive rows' offsets then differ by exactly one
+    // row height in the browser) plus the scroller's overflow behavior.
     const checkGapless = (container: HTMLElement, rowCount: number) => {
       const tracks = container.querySelectorAll(".y-bar-track");
       expect(tracks).toHaveLength(rowCount);
       const rows = Array.from(tracks, (t) => t.parentElement!);
       const list = rows[0]!.parentElement!;
       expect(list.className).not.toMatch(/gap-|space-/);
+      // No viewport-fill stretching: the list is a plain block container
+      // (never a h-full flex column centering stretched rows).
+      expect(list.className).not.toMatch(/(^|\s)flex($|\s)/);
+      expect(list.className).not.toMatch(/h-full|justify-center/);
       for (const row of rows) {
         expect(row.className).not.toMatch(/(^|\s)m[xytrbl]?-/);
+        // Fixed natural row height: rows never grow to fill free space.
+        expect(row.className).not.toMatch(/flex-1|min-h-/);
       }
       const scroller = list.parentElement!;
       expect(scroller.className).toMatch(/overflow-y-auto/);
       expect(scroller.className).not.toMatch(/overflow-y-(hidden|clip)/);
     };
-    // Few rows: the stretching branch.
+    // Few rows: short lists sit at the top at the same fixed row height.
     const few = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
     checkGapless(few.container, 3);
     few.unmount();
-    // Many rows: the overflowing branch (growRows ends past 14 rows).
+    // Many rows: the overflowing list scrolls instead of compressing.
     const targets: SpendingItem[] = Array.from({ length: 16 }, (_, i) => ({
       name: `Category ${i}`,
       value: (16 - i) * 1000,

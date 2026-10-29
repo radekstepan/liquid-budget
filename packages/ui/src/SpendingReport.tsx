@@ -263,7 +263,6 @@ export function SpendingReport({
   const incomeRows: MergedSpendingItem[] = mergedIncome.items;
 
   const empty = incomeRows.length === 0 && merged.targets.length === 0;
-  const growRows = rows.length > 0 && rows.length <= 14;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
   const remaining = totals.remaining;
@@ -1014,22 +1013,14 @@ export function SpendingReport({
       </div>
 
       {viewMode === "bars" ? (
-        <div
-          className={
-            "min-h-0 flex-1 overflow-y-auto px-4 py-3 y-scroll " +
-            (growRows ? "flex flex-col" : "")
-          }
-        >
-          {/* Bars rows stack gaplessly: no inter-row gap, space, or margin —
-              each row's bottom edge touches the next row's top edge. The
-              outer scroller (overflow-y-auto) handles overflow — rows never
-              compress or truncate to fit the viewport. */}
-          <div
-            className={
-              "mx-auto w-full max-w-[1100px] " +
-              (growRows ? "flex h-full min-h-0 flex-col justify-center" : "")
-            }
-          >
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 y-scroll">
+          {/* Bars rows stack gaplessly at a fixed natural height: no
+              inter-row gap, space, or margin — each row's bottom edge
+              touches the next row's top edge — and no flex stretching to
+              fill the viewport either. Short lists sit at the top; a long
+              list overflows and the outer scroller (overflow-y-auto) takes
+              over. Rows never compress, stretch, or truncate to fit. */}
+          <div className="mx-auto w-full max-w-[1100px]">
             {/* Shared hatch def for bucket bars: the SAME pattern element
                 the Sankey overlays on its render-only rows (identical
                 angles, spacing, and colors — the two views cannot drift).
@@ -1058,10 +1049,7 @@ export function SpendingReport({
                 // and two rows named "Other" share nothing but the label.
                 <div
                   key={`${r.i}:${r.bucket === true ? "bucket" : "row"}:${r.name}`}
-                  className={
-                    "group flex cursor-default items-center gap-3 rounded-[4px] px-2 transition-colors " +
-                    (growRows ? "min-h-[36px] flex-1 py-[6px]" : "py-[7px]")
-                  }
+                  className="group flex cursor-default items-center gap-3 rounded-[4px] px-2 py-[7px] transition-colors"
                   style={{ background: isHover ? "var(--y-row-sel)" : "transparent" }}
                   onMouseMove={(e) => pushHover({ kind: "bar", idx: r.i, x: e.clientX, y: e.clientY })}
                   onMouseLeave={() => pushHover(null)}
@@ -1074,10 +1062,7 @@ export function SpendingReport({
                     }}
                   />
                   <span
-                    className={
-                      "shrink-0 truncate text-[12.5px] " +
-                      (growRows ? "w-[22%]" : "w-[26%]")
-                    }
+                    className="shrink-0 w-[26%] truncate text-[12.5px]"
                     style={{ color: "var(--y-ink)" }}
                   >
                     {r.name}
