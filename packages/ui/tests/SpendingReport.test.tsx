@@ -158,14 +158,15 @@ describe("SpendingReport", () => {
     const svg = container.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
     // Left: one income source; middle: 2 category groups; right: 3
-    // categories plus the Remaining plug. Left ribbons run income → groups
-    // (1 x 2) plus the full-width Remaining ribbon; right ribbons run
-    // groups → categories (3 exact cells).
+    // categories plus the Remaining plug. Left bands run income → groups
+    // (1 x 2) plus the full-width Remaining ribbon, but the Bills band
+    // nests two category sub-ribbons, so 4 left paths render; right
+    // ribbons run groups → categories (3 exact cells).
     expect(svg!.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(1);
     expect(svg!.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
     expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(4);
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')).toHaveLength(3);
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(7);
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')).toHaveLength(4);
     expect(svg!.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')).toHaveLength(3);
     // No Total bar and no Total-side ribbons.
     expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
@@ -287,9 +288,10 @@ describe("SpendingReport", () => {
     expect(screen.getByText("(3 in Other)")).toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Mortgage + Other + Remaining on the right; Bills + Other in the
-    // middle: 1 x 3 left ribbons and 3 right ribbons.
+    // middle. The Bills band nests Mortgage + Other sub-ribbons, so 4
+    // left paths render beside the 3 right ribbons.
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(7);
     expect(within(svg as unknown as HTMLElement).getAllByText("Other")).toHaveLength(2);
     expect(within(svg as unknown as HTMLElement).getByText("$550.00 · 28%")).toBeInTheDocument();
     expect(within(svg as unknown as HTMLElement).getByText("$400.00 · 20%")).toBeInTheDocument();
@@ -358,15 +360,16 @@ describe("SpendingReport", () => {
     expect(screen.getByText("(5 in Other)")).toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Left: Payroll + Other; middle: Bills + Other; right: Mortgage +
-    // Other + Remaining. Left ribbons run 2 x 3, right ribbons run one per
-    // cell (3) — never one per income.
+    // Other + Remaining. Each income's Bills band nests Mortgage + Other
+    // sub-ribbons, so 4 left paths per income (8) beside the 3 right
+    // ribbons — one per cell, never one per income.
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
     expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(9);
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(11);
     expect(
       svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
-    ).toHaveLength(6);
+    ).toHaveLength(8);
     expect(
       svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
     ).toHaveLength(3);
@@ -527,8 +530,9 @@ describe("SpendingReport", () => {
 
   it("shows the proportional flow when hovering an income→group ribbon", () => {
     const { container } = renderReport();
-    // Left ribbons run middle-major: [Payroll→Bills, Payroll→Everyday, ...].
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[1]!;
+    // Left paths run middle-major with the Bills band subdivided:
+    // [Bills/Mortgage, Bills/Electric, Everyday/Groceries, plug, ...].
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[2]!;
     expect(link.getAttribute("data-side")).toBe("left");
     fireEvent.mouseMove(link, { clientX: 400, clientY: 200 });
     const tip = document.querySelector(".y-tip")!;
@@ -542,8 +546,9 @@ describe("SpendingReport", () => {
 
   it("shows the exact rollup when hovering a group→category ribbon", () => {
     const { container } = renderReport();
-    // Right ribbons run group-major: [Bills→Mortgage, Bills→Electric, ...].
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[3]!;
+    // Right ribbons trail the 4 left paths, group-major: [Bills→Mortgage,
+    // Bills→Electric, ...].
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[4]!;
     expect(link.getAttribute("data-side")).toBe("right");
     fireEvent.mouseMove(link, { clientX: 500, clientY: 120 });
     const tip = document.querySelector(".y-tip")!;
@@ -584,7 +589,7 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
-  it("colors every ribbon flat by the node it flows into, not its income source", () => {
+  it("colors every ribbon flat by its final destination, not its income source", () => {
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Bonus", value: 50000 },
@@ -596,17 +601,16 @@ describe("SpendingReport", () => {
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
     expect(right).toHaveLength(3);
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
-    // 2 incomes x 2 groups plus 2 full-width Remaining ribbons on the left.
-    expect(left).toHaveLength(6);
+    // 2 incomes x (Bills nesting 2 categories + Everyday nesting 1) plus
+    // 2 full-width Remaining ribbons on the left.
+    expect(left).toHaveLength(8);
     // Each ribbon carries one flat color through its whole length,
-    // exactly its destination node's fill — gradients live only on the
-    // income bars (one per bar), never on a ribbon.
+    // exactly its final destination node's fill — gradients live only on
+    // the income bars (one per bar), never on a ribbon.
     for (const link of svg.querySelectorAll('[data-testid="sankey-link"]')) {
       expect(link.getAttribute("fill")).not.toMatch(/^url\(/);
     }
     expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
-    const bills = colorForName("Bills");
-    const everyday = colorForName("Everyday");
     // Right ribbons fill with their target's own color, cell-major:
     // Bills→Mortgage, Bills→Electric, Everyday→Groceries. Both Bills legs
     // carry their category's color — the middle group never tints them.
@@ -620,14 +624,24 @@ describe("SpendingReport", () => {
       // Cells carry every income's money: no per-income identity survives.
       expect(link.getAttribute("data-income")).toBeNull();
     });
-    // Left ribbons fill with their middle's color; the plug ribbons run
-    // Remaining green full-width. Links run middle-major, incomes within.
-    const leftFills = [bills, bills, everyday, everyday, REMAINING_COLOR, REMAINING_COLOR];
+    // Left sub-ribbons fill with their final category's color; the plug
+    // ribbons run Remaining green full-width. Links run middle-major,
+    // incomes within, sub-ribbons expanding inline per band.
+    const leftFills = [
+      colorForName("Mortgage Interest"),
+      colorForName("Electric Bill"),
+      colorForName("Mortgage Interest"),
+      colorForName("Electric Bill"),
+      colorForName("Groceries"),
+      colorForName("Groceries"),
+      REMAINING_COLOR,
+      REMAINING_COLOR,
+    ];
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
-    // Ribbon fills equal their destination bars' fills exactly: the line
-    // from an income to a category reads as one color throughout. The
+    // Ribbon fills equal their final destination bars' fills exactly: the
+    // line from an income to a category reads as one color throughout. The
     // income's own color never appears on a ribbon.
     const incomeFill = svg
       .querySelector('[data-testid="sankey-income"]')!
@@ -648,8 +662,21 @@ describe("SpendingReport", () => {
       const targetIndex = [0, 2, 1][k]!;
       expect(link.getAttribute("fill")).toBe(nodeFills[targetIndex]);
     });
+    // Nodes run in target order (Mortgage, Groceries, Electric,
+    // Remaining); each left sub-ribbon matches its final category's bar.
+    const leftDestBySub = [
+      nodeFills[0],
+      nodeFills[2],
+      nodeFills[0],
+      nodeFills[2],
+      nodeFills[1],
+      nodeFills[1],
+      nodeFills[3],
+      nodeFills[3],
+    ];
+    expect(groupFills).toEqual([colorForName("Bills"), colorForName("Everyday")]);
     left.forEach((link, k) => {
-      const destFill = k < 4 ? groupFills[Math.floor(k / 2)] : nodeFills[3];
+      const destFill = leftDestBySub[k];
       expect(link.getAttribute("fill")).toBe(destFill);
       if (incomeFill !== destFill) {
         expect(link.getAttribute("fill")).not.toBe(incomeFill);
@@ -694,10 +721,14 @@ describe("SpendingReport", () => {
     // Payroll's left ribbons brighten and render above the dimmed Bonus
     // ribbons (spotlight z-order: dimmed legs first, lit legs last).
     const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    // Bonus's 4 sub-ribbons dim, Payroll's 4 brighten (spotlight z-order:
+    // dimmed legs first, lit legs last).
     expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
       "0.12",
       "0.12",
       "0.12",
+      "0.12",
+      "0.85",
       "0.85",
       "0.85",
       "0.85",
@@ -736,7 +767,11 @@ describe("SpendingReport", () => {
     expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.12");
     expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.85");
     const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    // Only the two Everyday sub-ribbons (one per income) join the
+    // spotlight; the Bills sub-ribbons and plugs dim, rendered first.
     expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.12",
+      "0.12",
       "0.12",
       "0.12",
       "0.12",
@@ -849,11 +884,12 @@ describe("SpendingReport", () => {
     const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
     expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.12");
     // The connected ribbons brighten above the dimmed rest
-    // (spotlight z-order: the dimmed Everyday ribbon renders first).
+    // (spotlight z-order: the dimmed Everyday ribbon renders first). The
+    // right block trails 4 left paths now that Bills nests two subs.
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
-    expect(links[3]!.getAttribute("fill-opacity")).toBe("0.12");
-    expect(links[4]!.getAttribute("fill-opacity")).toBe("0.85");
+    expect(links[4]!.getAttribute("fill-opacity")).toBe("0.12");
     expect(links[5]!.getAttribute("fill-opacity")).toBe("0.85");
+    expect(links[6]!.getAttribute("fill-opacity")).toBe("0.85");
     fireEvent.mouseLeave(group);
     // Rest state returns once the hover clears.
     expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
@@ -880,8 +916,9 @@ describe("SpendingReport", () => {
     const group = svg.querySelectorAll('[data-testid="sankey-group"]')[0]!;
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     // Same commit, same brightness: the bar and every ribbon on its path
-    // share the hover step, and the left-hop ribbons share the bar's exact
-    // fill (right-hop ribbons carry their target's own color by design).
+    // share the hover step. The left-hop sub-ribbons carry their final
+    // category's color (right-hop ribbons too, by design) while the group
+    // bar keeps its own fill.
     const barFill = group.getAttribute("fill");
     expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     const lit = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]')).filter(
@@ -892,10 +929,12 @@ describe("SpendingReport", () => {
       expect(l.getAttribute("style") ?? "").not.toMatch(/fill-opacity/);
     }
     const leftLit = lit.filter((l) => l.getAttribute("data-side") === "left");
-    expect(leftLit.length).toBeGreaterThan(0);
-    for (const l of leftLit) {
-      expect(l.getAttribute("fill")).toBe(barFill);
-    }
+    expect(leftLit).toHaveLength(2);
+    // The lit Bills sub-ribbons read as their final categories — never
+    // the middle group's own hue.
+    const billsChildren = [colorForName("Mortgage Interest"), colorForName("Electric Bill")];
+    expect(leftLit.map((l) => l.getAttribute("fill"))).toEqual(billsChildren);
+    expect(barFill).toBe(colorForName("Bills"));
     fireEvent.mouseLeave(group);
   });
 
@@ -989,9 +1028,9 @@ describe("SpendingReport", () => {
 
   it("shows the proportional flow when hovering the full-width Remaining ribbon", () => {
     const { container } = renderReport();
-    // The plug ribbon trails the left ribbons: [Payroll→Bills,
-    // Payroll→Everyday, Payroll→Remaining, ...].
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[2]!;
+    // The plug ribbon trails the subdivided left bands: [Bills/Mortgage,
+    // Bills/Electric, Everyday/Groceries, Payroll→Remaining, ...].
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[3]!;
     expect(link.getAttribute("data-side")).toBe("left");
     fireEvent.mouseMove(link, { clientX: 400, clientY: 300 });
     const tip = document.querySelector(".y-tip")!;
@@ -1104,11 +1143,11 @@ describe("SpendingReport", () => {
     expect(screen.queryByText("Remaining")).not.toBeInTheDocument();
     expect(screen.queryByText("Overspent")).not.toBeInTheDocument();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Two income→group ribbons plus three group→category ribbons; every
-    // middle and right bar draws in full with no grey shortfall segment —
-    // the gap lives in the tooltip, since every bar shares the same
-    // unfunded fraction.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(5);
+    // Three income→group sub-ribbons (Bills nests two categories) plus
+    // three group→category ribbons; every middle and right bar draws in
+    // full with no grey shortfall segment — the gap lives in the tooltip,
+    // since every bar shares the same unfunded fraction.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
     expect(svg.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
     expect(svg.querySelectorAll('[data-testid="sankey-shortfall"]')).toHaveLength(0);
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(2);
@@ -1322,10 +1361,11 @@ describe("SpendingReport", () => {
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
     // Bills feeds two of the three right ribbons: those brighten and render
-    // above the dimmed Everyday ribbon (dimmed first in the DOM).
-    expect(links[3]!.getAttribute("fill-opacity")).toBe("0.12");
-    expect(links[4]!.getAttribute("fill-opacity")).toBe("0.85");
+    // above the dimmed Everyday ribbon (dimmed first in the DOM). The
+    // right block trails 4 left paths now that Bills nests two subs.
+    expect(links[4]!.getAttribute("fill-opacity")).toBe("0.12");
     expect(links[5]!.getAttribute("fill-opacity")).toBe("0.85");
+    expect(links[6]!.getAttribute("fill-opacity")).toBe("0.85");
     // The hovered group brightens with its path; the off-path sibling
     // dims; the connected targets stay lit.
     const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
@@ -1865,8 +1905,8 @@ describe("SpendingReport", () => {
   it("keeps a ribbon's endpoint node strokeless with identical geometry while hovered", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Right ribbons trail the left ones: Bills→Mortgage is links[3].
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[3]!;
+    // Right ribbons trail the 4 left paths: Bills→Mortgage is links[4].
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[4]!;
     expect(link.getAttribute("data-side")).toBe("right");
     const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
     const rest = {
@@ -1894,8 +1934,8 @@ describe("SpendingReport", () => {
   it("highlights the parent group in the same bright color when hovering a ribbon", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
-    // Everyday→Groceries trails the right ribbons (links[5]).
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[5]!;
+    // Everyday→Groceries trails the right ribbons (links[6]).
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[6]!;
     expect(link.getAttribute("data-side")).toBe("right");
     fireEvent.mouseMove(link, { clientX: 500, clientY: 200 });
     // The parent group brightens to the spotlight level — the same
@@ -2013,6 +2053,71 @@ describe("SpendingReport", () => {
     for (const name of ["Bank of Example", "Whole Foods", "Corner Shop"]) {
       expect(stops.some((s) => s.color === colorForName(name))).toBe(false);
     }
+  });
+
+  it("nests each income→group ribbon's downstream categories so ribbons match the bar", () => {
+    // Categories grouping: a blue bar segment must meet a blue ribbon of
+    // the same width — never a wider brown group band. Each income→group
+    // band subdivides into one sub-ribbon per downstream cell, in the
+    // cell's category color, tiling the band edge to edge exactly where
+    // the income gradient nests the same categories.
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const left = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    );
+    // Payroll's Bills band nests Mortgage Interest + Electric Bill,
+    // Everyday nests Groceries, and the plug stays whole and green.
+    const mortgage = colorForName("Mortgage Interest");
+    const electric = colorForName("Electric Bill");
+    const groceries = colorForName("Groceries");
+    expect(left.map((l) => l.getAttribute("fill"))).toEqual([
+      mortgage,
+      electric,
+      groceries,
+      REMAINING_COLOR,
+    ]);
+    // No group color survives on the left hop: the middle groups keep
+    // their own bars, but every ribbon reads as its final category.
+    for (const name of ["Bills", "Everyday"]) {
+      expect(left.some((l) => l.getAttribute("fill") === colorForName(name))).toBe(false);
+    }
+    // Each sub-ribbon is a closed bezier running left-to-right; parse
+    // its source/target slices out of the path.
+    const slices = left.map((l) => {
+      const nums = (l.getAttribute("d") ?? "").match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      return { sy0: nums[1]!, sy1: nums[15]!, ty0: nums[7]!, ty1: nums[9]! };
+    });
+    // Source slices tile the income bar edge to edge with no gaps and
+    // no taper (each sub-ribbon keeps one width end to end).
+    for (let i = 1; i < slices.length; i++) {
+      expect(slices[i]!.sy0).toBeCloseTo(slices[i - 1]!.sy1, 2);
+    }
+    for (const s of slices) {
+      expect(s.sy1 - s.sy0).toBeCloseTo(s.ty1 - s.ty0, 2);
+    }
+    // ... and they land exactly on the income gradient's hard edges, so
+    // every bar segment meets its ribbon pixel for pixel.
+    const bar = svg.querySelector('[data-testid="sankey-income"]')!;
+    const barY = Number(bar.getAttribute("y"));
+    const barH = Number(bar.getAttribute("height"));
+    const stops = Array.from(
+      svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
+    ).map((s) => barY + Number(s.getAttribute("offset")) * barH);
+    const edges = [stops[0]!, stops[1]!, stops[3]!, stops[5]!, stops[7]!];
+    slices.forEach((s, i) => {
+      expect(s.sy0).toBeCloseTo(edges[i]!, 1);
+      expect(s.sy1).toBeCloseTo(edges[i + 1]!, 1);
+    });
+    // Interaction stays at band level: hovering any sub-ribbon of the
+    // Bills band reads as the whole Payroll → Bills band.
+    fireEvent.mouseMove(left[1]!, { clientX: 400, clientY: 200 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Payroll → Bills")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("$1,150.00")).toBeInTheDocument();
+    fireEvent.mouseLeave(left[1]!);
+    expect(document.querySelector(".y-tip")).toBeNull();
   });
 
   it("sizes shortfall bars to their funded flow with a legible minimum", () => {

@@ -1029,8 +1029,13 @@ function resolveFlowHeights(
   return resolveNodeHeights(flowValues, bandH, minNodeHeight);
 }
 
-/** Closed bezier ribbon path from the source band to the target band. */
-function ribbonPath(
+/**
+ * Closed bezier ribbon path from the source band to the target band.
+ * Exported so the report can draw sub-ribbons that tile a layout link's
+ * band (same curve family as the layout's own paths, so a subdivided
+ * band reads as one ribbon split lengthwise).
+ */
+export function ribbonPath(
   x0: number,
   x1: number,
   sy0: number,

@@ -230,10 +230,12 @@ describe("ReportsView", () => {
 
     // Default is the three-column Sankey flow: the income feeds the
     // Everyday group plus the full-width Remaining ribbon (income exceeds
-    // spending), and the group fans out to Groceries and Rent.
+    // spending), and the group fans out to Groceries and Rent. The
+    // Everyday band nests both categories, so 3 left paths render beside
+    // the 2 right ribbons.
     const svg = panel.querySelector('[data-testid="sankey-svg"]');
     expect(svg).not.toBeNull();
-    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    expect(svg!.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(5);
     expect(svg!.querySelectorAll('[data-testid="sankey-node"]')).toHaveLength(3);
     expect(svg!.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
     expect(svg!.querySelector('[data-testid="sankey-total"]')).toBeNull();
@@ -305,8 +307,10 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("Other")).toBeInTheDocument();
     expect(within(panel).getByText("(1 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
-    // Groceries + Other + Remaining on the right, all through Everyday.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(4);
+    // Groceries + Other + Remaining on the right, all through Everyday;
+    // the Everyday band nests Groceries + Other sub-ribbons beside the
+    // plug and the 2 right ribbons.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(5);
     // Out total is unchanged by merging.
     expect(within(panel).getAllByText("$650.00")).toHaveLength(1);
   });
@@ -324,9 +328,9 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
-    // 2 incomes x 1 group plus 2 full-width Remaining ribbons on the
-    // left; one ribbon per cell (Groceries + Other) on the right.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(6);
+    // 2 incomes x (1 group nesting Groceries + Other) plus 2 full-width
+    // Remaining ribbons on the left; one ribbon per cell on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(8);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -427,7 +431,7 @@ describe("ReportsView", () => {
     }
   });
 
-  it("Spending by Category draws one closed ribbon per group and keeps tiny flows hoverable", () => {
+  it("Spending by Category draws one closed sub-ribbon per cell and keeps tiny flows hoverable", () => {
     // "Fees" is a dust share ($0.01 of $650.01) — without a minimum node
     // height it would collapse to a sub-pixel sliver no cursor can hit.
     const data = makeData();
@@ -449,9 +453,10 @@ describe("ReportsView", () => {
     const links = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]'));
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
     // Groceries + Rent + Fees + the Remaining plug (income exceeds spending),
-    // all routed through the single Everyday group: two left ribbons (group
-    // + full-width Remaining) and three right ribbons.
-    expect(links).toHaveLength(5);
+    // all routed through the single Everyday group: the band nests three
+    // category sub-ribbons beside the full-width Remaining ribbon (4 left
+    // paths) and three right ribbons.
+    expect(links).toHaveLength(7);
     expect(nodes).toHaveLength(4);
     expect(svg.querySelectorAll('[data-testid="sankey-group"]')).toHaveLength(1);
     // Each ribbon is a closed bezier path running left-to-right.
@@ -761,14 +766,15 @@ describe("ReportsView", () => {
     expect(barH).toBeLessThan(26);
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
-    // Left ribbons take their middle group's color and right ribbons
-    // their final category's own color: each ribbon reads as where the
+    // Left sub-ribbons take their final category's color and right
+    // ribbons their target's own color: each ribbon reads as where the
     // money lands, in one flat color through its whole length.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
-    // 2 incomes x 1 group plus 2 Remaining ribbons on the left; one ribbon
-    // per cell (2) on the right — never one per income.
-    expect(left).toHaveLength(4);
+    // 2 incomes x (1 group nesting Groceries + Rent) plus 2 Remaining
+    // ribbons on the left; one ribbon per cell (2) on the right — never
+    // one per income.
+    expect(left).toHaveLength(6);
     expect(right).toHaveLength(2);
     // Flat destination fills on every ribbon — gradients live only on
     // the two income bars, never on a ribbon.
@@ -777,7 +783,11 @@ describe("ReportsView", () => {
     }
     expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
     const everyday = colorForName("Everyday");
-    const leftFills = [everyday, everyday, REMAINING_COLOR, REMAINING_COLOR];
+    const groceries = colorForName("Groceries");
+    const rent = colorForName("Rent");
+    // Links run middle-major, incomes within, sub-ribbons expanding
+    // inline per band.
+    const leftFills = [groceries, rent, groceries, rent, REMAINING_COLOR, REMAINING_COLOR];
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
@@ -788,7 +798,9 @@ describe("ReportsView", () => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
       expect(link.getAttribute("data-income")).toBeNull();
     });
-    // Ribbon fills equal their destination bars' fills exactly.
+    // Ribbon fills equal their FINAL destination bars' fills exactly:
+    // every left sub-ribbon matches its category node (or the plug), and
+    // the middle bar keeps its own group hue.
     const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
       (n) => n.getAttribute("fill")
     );
@@ -799,6 +811,17 @@ describe("ReportsView", () => {
     ]);
     const groupFill = svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill");
     expect(groupFill).toBe(everyday);
+    const leftDestBySub = [
+      nodeFills[0],
+      nodeFills[1],
+      nodeFills[0],
+      nodeFills[1],
+      nodeFills[2],
+      nodeFills[2],
+    ];
+    left.forEach((link, k) => {
+      expect(link.getAttribute("fill")).toBe(leftDestBySub[k]);
+    });
   });
 });
 

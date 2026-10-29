@@ -9,6 +9,7 @@ import {
   sankeyAutoFitThreshold,
   sankeyContentHeight,
   OVER_INCOME_LABEL,
+  ribbonPath,
   sankeyThresholdStep,
   sankeyThresholdStops,
   showSankeySourceAmount,
@@ -58,6 +59,19 @@ type Hover =
   | { kind: "link"; side: "right"; a: number; b: number; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
 
+// One slice of a subdivided left-hop band (see leftSubs): the income's
+// share of one downstream cell, drawn as its own ribbon in the cell's
+// category color. Source slices tile the parent band exactly where the
+// income gradient nests the same categories.
+type LeftLinkSub = {
+  color: string;
+  sy0: number;
+  sy1: number;
+  ty0: number;
+  ty1: number;
+  d: string;
+};
+
 const LABEL_ZONE = 190;
 
 // Conservative per-character px estimates for the left-column labels (12px
@@ -71,14 +85,20 @@ function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
 }
 
-// Each ribbon carries one flat color — the color of the node it flows
-// INTO — through its whole length: left-hop ribbons the middle group's (or
-// the Remaining plug's green for the full-width surplus ribbons), right-hop
-// ribbons their final category's or merchant's own color. The category
-// determines the color and it flows backwards along every ribbon arriving
-// at it, no matter which middle group each ribbon comes from — the parent
-// group never tints a ribbon, and the income side never colors one either.
-// Exported so tests can pin the fills.
+// Each ribbon carries one flat color — the color of its FINAL (right-column)
+// destination — through its whole length: right-hop ribbons their
+// category's or merchant's own color (one ribbon per group→target cell),
+// and in Categories grouping each left-hop income→group band subdivides
+// into one sub-ribbon per downstream cell, in the same category colors,
+// so the line from an income bar to a category bar reads as one color
+// throughout. The full-width Remaining ribbons carry the plug's green,
+// and in Merchants grouping each left-hop band stays one group-colored
+// ribbon (merchants span groups, so per-merchant splits would repeat
+// colors down the bar). The category determines the color and it flows
+// backwards along every ribbon arriving at it, no matter which middle
+// group each ribbon comes from — the parent group never tints a ribbon,
+// and the income side never colors one either. Exported so tests can pin
+// the fills.
 //
 // Spotlight scale: at rest every ribbon and every bar sits at
 // SANKEY_RIBBON_OPACITY — nearly as solid as the hover step, one small
@@ -401,10 +421,12 @@ export function SpendingReport({
     });
   }, [sankey, totals.flowTotal]);
 
-  // Flat destination color of a left-hop ribbon: its middle group's color —
-  // except the full-width surplus ribbons, which carry the Remaining plug's
-  // green straight through to the right. Shared by the ribbon fills and, as
-  // the base color, by the income bar gradients.
+  // Flat color of a whole left-hop band: its middle group's color — except
+  // the full-width surplus ribbons, which carry the Remaining plug's green
+  // straight through to the right. Whole bands render only in Merchants
+  // grouping, for the plug, and as the degenerate fallback; in Categories
+  // grouping every real band subdivides (see leftSubs) and this survives
+  // only as the per-sub fallback color.
   const leftFillFor = (targetIndex: number, targetName: string): string => {
     const plugTarget = sankey?.remainingTargetIndex;
     return targetIndex >= midRows.length && plugTarget != null
@@ -412,52 +434,76 @@ export function SpendingReport({
       : (midRows[targetIndex]?.color ?? colorForName(targetName));
   };
 
+  // Left-hop subdivision, shared by the income gradients and the ribbon
+  // paths so a bar segment always meets its sub-ribbon pixel for pixel:
+  // in Categories grouping each real income→group band splits into one
+  // sub-ribbon per downstream cell (each category has exactly one group,
+  // so the split is exact), in the cell's category color. linksRight runs
+  // (middle, target) sorted, so each group's cells arrive in drawn target
+  // order — the band nests them the same way they leave the group on the
+  // right. The plug band (past the last middle), every band in Merchants
+  // grouping, and any degenerate band (empty or lopsided spans) stay
+  // whole: those links have no entry here and render as one ribbon.
+  const leftSubs = useMemo(() => {
+    const subs = new Map<string, LeftLinkSub[]>();
+    if (sankey == null || dimension !== "categories") return subs;
+    for (const l of sankey.linksLeft) {
+      if (l.targetIndex >= sankey.middles.length) continue;
+      const cells = sankey.linksRight.filter((r) => r.sourceIndex === l.targetIndex);
+      const values = cells.map((c) => c.value);
+      const sourceSpans = subdivideBandByValues([l.sy0, l.sy1], values);
+      const targetSpans = subdivideBandByValues([l.ty0, l.ty1], values);
+      if (sourceSpans.length === 0 || targetSpans.length !== sourceSpans.length) continue;
+      const base = leftFillFor(l.targetIndex, l.targetName);
+      subs.set(
+        `${l.sourceIndex}:${l.targetIndex}`,
+        sourceSpans.map((s, k) => {
+          const t = targetSpans[k]!;
+          const targetIndex = cells[s.valueIndex]?.targetIndex;
+          return {
+            color: targetIndex != null ? (tgtRows[targetIndex]?.color ?? base) : base,
+            sy0: s.y0,
+            sy1: s.y1,
+            ty0: t.y0,
+            ty1: t.y1,
+            d: ribbonPath(l.x0, l.x1, s.y0, s.y1, t.y0, t.y1),
+          };
+        })
+      );
+    }
+    return subs;
+    // leftFillFor closes over the layout-derived rows, hence their deps.
+  }, [sankey, midRows, tgtRows, dimension]);
+
   // One fill gradient per income bar: each bar stacks its outgoing bands
   // top-to-bottom with hard edges at the band boundaries — no feathering,
-  // no border, no gray. In Categories grouping each income→group band
-  // subdivides by the group's downstream categories (each category has
-  // exactly one group, so the split is exact), and the category colors
-  // drive the bar's segments; in Merchants grouping each band stays one
-  // group-colored segment (merchants span groups, so per-merchant splits
-  // would repeat colors down the bar). The full-width Remaining band stays
-  // plug green in both. A bar with no outgoing bands (defensive) falls
-  // back to the solid neutral income gray.
+  // no border, no gray. Slices come from the same subdivision as the
+  // ribbons (see leftSubs), so every segment meets its ribbon exactly.
+  // A bar with no outgoing bands (defensive) falls back to the solid
+  // neutral income gray.
   const incomeGradients = useMemo(() => {
     if (sankey == null) return [];
     return sankey.sources.map((bar, idx) => {
       const bands: SankeyIncomeBand[] = [];
       for (const l of sankey.linksLeft) {
         if (l.sourceIndex !== idx) continue;
-        const base = leftFillFor(l.targetIndex, l.targetName);
-        // Only real group bands split; the plug band (past the last
-        // middle) and every band in Merchants grouping stay whole.
-        if (dimension === "categories" && l.targetIndex < sankey.middles.length) {
-          // linksRight runs (middle, target) sorted, so each group's cells
-          // arrive in drawn target order — the bar nests them the same way
-          // they leave the group on the right.
-          const cells = sankey.linksRight.filter((r) => r.sourceIndex === l.targetIndex);
-          const spans = subdivideBandByValues(
-            [l.sy0, l.sy1],
-            cells.map((c) => c.value)
-          );
-          if (spans.length > 0) {
-            for (const s of spans) {
-              const targetIndex = cells[s.valueIndex]?.targetIndex;
-              bands.push({
-                y0: s.y0,
-                y1: s.y1,
-                color: targetIndex != null ? (tgtRows[targetIndex]?.color ?? base) : base,
-              });
-            }
-            continue;
+        const subs = leftSubs.get(`${l.sourceIndex}:${l.targetIndex}`);
+        if (subs != null) {
+          for (const s of subs) {
+            bands.push({ y0: s.sy0, y1: s.sy1, color: s.color });
           }
+        } else {
+          bands.push({
+            y0: l.sy0,
+            y1: l.sy1,
+            color: leftFillFor(l.targetIndex, l.targetName),
+          });
         }
-        bands.push({ y0: l.sy0, y1: l.sy1, color: base });
       }
       return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands);
     });
     // leftFillFor closes over the layout-derived rows, hence their deps.
-  }, [sankey, midRows, tgtRows, dimension]);
+  }, [sankey, midRows, tgtRows, leftSubs]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -1250,10 +1296,49 @@ export function SpendingReport({
                   )
               )}
               {orderedLinksLeft.map((link) => {
-                // Flat destination color through the whole length (see
-                // leftFillFor): the income side never colors a ribbon.
-                const fill = leftFillFor(link.targetIndex, link.targetName);
+                const subs = leftSubs.get(`${link.sourceIndex}:${link.targetIndex}`);
                 const lit = leftLit(link.sourceIndex, link.targetIndex);
+                const opacity = ribbonOpacity(lit, hl.ll != null);
+                const hoverPayload = (x: number, y: number) => ({
+                  kind: "link" as const,
+                  side: "left" as const,
+                  a: link.sourceIndex,
+                  b: link.targetIndex,
+                  x,
+                  y,
+                });
+                // A subdivided band renders one sub-ribbon per downstream
+                // cell, each flat in its final category's color — the band
+                // stays one hover target (handlers on the wrapping <g>, so
+                // moving between sub-ribbons never flickers the spotlight)
+                // and every sub shares the band's spotlight key.
+                if (subs != null) {
+                  return (
+                    <g
+                      key={`ll-${link.sourceIndex}-${link.targetIndex}`}
+                      style={{ cursor: "pointer" }}
+                      onMouseMove={(e) => pushHover(hoverPayload(e.clientX, e.clientY))}
+                      onMouseLeave={() => pushHover(null)}
+                    >
+                      {subs.map((s, si) => (
+                        <path
+                          key={`llsub-${si}`}
+                          data-testid="sankey-link"
+                          data-side="left"
+                          d={s.d}
+                          fill={s.color}
+                          fillOpacity={opacity}
+                          stroke="none"
+                        />
+                      ))}
+                    </g>
+                  );
+                }
+                // Whole bands (Merchants grouping, the Remaining plug, and
+                // the degenerate fallback) keep one flat group-colored
+                // ribbon through the whole length: the income side never
+                // colors a ribbon.
+                const fill = leftFillFor(link.targetIndex, link.targetName);
                 return (
                   <path
                     key={`ll-${link.sourceIndex}-${link.targetIndex}`}
@@ -1261,19 +1346,10 @@ export function SpendingReport({
                     data-side="left"
                     d={link.d}
                     fill={fill}
-                    fillOpacity={ribbonOpacity(lit, hl.ll != null)}
+                    fillOpacity={opacity}
                     stroke="none"
                     style={{ cursor: "pointer" }}
-                    onMouseMove={(e) =>
-                      pushHover({
-                        kind: "link",
-                        side: "left",
-                        a: link.sourceIndex,
-                        b: link.targetIndex,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
+                    onMouseMove={(e) => pushHover(hoverPayload(e.clientX, e.clientY))}
                     onMouseLeave={() => pushHover(null)}
                   />
                 );
