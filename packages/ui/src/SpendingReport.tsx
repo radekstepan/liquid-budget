@@ -128,6 +128,13 @@ export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 // `${SANKEY_INCOME_GRADIENT_ID_PREFIX}${i}`.
 export const SANKEY_INCOME_GRADIENT_ID_PREFIX = "sankey-income-gradient-";
 
+// Middle bars fill the same way — one gradient per bar built from the
+// outgoing group→target cells' colors (see middleGradients), so each bar
+// segment matches its ribbon exactly instead of sitting flat in the group
+// hue while category-colored arms leave it. Bar i paints from
+// `${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i}`.
+export const SANKEY_MIDDLE_GRADIENT_ID_PREFIX = "sankey-middle-gradient-";
+
 // Session flag for the Under auto-fit: it runs at most once per tab session —
 // on the first Sankey paint with a measured container — and never again after
 // the user drags the slider themselves. Report tab switches remount this
@@ -391,6 +398,10 @@ export function SpendingReport({
         ...m,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((m.value / totals.flowTotal) * 100) : 0,
+        // Group color for the tooltip dot, the Merchants left-hop ribbons,
+        // and the no-outgoing-bands fallback only: the bars themselves
+        // segment by their outgoing cells' target colors (see
+        // middleGradients). No single color can stand for a segmented bar.
         color: colorForName(m.name),
         // How many right-column rows this group feeds (distinct targets —
         // one ribbon per group→target cell).
@@ -504,6 +515,35 @@ export function SpendingReport({
     });
     // leftFillFor closes over the layout-derived rows, hence their deps.
   }, [sankey, midRows, tgtRows, leftSubs]);
+
+  // One fill gradient per middle bar: each bar stacks its outgoing
+  // group→target cells top-to-bottom with hard edges at the cell
+  // boundaries — the same construction as the income gradients, in the
+  // cells' target colors — so every segment meets its ribbon exactly.
+  // Bands come from the right-hop links' own source spans, which the
+  // layout stacks contiguously from each bar's top edge; when the minimum
+  // label height lifts a bar past its band stack the gradient clamps to
+  // the last segment's color below the bands (the same slack income bars
+  // have). One ribbon per cell holds in both groupings, so the same
+  // construction serves Categories and Merchants with no dimension split.
+  // A bar with no outgoing bands (no income, so no ribbons at all) falls
+  // back to its solid group color.
+  const middleGradients = useMemo(() => {
+    if (sankey == null) return [];
+    return sankey.middles.map((bar, idx) => {
+      const base = midRows[idx]?.color ?? colorForName(bar.name);
+      const bands: SankeyIncomeBand[] = [];
+      for (const l of sankey.linksRight) {
+        if (l.sourceIndex !== idx) continue;
+        bands.push({
+          y0: l.sy0,
+          y1: l.sy1,
+          color: tgtRows[l.targetIndex]?.color ?? base,
+        });
+      }
+      return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands, base);
+    });
+  }, [sankey, midRows, tgtRows]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -1253,8 +1293,22 @@ export function SpendingReport({
                 <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
                 {incomeGradients.map((stops, idx) => (
                   <linearGradient
-                    key={idx}
+                    key={`income-${idx}`}
                     id={`${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx}`}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    {stops.map((s, k) => (
+                      <stop key={k} offset={s.offset} stopColor={s.color} />
+                    ))}
+                  </linearGradient>
+                ))}
+                {middleGradients.map((stops, idx) => (
+                  <linearGradient
+                    key={`middle-${idx}`}
+                    id={`${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${idx}`}
                     x1="0"
                     y1="0"
                     x2="0"
@@ -1481,7 +1535,6 @@ export function SpendingReport({
               })}
               {sankey.middles.map((node, idx) => {
                 const r = midRows[idx]!;
-                const color = r.color;
                 const isBucket = r.bucket === true;
                 // Parent groups join the flow-path spotlight at the ribbons'
                 // own brightness steps: rest opacity at rest, bright when the
@@ -1496,20 +1549,22 @@ export function SpendingReport({
                 const labelY = node.y + node.h / 2;
                 return (
                   <g key={`mid-${node.name}-${idx}`}>
-                    {/* Parent groups read as one color with their ribbons:
-                        the same fill at the same rest opacity — and the same
-                        bright color while the hovered path runs through them.
-                        No borders anywhere: the merged Other bucket adds only
-                        the render-only hatch. The bar wraps the group's funded
-                        flow; when spending exceeds income the gap shows in
-                        the tooltip, not as a grey segment. */}
+                    {/* Each middle bar fills with its own gradient — never
+                        flat group color, never a hover overlay, never a
+                        border. The segments are the outgoing cells' target
+                        colors (see middleGradients), so every segment meets
+                        its ribbon exactly, like the income bars. The merged
+                        Other bucket adds only the render-only hatch. The bar
+                        wraps the group's funded flow; when spending exceeds
+                        income the gap shows in the tooltip, not as a grey
+                        segment. */}
                     <rect
                       data-testid="sankey-group"
                       x={node.x}
                       y={node.y}
                       width={node.w}
                       height={Math.max(0, node.h)}
-                      fill={color}
+                      fill={`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${idx})`}
                       fillOpacity={barOpacity}
                       stroke="none"
                       style={{ cursor: "pointer" }}

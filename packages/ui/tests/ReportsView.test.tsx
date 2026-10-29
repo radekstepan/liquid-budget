@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
+import { SANKEY_MIDDLE_GRADIENT_ID_PREFIX } from "../src/SpendingReport.js";
 import { colorForName, REMAINING_COLOR } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { sankeyThresholdStops } from "@ynab/logic";
@@ -777,12 +778,11 @@ describe("ReportsView", () => {
     expect(left).toHaveLength(6);
     expect(right).toHaveLength(2);
     // Flat destination fills on every ribbon — gradients live only on
-    // the two income bars, never on a ribbon.
+    // the bars (two incomes plus the one middle), never on a ribbon.
     for (const link of svg.querySelectorAll('[data-testid="sankey-link"]')) {
       expect(link.getAttribute("fill")).not.toMatch(/^url\(/);
     }
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
-    const everyday = colorForName("Everyday");
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(3);
     const groceries = colorForName("Groceries");
     const rent = colorForName("Rent");
     // Links run middle-major, incomes within, sub-ribbons expanding
@@ -800,7 +800,8 @@ describe("ReportsView", () => {
     });
     // Ribbon fills equal their FINAL destination bars' fills exactly:
     // every left sub-ribbon matches its category node (or the plug), and
-    // the middle bar keeps its own group hue.
+    // the middle bar segments by its outgoing cells instead of keeping a
+    // flat group hue.
     const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
       (n) => n.getAttribute("fill")
     );
@@ -810,7 +811,13 @@ describe("ReportsView", () => {
       REMAINING_COLOR,
     ]);
     const groupFill = svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill");
-    expect(groupFill).toBe(everyday);
+    expect(groupFill).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`);
+    // The middle gradient stacks the Everyday cells in target order:
+    // Groceries then Rent.
+    const midStops = Array.from(
+      svg.querySelectorAll(`#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0 stop`)
+    ).map((s) => s.getAttribute("stop-color"));
+    expect(midStops).toEqual([groceries, groceries, rent, rent]);
     const leftDestBySub = [
       nodeFills[0],
       nodeFills[1],

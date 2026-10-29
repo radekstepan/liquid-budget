@@ -237,4 +237,25 @@ describe("sankeyIncomeGradientStops", () => {
       { offset: 1, color: SANKEY_INCOME_COLOR },
     ]);
   });
+
+  it("paints the caller's fallback solid when there are no bands", () => {
+    // Middle bars with no outgoing ribbons (no income) keep their group
+    // color instead of the income gray.
+    expect(sankeyIncomeGradientStops(0, 100, [], "#112233")).toEqual([
+      { offset: 0, color: "#112233" },
+      { offset: 1, color: "#112233" },
+    ]);
+    // All-skipped bands fall back the same way.
+    expect(
+      sankeyIncomeGradientStops(
+        0,
+        100,
+        [{ y0: 50, y1: 50, color: "#999999" }],
+        "#112233"
+      )
+    ).toEqual([
+      { offset: 0, color: "#112233" },
+      { offset: 1, color: "#112233" },
+    ]);
+  });
 });

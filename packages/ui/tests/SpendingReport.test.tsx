@@ -10,6 +10,7 @@ import {
   SpendingReport,
   SANKEY_BUCKET_HATCH_ID,
   SANKEY_INCOME_GRADIENT_ID_PREFIX,
+  SANKEY_MIDDLE_GRADIENT_ID_PREFIX,
   SANKEY_RIBBON_DIM_OPACITY,
   SANKEY_RIBBON_HOVER_OPACITY,
   SANKEY_RIBBON_OPACITY,
@@ -230,12 +231,13 @@ describe("SpendingReport", () => {
       colorForName("Electric Bill"),
       REMAINING_COLOR,
     ]);
-    // The middle bars carry their own group colors; the children match only
-    // by hash coincidence, never by design.
+    // The middle bars segment by their outgoing cells' target colors —
+    // one gradient per bar, like the income bars — so every segment meets
+    // its ribbon exactly; no bar keeps its flat group hue.
     const groups = Array.from(svg.querySelectorAll('[data-testid="sankey-group"]'));
     expect(groups.map((g) => g.getAttribute("fill"))).toEqual([
-      colorForName("Bills"),
-      colorForName("Everyday"),
+      `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`,
+      `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}1)`,
     ]);
     // The helper agrees with the rendered bars (same rule, pinned twice).
     expect(
@@ -607,11 +609,12 @@ describe("SpendingReport", () => {
     expect(left).toHaveLength(8);
     // Each ribbon carries one flat color through its whole length,
     // exactly its final destination node's fill — gradients live only on
-    // the income bars (one per bar), never on a ribbon.
+    // the income and middle bars (one per bar), never on a ribbon.
     for (const link of svg.querySelectorAll('[data-testid="sankey-link"]')) {
       expect(link.getAttribute("fill")).not.toMatch(/^url\(/);
     }
-    expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
+    // Two incomes plus two middles, one gradient each.
+    expect(svg.querySelectorAll("linearGradient")).toHaveLength(4);
     // Right ribbons fill with their target's own color, cell-major:
     // Bills→Mortgage, Bills→Electric, Everyday→Groceries. Both Bills legs
     // carry their category's color — the middle group never tints them.
@@ -675,7 +678,13 @@ describe("SpendingReport", () => {
       nodeFills[3],
       nodeFills[3],
     ];
-    expect(groupFills).toEqual([colorForName("Bills"), colorForName("Everyday")]);
+    // The middle bars segment by their outgoing cells (one gradient per
+    // bar), so the group's own hue appears on no bar — only on the
+    // Merchants left-hop ribbons and the tooltip dot.
+    expect(groupFills).toEqual([
+      `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`,
+      `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}1)`,
+    ]);
     left.forEach((link, k) => {
       const destFill = leftDestBySub[k];
       expect(link.getAttribute("fill")).toBe(destFill);
@@ -873,8 +882,9 @@ describe("SpendingReport", () => {
     // carries the highlight instead.
     expect(group.getAttribute("stroke")).toBe("none");
     expect(group.getAttribute("stroke-width")).toBeNull();
-    // The bar matches its ribbons exactly: same fill, same rest opacity.
-    expect(group.getAttribute("fill")).toBe(colorForName("Bills"));
+    // The bar's segments match its ribbons exactly: gradient fill at the
+    // shared rest opacity.
+    expect(group.getAttribute("fill")).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`);
     expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     expect(group.getAttribute("stroke")).toBe("none");
@@ -918,8 +928,8 @@ describe("SpendingReport", () => {
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     // Same commit, same brightness: the bar and every ribbon on its path
     // share the hover step. The left-hop sub-ribbons carry their final
-    // category's color (right-hop ribbons too, by design) while the group
-    // bar keeps its own fill.
+    // category's color (right-hop ribbons too, by design), and the group
+    // bar segments by the same outgoing cells.
     const barFill = group.getAttribute("fill");
     expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     const lit = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]')).filter(
@@ -935,7 +945,7 @@ describe("SpendingReport", () => {
     // the middle group's own hue.
     const billsChildren = [colorForName("Mortgage Interest"), colorForName("Electric Bill")];
     expect(leftLit.map((l) => l.getAttribute("fill"))).toEqual(billsChildren);
-    expect(barFill).toBe(colorForName("Bills"));
+    expect(barFill).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`);
     fireEvent.mouseLeave(group);
   });
 
@@ -2023,9 +2033,10 @@ describe("SpendingReport", () => {
     expect(link.getAttribute("data-side")).toBe("right");
     fireEvent.mouseMove(link, { clientX: 500, clientY: 200 });
     // The parent group brightens to the spotlight level — the same
-    // brightness as its lit ribbon, in its own hue — while Bills dims.
+    // brightness as its lit ribbon — while Bills dims; the bar keeps its
+    // segmented fill, only the opacity step changes.
     const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
-    expect(groups[1]!.getAttribute("fill")).toBe(colorForName("Everyday"));
+    expect(groups[1]!.getAttribute("fill")).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}1)`);
     expect(groups[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.12");
     const litRibbon = Array.from(
@@ -2207,6 +2218,170 @@ describe("SpendingReport", () => {
     expect(within(tip as unknown as HTMLElement).getByText("$1,150.00")).toBeInTheDocument();
     fireEvent.mouseLeave(left[1]!);
     expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("segments each middle bar by its outgoing cells so segments meet their ribbons pixel for pixel", () => {
+    // Categories grouping: a blue bar segment must meet a blue ribbon of
+    // the same width — never a flat group-hued bar with category-colored
+    // arms leaving it. Each middle bar stacks its outgoing cells in the
+    // cells' target colors, tiling the bar edge to edge exactly where the
+    // right-hop ribbons leave it.
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bars = svg.querySelectorAll('[data-testid="sankey-group"]');
+    expect(bars).toHaveLength(2);
+    bars.forEach((bar, i) => {
+      expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i})`);
+    });
+    const mortgage = colorForName("Mortgage Interest");
+    const electric = colorForName("Electric Bill");
+    const groceries = colorForName("Groceries");
+    // Bills stacks Mortgage Interest + Electric Bill; Everyday is one
+    // Groceries band, solid. Two stops per band, sharing the boundary
+    // offsets (hard edges).
+    const stopsOf = (i: number) =>
+      Array.from(svg.querySelectorAll(`#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i} stop`)).map(
+        (s) => ({
+          offset: Number(s.getAttribute("offset")),
+          color: s.getAttribute("stop-color"),
+        })
+      );
+    const billsStops = stopsOf(0);
+    const everydayStops = stopsOf(1);
+    expect(billsStops.map((s) => s.color)).toEqual([mortgage, mortgage, electric, electric]);
+    expect(everydayStops.map((s) => s.color)).toEqual([groceries, groceries]);
+    expect(everydayStops.map((s) => s.offset)).toEqual([0, 1]);
+    // Right ribbons run middle-major: Bills→Mortgage, Bills→Electric,
+    // Everyday→Groceries. Each is a closed bezier running left-to-right;
+    // parse its source/target slices out of the path.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right).toHaveLength(3);
+    const slices = right.map((l) => {
+      const nums = (l.getAttribute("d") ?? "").match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      return {
+        sy0: nums[1]!,
+        sy1: nums[15]!,
+        ty0: nums[7]!,
+        ty1: nums[9]!,
+        fill: l.getAttribute("fill"),
+      };
+    });
+    expect(slices.map((s) => s.fill)).toEqual([mortgage, electric, groceries]);
+    // No taper: each ribbon keeps one width end to end.
+    for (const s of slices) {
+      expect(s.sy1 - s.sy0).toBeCloseTo(s.ty1 - s.ty0, 2);
+    }
+    // Source slices tile each middle bar edge to edge with no gaps, and
+    // land exactly on the gradient's hard edges — every bar segment meets
+    // its ribbon pixel for pixel, in the same color.
+    const checkBar = (barIdx: number, bandIdx: number[]) => {
+      const bar = bars[barIdx]!;
+      const barY = Number(bar.getAttribute("y"));
+      const barH = Number(bar.getAttribute("height"));
+      const stops = barIdx === 0 ? billsStops : everydayStops;
+      expect(slices[bandIdx[0]!]!.sy0).toBeCloseTo(barY, 2);
+      bandIdx.forEach((k, j) => {
+        const s = slices[k]!;
+        expect(s.sy0).toBeCloseTo(barY + stops[2 * j]!.offset * barH, 1);
+        expect(s.sy1).toBeCloseTo(barY + stops[2 * j + 1]!.offset * barH, 1);
+        expect(s.fill).toBe(stops[2 * j]!.color);
+        if (j > 0) expect(s.sy0).toBeCloseTo(slices[bandIdx[j - 1]!]!.sy1, 2);
+      });
+      const last = slices[bandIdx[bandIdx.length - 1]!]!;
+      expect(last.sy1).toBeCloseTo(barY + barH, 2);
+    };
+    checkBar(0, [0, 1]);
+    checkBar(1, [2]);
+  });
+
+  it("segments middle bars by their outgoing merchants in Merchants grouping", () => {
+    // Merchants span groups, but each middle→merchant cell still draws one
+    // ribbon in the merchant's color — so the same segmentation serves
+    // Merchants grouping with no dimension split: Bills is one Bank of
+    // Example band, Everyday stacks Whole Foods + Corner Shop.
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bars = svg.querySelectorAll('[data-testid="sankey-group"]');
+    expect(bars).toHaveLength(2);
+    bars.forEach((bar, i) => {
+      expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i})`);
+    });
+    const bank = colorForName("Bank of Example");
+    const whole = colorForName("Whole Foods");
+    const corner = colorForName("Corner Shop");
+    const stopsOf = (i: number) =>
+      Array.from(svg.querySelectorAll(`#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i} stop`)).map(
+        (s) => ({
+          offset: Number(s.getAttribute("offset")),
+          color: s.getAttribute("stop-color"),
+        })
+      );
+    expect(stopsOf(0).map((s) => s.color)).toEqual([bank, bank]);
+    expect(stopsOf(1).map((s) => s.color)).toEqual([whole, whole, corner, corner]);
+    // Right ribbons run middle-major: Bills→Bank, Everyday→Whole,
+    // Everyday→Corner. Each segment meets its ribbon pixel for pixel.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill"))).toEqual([bank, whole, corner]);
+    const slices = right.map((l) => {
+      const nums = (l.getAttribute("d") ?? "").match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      return { sy0: nums[1]!, sy1: nums[15]! };
+    });
+    const bands: [number, number[]][] = [
+      [0, [0]],
+      [1, [1, 2]],
+    ];
+    for (const [barIdx, idxs] of bands) {
+      const bar = bars[barIdx]!;
+      const barY = Number(bar.getAttribute("y"));
+      const barH = Number(bar.getAttribute("height"));
+      const stops = stopsOf(barIdx);
+      idxs.forEach((k, j) => {
+        expect(slices[k]!.sy0).toBeCloseTo(barY + stops[2 * j]!.offset * barH, 1);
+        expect(slices[k]!.sy1).toBeCloseTo(barY + stops[2 * j + 1]!.offset * barH, 1);
+      });
+      expect(slices[idxs[0]!]!.sy0).toBeCloseTo(barY, 2);
+      expect(slices[idxs[idxs.length - 1]!]!.sy1).toBeCloseTo(barY + barH, 2);
+    }
+  });
+
+  it("falls back to solid group color on middle bars with no outgoing ribbons", () => {
+    // No income means no ribbons at all (coverage is zero): each middle
+    // bar renders at the minimum label height in its solid group color —
+    // there is nothing to segment by.
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={sampleCategoryFlow}
+        merchantFlow={sampleMerchantFlow}
+        income={[]}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(0);
+    const bars = svg.querySelectorAll('[data-testid="sankey-group"]');
+    expect(bars).toHaveLength(2);
+    bars.forEach((bar, i) => {
+      expect(bar.getAttribute("fill")).toBe(`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i})`);
+    });
+    const stopsOf = (i: number) =>
+      Array.from(svg.querySelectorAll(`#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i} stop`)).map(
+        (s) => ({
+          offset: Number(s.getAttribute("offset")),
+          color: s.getAttribute("stop-color"),
+        })
+      );
+    expect(stopsOf(0)).toEqual([
+      { offset: 0, color: colorForName("Bills") },
+      { offset: 1, color: colorForName("Bills") },
+    ]);
+    expect(stopsOf(1)).toEqual([
+      { offset: 0, color: colorForName("Everyday") },
+      { offset: 1, color: colorForName("Everyday") },
+    ]);
   });
 
   it("sizes shortfall bars to their funded flow with a legible minimum", () => {

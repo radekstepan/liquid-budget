@@ -2504,6 +2504,43 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
+  it("stacks outgoing bands contiguously from each middle bar's top edge, slack only at the bottom", () => {
+    // Twenty targets shrink the right column's minimum to 13.5px while
+    // the two middles keep the 24px label minimum: Big's single 13.5px
+    // band leaves slack that the water-fill absorbs BELOW the bands — the
+    // render contract the middle gradients rely on (the gradient clamps
+    // to the last segment's color over the slack, the same slack income
+    // bars have).
+    const small = Array.from({ length: 19 }, (_, i) => merged(`T${i}`, 10));
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 10000)],
+      [merged("Big", 9810), merged("Tiny", 190)],
+      [merged("A", 9810), ...small],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9810 },
+        ...small.map((_, k) => ({ groupIndex: 1, targetIndex: k + 1, value: 10 })),
+      ],
+      { width: 800, height: 400, minNodeHeight: 24 }
+    );
+    const big = layout.middles[0]!;
+    const bigBands = layout.linksRight.filter((l) => l.sourceIndex === 0);
+    expect(bigBands).toHaveLength(1);
+    expect(big.h).toBe(24);
+    expect(bigBands[0]!.sy0).toBeCloseTo(big.y, 6);
+    expect(bigBands[0]!.sy1 - bigBands[0]!.sy0).toBeCloseTo(13.5, 6);
+    expect(bigBands[0]!.sy1).toBeLessThan(big.y + big.h);
+    // Fully wrapped bars still tile edge to edge, contiguously.
+    const tiny = layout.middles[1]!;
+    const tinyBands = layout.linksRight.filter((l) => l.sourceIndex === 1);
+    expect(tinyBands).toHaveLength(19);
+    const tinyH = tinyBands.reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+    expect(tinyBands[0]!.sy0).toBeCloseTo(tiny.y, 6);
+    expect(tinyH).toBeCloseTo(tiny.h, 6);
+    for (let k = 1; k < tinyBands.length; k++) {
+      expect(tinyBands[k]!.sy0).toBeCloseTo(tinyBands[k - 1]!.sy1, 6);
+    }
+  });
+
   it("stacks all three columns top-down inside the padded plot area", () => {
     const W = 800;
     const H = 400;

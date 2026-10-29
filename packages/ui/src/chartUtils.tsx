@@ -403,31 +403,35 @@ export type SankeyIncomeBand = { y0: number; y1: number; color: string };
 export type SankeyGradientStop = { offset: number; color: string };
 
 /**
- * Hard-edged top-to-bottom gradient stops for a Sankey income bar, built
- * from the colors of the ribbons extending from it: each band keeps its
- * ribbon's destination color through its exact span, and adjacent bands
- * meet at a hard edge on their shared boundary — so every bar segment
- * matches the ribbon leaving it. (An earlier feathered blend smeared each
- * boundary across the bar and the bar stopped matching its ribbons.) Pure
- * geometry → stops.
+ * Hard-edged top-to-bottom gradient stops for a Sankey income or middle
+ * bar, built from the colors of the ribbons extending from it: each band
+ * keeps its ribbon's destination color through its exact span, and
+ * adjacent bands meet at a hard edge on their shared boundary — so every
+ * bar segment matches the ribbon leaving it. (An earlier feathered blend
+ * smeared each boundary across the bar and the bar stopped matching its
+ * ribbons.) Pure geometry → stops.
  *
  * - Band order is the gradient order (top to bottom); zero-height bands
  *   are skipped.
  * - Shared boundary offsets are kept, not collapsed: the duplicate offset
  *   is what renders the hard edge between two bands.
- * - A single band (or none, defensively) yields a solid fill.
+ * - A single band (or none, defensively) yields a solid fill: the band's
+ *   own color, or `fallback` when there are no bands (the neutral income
+ *   gray for income bars, the group's own color for middle bars with no
+ *   outgoing ribbons).
  */
 export function sankeyIncomeGradientStops(
   barY0: number,
   barY1: number,
-  bands: readonly SankeyIncomeBand[]
+  bands: readonly SankeyIncomeBand[],
+  fallback: string = SANKEY_INCOME_COLOR
 ): SankeyGradientStop[] {
   const h = barY1 - barY0;
   const live = bands.filter((b) => b.y1 > b.y0 && h > 0);
   if (live.length === 0) {
     return [
-      { offset: 0, color: SANKEY_INCOME_COLOR },
-      { offset: 1, color: SANKEY_INCOME_COLOR },
+      { offset: 0, color: fallback },
+      { offset: 1, color: fallback },
     ];
   }
   if (live.length === 1) {
