@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import {
   SANKEY_LEFT_LABEL_INSET,
@@ -19,7 +19,7 @@ import {
 import {
   colorForName,
   REMAINING_COLOR,
-  sankeyFamilyShade,
+  sankeyTargetColor,
   SANKEY_INCOME_COLOR,
 } from "../src/chartUtils.js";
 
@@ -215,27 +215,30 @@ describe("SpendingReport", () => {
     }
   });
 
-  it("colors each category as a shade of its parent group", () => {
+  it("colors each category by its own name, never by its parent group", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const nodes = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]'));
-    const bills = colorForName("Bills");
-    // Darkest-first: Mortgage Interest is the first (largest) Bills child,
-    // so it takes the darkest shade; Electric Bill is the second, so it
-    // keeps the parent color; Groceries is the only Everyday child.
-    // Remaining stays green.
+    // The category determines the color: Mortgage Interest and Electric Bill
+    // share the Bills group but keep their own stable hues — the parent
+    // group never tints them. Remaining stays green.
     expect(nodes.map((n) => n.getAttribute("fill"))).toEqual([
-      sankeyFamilyShade(bills, 1),
-      colorForName("Everyday"),
-      bills,
+      colorForName("Mortgage Interest"),
+      colorForName("Groceries"),
+      colorForName("Electric Bill"),
       REMAINING_COLOR,
     ]);
-    // The middle bars carry the family base colors the children shade from.
+    // The middle bars carry their own group colors; the children match only
+    // by hash coincidence, never by design.
     const groups = Array.from(svg.querySelectorAll('[data-testid="sankey-group"]'));
     expect(groups.map((g) => g.getAttribute("fill"))).toEqual([
-      bills,
+      colorForName("Bills"),
       colorForName("Everyday"),
     ]);
+    // The helper agrees with the rendered bars (same rule, pinned twice).
+    expect(
+      sankeyTargetColor({ name: "Mortgage Interest", bucket: false, isPlug: false })
+    ).toBe(nodes[0]!.getAttribute("fill"));
   });
 
   it("toggles between Categories and Merchants dimensions", () => {
@@ -547,10 +550,14 @@ describe("SpendingReport", () => {
     expect(svg.querySelectorAll("linearGradient")).toHaveLength(2);
     const bills = colorForName("Bills");
     const everyday = colorForName("Everyday");
-    // Right ribbons fill with their target's family shade, cell-major:
-    // Bills→Mortgage, Bills→Electric, Everyday→Groceries. Darkest-first:
-    // the largest sibling (Mortgage) takes the darkest shade.
-    const targetFills = [sankeyFamilyShade(bills, 1), bills, everyday];
+    // Right ribbons fill with their target's own color, cell-major:
+    // Bills→Mortgage, Bills→Electric, Everyday→Groceries. Both Bills legs
+    // carry their category's color — the middle group never tints them.
+    const targetFills = [
+      colorForName("Mortgage Interest"),
+      colorForName("Electric Bill"),
+      colorForName("Groceries"),
+    ];
     right.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
       // Cells carry every income's money: no per-income identity survives.
@@ -574,7 +581,12 @@ describe("SpendingReport", () => {
     const groupFills = Array.from(svg.querySelectorAll('[data-testid="sankey-group"]')).map(
       (g) => g.getAttribute("fill")
     );
-    expect(nodeFills).toEqual([sankeyFamilyShade(bills, 1), everyday, bills, REMAINING_COLOR]);
+    expect(nodeFills).toEqual([
+      colorForName("Mortgage Interest"),
+      colorForName("Groceries"),
+      colorForName("Electric Bill"),
+      REMAINING_COLOR,
+    ]);
     right.forEach((link, k) => {
       const targetIndex = [0, 2, 1][k]!;
       expect(link.getAttribute("fill")).toBe(nodeFills[targetIndex]);
@@ -682,12 +694,14 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(node);
   });
 
-  it("spotlights only the dominant path when hovering a merchant split across groups", () => {
+  it("spotlights the full path — every leg — when hovering a merchant split across groups", () => {
     // Airbnb draws mostly from Everyday ($900) with a small Bills cell
-    // ($100): hovering it must trace only the Everyday path — lighting
-    // every group's full funding fan would highlight income flows that
-    // have nothing to do with it. Categories (one group each) already
-    // behave this way; merchants must match.
+    // ($100): hovering it must trace its FULL path — both cells brighten,
+    // in the merchant's own color along their whole length, or the small
+    // leg sits dim beside the bar while the tooltip claims the whole
+    // amount. A dominant-only spotlight used to leave that leg dark
+    // (task-35): the full path is the merchant's whole story, so it all
+    // lights. Categories (one group each) trivially behave the same way.
     const merchantFlow: SpendingGroupFlow = {
       groups: [
         { name: "Bills", value: 110000 },
@@ -718,33 +732,40 @@ describe("SpendingReport", () => {
     const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
     expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
     expect(nodes[2]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
-    // Only the dominant (Everyday) cell brightens — the small Bills cell
-    // dims with the off-path rest, rendered before it in the DOM.
+    // Both Airbnb cells brighten — the small Bills leg included — in the
+    // merchant's own color, rendered above the two dimmed off-path cells.
+    // Right links run cell-major: Bills→Airbnb, Bills→Bank, Everyday→Airbnb,
+    // Everyday→Whole Foods; the spotlight z-reorder moves lit legs last.
     const right = Array.from(
       svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
     );
     expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual([
       "0.12",
       "0.12",
-      "0.12",
+      "0.85",
       "0.85",
     ]);
-    // Only the dominant group joins the spotlight; Bills dims.
+    const airbnb = colorForName("Airbnb");
+    expect(node.getAttribute("fill")).toBe(airbnb);
+    expect(right[2]!.getAttribute("fill")).toBe(airbnb);
+    expect(right[3]!.getAttribute("fill")).toBe(airbnb);
+    // Both parent groups join the spotlight — the non-dominant Bills bar
+    // brightens with its ribbon instead of dimming away from it.
     const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
-    expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.12");
+    expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.85");
     expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.85");
-    // Only the dominant group's income fan brightens: the Bills ribbons
-    // from both incomes dim.
+    // The income fans of both groups brighten: every left ribbon feeds a
+    // lit group here, so all four light.
     const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
     expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
-      "0.12",
-      "0.12",
+      "0.85",
+      "0.85",
       "0.85",
       "0.85",
     ]);
     // Every income funds every group proportionally, so both income bars
-    // join the dominant fan's spotlight — the same contract as hovering
-    // a category in Categories view.
+    // join the spotlight — the same contract as hovering a category in
+    // Categories view.
     const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
     expect(incomes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
@@ -803,7 +824,7 @@ describe("SpendingReport", () => {
     fireEvent.mouseMove(group, { clientX: 380, clientY: 100 });
     // Same commit, same brightness: the bar and every ribbon on its path
     // share the hover step, and the left-hop ribbons share the bar's exact
-    // fill (right-hop ribbons carry their target's family shade by design).
+    // fill (right-hop ribbons carry their target's own color by design).
     const barFill = group.getAttribute("fill");
     expect(group.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     const lit = Array.from(svg.querySelectorAll('[data-testid="sankey-link"]')).filter(
@@ -1383,12 +1404,9 @@ describe("SpendingReport", () => {
     }
   });
 
-  it("paints Bars rows in their own stable colors, not the dark Sankey family shades", () => {
-    // Bars regressed dark when they adopted the Sankey family colors
-    // (task-19, darkest-first since task-23): family shades darken toward
-    // black to stay readable at translucent ribbon opacity, but at the
-    // Bars' full opacity they read too dark. Each row keeps its own
-    // full-brightness stable color instead.
+  it("paints Bars rows in their own stable colors", () => {
+    // Each row keeps its own full-brightness stable color — the same color
+    // its Sankey bar carries, so the two views agree row for row.
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
     const swatches = container.querySelectorAll("span.h-3.w-3");
@@ -1396,11 +1414,49 @@ describe("SpendingReport", () => {
     ["Mortgage Interest", "Groceries", "Electric Bill"].forEach((name, i) => {
       expect(swatches[i]).toHaveStyle({ background: colorForName(name) });
     });
-    // Regression guard: the largest row must keep its own color, not the
-    // darkened shade of its parent group's.
-    expect(swatches[0]).not.toHaveStyle({
-      background: sankeyFamilyShade(colorForName("Bills"), 1),
-    });
+  });
+
+  it("renders a literal Other row beside the merged Other bucket with no duplicate key warning", () => {
+    // Task-35 regression: Bars rows were keyed by name alone, so a literal
+    // "Other" category beside the merged "Other" bucket produced two
+    // children with the same key — React duplicated/omitted rows and logged
+    // a console error. Rows are keyed by position now, so both render.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const targets: SpendingItem[] = [
+        { name: "Big", value: 100000 },
+        { name: "Other", value: 60000 },
+        { name: "Small A", value: 5000 },
+        { name: "Small B", value: 4000 },
+      ];
+      const categoryFlow: SpendingGroupFlow = {
+        groups: [{ name: "Stuff", value: 169000 }],
+        targets,
+        links: targets.map((t, i) => ({ groupIndex: 0, targetIndex: i, value: t.value })),
+      };
+      const { container } = render(
+        <SpendingReport
+          categoryFlow={categoryFlow}
+          merchantFlow={{ groups: [], targets: [], links: [] }}
+          income={[{ name: "Payroll", value: 200000 }]}
+          initialView="bars"
+        />
+      );
+      // $500 threshold: Small A + Small B merge into the bucket while the
+      // literal "Other" ($600) stays its own row — two rows named "Other".
+      const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+      fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+      expect(screen.getAllByText("Other")).toHaveLength(2);
+      expect(screen.getByText("(2 merged)")).toBeInTheDocument();
+      expect(container.querySelectorAll(".y-bar-track")).toHaveLength(3);
+      // No duplicate-key warning (or any other React error) was logged.
+      expect(
+        errSpy.mock.calls.filter(([msg]) => String(msg).includes("same key"))
+      ).toHaveLength(0);
+      expect(errSpy).not.toHaveBeenCalled();
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("coalesces rapid hover updates into one commit per animation frame", () => {

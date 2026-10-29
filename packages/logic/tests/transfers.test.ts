@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyBoundaryTransfer,
   isCreditPayoffTransfer,
+  isInternalTransfer,
   isOffBudgetTransfer,
   TransactionError,
   transferNetOnBudgetDelta,
@@ -245,6 +246,37 @@ describe("isCreditPayoffTransfer", () => {
     expect(isCreditPayoffTransfer(transferRow(1, 3, "-20000"), map)).toBe(true);
     expect(isCreditPayoffTransfer(transferRow(1, 3, "-20000"))).toBe(false);
     expect(isCreditPayoffTransfer(transferRow(1, 999, "-20000"), ALL_ACCOUNTS)).toBe(false);
+  });
+});
+
+describe("isInternalTransfer", () => {
+  it("flags on-budget moves between liquid accounts in either direction", () => {
+    expect(isInternalTransfer(transferRow(1, 2, "-5000"), ALL_ACCOUNTS)).toBe(true);
+    expect(isInternalTransfer(transferRow(2, 1, "-5000"), ALL_ACCOUNTS)).toBe(true);
+  });
+
+  it("flags credit-card payoffs (a payoff is an internal move)", () => {
+    expect(isInternalTransfer(transferRow(1, 3, "-20000"), ALL_ACCOUNTS)).toBe(true);
+    expect(isInternalTransfer(transferRow(3, 1, "-5000"), ALL_ACCOUNTS)).toBe(true);
+  });
+
+  it("rejects boundary crossings and off-budget moves", () => {
+    expect(isInternalTransfer(transferRow(1, 5, "-30000"), ALL_ACCOUNTS)).toBe(false);
+    expect(isInternalTransfer(transferRow(5, 1, "-75000"), ALL_ACCOUNTS)).toBe(false);
+    expect(isInternalTransfer(transferRow(4, 5, "-1000"), ALL_ACCOUNTS)).toBe(false);
+  });
+
+  it("rejects regular (non-transfer) rows", () => {
+    expect(isInternalTransfer(transferRow(1, null, "-5000"), ALL_ACCOUNTS)).toBe(false);
+  });
+
+  it("accepts a Map of accounts and defaults missing accounts to on-budget", () => {
+    const map = new Map(ALL_ACCOUNTS.map((a) => [a.id, a]));
+    expect(isInternalTransfer(transferRow(1, 2, "-5000"), map)).toBe(true);
+    // Unknown destination defaults to on-budget, so the move reads as internal.
+    expect(isInternalTransfer(transferRow(1, 999, "-5000"), ALL_ACCOUNTS)).toBe(true);
+    // No accounts at all: everything reads as on-budget (internal).
+    expect(isInternalTransfer(transferRow(1, 2, "-5000"))).toBe(true);
   });
 });
 

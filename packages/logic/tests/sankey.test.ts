@@ -142,18 +142,48 @@ describe("computeSpendingBreakdown", () => {
     expect(items).toEqual([{ name: "Groceries", value: 10000 }]);
   });
 
-  it("includes categorized transfers in category mode", () => {
+  it("excludes internal on-budget transfers in both dimensions, categorized or not", () => {
+    // This used to assert a categorized internal transfer counts as Rent
+    // spending — that expectation encoded the bug (task-35): a same-boundary
+    // move is movement between pools, not a terminal outflow, so neither leg
+    // may appear as spending (or net against it) in either dimension. Only
+    // the real June purchase remains.
     const data = makeData();
     data.transactions.push(
       txn("2026-06-15", "Transfer : Savings", -50000, 11, { transferAccountId: 2 })
     );
-    const items = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
-    expect(items).toEqual([
-      { name: "Rent", value: 50000 },
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
       { name: "Groceries", value: 5000 },
     ]);
-    // Internal same-boundary move: counted as spending (legacy semantics).
-    // The exact-shape assertion above pins the rows (no vestigial flags).
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Whole Foods", value: 5000 },
+    ]);
+  });
+
+  it("nets out a savings round-trip: gross pass-through never shows as spending", () => {
+    // Task-35 regression: parking money in an on-budget savings account and
+    // withdrawing it again used to show the GROSS inflow as a
+    // "Transfer: EQ Bank" merchant ($848,748 in the report) — each leg names
+    // the OTHER account, so the legs never shared a payee to net under.
+    // Both legs are movement; only the terminal purchase counts.
+    const data = makeData();
+    data.accounts.push(
+      { id: 7, name: "EQ Bank", kind: "liquid", groupLabel: "Budget", balance: "0", onBudget: true, sort: 2 }
+    );
+    data.transactions.push(
+      txn("2026-06-03", "Transfer : EQ Bank", -84874800, null, { transferAccountId: 7 }),
+      txn("2026-06-20", "Transfer : Chequing", -84000000, null, { accountId: 7, transferAccountId: 1 }),
+      txn("2026-06-21", "Whole Foods", -800000, 10, { accountId: 7 })
+    );
+    // Categories: the June Groceries rows ($50 at Chequing + $8,000 at EQ
+    // Bank); no transfer category is invented.
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Groceries", value: 805000 },
+    ]);
+    // Merchants: real payees only — no "Transfer:" node at all.
+    const merchants = computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants");
+    expect(merchants).toEqual([{ name: "Whole Foods", value: 805000 }]);
+    expect(merchants.some((i) => i.name.startsWith("Transfer"))).toBe(false);
   });
 
   it("excludes credit-card payoff transfers in category mode (money flows through once)", () => {

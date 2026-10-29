@@ -47,92 +47,24 @@ export function colorForName(name: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length] ?? "#888";
 }
 
-// Mix a hex color toward black (amt < 1) or white (amt > 1). amt 0..1 darkens,
-// 1 keeps it unchanged, >1 lightens. Returns a hex string.
-export function shade(hex: string, amt: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  const base = m ? m[1]! : "888888";
-  const t = Math.pow(2, Math.log2(amt));
-  const ch = (i: number): number => {
-    const c = parseInt(base.slice(i * 2, i * 2 + 2), 16);
-    const v = amt <= 1 ? c * t : 255 - (255 - c) * t;
-    return Math.max(0, Math.min(255, Math.round(v)));
-  };
-  const [r, g, b] = [ch(0), ch(1), ch(2)];
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-}
-
-// Sankey family colors: each middle (parent group) node owns one hue, and
-// every target it feeds is a shade of that hue — the largest child takes the
-// darkest shade and smaller siblings lighten toward the parent color by rank,
-// so more money reads darker (single children keep the parent color). Shades
-// only darken from the base, never lighten past it, which keeps bars and
-// ribbons readable at ribbon opacity over a light background. Pure hex → hex.
-const SANKEY_FAMILY_SHADE_STEPS = [1, 0.87, 0.76, 0.67, 0.6, 0.54];
-
-export function sankeyFamilyShade(base: string, rank: number): string {
-  if (rank <= 0) return base;
-  const step =
-    rank < SANKEY_FAMILY_SHADE_STEPS.length
-      ? (SANKEY_FAMILY_SHADE_STEPS[rank] ?? 0.54)
-      : Math.max(0.35, 0.54 * Math.pow(0.92, rank - SANKEY_FAMILY_SHADE_STEPS.length + 1));
-  return shade(base, step);
-}
-
-export type SankeyFamilyGroup = { name: string; bucket: boolean };
-export type SankeyFamilyTarget = { name: string; bucket: boolean; isPlug: boolean };
-export type SankeyFamilyLink = { middleIndex: number; targetIndex: number; value: number };
-
 /**
- * One color per right-column target, aligned with `targets`: each target
- * takes a shade of its dominant (largest-value) parent group's color, with
- * siblings shaded darkest-first by column order (see sankeyFamilyShade) —
- * in Amount sort the column runs largest-first, so more money reads darker
- * and the smallest sibling keeps the parent color. A target fed by several
- * groups (a merchant split across groups) joins its dominant group's
- * family; ties keep the first link in input order so the result is
- * deterministic. The Remaining plug stays green and merged Other buckets
- * stay slate — both by flag, never by name, so a literal "Remaining" or
- * "Other" row still joins its own family. Targets with no incoming link
- * (defensive: well-formed flows never produce them) fall back to their
- * stable name color. Pure data → hex colors.
+ * One color for a right-column Sankey target: the category (or merchant)
+ * determines its own color, and that color flows backwards along every
+ * ribbon arriving at it — no matter which middle group each ribbon comes
+ * from. The parent group never tints the target: two categories sharing a
+ * group keep their own stable hues, and a merchant split across groups is
+ * still one color on every leg. The Remaining plug stays green and merged
+ * Other buckets stay slate — both by flag, never by name, so a literal
+ * "Remaining" or "Other" row still keeps its own stable color.
  */
-export function sankeyTargetColors(
-  groups: SankeyFamilyGroup[],
-  targets: SankeyFamilyTarget[],
-  links: SankeyFamilyLink[]
-): string[] {
-  const dominant = new Array<number | null>(targets.length).fill(null);
-  const best = new Array<number>(targets.length).fill(0);
-  for (const l of links) {
-    if (l.middleIndex < 0 || l.targetIndex < 0 || l.targetIndex >= targets.length) continue;
-    if (!(l.value > 0)) continue;
-    if (dominant[l.targetIndex] == null || l.value > (best[l.targetIndex] ?? 0)) {
-      dominant[l.targetIndex] = l.middleIndex;
-      best[l.targetIndex] = l.value;
-    }
-  }
-  // Family sizes first: the darkest shade goes to the first (largest, in
-  // Amount sort) sibling, so each member's rank counts down from the end.
-  const familySize = new Map<number, number>();
-  targets.forEach((t, i) => {
-    if (t.isPlug || t.bucket) return;
-    const m = dominant[i];
-    if (m == null || groups[m] == null) return;
-    familySize.set(m, (familySize.get(m) ?? 0) + 1);
-  });
-  const seen = new Map<number, number>();
-  return targets.map((t, i) => {
-    if (t.isPlug) return REMAINING_COLOR;
-    if (t.bucket) return OTHER_BUCKET_COLOR;
-    const m = dominant[i];
-    const g = m != null ? groups[m] : undefined;
-    if (g == null || m == null) return colorForName(t.name);
-    const base = g.bucket ? OTHER_BUCKET_COLOR : colorForName(g.name);
-    const pos = seen.get(m) ?? 0;
-    seen.set(m, pos + 1);
-    return sankeyFamilyShade(base, (familySize.get(m) ?? 1) - 1 - pos);
-  });
+export function sankeyTargetColor(t: {
+  name: string;
+  bucket: boolean;
+  isPlug: boolean;
+}): string {
+  if (t.isPlug) return REMAINING_COLOR;
+  if (t.bucket) return OTHER_BUCKET_COLOR;
+  return colorForName(t.name);
 }
 
 export function fmtShort(cents: number): string {

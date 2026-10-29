@@ -9,11 +9,9 @@ import {
   OTHER_BUCKET_COLOR,
   quantile,
   REMAINING_COLOR,
-  sankeyFamilyShade,
   sankeyIncomeGradientStops,
-  sankeyTargetColors,
+  sankeyTargetColor,
   SANKEY_INCOME_COLOR,
-  shade,
   useElementSize,
 } from "./chartUtils.js";
 
@@ -78,139 +76,32 @@ describe("computeOutlierBreak", () => {
   });
 });
 
-describe("sankeyFamilyShade", () => {
-  it("keeps the parent color exactly at rank 0", () => {
-    expect(sankeyFamilyShade("#2f7fb0", 0)).toBe("#2f7fb0");
-    expect(sankeyFamilyShade("#2f7fb0", -1)).toBe("#2f7fb0");
-  });
-
-  it("darkens by rank without brightening any channel", () => {
-    const base = "#2f7fb0";
-    const shades = [1, 2, 3, 4, 5, 6, 10].map((r) => sankeyFamilyShade(base, r));
-    expect(shades[0]).toBe(shade(base, 0.87));
-    for (const out of shades) {
-      expect(out).toMatch(/^#[0-9a-f]{6}$/);
-      for (let i = 0; i < 3; i++) {
-        const inp = parseInt(base.slice(1 + i * 2, 3 + i * 2), 16);
-        const got = parseInt(out.slice(1 + i * 2, 3 + i * 2), 16);
-        expect(got).toBeLessThanOrEqual(inp);
-      }
-    }
-    // Monotonic: each deeper rank is no brighter than the last.
-    const lum = (hex: string) =>
-      [0, 1, 2].reduce((s, i) => s + parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16), 0);
-    for (let i = 1; i < shades.length; i++) {
-      expect(lum(shades[i]!)).toBeLessThanOrEqual(lum(shades[i - 1]!));
-    }
-  });
-});
-
-describe("sankeyTargetColors", () => {
-  const groups = [
-    { name: "Bills", bucket: false },
-    { name: "Everyday", bucket: false },
-  ];
-  const bills = colorForName("Bills");
-  const everyday = colorForName("Everyday");
-
-  it("colors each target as a shade of its parent group", () => {
-    const colors = sankeyTargetColors(
-      groups,
-      [
-        { name: "Mortgage Interest", bucket: false, isPlug: false },
-        { name: "Groceries", bucket: false, isPlug: false },
-        { name: "Electric Bill", bucket: false, isPlug: false },
-      ],
-      [
-        { middleIndex: 0, targetIndex: 0, value: 100000 },
-        { middleIndex: 0, targetIndex: 2, value: 15000 },
-        { middleIndex: 1, targetIndex: 1, value: 40000 },
-      ]
+describe("sankeyTargetColor", () => {
+  it("colors each target by its own stable name color, never by its parent group", () => {
+    // The category determines the color: two targets sharing a parent group
+    // keep their own hues, and nothing about the middle column leaks in.
+    expect(
+      sankeyTargetColor({ name: "Mortgage Interest", bucket: false, isPlug: false })
+    ).toBe(colorForName("Mortgage Interest"));
+    expect(sankeyTargetColor({ name: "Groceries", bucket: false, isPlug: false })).toBe(
+      colorForName("Groceries")
     );
-    // Darkest-first: the first (largest, in Amount sort) sibling takes the
-    // darkest shade and later siblings lighten toward the parent color, so
-    // more money reads darker; single children keep the parent color.
-    expect(colors).toEqual([
-      sankeyFamilyShade(bills, 1),
-      everyday,
-      bills,
-    ]);
-  });
-
-  it("reads more money as a darker color within a family", () => {
-    const colors = sankeyTargetColors(
-      groups,
-      [
-        { name: "Big", bucket: false, isPlug: false },
-        { name: "Mid", bucket: false, isPlug: false },
-        { name: "Small", bucket: false, isPlug: false },
-      ],
-      [
-        { middleIndex: 0, targetIndex: 0, value: 900 },
-        { middleIndex: 0, targetIndex: 1, value: 500 },
-        { middleIndex: 0, targetIndex: 2, value: 100 },
-      ]
-    );
-    // Amount sort runs largest-first down the column: luminance must rise
-    // down the column — the largest sibling is the darkest.
-    const lum = (hex: string) =>
-      [0, 1, 2].reduce((s, i) => s + parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16), 0);
-    expect(lum(colors[0]!)).toBeLessThan(lum(colors[1]!));
-    expect(lum(colors[1]!)).toBeLessThan(lum(colors[2]!));
-    expect(colors[2]).toBe(bills);
-  });
-
-  it("attributes a multi-group target to its dominant group", () => {
-    const colors = sankeyTargetColors(
-      groups,
-      [{ name: "Amazon", bucket: false, isPlug: false }],
-      [
-        { middleIndex: 0, targetIndex: 0, value: 100 },
-        { middleIndex: 1, targetIndex: 0, value: 900 },
-      ]
-    );
-    expect(colors).toEqual([everyday]);
   });
 
   it("keeps the Remaining plug green and Other buckets slate by flag, never by name", () => {
-    const colors = sankeyTargetColors(
-      groups,
-      [
-        // A literal "Remaining" category joins its own family.
-        { name: "Remaining", bucket: false, isPlug: false },
-        // A literal "Other" merchant joins its own family.
-        { name: "Other", bucket: false, isPlug: false },
-        { name: "Other", bucket: true, isPlug: false },
-        { name: "Remaining", bucket: false, isPlug: true },
-      ],
-      [
-        { middleIndex: 0, targetIndex: 0, value: 10 },
-        { middleIndex: 0, targetIndex: 1, value: 5 },
-        { middleIndex: 0, targetIndex: 2, value: 3 },
-      ]
+    expect(sankeyTargetColor({ name: "Remaining", bucket: false, isPlug: true })).toBe(
+      REMAINING_COLOR
     );
-    expect(colors[0]).toBe(sankeyFamilyShade(bills, 1));
-    expect(colors[1]).toBe(bills);
-    expect(colors[2]).toBe(OTHER_BUCKET_COLOR);
-    expect(colors[3]).toBe(REMAINING_COLOR);
-  });
-
-  it("shades targets routed through the merged Other group in slate", () => {
-    const colors = sankeyTargetColors(
-      [{ name: "Other", bucket: true }],
-      [{ name: "Kept Category", bucket: false, isPlug: false }],
-      [{ middleIndex: 0, targetIndex: 0, value: 100 }]
+    expect(sankeyTargetColor({ name: "Other", bucket: true, isPlug: false })).toBe(
+      OTHER_BUCKET_COLOR
     );
-    expect(colors).toEqual([OTHER_BUCKET_COLOR]);
-  });
-
-  it("falls back to the stable name color for targets with no incoming link", () => {
-    const colors = sankeyTargetColors(
-      groups,
-      [{ name: "Orphan", bucket: false, isPlug: false }],
-      []
+    // A literal "Remaining" category or "Other" merchant keeps its own color.
+    expect(sankeyTargetColor({ name: "Remaining", bucket: false, isPlug: false })).toBe(
+      colorForName("Remaining")
     );
-    expect(colors).toEqual([colorForName("Orphan")]);
+    expect(sankeyTargetColor({ name: "Other", bucket: false, isPlug: false })).toBe(
+      colorForName("Other")
+    );
   });
 });
 

@@ -10,7 +10,7 @@
 import type { BudgetData } from "./types.js";
 import { num } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
-import { isCreditPayoffTransfer, isOffBudgetTransfer } from "./transfers.js";
+import { isInternalTransfer, isOffBudgetTransfer } from "./transfers.js";
 
 export type SpendingDimension = "categories" | "merchants";
 
@@ -69,14 +69,16 @@ export type SpendingGroupFlow = {
  *   income rows are uncategorized by definition).
  * - Refunds/returns (positive amounts on non-income rows) net against the
  *   cell's outflows; targets netting to <= 0 are dropped.
- * - Categorized on-budget transfers count as spending in category mode
- *   (matches the legacy Spending by Category tab); in merchant mode every
- *   non-income outflow row counts, categorized or not — except
- *   off-budget transfers, which are excluded in both dimensions (below).
- * - Credit-card payoff transfers (internal moves touching an on-budget
- *   credit account) are excluded in both dimensions: the spending was
- *   already captured by the original card purchases, so money flows THROUGH
- *   instead of appearing as a second "Transfer" expense.
+ * - No transfer leg counts as spending in either dimension, categorized
+ *   or not: every transfer is movement between pools, and the terminal
+ *   purchase (wherever its account sits) is the one spending record. In
+ *   particular internal on-budget transfers (chequing to an on-budget
+ *   savings account, credit-card payoffs) are excluded: counting the legs
+ *   would show gross pass-through "spending" under `Transfer: <account>`
+ *   payees that can never net out, since each leg names the OTHER account
+ *   (a round-trip through a savings account is movement, not spending —
+ *   only money that actually leaves the budget counts). Matches the
+ *   internal-transfer exclusion in computeCashFlowRange.
  * - Off-budget transfers (any transfer touching an off-budget account: a
  *   contribution out, a withdrawal back, or a move between two off-budget
  *   accounts) are excluded in both dimensions: off-budget accounts are
@@ -128,7 +130,11 @@ export function computeSpendingGroupFlow(
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
-    if (isCreditPayoffTransfer(t, accountMap)) continue;
+    // Every transfer leg is movement between pools, never terminal spending
+    // (internal on-budget moves and credit payoffs via isInternalTransfer,
+    // boundary crossings via isOffBudgetTransfer — together they cover every
+    // row with transferAccountId set).
+    if (isInternalTransfer(t, accountMap)) continue;
     if (isOffBudgetTransfer(t, accountMap)) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;

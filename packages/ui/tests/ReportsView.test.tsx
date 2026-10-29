@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
-import { colorForName, REMAINING_COLOR, sankeyFamilyShade } from "../src/chartUtils.js";
+import { colorForName, REMAINING_COLOR } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
 import { sankeyThresholdStops } from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
@@ -762,7 +762,7 @@ describe("ReportsView", () => {
     expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
 
     // Left ribbons take their middle group's color and right ribbons
-    // their final category's family shade: each ribbon reads as where the
+    // their final category's own color: each ribbon reads as where the
     // money lands, in one flat color through its whole length.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
@@ -781,10 +781,9 @@ describe("ReportsView", () => {
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
-    // Right ribbons fill with their target's family shade, cell-major.
-    // Darkest-first: the larger sibling (Groceries) takes the darker
-    // shade, Rent keeps the Everyday color.
-    const targetFills = [sankeyFamilyShade(everyday, 1), everyday];
+    // Right ribbons fill with their target's own color, cell-major.
+    // Both siblings share the Everyday group but keep their own hues.
+    const targetFills = [colorForName("Groceries"), colorForName("Rent")];
     right.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(targetFills[k]);
       expect(link.getAttribute("data-income")).toBeNull();
@@ -793,7 +792,11 @@ describe("ReportsView", () => {
     const nodeFills = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
       (n) => n.getAttribute("fill")
     );
-    expect(nodeFills).toEqual([sankeyFamilyShade(everyday, 1), everyday, REMAINING_COLOR]);
+    expect(nodeFills).toEqual([
+      colorForName("Groceries"),
+      colorForName("Rent"),
+      REMAINING_COLOR,
+    ]);
     const groupFill = svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill");
     expect(groupFill).toBe(everyday);
   });

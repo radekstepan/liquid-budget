@@ -176,12 +176,37 @@ export function isOffBudgetTransfer(
 }
 
 /**
+ * True when the row is an internal transfer: both legs sit on the same side
+ * of the budget boundary and both are on-budget (e.g. moving money from
+ * chequing to an on-budget savings account). Such moves are pure money
+ * movement inside the budget: the spending is captured by the terminal
+ * purchase (wherever its account sits), so flow-through reports must not
+ * count either leg — the legs would otherwise show as gross pass-through
+ * "spending" under `Transfer: <account>` payees that never nets out (each
+ * leg names the OTHER account, so the two sides never share a payee to net
+ * under). Matches the `isInternalTransfer` boundary concept in
+ * `reports.ts` (cash flow) and `budget-engine.ts`. Missing accounts default
+ * to on-budget (matches `transferNetOnBudgetDelta`).
+ */
+export function isInternalTransfer(
+  t: Transaction,
+  accountMap?: Map<number, Account> | Account[]
+): boolean {
+  if (t.transferAccountId == null) return false;
+  const onA = findAccount(accountMap, t.accountId)?.onBudget ?? true;
+  const onB = findAccount(accountMap, t.transferAccountId)?.onBudget ?? true;
+  return onA && onB;
+}
+
+/**
  * True when the row is an internal (same-boundary) transfer touching an
  * on-budget credit account — i.e. a credit-card payoff from the budget, a
  * cash advance back into it, or a balance transfer between cards. Such moves
  * are pure money movement: the spending was already captured by the original
  * categorized card purchases, so reports must not count the transfer again
- * (money flows THROUGH, it is not a second expense).
+ * (money flows THROUGH, it is not a second expense). A subset of
+ * `isInternalTransfer` (kept as its own classifier for callers that care
+ * specifically about the credit leg).
  *
  * Boundary-crossing transfers are never payoffs (see `isOffBudgetTransfer`):
  * money moves between the budget and an intermediate off-budget pool there,
