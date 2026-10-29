@@ -848,6 +848,17 @@ export function SpendingReport({
     hl.ll != null && hl.ll.has(`${a}:${b}`);
   const rightLit = (a: number, b: number) =>
     hl.rl != null && hl.rl.has(`${a}:${b}`);
+  // Sub-ribbon spotlight: a subdivided band's subs each feed one downstream
+  // cell, so a sub lights only when BOTH its band and its cell sit on the
+  // hovered path. Hovering a target (or one of its cell ribbons) lights that
+  // target's slices — never the sibling categories nested in the same bands.
+  // Income, group, and left-ribbon hovers light every downstream cell of
+  // their bands, so all subs of a lit band still light there, unchanged.
+  const leftCellLit = (s: GroupedLeftCellLayout) =>
+    hl.ll != null &&
+    hl.rl != null &&
+    hl.ll.has(`${s.sourceIndex}:${s.middleIndex}`) &&
+    hl.rl.has(`${s.middleIndex}:${s.targetIndex}`);
   const ribbonOpacity = (lit: boolean, active: boolean) =>
     !active
       ? SANKEY_RIBBON_OPACITY
@@ -1289,8 +1300,10 @@ export function SpendingReport({
                 // A subdivided band renders one sub-ribbon per downstream
                 // cell from the layout's own paths and fills — the band
                 // stays one hover target (handlers on the wrapping <g>, so
-                // moving between sub-ribbons never flickers the spotlight)
-                // and every sub shares the band's spotlight key.
+                // moving between sub-ribbons never flickers the spotlight),
+                // but each sub carries its own spotlight key: its band's AND
+                // its downstream cell's, so a target hover lights only that
+                // target's slices out of the shared bands.
                 if (subs != null) {
                   return (
                     <g
@@ -1306,7 +1319,7 @@ export function SpendingReport({
                           data-side="left"
                           d={s.d}
                           fill={s.fill}
-                          fillOpacity={opacity}
+                          fillOpacity={ribbonOpacity(leftCellLit(s), hl.ll != null)}
                           stroke="none"
                           style={{
                             transition: `fill-opacity ${transitionMs}ms`,

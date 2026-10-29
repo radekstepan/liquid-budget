@@ -897,6 +897,69 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(node);
   });
 
+  it("lights only the hovered target's sub-ribbons inside a shared group band", () => {
+    // Bills feeds TWO categories (Mortgage Interest + Electric Bill), so its
+    // income band subdivides into two sub-ribbons. Hovering one category must
+    // light only ITS slice — the sibling's sub-ribbon dims with the rest of
+    // the off-path wash, or unrelated categories light up to the left.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Left paths: [Bills/Mortgage, Bills/Electric, Everyday/Groceries, plug].
+    const node = svg.querySelectorAll('[data-testid="sankey-node"]')[0]!;
+    fireEvent.mouseMove(node, { clientX: 600, clientY: 100 });
+    const left = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    );
+    expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.85", // Mortgage Interest's own slice
+      "0.12", // Electric Bill's slice — same band, different category
+      "0.12", // Everyday band
+      "0.12", // plug
+    ]);
+    // The lit slice reads as the hovered category; the dimmed sibling keeps
+    // its own color (dimmed, not relit).
+    expect(left[0]!.getAttribute("fill")).toBe(colorForName("Mortgage Interest"));
+    expect(left[1]!.getAttribute("fill")).toBe(colorForName("Electric Bill"));
+    // Right side: only the Mortgage cell lights; the parent group joins the
+    // spotlight while the off-path group dims.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.85",
+      "0.12",
+      "0.12",
+    ]);
+    const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
+    expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.85");
+    expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.12");
+    fireEvent.mouseLeave(node);
+  });
+
+  it("lights only the hovered cell's sub-ribbons when hovering a group→category ribbon", () => {
+    // The through-line of a right-hop ribbon runs back through the income
+    // bands feeding its middle — but only the hovered cell's slices, not the
+    // sibling categories nested in the same bands.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Right ribbons trail the 4 left paths: Bills→Mortgage first.
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[4]!;
+    expect(link.getAttribute("data-side")).toBe("right");
+    fireEvent.mouseMove(link, { clientX: 500, clientY: 120 });
+    const left = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    );
+    expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
+      "0.85", // Mortgage Interest's slice of the Bills band
+      "0.12", // Electric Bill's slice — same band, not on this path
+      "0.12", // Everyday band
+      "0.12", // plug
+    ]);
+    fireEvent.mouseLeave(link);
+  });
+
   it("spotlights the full path — every leg — when hovering a merchant split across groups", () => {
     // Airbnb draws mostly from Everyday ($900) with a small Bills cell
     // ($100): hovering it must trace its FULL path — both cells brighten,
