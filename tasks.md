@@ -69,4 +69,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 Spending by Category - Sankey has these issues:
 - Categories view "Housing to "Mortgage Interest" line is thicker than "SAP Concur" to "Housing" of the same color
-- Categories view "Other" category the sankey lines going to it is a complete fucking mess. The "Other" parent category is even worse where it sort of terminates and nothing leaves from it
+- Categories view "Other" category the sankey lines going to it is a complete fucking mess. The "Other" parent category is even worse where it does not have lines going in or out
+- since you can't fucking implement this correctly, I want you to first calculate mathematically how the lines will look like, then use a lib that lets you render them that way. I don't care what you fucking say, you can't get the sankey chart to render properly if your life depended on it. Do math, reproducible ts objects. Then render from these objects. If I see a glitch you'll go to the math objects and fix the math. Rendering is pure presentation, no logic.
