@@ -8,6 +8,7 @@ import {
 } from "@ynab/logic";
 import {
   SpendingReport,
+  SANKEY_AUTOFIT_SESSION_KEY,
   SANKEY_BUCKET_HATCH_ID,
   SANKEY_INCOME_GRADIENT_ID_PREFIX,
   SANKEY_MIDDLE_GRADIENT_ID_PREFIX,
@@ -686,6 +687,9 @@ describe("SpendingReport", () => {
   });
 
   it("colors every ribbon flat by its final destination, not its income source", () => {
+    // Unmerged fixture: pin the auto-fit flag so the initial load keeps the
+    // threshold off instead of raising it to fit the 400px mock viewport.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Bonus", value: 50000 },
@@ -847,6 +851,9 @@ describe("SpendingReport", () => {
   });
 
   it("highlights a hovered target and every line leading into it", () => {
+    // Unmerged fixture: pin the auto-fit flag so the initial load keeps the
+    // threshold off instead of raising it to fit the 400px mock viewport.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
     const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
       { name: "Payroll", value: 200000 },
       { name: "Bonus", value: 50000 },
@@ -2037,10 +2044,13 @@ describe("SpendingReport", () => {
   });
 
   it("auto-raises the Under threshold on load so the Sankey fits the viewport", () => {
-    // Thirty $5..$150 categories in two groups with a $10,000 income: at
-    // most 10 rows fit the mocked 400px viewport, so the initial load
-    // merges up to the smallest fitting stop ($150) instead of starting
-    // with amounts under the fold.
+    // Thirty $5..$150 categories in two groups with a $10,000 income: the
+    // initial load merges up to the smallest stop whose layout fits the
+    // mocked 400px viewport instead of starting with amounts under the
+    // fold. Merging the targets alone is not enough — the fat Remaining
+    // plug and its transit lane bind the fit — so the auto-fit keeps both
+    // middle rows only until $1,500, which folds the middles into one and
+    // lifts the lane into the viewport.
     const targets: SpendingItem[] = Array.from({ length: 30 }, (_, i) => ({
       name: `Category ${i + 1}`,
       value: (i + 1) * 500,
@@ -2061,7 +2071,7 @@ describe("SpendingReport", () => {
       />
     );
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    expect(slider.getAttribute("aria-valuetext")).toBe("$150.00");
+    expect(slider.getAttribute("aria-valuetext")).toBe("$1,500.00");
     // The merged chart needs no scrolling: the SVG is exactly the viewport.
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.getAttribute("height")).toBe("400");
@@ -2096,7 +2106,9 @@ describe("SpendingReport", () => {
       <SpendingReport categoryFlow={categoryFlow} merchantFlow={emptyFlow} income={income} />
     );
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
-    expect(slider.getAttribute("aria-valuetext")).toBe("$150.00");
+    // Single middle group: $200 folds every target into one Other row and
+    // the layout fits the viewport.
+    expect(slider.getAttribute("aria-valuetext")).toBe("$200.00");
     // The user opts back into full detail; a remount (report tab switch)
     // must keep that choice instead of re-fitting.
     fireEvent.change(slider, { target: { value: "0" } });
@@ -2534,8 +2546,10 @@ describe("SpendingReport", () => {
     ]);
   });
 
-  it("sizes shortfall bars to their funded flow with a legible minimum", () => {
-    // $1,000 in over $1,550 out: ~65% coverage, no Remaining.
+  it("sizes shortfall bars to their funded flow, wrapping bands exactly", () => {
+    // $1,000 in over $1,550 out: ~65% coverage, no Remaining. Bars wrap
+    // their funded bands exactly — no label minimum lifts small bars and
+    // nothing is taken from large ones to fund one.
     const { container } = render(
       <SpendingReport
         categoryFlow={sampleCategoryFlow}
@@ -2545,7 +2559,8 @@ describe("SpendingReport", () => {
     );
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // The 328px band splits by funded share of the $1,550 flow — not by
-    // full value — with the tiniest row floored at the 24px label minimum.
+    // full value — down to the tiniest row, which keeps its exact funded
+    // share instead of a minimum.
     const coverage = 100000 / 155000;
     const heights = Array.from(svg.querySelectorAll('[data-testid="sankey-node"]')).map(
       (n) => Number(n.getAttribute("height"))
@@ -2553,13 +2568,13 @@ describe("SpendingReport", () => {
     expect(heights).toHaveLength(3);
     expect(heights[0]).toBeCloseTo(((100000 * coverage) / 155000) * 328, 6);
     expect(heights[1]).toBeCloseTo(((40000 * coverage) / 155000) * 328, 6);
-    expect(heights[2]).toBe(24);
+    expect(heights[2]).toBeCloseTo(((15000 * coverage) / 155000) * 328, 6);
     // Middle bars wrap their funded bands the same way: Bills stacks the
     // Mortgage and Electric bands, Everyday matches Groceries.
     const midHeights = Array.from(svg.querySelectorAll('[data-testid="sankey-group"]')).map(
       (g) => Number(g.getAttribute("height"))
     );
-    expect(midHeights[0]).toBeCloseTo(heights[0]! + 24, 6);
+    expect(midHeights[0]).toBeCloseTo(heights[0]! + heights[2]!, 6);
     expect(midHeights[1]).toBeCloseTo(heights[1]!, 6);
   });
 

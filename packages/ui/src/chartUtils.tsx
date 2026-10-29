@@ -1,71 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { fmt, OTHER_BUCKET_LABEL, REMAINING_LABEL, OVER_INCOME_LABEL } from "@ynab/logic";
+import { fmt } from "@ynab/logic";
 
-export const PALETTE = [
-  "#2f7fb0", // 0: Classic Steel Blue
-  "#5c8f2c", // 1: Olive/Forest Green
-  "#e8a33d", // 2: Amber/Gold
-  "#7e57c2", // 3: Purple/Violet
-  "#d45042", // 4: Coral Red
-  "#26a69a", // 5: Teal/Cyan
-  "#1f5c85", // 6: Deep Navy
-  "#c07d1c", // 7: Warm Ochre
-  "#b0608f", // 8: Rose/Magenta
-  "#5aa5d0", // 9: Sky Blue
-  "#78909c", // 10: Slate Grey
-  "#8bc34a", // 11: Lime Green
-];
-
-export function colorAt(i: number): string {
-  return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length] ?? "#888";
-}
-
-// Stable color per series name (djb2 hash into PALETTE): a category or
-// merchant keeps its color across month ranges, dimension toggles, and
-// threshold merges. The merged "Other" bucket always renders slate; the
-// unspent-income plug is green and each expense's over-income slice is
-// neutral gray (an unfunded slice is not a series, so it never takes a
-// palette color).
-export const OTHER_BUCKET_COLOR = "#78909c";
-export const REMAINING_COLOR = "#2f9e5f";
-export const OVER_INCOME_COLOR = "#a3adb6";
-// Sankey income bars carry no series color: every left-column bar renders
-// this one neutral gray so the income side never competes with the
-// group/category colors on the right.
-export const SANKEY_INCOME_COLOR = "#9aa3ad";
-
-export function colorForName(name: string): string {
-  if (name === OTHER_BUCKET_LABEL) return OTHER_BUCKET_COLOR;
-  if (name === REMAINING_LABEL) return REMAINING_COLOR;
-  if (name === OVER_INCOME_LABEL) return OVER_INCOME_COLOR;
-  let h = 5381;
-  for (let i = 0; i < name.length; i++) {
-    h = ((h << 5) + h + name.charCodeAt(i)) | 0;
-  }
-  return PALETTE[Math.abs(h) % PALETTE.length] ?? "#888";
-}
-
-/**
- * One color for a right-column Sankey target: the category (or merchant)
- * determines its own color, and that color flows backwards along every
- * ribbon arriving at it — no matter which middle group each ribbon comes
- * from. The parent group never tints the target: two categories sharing a
- * group keep their own stable hues, and a merchant split across groups is
- * still one color on every leg. The Remaining plug stays green and merged
- * Other buckets stay slate — both by flag, never by name, so a literal
- * "Remaining" or "Other" row still keeps its own stable color.
- */
-export function sankeyTargetColor(t: {
-  name: string;
-  bucket: boolean;
-  isPlug: boolean;
-}): string {
-  if (t.isPlug) return REMAINING_COLOR;
-  if (t.bucket) return OTHER_BUCKET_COLOR;
-  return colorForName(t.name);
-}
+// The Sankey palette and color math live in @ynab/logic (the layout's
+// canonical home) and are re-exported here for the reports — never
+// re-implemented. In particular colorForName is a pure name hash: buckets
+// and plugs resolve through sankeyTargetColor by FLAG, never by name, so a
+// literal "Other" or "Remaining" row keeps its own stable color instead of
+// colliding with the computed rows.
+export {
+  PALETTE,
+  colorAt,
+  OTHER_BUCKET_COLOR,
+  REMAINING_COLOR,
+  OVER_INCOME_COLOR,
+  SANKEY_INCOME_COLOR,
+  colorForName,
+  sankeyTargetColor,
+  sankeyIncomeGradientStops,
+  type SankeyIncomeBand,
+  type SankeyGradientStop,
+} from "@ynab/logic";
 
 export function fmtShort(cents: number): string {
   const dollars = cents / 100;
@@ -398,62 +354,6 @@ export function SankeyBucketHatchPattern({ id }: { id: string }) {
 }
 
 /** One outgoing ribbon band across an income bar: vertical span + ribbon color. */
-export type SankeyIncomeBand = { y0: number; y1: number; color: string };
-/** One linear-gradient stop: fractional offset + color. */
-export type SankeyGradientStop = { offset: number; color: string };
-
-/**
- * Hard-edged top-to-bottom gradient stops for a Sankey income or middle
- * bar, built from the colors of the ribbons extending from it: each band
- * keeps its ribbon's destination color through its exact span, and
- * adjacent bands meet at a hard edge on their shared boundary — so every
- * bar segment matches the ribbon leaving it. (An earlier feathered blend
- * smeared each boundary across the bar and the bar stopped matching its
- * ribbons.) Pure geometry → stops.
- *
- * - Band order is the gradient order (top to bottom); zero-height bands
- *   are skipped.
- * - Shared boundary offsets are kept, not collapsed: the duplicate offset
- *   is what renders the hard edge between two bands.
- * - A single band (or none, defensively) yields a solid fill: the band's
- *   own color, or `fallback` when there are no bands (the neutral income
- *   gray for income bars, the group's own color for middle bars with no
- *   outgoing ribbons).
- */
-export function sankeyIncomeGradientStops(
-  barY0: number,
-  barY1: number,
-  bands: readonly SankeyIncomeBand[],
-  fallback: string = SANKEY_INCOME_COLOR
-): SankeyGradientStop[] {
-  const h = barY1 - barY0;
-  const live = bands.filter((b) => b.y1 > b.y0 && h > 0);
-  if (live.length === 0) {
-    return [
-      { offset: 0, color: fallback },
-      { offset: 1, color: fallback },
-    ];
-  }
-  if (live.length === 1) {
-    return [
-      { offset: 0, color: live[0]!.color },
-      { offset: 1, color: live[0]!.color },
-    ];
-  }
-  const frac = (y: number) => (y - barY0) / h;
-  const clamp01 = (o: number) => Math.min(1, Math.max(0, o));
-  const stops: SankeyGradientStop[] = [];
-  for (const b of live) {
-    stops.push({ offset: clamp01(frac(b.y0)), color: b.color });
-    stops.push({ offset: clamp01(frac(b.y1)), color: b.color });
-  }
-  // Bands arrive top-to-bottom, so this sort is a no-op on well-formed
-  // input; stability keeps each shared boundary's outgoing color before
-  // the incoming one, which is what renders the hard edge.
-  stops.sort((a, b) => a.offset - b.offset);
-  return stops;
-}
-
 // ---------------------------------------------------------------------------
 // Outlier detection (Tukey IQR fence) — ported from the SVG bar-chart outlier
 // playground. Robust: quartiles cannot be distorted by the outlier itself.

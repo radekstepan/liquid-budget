@@ -8,13 +8,12 @@ import {
   layoutGroupedIncomeSankey,
   sankeyAutoFitThreshold,
   sankeyContentHeight,
+  sankeyTargetColor,
   OVER_INCOME_LABEL,
-  ribbonPath,
   sankeyThresholdStep,
   sankeyThresholdStops,
   showSankeySourceAmount,
   sortMergedGroupFlow,
-  subdivideBandByValues,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -22,6 +21,7 @@ import {
   SANKEY_PAD_TOP,
   SANKEY_SOURCE_GUTTER,
   UNCATEGORIZED_GROUP_LABEL,
+  type GroupedLeftCellLayout,
   type MergedSpendingItem,
   type SankeyTargetSort,
   type SpendingBreakdownItem,
@@ -31,16 +31,11 @@ import {
 import { Button, Panel, Tooltip } from "@ynab/theme";
 import {
   ChartTip,
-  colorForName,
-  sankeyIncomeGradientStops,
-  sankeyTargetColor,
   SankeyBucketHatchPattern,
-  SANKEY_INCOME_COLOR,
   TipLabel,
   OVER_INCOME_COLOR,
   useElementSize,
   useRafThrottledSet,
-  type SankeyIncomeBand,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -58,19 +53,6 @@ type Hover =
   | { kind: "link"; side: "left"; a: number; b: number; x: number; y: number }
   | { kind: "link"; side: "right"; a: number; b: number; x: number; y: number }
   | { kind: "bar"; idx: number; x: number; y: number };
-
-// One slice of a subdivided left-hop band (see leftSubs): the income's
-// share of one downstream cell, drawn as its own ribbon in the cell's
-// category color. Source slices tile the parent band exactly where the
-// income gradient nests the same categories.
-type LeftLinkSub = {
-  color: string;
-  sy0: number;
-  sy1: number;
-  ty0: number;
-  ty1: number;
-  d: string;
-};
 
 const LABEL_ZONE = 190;
 
@@ -109,9 +91,10 @@ function usePrefersReducedMotion(): boolean {
 // destination — through its whole length: right-hop ribbons their
 // category's or merchant's own color (one ribbon per group→target cell),
 // and in Categories grouping each left-hop income→group band subdivides
-// into one sub-ribbon per downstream cell, in the same category colors,
-// so the line from an income bar to a category bar reads as one color
-// throughout. The full-width Remaining ribbons carry the plug's green,
+// into one sub-ribbon per downstream cell (layout leftCells), in the same
+// category colors, landing in contiguous per-color blocks — so the line
+// from an income bar to a category bar reads as one color throughout at
+// one thickness. The full-width Remaining ribbons carry the plug's green,
 // and in Merchants grouping each left-hop band stays one group-colored
 // ribbon (merchants span groups, so per-merchant splits would repeat
 // colors down the bar). The category determines the color and it flows
@@ -150,16 +133,16 @@ export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 // border), so computed rows never read as real ones.
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
-// Income bars fill with a hard-edged top-to-bottom gradient built from
-// their outgoing ribbons' destination colors — one gradient per bar, so
-// each bar segment matches its ribbon exactly. Bar i paints from
+// Income bars fill with a hard-edged top-to-bottom gradient from the
+// layout's own stops (sourceFills) — one gradient per bar, so each bar
+// segment matches its ribbon exactly. Bar i paints from
 // `${SANKEY_INCOME_GRADIENT_ID_PREFIX}${i}`.
 export const SANKEY_INCOME_GRADIENT_ID_PREFIX = "sankey-income-gradient-";
 
-// Middle bars fill the same way — one gradient per bar built from the
-// outgoing group→target cells' colors (see middleGradients), so each bar
-// segment matches its ribbon exactly instead of sitting flat in the group
-// hue while category-colored arms leave it. Bar i paints from
+// Middle bars fill the same way — one gradient per bar from the layout's
+// own stops (middleFills), so each bar segment matches its ribbon exactly
+// instead of sitting flat in the group hue while category-colored arms
+// leave it. Bar i paints from
 // `${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${i}`.
 export const SANKEY_MIDDLE_GRADIENT_ID_PREFIX = "sankey-middle-gradient-";
 
@@ -168,8 +151,10 @@ export const SANKEY_MIDDLE_GRADIENT_ID_PREFIX = "sankey-middle-gradient-";
 // the user drags the slider themselves. Report tab switches remount this
 // component, so a mount-local ref alone would re-auto and fight the user's
 // in-session choice; sessionStorage survives remounts but resets on a fresh
-// tab load, which is exactly "initial load" semantics.
-const SANKEY_AUTOFIT_SESSION_KEY = "ynab:reports:spendingAutoFit";
+// tab load, which is exactly "initial load" semantics. Exported so tests can
+// pin the flag and assert unmerged geometry without the auto-fit raising the
+// threshold underneath them.
+export const SANKEY_AUTOFIT_SESSION_KEY = "ynab:reports:spendingAutoFit";
 
 function sankeyAutoFitDone(): boolean {
   try {
@@ -304,15 +289,15 @@ export function SpendingReport({
   // keeps its own full-brightness stable color — NOT the Sankey family
   // shades: those darken toward black to stay readable at translucent
   // ribbon opacity, but at the Bars' full opacity they read too dark
-  // (task-31 restore of the pre-task-19 palette). The merged Other bucket
-  // still renders slate via colorForName's bucket branch.
+  // (task-31 restore of the pre-task-19 palette). Buckets render slate by
+  // flag (never by name, so a literal "Other" row keeps its own color).
   const rows = useMemo(() => {
     const maxSpend = merged.targets.reduce((m, s) => Math.max(m, s.value), 1);
     return merged.targets.map((s, i) => {
       const share = spentTotal !== 0 ? s.value / spentTotal : 0;
       const pctOfTotal = Math.round(share * 100);
       const pctOfMax = (s.value / maxSpend) * 100;
-      const color = colorForName(s.name);
+      const color = sankeyTargetColor({ name: s.name, bucket: s.bucket === true, isPlug: false });
       return { ...s, share, pctOfTotal, pctOfMax, color, i };
     });
   }, [merged.targets, spentTotal]);
@@ -345,6 +330,11 @@ export function SpendingReport({
     [incomeRows.length, merged.groups.length, merged.targets.length, totals.incomeTotal, totals.spendingTotal, chartSize.height]
   );
 
+  // Math-first: the layout owns EVERYTHING drawn below — node bars, ribbon
+  // paths, sub-ribbon paths, bar gradient stops, fills, and label anchors —
+  // and this component renders those objects verbatim with no geometry,
+  // subdivision, path, color, or label math of its own. A visual glitch is
+  // fixed in the layout (unit-tested in @ynab/logic), never here.
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
     return layoutGroupedIncomeSankey(incomeRows, ordered.groups, ordered.targets, ordered.links, {
@@ -356,8 +346,13 @@ export function SpendingReport({
       padBottom: SANKEY_PAD_BOTTOM,
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
+      // Categories grouping subdivides each income→group band into one
+      // sub-ribbon per downstream cell (layout leftCells), so each color
+      // crosses the middle as one contiguous block at its cell's thickness;
+      // Merchants grouping renders whole group-colored bands.
+      leftDetail: dimension === "categories" ? "cells" : "bands",
     });
-  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH]);
+  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH, dimension]);
 
   // Initial-load auto-fit: raise the Under threshold to the smallest stop
   // whose merged columns fit the measured container, so the Sankey shows
@@ -408,17 +403,17 @@ export function SpendingReport({
   );
 
   // Label/tooltip rows follow the layout (which appends Remaining and drops
-  // non-positive values), so labels and bars always agree.
+  // non-positive values), so labels and bars always agree. Colors come from
+  // the layout's own fills — recomputing them here would let the two drift.
   const srcRows = useMemo(
     () =>
       (sankey?.sources ?? []).map((s, i) => ({
         ...s,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((s.value / totals.flowTotal) * 100) : 0,
-        // Neutral gray for the income tooltip dot only: the bars
-        // themselves fill with their outgoing ribbons' colors. No single
-        // color can stand for a gradient bar.
-        color: SANKEY_INCOME_COLOR,
+        // The layout's fill doubles as the tooltip dot. The bars themselves
+        // paint their gradient stops; no single color can stand for one.
+        color: s.fill,
         i,
       })),
     [sankey, totals.flowTotal]
@@ -429,11 +424,9 @@ export function SpendingReport({
         ...m,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((m.value / totals.flowTotal) * 100) : 0,
-        // Group color for the tooltip dot, the Merchants left-hop ribbons,
-        // and the no-outgoing-bands fallback only: the bars themselves
-        // segment by their outgoing cells' target colors (see
-        // middleGradients). No single color can stand for a segmented bar.
-        color: colorForName(m.name),
+        // The layout's fill doubles as the tooltip dot. The bars themselves
+        // paint their gradient stops; no single color can stand for one.
+        color: m.fill,
         // How many right-column rows this group feeds (distinct targets —
         // one ribbon per group→target cell).
         memberCount: new Set(
@@ -453,134 +446,30 @@ export function SpendingReport({
         ...t,
         flowPct:
           totals.flowTotal !== 0 ? Math.round((t.value / totals.flowTotal) * 100) : 0,
-        // The category's own stable color — the parent group never tints
-        // it, so every ribbon into this bar shares one color no matter
-        // which middle group it comes from.
-        color: sankeyTargetColor({ name: t.name, bucket: t.bucket, isPlug }),
+        // The layout's fill, shared with every incoming ribbon: the line
+        // into this bar reads as one color throughout, whichever middle
+        // group each ribbon arrives from.
+        color: t.fill,
         isPlug,
         i,
       };
     });
   }, [sankey, totals.flowTotal]);
 
-  // Flat color of a whole left-hop band: its middle group's color — except
-  // the full-width surplus ribbons, which carry the Remaining plug's green
-  // straight through to the right. Whole bands render only in Merchants
-  // grouping, for the plug, and as the degenerate fallback; in Categories
-  // grouping every real band subdivides (see leftSubs) and this survives
-  // only as the per-sub fallback color.
-  const leftFillFor = (targetIndex: number, targetName: string): string => {
-    const plugTarget = sankey?.remainingTargetIndex;
-    return targetIndex >= midRows.length && plugTarget != null
-      ? (tgtRows[plugTarget]?.color ?? colorForName(targetName))
-      : (midRows[targetIndex]?.color ?? colorForName(targetName));
-  };
-
-  // Left-hop subdivision, shared by the income gradients and the ribbon
-  // paths so a bar segment always meets its sub-ribbon pixel for pixel:
-  // in Categories grouping each real income→group band splits into one
-  // sub-ribbon per downstream cell (each category has exactly one group,
-  // so the split is exact), in the cell's category color. linksRight runs
-  // (middle, target) sorted, so each group's cells arrive in drawn target
-  // order — the band nests them the same way they leave the group on the
-  // right. Cells weigh in at their DRAWN heights, not their values:
-  // minimum label heights (and the donors funding them) distort drawn
-  // heights away from value proportions, and weighing by values would
-  // enter the middle at a different thickness per color than the category
-  // side leaves it (task-43). Undistorted cells stay proportional, so this
-  // agrees with values exactly when no minimum binds. The plug band (past
-  // the last middle), every band in Merchants grouping, and any degenerate
-  // band (empty or lopsided spans) stay whole: those links have no entry
-  // here and render as one ribbon.
-  const leftSubs = useMemo(() => {
-    const subs = new Map<string, LeftLinkSub[]>();
-    if (sankey == null || dimension !== "categories") return subs;
-    for (const l of sankey.linksLeft) {
-      if (l.targetIndex >= sankey.middles.length) continue;
-      const cells = sankey.linksRight.filter((r) => r.sourceIndex === l.targetIndex);
-      const values = cells.map((c) => c.sy1 - c.sy0);
-      const sourceSpans = subdivideBandByValues([l.sy0, l.sy1], values);
-      const targetSpans = subdivideBandByValues([l.ty0, l.ty1], values);
-      if (sourceSpans.length === 0 || targetSpans.length !== sourceSpans.length) continue;
-      const base = leftFillFor(l.targetIndex, l.targetName);
-      subs.set(
-        `${l.sourceIndex}:${l.targetIndex}`,
-        sourceSpans.map((s, k) => {
-          const t = targetSpans[k]!;
-          const targetIndex = cells[s.valueIndex]?.targetIndex;
-          return {
-            color: targetIndex != null ? (tgtRows[targetIndex]?.color ?? base) : base,
-            sy0: s.y0,
-            sy1: s.y1,
-            ty0: t.y0,
-            ty1: t.y1,
-            d: ribbonPath(l.x0, l.x1, s.y0, s.y1, t.y0, t.y1),
-          };
-        })
-      );
+  // Subdivided left-hop bands grouped for band-level hover: the layout's
+  // leftCells carry their own paths and fills (rendered verbatim below),
+  // and this only groups them so each band stays one hover target.
+  const leftCellsByBand = useMemo(() => {
+    const groups = new Map<string, GroupedLeftCellLayout[]>();
+    if (sankey == null) return groups;
+    for (const c of sankey.leftCells) {
+      const key = `${c.sourceIndex}:${c.middleIndex}`;
+      const list = groups.get(key) ?? [];
+      list.push(c);
+      groups.set(key, list);
     }
-    return subs;
-    // leftFillFor closes over the layout-derived rows, hence their deps.
-  }, [sankey, midRows, tgtRows, dimension]);
-
-  // One fill gradient per income bar: each bar stacks its outgoing bands
-  // top-to-bottom with hard edges at the band boundaries — no feathering,
-  // no border, no gray. Slices come from the same subdivision as the
-  // ribbons (see leftSubs), so every segment meets its ribbon exactly.
-  // A bar with no outgoing bands (defensive) falls back to the solid
-  // neutral income gray.
-  const incomeGradients = useMemo(() => {
-    if (sankey == null) return [];
-    return sankey.sources.map((bar, idx) => {
-      const bands: SankeyIncomeBand[] = [];
-      for (const l of sankey.linksLeft) {
-        if (l.sourceIndex !== idx) continue;
-        const subs = leftSubs.get(`${l.sourceIndex}:${l.targetIndex}`);
-        if (subs != null) {
-          for (const s of subs) {
-            bands.push({ y0: s.sy0, y1: s.sy1, color: s.color });
-          }
-        } else {
-          bands.push({
-            y0: l.sy0,
-            y1: l.sy1,
-            color: leftFillFor(l.targetIndex, l.targetName),
-          });
-        }
-      }
-      return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands);
-    });
-    // leftFillFor closes over the layout-derived rows, hence their deps.
-  }, [sankey, midRows, tgtRows, leftSubs]);
-
-  // One fill gradient per middle bar: each bar stacks its outgoing
-  // group→target cells top-to-bottom with hard edges at the cell
-  // boundaries — the same construction as the income gradients, in the
-  // cells' target colors — so every segment meets its ribbon exactly.
-  // Bands come from the right-hop links' own source spans, which the
-  // layout stacks contiguously from each bar's top edge; when the minimum
-  // label height lifts a bar past its band stack the gradient clamps to
-  // the last segment's color below the bands (the same slack income bars
-  // have). One ribbon per cell holds in both groupings, so the same
-  // construction serves Categories and Merchants with no dimension split.
-  // A bar with no outgoing bands (no income, so no ribbons at all) falls
-  // back to its solid group color.
-  const middleGradients = useMemo(() => {
-    if (sankey == null) return [];
-    return sankey.middles.map((bar, idx) => {
-      const base = midRows[idx]?.color ?? colorForName(bar.name);
-      const bands: SankeyIncomeBand[] = [];
-      for (const l of sankey.linksRight) {
-        if (l.sourceIndex !== idx) continue;
-        bands.push({
-          y0: l.sy0,
-          y1: l.sy1,
-          color: tgtRows[l.targetIndex]?.color ?? base,
-        });
-      }
-      return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands, base);
-    });
-  }, [sankey, midRows, tgtRows]);
+    return groups;
+  }, [sankey]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -734,7 +623,11 @@ export function SpendingReport({
               return {
                 name:
                   g?.bucket === true ? `${g.name} (merged)` : (g?.name ?? "—"),
-                color: colorForName(g?.name ?? "—"),
+                color: sankeyTargetColor({
+                  name: g?.name ?? "—",
+                  bucket: g?.bucket === true,
+                  isPlug: false,
+                }),
                 value: l.value,
               };
             })
@@ -1308,15 +1201,19 @@ export function SpendingReport({
             <svg
               data-testid="sankey-svg"
               width={chartSize.width}
-              // The Remaining lane is transit-only (no bar moves), so when it
-              // pokes past the plot bottom the CANVAS extends to fit it while
-              // the layout keeps its height — same geometry, no re-layout.
-              height={contentH + (sankey?.remainingLaneOverflow ?? 0)}
+              // The canvas fits the layout's own contentHeight (tallest
+              // column or the transit-only Remaining lane, plus the bottom
+              // pad) — never the row-count heuristic alone, which undercovers
+              // fat bars and would clip them. Same geometry, no re-layout.
+              height={Math.max(contentH, sankey.contentHeight)}
               className="block"
             >
               <defs>
                 <SankeyBucketHatchPattern id={SANKEY_BUCKET_HATCH_ID} />
-                {incomeGradients.map((stops, idx) => (
+                {/* Bar fills come from the layout's own gradient stops,
+                    rendered verbatim — the stops already tile each bar so
+                    every segment meets its ribbon exactly. */}
+                {sankey.sourceFills.map((stops, idx) => (
                   <linearGradient
                     key={`income-${idx}`}
                     id={`${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx}`}
@@ -1330,7 +1227,7 @@ export function SpendingReport({
                     ))}
                   </linearGradient>
                 ))}
-                {middleGradients.map((stops, idx) => (
+                {sankey.middleFills.map((stops, idx) => (
                   <linearGradient
                     key={`middle-${idx}`}
                     id={`${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${idx}`}
@@ -1378,7 +1275,7 @@ export function SpendingReport({
                   )
               )}
               {linksLeft.map((link) => {
-                const subs = leftSubs.get(`${link.sourceIndex}:${link.targetIndex}`);
+                const subs = leftCellsByBand.get(`${link.sourceIndex}:${link.targetIndex}`);
                 const lit = leftLit(link.sourceIndex, link.targetIndex);
                 const opacity = ribbonOpacity(lit, hl.ll != null);
                 const hoverPayload = (x: number, y: number) => ({
@@ -1390,7 +1287,7 @@ export function SpendingReport({
                   y,
                 });
                 // A subdivided band renders one sub-ribbon per downstream
-                // cell, each flat in its final category's color — the band
+                // cell from the layout's own paths and fills — the band
                 // stays one hover target (handlers on the wrapping <g>, so
                 // moving between sub-ribbons never flickers the spotlight)
                 // and every sub shares the band's spotlight key.
@@ -1408,7 +1305,7 @@ export function SpendingReport({
                           data-testid="sankey-link"
                           data-side="left"
                           d={s.d}
-                          fill={s.color}
+                          fill={s.fill}
                           fillOpacity={opacity}
                           stroke="none"
                           style={{
@@ -1420,17 +1317,16 @@ export function SpendingReport({
                   );
                 }
                 // Whole bands (Merchants grouping, the Remaining plug, and
-                // the degenerate fallback) keep one flat group-colored
-                // ribbon through the whole length: the income side never
-                // colors a ribbon.
-                const fill = leftFillFor(link.targetIndex, link.targetName);
+                // the degenerate fallback) render the layout's own path and
+                // fill: one flat ribbon through the whole length, and the
+                // income side never colors one.
                 return (
                   <path
                     key={`ll-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
                     data-side="left"
                     d={link.d}
-                    fill={fill}
+                    fill={link.fill}
                     fillOpacity={opacity}
                     stroke="none"
                     style={{
@@ -1443,14 +1339,10 @@ export function SpendingReport({
                 );
               })}
               {linksRight.map((link) => {
-                // Flat destination color through the whole length: each cell
-                // ribbon fills with the final category's or merchant's own
-                // color, so each ribbon reads as where the money lands —
-                // no matter which middle group it comes from. One ribbon
-                // per group→target cell — hovering one traces its
-                // through-line end to end.
-                const fill =
-                  tgtRows[link.targetIndex]?.color ?? colorForName(link.targetName);
+                // One ribbon per group→target cell, rendered from the
+                // layout's own path and fill: each ribbon reads as where
+                // the money lands, no matter which middle group it comes
+                // from — hovering one traces its through-line end to end.
                 const lit = rightLit(link.sourceIndex, link.targetIndex);
                 return (
                   <path
@@ -1458,7 +1350,7 @@ export function SpendingReport({
                     data-testid="sankey-link"
                     data-side="right"
                     d={link.d}
-                    fill={fill}
+                    fill={link.fill}
                     fillOpacity={ribbonOpacity(lit, hl.rl != null)}
                     stroke="none"
                     style={{
@@ -1483,11 +1375,11 @@ export function SpendingReport({
                 const r = srcRows[idx]!;
                 // Each income bar fills with its own gradient — never flat
                 // gray, never a hover overlay, never a border. In Categories
-                // grouping the segments are the downstream category colors
-                // (see incomeGradients); in Merchants grouping they are the
-                // outgoing ribbons' group colors. The merged Other bucket
-                // adds the render-only hatch. The bar joins the flow-path
-                // spotlight at the ribbons' own brightness steps.
+                // grouping the segments are the downstream category colors;
+                // in Merchants grouping they are the outgoing ribbons'
+                // group colors. The merged Other bucket adds the
+                // render-only hatch. The bar joins the flow-path spotlight
+                // at the ribbons' own brightness steps.
                 const isBucket = r.bucket === true;
                 const lit = hl.src != null && hl.src.has(idx);
                 const dim = hl.src != null && !hl.src.has(idx);
@@ -1496,7 +1388,10 @@ export function SpendingReport({
                   : lit
                     ? SANKEY_RIBBON_HOVER_OPACITY
                     : SANKEY_RIBBON_DIM_OPACITY;
-                const labelY = node.y + node.h / 2;
+                // Labels anchor at the layout's own labelY verbatim — never
+                // recomputed here, so hairline bars keep their labels clear
+                // of neighbors instead of centered on the sliver.
+                const labelY = node.labelY;
                 // Bars too short for two lines show the name only, centered
                 // on the bar; taller bars keep name + amount.
                 const twoLine = showSankeySourceAmount(node.h);
@@ -1603,7 +1498,10 @@ export function SpendingReport({
                   : lit
                     ? SANKEY_RIBBON_HOVER_OPACITY
                     : SANKEY_RIBBON_DIM_OPACITY;
-                const labelY = node.y + node.h / 2;
+                // Labels anchor at the layout's own labelY verbatim — never
+                // recomputed here, so hairline bars keep their labels clear
+                // of neighbors instead of centered on the sliver.
+                const labelY = node.labelY;
                 // One hover target per row, like the other columns: the <g>
                 // owns the row's hover, so the bar, name, and amount all
                 // spotlight the same path and moving between them never fires
@@ -1628,12 +1526,11 @@ export function SpendingReport({
                     {/* Each middle bar fills with its own gradient — never
                         flat group color, never a hover overlay, never a
                         border. The segments are the outgoing cells' target
-                        colors (see middleGradients), so every segment meets
-                        its ribbon exactly, like the income bars. The merged
-                        Other bucket adds only the render-only hatch. The bar
-                        wraps the group's funded flow; when spending exceeds
-                        income the gap shows in the tooltip, not as a grey
-                        segment. */}
+                        colors, so every segment meets its ribbon exactly,
+                        like the income bars. The merged Other bucket adds
+                        only the render-only hatch. The bar wraps the group's
+                        funded flow; when spending exceeds income the gap
+                        shows in the tooltip, not as a grey segment. */}
                     <rect
                       data-testid="sankey-group"
                       x={node.x}
@@ -1728,7 +1625,10 @@ export function SpendingReport({
                   : lit
                     ? SANKEY_RIBBON_HOVER_OPACITY
                     : SANKEY_RIBBON_DIM_OPACITY;
-                const labelY = node.y + node.h / 2;
+                // Labels anchor at the layout's own labelY verbatim — never
+                // recomputed here, so hairline bars keep their labels clear
+                // of neighbors instead of centered on the sliver.
+                const labelY = node.labelY;
                 // One hover target per row: the <g> owns the row's hover, so
                 // the bar, title, and amount all spotlight the same path and
                 // moving between them never fires leave+enter (spotlight

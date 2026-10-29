@@ -1,10 +1,17 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ReportsView } from "../src/ReportsView.js";
-import { SANKEY_MIDDLE_GRADIENT_ID_PREFIX } from "../src/SpendingReport.js";
+import {
+  SANKEY_AUTOFIT_SESSION_KEY,
+  SANKEY_MIDDLE_GRADIENT_ID_PREFIX,
+} from "../src/SpendingReport.js";
 import { colorForName, REMAINING_COLOR } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";
-import { sankeyThresholdStops } from "@ynab/logic";
+import {
+  SANKEY_LABEL_CENTER_MIN,
+  SANKEY_MIN_LINK_HEIGHT,
+  sankeyThresholdStops,
+} from "@ynab/logic";
 import { openDropdown, pickFromOpenDropdownByValue } from "./dropdown.js";
 
 // The Under slider walks stepped stops, not raw dollars: resolve the slider
@@ -203,6 +210,9 @@ describe("ReportsView", () => {
   });
 
   it("Spending tab shows sorted bars with percents", () => {
+    // Unmerged fixture: pin the auto-fit flag so the initial load keeps the
+    // threshold off instead of raising it to fit the 400px mock viewport.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
     renderView();
     clickTab("Spending by Category");
     const panel = findPanel("Spending by Category")!;
@@ -433,8 +443,13 @@ describe("ReportsView", () => {
   });
 
   it("Spending by Category draws one closed sub-ribbon per cell and keeps tiny flows hoverable", () => {
-    // "Fees" is a dust share ($0.01 of $650.01) — without a minimum node
-    // height it would collapse to a sub-pixel sliver no cursor can hit.
+    // Unmerged fixture: pin the auto-fit flag so the dust row survives the
+    // initial load instead of merging into Other.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
+    // "Fees" is a dust share ($0.01 of $650.01) — its bar wraps its band
+    // exactly (floored at the link floor so it stays visible as a hairline
+    // instead of vanishing), and the row stays hoverable through its label,
+    // which shares the row's hover target with the bar.
     const data = makeData();
     data.categories.push({
       id: 12,
@@ -465,18 +480,40 @@ describe("ReportsView", () => {
       const d = link.getAttribute("d") ?? "";
       expect(d).toMatch(/^M .* C .* Z$/);
     }
-    // Every node (including dust) is tall enough to hover, and the bands
-    // stack without overlap inside the 400px-tall mock viewport.
+    // Every node (including dust) draws at least the link floor, the bands
+    // stack without overlap, and the canvas fits the whole stack (the SVG
+    // sizes to the layout's contentHeight, scrolling past the 400px mock
+    // viewport when fat bars need the room).
+    const svgH = Number(svg.getAttribute("height"));
     let prevBottom = 8;
     for (const node of nodes) {
       const y = Number(node.getAttribute("y"));
       const h = Number(node.getAttribute("height"));
-      expect(h).toBeGreaterThanOrEqual(8);
+      expect(h).toBeGreaterThanOrEqual(SANKEY_MIN_LINK_HEIGHT);
       expect(y).toBeGreaterThanOrEqual(prevBottom - 1e-6);
-      expect(y + h).toBeLessThanOrEqual(400 - 8 + 1e-6);
+      expect(y + h).toBeLessThanOrEqual(svgH + 1e-6);
       prevBottom = y + h + 6;
     }
     expect(within(panel).getByText("Fees")).toBeInTheDocument();
+    // Hovering the dust label spotlights the dust row: the label shares the
+    // bar's hover target, so the hairline bar needs no minimum height to
+    // stay reachable. Hover commits ride rAF, so deliver frames synchronously.
+    const origRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    }) as typeof requestAnimationFrame;
+    try {
+      const feesLabel = within(panel).getByText("Fees");
+      fireEvent.mouseMove(feesLabel, { clientX: 700, clientY: 200 });
+      const tip = document.querySelector(".y-tip") as unknown as HTMLElement;
+      expect(tip).not.toBeNull();
+      expect(within(tip).getByText("Fees")).toBeInTheDocument();
+      fireEvent.mouseLeave(feesLabel);
+      expect(document.querySelector(".y-tip")).toBeNull();
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+    }
   });
 
   it("Spending by Category renders proportional bars with no truncation breaks", () => {
@@ -746,6 +783,9 @@ describe("ReportsView", () => {
   });
 
   it("Spending sankey hides amounts on tiny income bars and colors ribbons by destination", () => {
+    // Unmerged fixture: pin the auto-fit flag so the initial load keeps the
+    // threshold off.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
     const data = makeData();
     data.transactions.push(txn("2026-06", 15, "Bonus", 1));
     renderView({ data });
@@ -761,11 +801,16 @@ describe("ReportsView", () => {
     expect(labels).toHaveLength(2);
     expect(within(panel).getByText("Bonus")).toBeInTheDocument();
     expect(svg.querySelectorAll('[data-testid="sankey-income-amount"]')).toHaveLength(1);
-    // The name-only label sits centered on its bar.
+    // The name-only label sits at the layout's own anchor below the bar top
+    // (never centered on the sliver), so hairline rows keep their labels
+    // clear of neighbors.
     const barY = Number(bars[1]!.getAttribute("y"));
     const barH = Number(bars[1]!.getAttribute("height"));
     expect(barH).toBeLessThan(26);
-    expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(barY + barH / 2 + 4, 5);
+    expect(Number(labels[1]!.getAttribute("y"))).toBeCloseTo(
+      barY + SANKEY_LABEL_CENTER_MIN + 4,
+      5
+    );
 
     // Left sub-ribbons take their final category's color and right
     // ribbons their target's own color: each ribbon reads as where the

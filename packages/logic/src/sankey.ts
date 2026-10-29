@@ -790,6 +790,136 @@ export function subdivideBandByValues(
   return spans;
 }
 
+// ---------------------------------------------------------------------------
+// Sankey color math: pure, deterministic, and part of the layout objects.
+// The layout resolves every drawable's exact fill (flat colors and gradient
+// stops), so rendering is pure presentation with no color logic. Canonical
+// home of the palette (previously in ui/chartUtils, which re-exports it).
+// ---------------------------------------------------------------------------
+
+export const PALETTE = [
+  "#2f7fb0", // 0: Classic Steel Blue
+  "#5c8f2c", // 1: Olive/Forest Green
+  "#e8a33d", // 2: Amber/Gold
+  "#7e57c2", // 3: Purple/Violet
+  "#d45042", // 4: Coral Red
+  "#26a69a", // 5: Teal/Cyan
+  "#1f5c85", // 6: Deep Navy
+  "#c07d1c", // 7: Warm Ochre
+  "#b0608f", // 8: Rose/Magenta
+  "#5aa5d0", // 9: Sky Blue
+  "#78909c", // 10: Slate Grey
+  "#8bc34a", // 11: Lime Green
+];
+
+export function colorAt(i: number): string {
+  return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length] ?? "#888";
+}
+
+// The merged "Other" bucket always renders slate; the unspent-income plug
+// is green and each expense's over-income slice is neutral gray (an
+// unfunded slice is not a series, so it never takes a palette color).
+export const OTHER_BUCKET_COLOR = "#78909c";
+export const REMAINING_COLOR = "#2f9e5f";
+export const OVER_INCOME_COLOR = "#a3adb6";
+// Sankey income bars carry no series color: every left-column bar renders
+// this one neutral gray so the income side never competes with the
+// group/category colors on the right.
+export const SANKEY_INCOME_COLOR = "#9aa3ad";
+
+// Stable color per series name (djb2 hash into PALETTE): a category or
+// merchant keeps its color across month ranges, dimension toggles, and
+// threshold merges. Bucket/plug colors are NEVER name-based: a literal
+// "Other" or "Remaining" row keeps its own hash color, and only rows
+// flagged bucket/plug render slate/green (see sankeyTargetColor) —
+// otherwise a real row shares the computed rows' color and the flows that
+// share the color stop being traceable.
+export function colorForName(name: string): string {
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+  }
+  return PALETTE[Math.abs(h) % PALETTE.length] ?? "#888";
+}
+
+/**
+ * One color for a right-column Sankey target: the category (or merchant)
+ * determines its own color, and that color flows backwards along every
+ * ribbon arriving at it — no matter which middle group each ribbon comes
+ * from. The parent group never tints the target: two categories sharing a
+ * group keep their own stable hues, and a merchant split across groups is
+ * still one color on every leg. The Remaining plug stays green and merged
+ * Other buckets stay slate — both by flag, never by name, so a literal
+ * "Remaining" or "Other" row still keeps its own stable color. Sources and
+ * middles resolve through the same function with isPlug: false.
+ */
+export function sankeyTargetColor(t: {
+  name: string;
+  bucket: boolean;
+  isPlug: boolean;
+}): string {
+  if (t.isPlug) return REMAINING_COLOR;
+  if (t.bucket) return OTHER_BUCKET_COLOR;
+  return colorForName(t.name);
+}
+
+/** One outgoing ribbon band across an income bar: vertical span + ribbon color. */
+export type SankeyIncomeBand = { y0: number; y1: number; color: string };
+/** One linear-gradient stop: fractional offset + color. */
+export type SankeyGradientStop = { offset: number; color: string };
+
+/**
+ * Hard-edged top-to-bottom gradient stops for a Sankey income or middle
+ * bar, built from the colors of the ribbons extending from it: each band
+ * keeps its ribbon's destination color through its exact span, and
+ * adjacent bands meet at a hard edge on their shared boundary — so every
+ * bar segment matches the ribbon leaving it. (An earlier feathered blend
+ * smeared each boundary across the bar and the bar stopped matching its
+ * ribbons.) Pure geometry → stops.
+ *
+ * - Band order is the gradient order (top to bottom); zero-height bands
+ *   are skipped.
+ * - Shared boundary offsets are kept, not collapsed: the duplicate offset
+ *   is what renders the hard edge between two bands.
+ * - A single band (or none, defensively) yields a solid fill: the band's
+ *   own color, or `fallback` when there are no bands (the neutral income
+ *   gray for income bars, the group's own color for middle bars with no
+ *   outgoing ribbons).
+ */
+export function sankeyIncomeGradientStops(
+  barY0: number,
+  barY1: number,
+  bands: readonly SankeyIncomeBand[],
+  fallback: string = SANKEY_INCOME_COLOR
+): SankeyGradientStop[] {
+  const h = barY1 - barY0;
+  const live = bands.filter((b) => b.y1 > b.y0 && h > 0);
+  if (live.length === 0) {
+    return [
+      { offset: 0, color: fallback },
+      { offset: 1, color: fallback },
+    ];
+  }
+  if (live.length === 1) {
+    return [
+      { offset: 0, color: live[0]!.color },
+      { offset: 1, color: live[0]!.color },
+    ];
+  }
+  const frac = (y: number) => (y - barY0) / h;
+  const clamp01 = (o: number) => Math.min(1, Math.max(0, o));
+  const stops: SankeyGradientStop[] = [];
+  for (const b of live) {
+    stops.push({ offset: clamp01(frac(b.y0)), color: b.color });
+    stops.push({ offset: clamp01(frac(b.y1)), color: b.color });
+  }
+  // Bands arrive top-to-bottom, so this sort is a no-op on well-formed
+  // input; stability keeps each shared boundary's outgoing color before
+  // the incoming one, which is what renders the hard edge.
+  stops.sort((a, b) => a.offset - b.offset);
+  return stops;
+}
+
 export type SankeyGeometryOptions = {
   /** Total SVG width/height in px. */
   width: number;
@@ -798,8 +928,30 @@ export type SankeyGeometryOptions = {
   nodeWidth?: number;
   /** Vertical gap between target nodes. Defaults to 6. */
   nodeGap?: number;
-  /** Minimum drawn node height so tiny flows stay hoverable. Defaults to 8. */
+  /**
+   * Minimum drawn node height so tiny flows stay hoverable. Defaults to 8.
+   * Legacy two-column layouts only — the grouped layout sizes bars from
+   * their bands (see minLinkHeight) and reserves label pitch separately,
+   * so it ignores this option.
+   */
   minNodeHeight?: number;
+  /**
+   * Minimum drawn band height in the grouped layout: every right-hop cell
+   * band and every Remaining plug band draws at least this thick, so tiny
+   * flows stay visible as hairlines instead of vanishing. Bars wrap their
+   * bands exactly — nothing is ever taken from large bars to fund the
+   * floor (no stealing, no crush). Defaults to SANKEY_MIN_LINK_HEIGHT.
+   * Legacy layouts ignore this option.
+   */
+  minLinkHeight?: number;
+  /**
+   * Left-hop detail in the grouped layout: "bands" draws one whole ribbon
+   * per income→middle band (plus the full-width Remaining ribbons);
+   * "cells" additionally subdivides each band into one sub-ribbon per
+   * downstream cell (leftCells), so each color crosses the middle at one
+   * contiguous thickness. Defaults to "bands".
+   */
+  leftDetail?: "bands" | "cells";
   /** Left gutter before the source node. Defaults to 8. */
   padLeft?: number;
   /** Right gutter after the target nodes (label zone). Defaults to 8. */
@@ -820,6 +972,19 @@ export type SankeyNodeLayout = {
   y: number;
   w: number;
   h: number;
+  /**
+   * Exact flat fill for the bar. Targets render this; sources and middles
+   * render their gradient stops (sourceFills/middleFills) and use this as
+   * the no-bands fallback color.
+   */
+  fill: string;
+  /**
+   * Vertical center for the bar's two-line label, in SVG px. Bars shorter
+   * than a label still anchor the label clear of neighbors (the layout
+   * reserves label pitch per row), so rendering positions labels here
+   * verbatim — never recomputed view-side.
+   */
+  labelY: number;
 };
 
 export type SankeyLinkLayout = {
@@ -851,8 +1016,9 @@ export type SankeyLayout = {
 // ---------------------------------------------------------------------------
 // Readability contract shared with the view: minimum geometry that keeps
 // two-line node labels from overlapping each other and keeps the TOTAL
-// captions clear of the source bar. The view must size the chart with
-// sankeyContentHeight and pass these spacings into layoutSankey.
+// captions clear of the source bar. Legacy layouts size the chart with
+// sankeyContentHeight; the grouped layout reserves SANKEY_MIN_PITCH per
+// row itself and reports its canvas need as contentHeight.
 // ---------------------------------------------------------------------------
 
 /** Minimum node height: a two-line label (name + amount) needs a 24px row. */
@@ -861,6 +1027,20 @@ export const SANKEY_NODE_MIN_HEIGHT = 24;
 export const SANKEY_NODE_GAP = 8;
 /** Minimum vertical pitch per node so adjacent two-line labels never touch. */
 export const SANKEY_MIN_PITCH = SANKEY_NODE_MIN_HEIGHT + SANKEY_NODE_GAP;
+/**
+ * Minimum drawn band height in the grouped layout: every right-hop cell
+ * band and every Remaining plug band draws at least this thick. A hairline
+ * that stays visible without pretending to be more flow than it is — bars
+ * wrap their bands exactly, so the floor only ever grows tiny bars and the
+ * canvas (via contentHeight), never shrinks large ones.
+ */
+export const SANKEY_MIN_LINK_HEIGHT = 2;
+/**
+ * Minimum label-center offset below a row's top edge: labelY sits at
+ * slotTop + max(barH / 2, this), so hairline bars still anchor their label
+ * inside their own reserved pitch instead of on the sliver.
+ */
+export const SANKEY_LABEL_CENTER_MIN = 13;
 /** Top/bottom gutters: room for the TOTAL caption above, amount below. */
 export const SANKEY_PAD_TOP = 28;
 export const SANKEY_PAD_BOTTOM = 28;
@@ -905,17 +1085,16 @@ export function sankeyContentHeight(itemCount: number, containerHeight: number):
 
 /**
  * Auto-fit "Under" threshold in whole dollars (always one of `stops`): the
- * smallest stop whose merged columns fit `containerHeight`, so the Sankey
- * shows fully on first paint with no amounts under the fold. The row count
- * is the longest merged column — income sources, groups, or targets plus
- * the future Remaining plug when income exceeds spending (the same count
- * the view sizes with sankeyContentHeight). Totals are merge-invariant, so
- * the plug is computed once from the raw inputs.
+ * smallest stop whose merged layout fits `containerHeight`, so the Sankey
+ * shows fully on first paint with no amounts under the fold. Fit is
+ * measured with the real layout (contentHeight at the container height),
+ * not a row-count heuristic, so bars, pitch, and the Remaining lane all
+ * count exactly as rendered.
  *
- * When no stop fits (even fully merged into one row per column), returns
- * the stop with the fewest rows — ties prefer the smaller stop — so the
- * chart gets as close to the viewport as merging allows. Empty stops
- * yield 0. Callers pass the measured container height.
+ * When no stop fits, returns the stop with the smallest contentHeight —
+ * ties prefer the smaller stop — so the chart gets as close to the
+ * viewport as merging allows. Empty stops yield 0. Callers pass the
+ * measured container height.
  */
 export function sankeyAutoFitThreshold(
   groups: SpendingBreakdownItem[],
@@ -926,25 +1105,32 @@ export function sankeyAutoFitThreshold(
   containerHeight: number
 ): number {
   if (stops.length === 0) return 0;
-  const incomeTotal = income.reduce((s, x) => s + x.value, 0);
-  const spendingTotal = targets.reduce((s, x) => s + x.value, 0);
-  const plugRows = incomeTotal > spendingTotal ? 1 : 0;
   let fallback = stops[0] ?? 0;
-  let fallbackRows = Number.POSITIVE_INFINITY;
+  let fallbackHeight = Number.POSITIVE_INFINITY;
   for (const stop of stops) {
     const thresholdCents = Math.round(stop * 100);
     const merged = mergeGroupFlow(groups, targets, links, thresholdCents);
     const mergedIncome = mergeBelowThreshold(income, thresholdCents);
-    const rows = Math.max(
-      mergedIncome.items.length,
-      merged.groups.length,
-      merged.targets.length + plugRows
+    // Width is irrelevant to heights (the y-geometry never reads x), so a
+    // fixed width keeps the probe reproducible; height is the container's.
+    const probe = layoutGroupedIncomeSankey(
+      mergedIncome.items,
+      merged.groups,
+      merged.targets,
+      merged.links,
+      {
+        width: 800,
+        height: Math.max(0, containerHeight),
+        padTop: SANKEY_PAD_TOP,
+        padBottom: SANKEY_PAD_BOTTOM,
+        nodeGap: SANKEY_NODE_GAP,
+      }
     );
-    if (rows < fallbackRows) {
-      fallbackRows = rows;
+    if (probe.contentHeight < fallbackHeight) {
+      fallbackHeight = probe.contentHeight;
       fallback = stop;
     }
-    if (sankeyContentHeight(rows, containerHeight) <= containerHeight) return stop;
+    if (probe.contentHeight <= containerHeight) return stop;
   }
   return fallback;
 }
@@ -996,44 +1182,9 @@ function resolveNodeHeights(values: number[], bandH: number, minNodeHeight: numb
 }
 
 /**
- * Resolve per-node pixel heights for a column whose bars wrap their FLOW
- * (funded) values on an absolute scale: each bar is its share
- * `flowValues[i] / scaleTotal` of `bandH`, floored at the minimum label
- * height so tiny flows stay legible — the bar matches its ribbon stack
- * unless the floor lifts it. When income covers spending the flows sum to
- * the scale total and this agrees with resolveNodeHeights exactly; under a
- * shortfall the column only fills its funded share of the band, leaving
- * honest empty space instead of padding bars with an unfunded segment.
- *
- * When minimums plus near-full flows would overflow the band (a long tiny
- * tail near full coverage), falls back to resolveNodeHeights, which funds
- * the minimums by stealing from the largest nodes first: labels keep their
- * pitch, and bands still fill each bar exactly because they derive from
- * these heights. The result always fits `bandH` and never contains NaN.
- */
-function resolveFlowHeights(
-  flowValues: number[],
-  scaleTotal: number,
-  bandH: number,
-  minNodeHeight: number
-): number[] {
-  const n = flowValues.length;
-  if (n === 0 || bandH <= 0) return flowValues.map(() => 0);
-  const minH = Math.min(minNodeHeight, bandH / n);
-  const absolute =
-    scaleTotal > 0
-      ? flowValues.map((v) => (v / scaleTotal) * bandH)
-      : flowValues.map(() => 0);
-  const floored = absolute.map((h) => Math.max(h, minH));
-  if (floored.reduce((s, h) => s + h, 0) <= bandH) return floored;
-  return resolveNodeHeights(flowValues, bandH, minNodeHeight);
-}
-
-/**
  * Closed bezier ribbon path from the source band to the target band.
- * Exported so the report can draw sub-ribbons that tile a layout link's
- * band (same curve family as the layout's own paths, so a subdivided
- * band reads as one ribbon split lengthwise).
+ * The layout uses it for every ribbon and sub-ribbon, so a subdivided
+ * band reads as one ribbon split lengthwise.
  */
 export function ribbonPath(
   x0: number,
@@ -1172,7 +1323,7 @@ export function layoutSankey(
     const it = items[i]!;
     const h = Math.max(0, heights[i] ?? 0);
     const share = total !== 0 ? it.value / total : 0;
-    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, share, x: nodeX, y, w: nodeWidth, h });
+    nodes.push({ name: it.name, value: it.value, mergedCount: it.mergedCount, bucket: it.bucket === true, share, x: nodeX, y, w: nodeWidth, h, fill: sankeyTargetColor({ name: it.name, bucket: it.bucket === true, isPlug: false }), labelY: y + h / 2 });
     const sy0 = sy;
     const sy1 = sy + h;
     const ty0 = y;
@@ -1222,6 +1373,8 @@ export type DirectSankeyLinkLayout = SankeyLinkLayout & {
   targetIndex: number;
   sourceName: string;
   targetName: string;
+  /** Exact flat fill for the ribbon (the final destination's color). */
+  fill: string;
   /**
    * Lane band vertical span at the middle-column bridge — present only on
    * lane-routed Remaining plug ribbons (see remainingLanePath). The ribbon
@@ -1384,6 +1537,8 @@ export function layoutDirectIncomeSankey(
     y: 0, // placed by the stacking pass below
     w: nodeWidth,
     h: Math.max(0, leftH[i] ?? 0),
+    fill: sankeyTargetColor({ name: s.name, bucket: s.bucket === true, isPlug: false }),
+    labelY: 0, // placed by the stacking pass below
   }));
   const tgtNodes: DirectSankeyTargetNode[] = tgtItems.map((t, j) => ({
     name: t.name,
@@ -1395,6 +1550,12 @@ export function layoutDirectIncomeSankey(
     y: 0, // placed by the stacking pass below
     w: nodeWidth,
     h: Math.max(0, rightH[j] ?? 0),
+    fill: sankeyTargetColor({
+      name: t.name,
+      bucket: t.bucket === true,
+      isPlug: incomeTotal > spendingTotal && j === tgtItems.length - 1 && t.name === REMAINING_LABEL,
+    }),
+    labelY: 0, // placed by the stacking pass below
     fundedValue: model.funded[j] ?? 0,
     unfundedValue: model.unfunded[j] ?? 0,
     unfundedH: unfundedH[j] ?? 0,
@@ -1404,11 +1565,13 @@ export function layoutDirectIncomeSankey(
   let y = padTop;
   for (let i = 0; i < srcNodes.length; i++) {
     srcNodes[i]!.y = y;
+    srcNodes[i]!.labelY = y + (leftH[i] ?? 0) / 2;
     y += (leftH[i] ?? 0) + gap;
   }
   y = padTop;
   for (let j = 0; j < tgtNodes.length; j++) {
     tgtNodes[j]!.y = y;
+    tgtNodes[j]!.labelY = y + (rightH[j] ?? 0) / 2;
     y += (rightH[j] ?? 0) + gap;
   }
 
@@ -1420,6 +1583,7 @@ export function layoutDirectIncomeSankey(
     targetIndex: l.targetIndex,
     sourceName: srcItems[l.sourceIndex]?.name ?? "",
     targetName: tgtItems[l.targetIndex]?.name ?? "",
+    fill: tgtNodes[l.targetIndex]?.fill ?? "#888",
     sy0: 0,
     sy1: 0,
     ty0: 0,
@@ -1475,11 +1639,69 @@ export type GroupedSankeyMiddleNode = DirectSankeyTargetNode;
  */
 export type GroupedRightLinkLayout = DirectSankeyLinkLayout;
 
+/**
+ * One left-hop sub-ribbon: income i's share of one middle→target cell,
+ * drawn in the cell's target color. Emitted only when leftDetail is
+ * "cells" (the Categories grouping); the Merchants grouping renders whole
+ * group-colored bands instead. Band-major in cell order, so siblings tile
+ * each source band edge to edge in the same order the cells leave the
+ * middle — while the target slots tile each middle's incoming stack in
+ * cell-major order (all incomes' slices of one cell adjacent), so each
+ * color enters the middle as one contiguous block at exactly the thickness
+ * it leaves it.
+ */
+export type GroupedLeftCellLayout = {
+  /** Index into sources. */
+  sourceIndex: number;
+  /** Index into middles. */
+  middleIndex: number;
+  /** Index into linksRight: the downstream cell this slice funds. */
+  rightLinkIndex: number;
+  /** Index into targets: the downstream cell's destination. */
+  targetIndex: number;
+  sourceName: string;
+  middleName: string;
+  targetName: string;
+  /** Funded cents in this slice (the cell's funded value times the income's share). */
+  value: number;
+  /** Source slice vertical span (left edge, within the income's band). */
+  sy0: number;
+  sy1: number;
+  /** Target slice vertical span (right edge, within the cell's block). */
+  ty0: number;
+  ty1: number;
+  x0: number;
+  x1: number;
+  /** Closed ribbon path from the source slice to the target slice. */
+  d: string;
+  /** Exact flat fill: the downstream cell's target color. */
+  fill: string;
+};
+
 export type GroupedIncomeSankeyLayout = {
   incomeTotal: number;
   spendingTotal: number;
   /** Height-scale denominator: max(income, spending). */
   flowTotal: number;
+  /**
+   * Pixels per cent: the ONE linear scale of the whole chart. Every band
+   * above the visibility floor draws at exactly value * pxPerCent on both
+   * hops, so equal money always reads at equal thickness.
+   */
+  pxPerCent: number;
+  /**
+   * Effective band visibility floor in px (the minLinkHeight option): bands
+   * below value * pxPerCent draw at this height instead. The only
+   * distortion in the geometry, confined to hairline flows.
+   */
+  linkFloor: number;
+  /**
+   * Canvas height the layout needs (tallest column, or the Remaining lane
+   * when it hangs lowest, plus padBottom). Callers size the SVG to
+   * max(containerHeight, contentHeight): the layout never crushes bars to
+   * fit — it reports how tall it is instead.
+   */
+  contentHeight: number;
   /** Left column: one bar per income source. */
   sources: SankeyNodeLayout[];
   /** Middle column: one bar per category group. */
@@ -1529,6 +1751,26 @@ export type GroupedIncomeSankeyLayout = {
    * by (middle, target).
    */
   linksRight: GroupedRightLinkLayout[];
+  /**
+   * Left-hop sub-ribbons (see GroupedLeftCellLayout). Empty unless
+   * leftDetail is "cells". Rendering draws these INSTEAD of the subdivided
+   * whole bands; bands with no entry here (plug ribbons, degenerate bands)
+   * render whole from linksLeft.
+   */
+  leftCells: GroupedLeftCellLayout[];
+  /**
+   * One fill gradient per source bar: hard-edged stops from the bar's
+   * outgoing bands' colors (per-cell slices in "cells" mode, whole-band
+   * group colors in "bands" mode), so every segment meets its ribbon
+   * exactly. Rendering maps these stops to gradient elements verbatim.
+   */
+  sourceFills: SankeyGradientStop[][];
+  /**
+   * One fill gradient per middle bar: hard-edged stops from the bar's
+   * outgoing cells' target colors, so every segment meets its ribbon
+   * exactly. Rendering maps these stops to gradient elements verbatim.
+   */
+  middleFills: SankeyGradientStop[][];
   /** x for end-anchored income labels (left of the source column). */
   sourceLabelX: number;
   /** x for start-anchored group labels (right of the middle column). */
@@ -1547,34 +1789,45 @@ export type GroupedIncomeSankeyLayout = {
  * unspent money bypasses groups through a dedicated lane below the middle
  * column, so those ribbons cross no bar and no middle→target ribbon.
  *
+ * Math-first: this function computes the complete reproducible picture —
+ * every node, band, and ribbon with exact y/height/color — and rendering
+ * draws it verbatim with no layout logic of its own. The layout is
+ * deterministic: equal inputs serialize to identical JSON.
+ *
  * Geometry contract (covered by unit tests):
- * - The right column owns the pixel scale (targets plus Remaining always
- *   sum to flowTotal): right bars wrap their funded flow on that absolute
- *   scale (resolveFlowHeights), floored at the minimum label height, so a
- *   bar matches its ribbon stack and the long tail of small spending rows
- *   keeps the minimum label pitch. Under a shortfall the column only
- *   fills its funded share of the plot.
- * - Right ribbon heights subdivide each target bar in proportion to their
- *   values; Remaining bands subdivide the Remaining bar. Each
- *   middle→target cell draws as ONE ribbon carrying the full cell value —
- *   no per-income subdivision, so no split lines inside a cell. Every
- *   ribbon has equal height at both ends (no taper): bands within a
- *   target run in middle order (source order for the Remaining plug),
- *   bands within a middle run in target order on the way out and in
- *   source order on the way in.
- * - Middle bars wrap their outgoing bands, water-filled to the minimum
- *   label height from leftover plot space (never overflowing it); with no
- *   income there are no ribbons and every bar renders at the minimum.
- *   Incoming bands tile the same drawn stack from the bar's top edge (in
- *   source order), so a minimum-lifted bar keeps identical slack below on
- *   both sides instead of stretching its incoming bands: each color
- *   crosses the middle at one thickness (flow conservation, task-43).
+ * - ONE linear scale (pxPerCent) governs the whole chart: every band above
+ *   the visibility floor draws at exactly value * pxPerCent on both hops,
+ *   so equal money always reads at equal thickness anywhere. The only
+ *   distortion is the band floor (linkFloor): bands below it draw at floor
+ *   height instead of vanishing. Bars wrap their bands exactly — the floor
+ *   only ever grows tiny bars and the canvas, never shrinks large ones:
+ *   there is no stealing, so the largest flow always draws the largest bar.
+ * - Right ribbon heights derive from cell values directly; Remaining bands
+ *   the same. Each middle→target cell draws as ONE ribbon carrying the
+ *   full cell value — no per-income subdivision, so no split lines inside
+ *   a cell. Every ribbon has equal height at both ends (no taper): bands
+ *   within a target run in middle order (source order for the Remaining
+ *   plug), bands within a middle run in target order on the way out.
+ * - Middle bars wrap their outgoing bands exactly; with no income there
+ *   are no bands and every bar is zero-height (labels still show via the
+ *   reserved pitch). Incoming bands tile the same drawn stack from the
+ *   bar's top edge with no slack on either side.
+ * - With leftDetail "cells", each income→middle band subdivides into one
+ *   sub-ribbon per downstream cell (leftCells): siblings tile the source
+ *   band edge to edge in cell order, while the target slots tile the
+ *   middle's incoming stack in cell-major order — every income's slice of
+ *   one cell adjacent — so each color enters the middle as one contiguous
+ *   block at exactly the thickness it leaves it (flow conservation per
+ *   color, in the same order both sides). Sub-ribbons have no taper.
  * - There is no unfunded segment in the geometry (unfundedH is always 0):
  *   the shortfall shows in tooltips and the header only. fundedValue and
- *   unfundedValue still report the funded/unfunded split in cents.
- * - Source bars wrap their outgoing bands exactly (group ribbons plus any
- *   full-width Remaining ribbons), water-filled up to the minimum node
- *   height from leftover plot space (never overflowing it).
+ *   unfundedValue still report the funded/unfunded split in cents. Under a
+ *   shortfall every column only fills its funded share.
+ * - Every row reserves label pitch (SANKEY_MIN_PITCH) independent of its
+ *   bar height, so adjacent two-line labels never touch no matter how thin
+ *   the bars; labelY anchors each label. The canvas need is reported as
+ *   contentHeight — callers size the SVG to max(container, contentHeight)
+ *   instead of the layout crushing bars to fit.
  * - Remaining plug ribbons route through a dedicated lane one row gap below
  *   the last middle bar (remainingLaneY): each drops from its source band
  *   into its lane span (ly0/ly1, tiling the lane in source order with no
@@ -1585,19 +1838,16 @@ export type GroupedIncomeSankeyLayout = {
  *   the left half remain: the endpoints straddle topologically, the same
  *   dense-bipartite crossings group ribbons make with each other. With no
  *   middles the plug ribbon stays a straight ribbon (nothing to bypass).
- * - The lane is transit-only: no bar moves for it. When the middle column
- *   hangs below the last spending target the lane pokes past the plot
- *   bottom by remainingLaneOverflow — callers extend the canvas (not the
- *   layout height) by that amount. In the common case the overflow is 0.
+ * - The lane is transit-only: no bar moves for it. contentHeight includes
+ *   the lane bottom, so callers fit it by sizing the canvas (not by
+ *   re-laying out at a taller height, which would just rescale every bar).
+ *   remainingLaneOverflow still reports how far the lane pokes past the
+ *   plot bottom (height minus padBottom); 0 in the common case.
  * - Node `share` is value/flowTotal on all three columns.
  * - Degenerate input (no positive right-column values, or a non-positive
  *   dimension) yields no nodes — never NaN geometry.
  * - Non-positive groups/targets are dropped, and links into dropped rows
  *   are dropped with them.
- *
- * Callers should size height with sankeyContentHeight over the LONGEST
- * column (see the readability contract above); the layout never exceeds the
- * padded plot area, but rows below the minimum pitch may touch.
  */
 export function layoutGroupedIncomeSankey(
   sources: MergedSpendingItem[],
@@ -1611,12 +1861,17 @@ export function layoutGroupedIncomeSankey(
     height,
     nodeWidth = 14,
     nodeGap = 6,
-    minNodeHeight = 8,
+    minLinkHeight = SANKEY_MIN_LINK_HEIGHT,
+    leftDetail = "bands",
     padLeft = 8,
     padRight = 8,
     padTop = 8,
     padBottom = 8,
   } = opts;
+  // minNodeHeight is a legacy-layout option; the grouped layout sizes bars
+  // from bands (minLinkHeight) with label pitch from SANKEY_MIN_PITCH.
+  void opts.minNodeHeight;
+  const linkFloor = Math.max(0, minLinkHeight);
 
   const nodeX = Math.max(padLeft + nodeWidth + 24, width - padRight - nodeWidth);
   const linkLX0 = padLeft + nodeWidth;
@@ -1673,6 +1928,9 @@ export function layoutGroupedIncomeSankey(
       incomeTotal,
       spendingTotal,
       flowTotal,
+      pxPerCent: 0,
+      linkFloor,
+      contentHeight: Math.max(0, height),
       sources: [],
       middles: [],
       targets: [],
@@ -1681,6 +1939,9 @@ export function layoutGroupedIncomeSankey(
       remainingLaneOverflow: 0,
       linksLeft: [],
       linksRight: [],
+      leftCells: [],
+      sourceFills: [],
+      middleFills: [],
       sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,
       middleLabelX: midX + nodeWidth + SANKEY_MIDDLE_LABEL_GAP,
       targetLabelX: width - padRight,
@@ -1701,11 +1962,13 @@ export function layoutGroupedIncomeSankey(
   }
   const bandH = Math.max(0, availH - gap * (nMax - 1));
 
-  // Right owns the scale; targets plus Remaining always sum to flowTotal.
-  // Bars wrap their funded flow on that absolute scale (floored at the
-  // minimum label height), so a bar matches its ribbon stack instead of
-  // padding out to its full value with an unfunded segment.
-  const rightH = resolveFlowHeights(rightFunded, flowTotal, bandH, minNodeHeight);
+  // ONE linear scale for the whole chart: every band above the visibility
+  // floor draws at exactly value * pxPerCent on both hops. Nothing is ever
+  // taken from large bands to fund small ones — no stealing, no crush, so
+  // the largest flow always draws the largest bar.
+  const pxPerCent = flowTotal > 0 && bandH > 0 ? bandH / flowTotal : 0;
+  const flooredBand = (fundedValue: number): number =>
+    fundedValue > 0 ? Math.max(fundedValue * pxPerCent, linkFloor) : 0;
 
   // Right hop values: exact rollup cells at the uniform coverage ratio.
   // Sorted by (middle, target) so bands run in target order within a
@@ -1736,55 +1999,42 @@ export function layoutGroupedIncomeSankey(
     tgtIn[l.targetIndex]?.push(k);
   });
 
-  // Ribbon pixel heights derive from the bars so bands exactly fill each
-  // bar: the whole bar is the funded region now (bars wrap their flow), so
-  // there is no unfunded segment in the geometry — the shortfall shows in
-  // tooltips and the header only.
-  const linkRH = new Array<number>(rightVals.length).fill(0);
+  // Ribbon pixel heights derive from VALUES directly (never from bars, so
+  // a floored bar can never stretch its bands and a crowded column can
+  // never shrink them): each right-hop cell band and each Remaining plug
+  // band draws at max(funded * scale, floor). Bars wrap the bands below.
+  const linkRH = rightVals.map((cell) => flooredBand(cell.value));
   const linkLH = new Array<number>(left.links.length).fill(0);
-  const rightUnfundedH: number[] = rightItems.map((_t, j) => {
-    const nodeH = rightH[j] ?? 0;
-    const fj = rightFunded[j] ?? 0;
-    if (fj > 0) {
-      if (remainingTargetIndex === j) {
-        for (const k of remIn) {
-          linkLH[k] = nodeH * ((left.links[k]?.value ?? 0) / fj);
-        }
-      } else {
-        for (const k of tgtIn[j] ?? []) {
-          linkRH[k] = nodeH * ((rightVals[k]?.value ?? 0) / fj);
-        }
-      }
+  for (const k of remIn) {
+    linkLH[k] = flooredBand(left.links[k]?.value ?? 0);
+  }
+  const rightUnfundedH: number[] = rightItems.map(() => 0);
+
+  // Target bars wrap their incoming bands exactly: spending targets sum
+  // their cells, the Remaining plug sums its plug bands. There is no
+  // unfunded segment in the geometry — the shortfall shows in tooltips
+  // and the header only.
+  const rightH = rightItems.map((_t, j) => {
+    if (remainingTargetIndex === j) {
+      return remIn.reduce((s, k) => s + (linkLH[k] ?? 0), 0);
     }
-    return 0;
+    return (tgtIn[j] ?? []).reduce((s, k) => s + (linkRH[k] ?? 0), 0);
   });
 
-  // Middle bars wrap their outgoing (funded) bands, water-filled to the
-  // minimum label height from leftover plot space — the same pattern as the
-  // left column — so a bar never exceeds its flow except to stay legible.
-  // With no income there are no bands and every bar renders at the
-  // (fitting) minimum.
+  // Middle bars wrap their outgoing bands exactly. With no income there
+  // are no bands and every bar is zero-height (labels still show via the
+  // reserved pitch below).
   const outStack = grpItems.map((_, i) =>
     (midOut[i] ?? []).reduce((s, k) => s + (linkRH[k] ?? 0), 0)
   );
-  const totalOut = outStack.reduce((s, b) => s + b, 0);
-  const gapsMid = gap * Math.max(0, nM - 1);
-  const midMinH = nM > 0 ? Math.min(minNodeHeight, (availH - gapsMid) / nM) : 0;
-  const midTiny = outStack.filter((b) => b < midMinH).length;
-  const midExtra = Math.max(0, availH - gapsMid - totalOut);
-  const midEffMin = midTiny > 0 ? Math.min(midMinH, midExtra / midTiny) : midMinH;
-  const midH = outStack.map((b) => Math.max(b, midEffMin));
+  const midH = [...outStack];
   const midFunded = grpItems.map((g) => g.value * coverage);
   const midUnfundedH = grpItems.map(() => 0);
 
-  // Left group-ribbon heights subdivide each middle's DRAWN outgoing stack
-  // in proportion to their values (Remaining bands were sized from the
-  // right): bands tile the stack from the bar's top edge, so when the
-  // minimum label height lifts a bar past its stack the incoming side keeps
-  // the same slack below that the outgoing side has — instead of stretching
-  // to fill the lifted bar while the category side leaves it thinner
-  // (task-43: each color crosses the middle at one thickness). Unfloored
-  // bars are untouched (the stack equals the bar height).
+  // Left group-ribbon heights subdivide each middle's outgoing stack in
+  // proportion to their values: bands tile the stack from the bar's top
+  // edge, so the incoming stack always equals the outgoing stack exactly —
+  // no slack on either side, no stretching.
   for (let i = 0; i < grpItems.length; i++) {
     const stackH = outStack[i] ?? 0;
     const fj = midFunded[i] ?? 0;
@@ -1795,19 +2045,12 @@ export function layoutGroupedIncomeSankey(
     }
   }
 
-  // Sources wrap their outgoing bands, water-filled to the minimum height
-  // from leftover space: total bands fit bandH (a subset of the right
-  // bars), so the fill can never push the column past the plot.
+  // Sources wrap their outgoing bands exactly (group ribbons plus any
+  // full-width Remaining ribbons).
   const bandSum = srcItems.map((_, i) =>
     (srcOut[i] ?? []).reduce((s, k) => s + (linkLH[k] ?? 0), 0)
   );
-  const totalBands = bandSum.reduce((s, b) => s + b, 0);
-  const gapsLeft = gap * Math.max(0, nS - 1);
-  const minH = nS > 0 ? Math.min(minNodeHeight, (availH - gapsLeft) / nS) : 0;
-  const tiny = bandSum.filter((b) => b < minH).length;
-  const extra = Math.max(0, availH - gapsLeft - totalBands);
-  const effMin = tiny > 0 ? Math.min(minH, extra / tiny) : minH;
-  const leftH = bandSum.map((b) => Math.max(b, effMin));
+  const leftH = [...bandSum];
 
   const srcNodes: SankeyNodeLayout[] = srcItems.map((s, i) => ({
     name: s.name,
@@ -1819,6 +2062,8 @@ export function layoutGroupedIncomeSankey(
     y: 0, // placed by the stacking pass below
     w: nodeWidth,
     h: Math.max(0, leftH[i] ?? 0),
+    fill: SANKEY_INCOME_COLOR,
+    labelY: 0, // placed by the stacking pass below
   }));
   const midNodes: GroupedSankeyMiddleNode[] = grpItems.map((g, i) => ({
     name: g.name,
@@ -1830,6 +2075,8 @@ export function layoutGroupedIncomeSankey(
     y: 0, // placed by the stacking pass below
     w: nodeWidth,
     h: Math.max(0, midH[i] ?? 0),
+    fill: sankeyTargetColor({ name: g.name, bucket: g.bucket === true, isPlug: false }),
+    labelY: 0, // placed by the stacking pass below
     fundedValue: midFunded[i] ?? 0,
     unfundedValue: g.value - (midFunded[i] ?? 0),
     unfundedH: midUnfundedH[i] ?? 0,
@@ -1844,27 +2091,34 @@ export function layoutGroupedIncomeSankey(
     y: 0, // placed by the stacking pass below
     w: nodeWidth,
     h: Math.max(0, rightH[j] ?? 0),
+    fill: sankeyTargetColor({
+      name: t.name,
+      bucket: t.bucket === true,
+      isPlug: remainingTargetIndex === j,
+    }),
+    labelY: 0, // placed by the stacking pass below
     fundedValue: rightFunded[j] ?? 0,
     unfundedValue: t.value - (rightFunded[j] ?? 0),
     unfundedH: rightUnfundedH[j] ?? 0,
   }));
 
   // Stack all columns top-down; bands accumulate from each bar's top edge.
-  let y = padTop;
-  for (let i = 0; i < srcNodes.length; i++) {
-    srcNodes[i]!.y = y;
-    y += (leftH[i] ?? 0) + gap;
-  }
-  y = padTop;
-  for (let i = 0; i < midNodes.length; i++) {
-    midNodes[i]!.y = y;
-    y += (midH[i] ?? 0) + gap;
-  }
-  y = padTop;
-  for (let j = 0; j < tgtNodes.length; j++) {
-    tgtNodes[j]!.y = y;
-    y += (rightH[j] ?? 0) + gap;
-  }
+  // Bar height and label pitch are decoupled: every row reserves at least
+  // SANKEY_MIN_PITCH below its top edge, so hairline bars never pull their
+  // labels onto each other. Labels anchor at labelY (bar center, or the
+  // minimum offset for bars shorter than a label).
+  const stackColumn = (nodes: SankeyNodeLayout[]): number => {
+    let top = padTop;
+    nodes.forEach((node, i) => {
+      node.y = top;
+      node.labelY = top + Math.max(node.h / 2, SANKEY_LABEL_CENTER_MIN);
+      if (i < nodes.length - 1) top += Math.max(node.h + gap, SANKEY_MIN_PITCH);
+    });
+    return nodes.length === 0 ? padTop : top + (nodes[nodes.length - 1]?.h ?? 0);
+  };
+  const srcBottom = stackColumn(srcNodes);
+  const midBottom = stackColumn(midNodes);
+  const tgtBottom = stackColumn(tgtNodes);
 
   // Dedicated Remaining lane: one row gap below the last middle bar, so
   // plug ribbons bridge under the middle column instead of slashing
@@ -1875,6 +2129,7 @@ export function layoutGroupedIncomeSankey(
   // so it stays a straight ribbon).
   let remainingLaneY: number | null = null;
   let remainingLaneOverflow = 0;
+  let laneBottom = midBottom;
   const laneBand = new Map<number, { ly0: number; ly1: number }>();
   const lastMid = midNodes[midNodes.length - 1];
   if (remainingTargetIndex != null && lastMid != null && remIn.length > 0) {
@@ -1886,6 +2141,7 @@ export function layoutGroupedIncomeSankey(
       laneBand.set(k, { ly0: ly, ly1: ly + h });
       ly += h;
     }
+    laneBottom = ly;
     remainingLaneOverflow = Math.max(0, ly - (height - padBottom));
   }
 
@@ -1902,6 +2158,10 @@ export function layoutGroupedIncomeSankey(
       targetIndex: l.targetIndex,
       sourceName: srcItems[l.sourceIndex]?.name ?? "",
       targetName,
+      fill:
+        isPlug && remainingTargetIndex != null
+          ? (tgtNodes[remainingTargetIndex]?.fill ?? REMAINING_COLOR)
+          : (midNodes[l.targetIndex]?.fill ?? SANKEY_INCOME_COLOR),
       sy0: 0,
       sy1: 0,
       ty0: 0,
@@ -1964,6 +2224,7 @@ export function layoutGroupedIncomeSankey(
     targetIndex: cell.targetIndex,
     sourceName: grpItems[cell.middleIndex]?.name ?? "",
     targetName: tgtItems[cell.targetIndex]?.name ?? "",
+    fill: tgtNodes[cell.targetIndex]?.fill ?? "#888",
     sy0: 0,
     sy1: 0,
     ty0: 0,
@@ -2014,10 +2275,117 @@ export function layoutGroupedIncomeSankey(
     l.d = ribbonPath(l.x0, l.x1, l.sy0, l.sy1, l.ty0, l.ty1);
   }
 
+  // Left-hop subdivision (leftDetail "cells" only): each income→middle band
+  // splits into one sub-ribbon per downstream cell, in the cell's target
+  // color. Siblings tile the source band edge to edge in cell order (the
+  // same order the cells leave the middle on the right), weighed by the
+  // cells' DRAWN heights — minimum-floored cells included — so the split
+  // matches the outgoing side exactly. The target slots instead tile each
+  // middle's incoming stack in cell-major order (all incomes' slices of
+  // one cell adjacent), so each color enters the middle as one contiguous
+  // block at exactly the thickness it leaves it. Plug bands and degenerate
+  // bands (no cells, no funded flow) stay whole: they have no entry here
+  // and render from linksLeft.
+  const leftCells: GroupedLeftCellLayout[] = [];
+  if (leftDetail === "cells") {
+    for (let m = 0; m < midNodes.length; m++) {
+      const cells = midOut[m] ?? [];
+      const ins = midIn[m] ?? [];
+      const midTop = midNodes[m]!.y;
+      const stackH = outStack[m] ?? 0;
+      const fj = midFunded[m] ?? 0;
+      if (cells.length === 0 || ins.length === 0 || !(stackH > 0) || !(fj > 0)) continue;
+      const weights = cells.map((k) => linkRH[k] ?? 0);
+      // Target slots: flat (cell, income) weights tile the incoming stack,
+      // so each cell's block lands contiguously in outgoing cell order.
+      const flat: number[] = [];
+      for (const k of cells) {
+        const h = linkRH[k] ?? 0;
+        for (const lk of ins) {
+          flat.push((h * (left.links[lk]?.value ?? 0)) / fj);
+        }
+      }
+      const targetSpans = subdivideBandByValues([midTop, midTop + stackH], flat);
+      if (targetSpans.length !== flat.length) continue;
+      for (const lk of ins) {
+        const band = linksLeft[lk]!;
+        const sourceSpans = subdivideBandByValues([band.sy0, band.sy1], weights);
+        if (sourceSpans.length !== cells.length) continue;
+        const inPos = ins.indexOf(lk);
+        cells.forEach((rk, c) => {
+          const src = sourceSpans[c]!;
+          const tgt = targetSpans[c * ins.length + inPos]!;
+          const cell = rightVals[rk]!;
+          const targetIndex = cell.targetIndex;
+          leftCells.push({
+            sourceIndex: band.sourceIndex,
+            middleIndex: m,
+            rightLinkIndex: rk,
+            targetIndex,
+            sourceName: band.sourceName,
+            middleName: grpItems[m]?.name ?? "",
+            targetName: tgtNodes[targetIndex]?.name ?? "",
+            value: (cell.value * (left.links[lk]?.value ?? 0)) / fj,
+            sy0: src.y0,
+            sy1: src.y1,
+            ty0: tgt.y0,
+            ty1: tgt.y1,
+            x0: band.x0,
+            x1: band.x1,
+            d: ribbonPath(band.x0, band.x1, src.y0, src.y1, tgt.y0, tgt.y1),
+            fill: tgtNodes[targetIndex]?.fill ?? "#888",
+          });
+        });
+      }
+    }
+  }
+
+  // One fill gradient per source bar from its outgoing bands' colors: the
+  // per-cell slices in "cells" mode (same subdivision as the sub-ribbons,
+  // so every segment meets its ribbon exactly), whole-band group colors in
+  // "bands" mode. A bar with no outgoing bands falls back to solid gray.
+  const sourceFills = srcNodes.map((bar, i) => {
+    const bands: SankeyIncomeBand[] = [];
+    for (const k of srcOut[i] ?? []) {
+      const band = linksLeft[k]!;
+      if (band.targetIndex >= midNodes.length) {
+        bands.push({ y0: band.sy0, y1: band.sy1, color: band.fill });
+        continue;
+      }
+      const subs = leftCells.filter(
+        (c) => c.sourceIndex === i && c.middleIndex === band.targetIndex
+      );
+      if (subs.length === 0) {
+        bands.push({ y0: band.sy0, y1: band.sy1, color: band.fill });
+      } else {
+        for (const s of subs) bands.push({ y0: s.sy0, y1: s.sy1, color: s.fill });
+      }
+    }
+    return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands, bar.fill);
+  });
+
+  // One fill gradient per middle bar from its outgoing cells' target
+  // colors, so every segment meets its ribbon exactly. A bar with no
+  // outgoing bands falls back to its solid group color.
+  const middleFills = midNodes.map((bar, i) => {
+    const bands: SankeyIncomeBand[] = [];
+    for (const k of midOut[i] ?? []) {
+      const cell = linksRight[k]!;
+      bands.push({ y0: cell.sy0, y1: cell.sy1, color: cell.fill });
+    }
+    return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands, bar.fill);
+  });
+
+  const contentHeight =
+    Math.max(srcBottom, midBottom, tgtBottom, laneBottom) + padBottom;
+
   return {
     incomeTotal,
     spendingTotal,
     flowTotal,
+    pxPerCent,
+    linkFloor,
+    contentHeight,
     sources: srcNodes,
     middles: midNodes,
     targets: tgtNodes,
@@ -2026,6 +2394,9 @@ export function layoutGroupedIncomeSankey(
     remainingLaneOverflow,
     linksLeft,
     linksRight,
+    leftCells,
+    sourceFills,
+    middleFills,
     sourceLabelX: padLeft - SANKEY_SOURCE_LABEL_GAP,
     middleLabelX: midX + nodeWidth + SANKEY_MIDDLE_LABEL_GAP,
     targetLabelX: nodeX + nodeWidth + 8,

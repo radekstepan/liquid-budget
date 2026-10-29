@@ -20,6 +20,8 @@ import {
   sortMergedGroupFlow,
   subdivideBandByValues,
   SANKEY_THRESHOLD_STOPS,
+  SANKEY_LABEL_CENTER_MIN,
+  SANKEY_MIN_LINK_HEIGHT,
   SANKEY_SOURCE_AMOUNT_MIN_HEIGHT,
   showSankeySourceAmount,
   SANKEY_LEFT_LABEL_INSET,
@@ -2504,13 +2506,11 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
-  it("stacks outgoing bands contiguously from each middle bar's top edge, slack only at the bottom", () => {
-    // Twenty targets shrink the right column's minimum to 13.5px while
-    // the two middles keep the 24px label minimum: Big's single 13.5px
-    // band leaves slack that the water-fill absorbs BELOW the bands — the
-    // render contract the middle gradients rely on (the gradient clamps
-    // to the last segment's color over the slack, the same slack income
-    // bars have).
+  it("wraps each middle bar exactly around its outgoing bands with no slack", () => {
+    // Bars wrap their bands exactly — no label minimum lifts them (the
+    // legacy minNodeHeight option is ignored) and no slack survives on
+    // either side: Big's bar equals its single band, and Tiny's nineteen
+    // floored bands tile its bar edge to edge, contiguously.
     const small = Array.from({ length: 19 }, (_, i) => merged(`T${i}`, 10));
     const layout = layoutGroupedIncomeSankey(
       [merged("Pay", 10000)],
@@ -2525,30 +2525,31 @@ describe("layoutGroupedIncomeSankey", () => {
     const big = layout.middles[0]!;
     const bigBands = layout.linksRight.filter((l) => l.sourceIndex === 0);
     expect(bigBands).toHaveLength(1);
-    expect(big.h).toBe(24);
+    expect(big.h).toBeCloseTo((9810 / 10000) * 270, 6);
     expect(bigBands[0]!.sy0).toBeCloseTo(big.y, 6);
-    expect(bigBands[0]!.sy1 - bigBands[0]!.sy0).toBeCloseTo(13.5, 6);
-    expect(bigBands[0]!.sy1).toBeLessThan(big.y + big.h);
-    // Fully wrapped bars still tile edge to edge, contiguously.
+    expect(bigBands[0]!.sy1).toBeCloseTo(big.y + big.h, 6);
     const tiny = layout.middles[1]!;
     const tinyBands = layout.linksRight.filter((l) => l.sourceIndex === 1);
     expect(tinyBands).toHaveLength(19);
+    for (const band of tinyBands) {
+      expect(band.sy1 - band.sy0).toBe(SANKEY_MIN_LINK_HEIGHT);
+    }
     const tinyH = tinyBands.reduce((s, l) => s + (l.sy1 - l.sy0), 0);
     expect(tinyBands[0]!.sy0).toBeCloseTo(tiny.y, 6);
     expect(tinyH).toBeCloseTo(tiny.h, 6);
+    expect(tinyBands[tinyBands.length - 1]!.sy1).toBeCloseTo(tiny.y + tiny.h, 6);
     for (let k = 1; k < tinyBands.length; k++) {
       expect(tinyBands[k]!.sy0).toBeCloseTo(tinyBands[k - 1]!.sy1, 6);
     }
   });
 
-  it("tiles incoming bands over each middle's drawn outgoing stack, slack below when floored", () => {
-    // Sibling of the outgoing-stacking contract above: the same minimum
-    // that lifts Big's bar to 24px must NOT stretch its incoming bands —
-    // they tile the 13.5px drawn outgoing stack from the bar's top edge,
-    // leaving the same slack below that the outgoing side has. Otherwise
-    // the income side enters the middle thicker than the category side
-    // leaves it, and same-color ribbons mismatch across the column
-    // (task-43: Housing → Mortgage Interest vs its SAP Concur sub-ribbon).
+  it("tiles incoming bands over each middle bar exactly with no slack", () => {
+    // Sibling of the outgoing-wrapping contract above: incoming bands tile
+    // the bar's full height from its top edge — the bar wraps its bands,
+    // so there is no lifted height to leave slack under, and the income
+    // side always enters at exactly the thickness the category side
+    // leaves (task-44: Housing → Mortgage Interest vs its SAP Concur
+    // sub-ribbon, per color via leftCells).
     const small = Array.from({ length: 19 }, (_, i) => merged(`T${i}`, 10));
     const layout = layoutGroupedIncomeSankey(
       [merged("Pay", 10000)],
@@ -2560,31 +2561,26 @@ describe("layoutGroupedIncomeSankey", () => {
       ],
       { width: 800, height: 400, minNodeHeight: 24 }
     );
+    for (const [i, mid] of layout.middles.entries()) {
+      const inH = layout.linksLeft
+        .filter((l) => l.targetIndex === i)
+        .reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+      const outH = layout.linksRight
+        .filter((l) => l.sourceIndex === i)
+        .reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+      expect(inH).toBeCloseTo(mid.h, 6);
+      expect(outH).toBeCloseTo(mid.h, 6);
+    }
     const big = layout.middles[0]!;
-    const outH = layout.linksRight
-      .filter((l) => l.sourceIndex === 0)
-      .reduce((s, l) => s + (l.sy1 - l.sy0), 0);
-    expect(big.h).toBe(24);
-    expect(outH).toBeCloseTo(13.5, 6);
-    // Incoming tiles the drawn stack — not the lifted bar.
     const inBands = layout.linksLeft.filter((l) => l.targetIndex === 0);
     expect(inBands).toHaveLength(1);
-    const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
-    expect(inH).toBeCloseTo(outH, 6);
     expect(inBands[0]!.ty0).toBeCloseTo(big.y, 6);
-    expect(inBands[0]!.ty1).toBeLessThan(big.y + big.h);
+    expect(inBands[0]!.ty1).toBeCloseTo(big.y + big.h, 6);
     // No taper: the source span matches the target span.
-    expect(inBands[0]!.sy1 - inBands[0]!.sy0).toBeCloseTo(inH, 6);
-    // Unfloored middles are untouched: bands still fill the bar exactly.
-    const tiny = layout.middles[1]!;
-    const tinyIn = layout.linksLeft
-      .filter((l) => l.targetIndex === 1)
-      .reduce((s, l) => s + (l.ty1 - l.ty0), 0);
-    const tinyOut = layout.linksRight
-      .filter((l) => l.sourceIndex === 1)
-      .reduce((s, l) => s + (l.sy1 - l.sy0), 0);
-    expect(tinyIn).toBeCloseTo(tiny.h, 6);
-    expect(tinyOut).toBeCloseTo(tiny.h, 6);
+    expect(inBands[0]!.sy1 - inBands[0]!.sy0).toBeCloseTo(
+      inBands[0]!.ty1 - inBands[0]!.ty0,
+      6
+    );
     // Sources still wrap their bands: every band sits inside its bar.
     for (const link of layout.linksLeft) {
       const src = layout.sources[link.sourceIndex]!;
@@ -2673,7 +2669,187 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.linksRight.map((l) => l.value)).toEqual([2500, 500, 1000, 1000]);
   });
 
-  it("floors tiny shortfall bars at the minimum label height with bands filling each bar", () => {
+  it("subdivides each income band into one sub-ribbon per downstream cell with no taper", () => {
+    // Two incomes funding one middle with two cells: every income→middle
+    // band splits into one leftCell per cell, in cell order, tiling the
+    // band edge to edge. Each sub-ribbon keeps one thickness end to end,
+    // carries its cell's value share, and fills with the cell's own color.
+    const layout = layoutGroupedIncomeSankey(
+      [merged("SAP Concur", 6000), merged("Payroll", 4000)],
+      [merged("Housing", 10000)],
+      [merged("Mortgage Interest", 7000), merged("Closing Costs", 3000)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 7000 },
+        { groupIndex: 0, targetIndex: 1, value: 3000 },
+      ],
+      { width: 800, height: 400, leftDetail: "cells" }
+    );
+    expect(layout.linksRight).toHaveLength(2);
+    expect(layout.leftCells).toHaveLength(4);
+    for (const sub of layout.leftCells) {
+      // No taper, exact cell color, and a closed left-to-right path.
+      expect(sub.sy1 - sub.sy0).toBeCloseTo(sub.ty1 - sub.ty0, 6);
+      const cell = layout.linksRight[sub.rightLinkIndex]!;
+      expect(sub.fill).toBe(cell.fill);
+      expect(sub.value).toBeGreaterThan(0);
+      expect(sub.d).toMatch(/^M .* C .* Z$/);
+    }
+    // Siblings tile each source band edge to edge in cell order.
+    for (const band of layout.linksLeft) {
+      const subs = layout.leftCells.filter(
+        (c) => c.sourceIndex === band.sourceIndex && c.middleIndex === band.targetIndex
+      );
+      expect(subs.map((s) => s.targetIndex)).toEqual([0, 1]);
+      expect(subs[0]!.sy0).toBeCloseTo(band.sy0, 6);
+      expect(subs[1]!.sy0).toBeCloseTo(subs[0]!.sy1, 6);
+      expect(subs[1]!.sy1).toBeCloseTo(band.sy1, 6);
+    }
+    // Values conserve both ways: each cell's subs sum to the cell, each
+    // band's subs sum to the band.
+    for (const cell of layout.linksRight) {
+      const sum = layout.leftCells
+        .filter((c) => c.rightLinkIndex === layout.linksRight.indexOf(cell))
+        .reduce((s, c) => s + c.value, 0);
+      expect(sum).toBeCloseTo(cell.value, 6);
+    }
+    for (const band of layout.linksLeft) {
+      const sum = layout.leftCells
+        .filter((c) => c.sourceIndex === band.sourceIndex && c.middleIndex === band.targetIndex)
+        .reduce((s, c) => s + c.value, 0);
+      expect(sum).toBeCloseTo(band.value, 6);
+    }
+  });
+
+  it("lands each color as one contiguous block at the outgoing cell's thickness", () => {
+    // The per-color conservation contract (task-44: SAP Concur → Housing
+    // vs Housing → Mortgage Interest): every income's slice of a cell lands
+    // adjacent to the other incomes' slices of the same cell, so each color
+    // enters the middle as ONE contiguous block at exactly the thickness
+    // its cell leaves it — never thinner on the way in.
+    const layout = layoutGroupedIncomeSankey(
+      [merged("SAP Concur", 6000), merged("Payroll", 4000)],
+      [merged("Housing", 10000)],
+      [merged("Mortgage Interest", 7000), merged("Closing Costs", 3000)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 7000 },
+        { groupIndex: 0, targetIndex: 1, value: 3000 },
+      ],
+      { width: 800, height: 400, leftDetail: "cells" }
+    );
+    const byFill = new Map<string, { y0: number; y1: number }[]>();
+    for (const sub of layout.leftCells) {
+      const slots = byFill.get(sub.fill) ?? [];
+      slots.push({ y0: sub.ty0, y1: sub.ty1 });
+      byFill.set(sub.fill, slots);
+    }
+    expect(byFill.size).toBe(2);
+    for (const [fill, slots] of byFill) {
+      slots.sort((a, b) => a.y0 - b.y0);
+      for (let k = 1; k < slots.length; k++) {
+        expect(slots[k]!.y0).toBeCloseTo(slots[k - 1]!.y1, 6);
+      }
+      const blockH = slots[slots.length - 1]!.y1 - slots[0]!.y0;
+      const cell = layout.linksRight.find((l) => l.fill === fill)!;
+      expect(blockH).toBeCloseTo(cell.sy1 - cell.sy0, 6);
+    }
+    // The blocks tile the middle's incoming stack in outgoing cell order.
+    const mid = layout.middles[0]!;
+    const blocks = layout.linksRight.map((cell) => {
+      const slots = (byFill.get(cell.fill) ?? []).sort((a, b) => a.y0 - b.y0);
+      return { y0: slots[0]!.y0, y1: slots[slots.length - 1]!.y1 };
+    });
+    expect(blocks[0]!.y0).toBeCloseTo(mid.y, 6);
+    expect(blocks[1]!.y0).toBeCloseTo(blocks[0]!.y1, 6);
+    expect(blocks[1]!.y1).toBeCloseTo(mid.y + mid.h, 6);
+  });
+
+  it("keeps plug bands whole and emits no leftCells in bands mode", () => {
+    // Surplus income: the group band subdivides, but the full-width
+    // Remaining band has no downstream cell and stays whole. The default
+    // bands detail (Merchants grouping) emits no subdivision at all.
+    const args = [
+      [merged("Pay", 12000)],
+      [merged("G", 10000)],
+      [merged("A", 10000)],
+      [{ groupIndex: 0, targetIndex: 0, value: 10000 }],
+    ] as const;
+    const cells = layoutGroupedIncomeSankey(args[0], args[1], args[2], [...args[3]], {
+      width: 800,
+      height: 400,
+      leftDetail: "cells",
+    });
+    expect(cells.linksLeft).toHaveLength(2);
+    expect(cells.leftCells).toHaveLength(1);
+    expect(cells.leftCells[0]).toMatchObject({ sourceIndex: 0, middleIndex: 0 });
+    const bands = layoutGroupedIncomeSankey(args[0], args[1], args[2], [...args[3]], {
+      width: 800,
+      height: 400,
+    });
+    expect(bands.leftCells).toEqual([]);
+  });
+
+  it("meets every bar segment to its ribbon through sourceFills and middleFills", () => {
+    // The layout resolves each bar's gradient stops from the same spans
+    // the ribbons draw, so rendering maps them to gradient elements
+    // verbatim and every segment meets its ribbon pixel for pixel.
+    const layout = layoutGroupedIncomeSankey(
+      [merged("SAP Concur", 6000), merged("Payroll", 4000)],
+      [merged("Housing", 10000)],
+      [merged("Mortgage Interest", 7000), merged("Closing Costs", 3000)],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 7000 },
+        { groupIndex: 0, targetIndex: 1, value: 3000 },
+      ],
+      { width: 800, height: 400, leftDetail: "cells" }
+    );
+    const mortgage = layout.targets[0]!.fill;
+    const closing = layout.targets[1]!.fill;
+    // Income bars: per-cell slices in band order (SAP Concur's two cells,
+    // then Payroll's), with hard edges on the shared boundaries.
+    expect(layout.sourceFills).toHaveLength(2);
+    for (const [i, bar] of layout.sources.entries()) {
+      const stops = layout.sourceFills[i]!;
+      expect(stops.map((s) => s.color)).toEqual([mortgage, mortgage, closing, closing]);
+      const subs = layout.leftCells.filter((c) => c.sourceIndex === i);
+      subs.forEach((sub, k) => {
+        expect(bar.y + stops[2 * k]!.offset * bar.h).toBeCloseTo(sub.sy0, 6);
+        expect(bar.y + stops[2 * k + 1]!.offset * bar.h).toBeCloseTo(sub.sy1, 6);
+      });
+    }
+    // Middle bars: one segment per outgoing cell, meeting each ribbon.
+    expect(layout.middleFills).toHaveLength(1);
+    const midStops = layout.middleFills[0]!;
+    expect(midStops.map((s) => s.color)).toEqual([mortgage, mortgage, closing, closing]);
+    const mid = layout.middles[0]!;
+    layout.linksRight.forEach((cell, k) => {
+      expect(mid.y + midStops[2 * k]!.offset * mid.h).toBeCloseTo(cell.sy0, 6);
+      expect(mid.y + midStops[2 * k + 1]!.offset * mid.h).toBeCloseTo(cell.sy1, 6);
+    });
+  });
+
+  it("serializes deterministically to reproducible layout objects", () => {
+    // Math-first contract: equal inputs produce identical JSON, and the
+    // JSON round-trips losslessly — a glitch report can pin the exact
+    // objects, and rendering reads them verbatim.
+    const build = () =>
+      layoutGroupedIncomeSankey(
+        [merged("SAP Concur", 6000), merged("Payroll", 4000)],
+        [merged("Housing", 10000)],
+        [merged("Mortgage Interest", 7000), merged("Closing Costs", 3000)],
+        [
+          { groupIndex: 0, targetIndex: 0, value: 7000 },
+          { groupIndex: 0, targetIndex: 1, value: 3000 },
+        ],
+        { width: 800, height: 400, leftDetail: "cells" }
+      );
+    const a = JSON.stringify(build());
+    const b = JSON.stringify(build());
+    expect(a).toBe(b);
+    expect(JSON.parse(a)).toEqual(JSON.parse(b));
+    expect(JSON.parse(a)).toEqual(build());
+  });
+
+  it("sizes shortfall bars to their funded bands with only the link floor below", () => {
     const layout = layoutGroupedIncomeSankey(
       [merged("Pay", 5000)],
       [merged("G", 10000)],
@@ -2685,9 +2861,10 @@ describe("layoutGroupedIncomeSankey", () => {
       { width: 800, height: 400, minNodeHeight: 24 }
     );
     // B's funded flow ($50 of $10000 over a 378px band) is under 2px, so
-    // the minimum lifts it to a legible bar; A keeps its flow height.
+    // the band visibility floor (not a label minimum) holds it at a
+    // hairline; A keeps its exact funded height.
     const [a, b] = [layout.targets[0]!, layout.targets[1]!];
-    expect(b.h).toBe(24);
+    expect(b.h).toBe(SANKEY_MIN_LINK_HEIGHT);
     expect(a.h).toBeCloseTo((4950 / 10000) * 378, 6);
     // Bands still fill each bar exactly — the bar matches its ribbon stack.
     for (const tgt of layout.targets) {
@@ -2699,10 +2876,11 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
-  it("funds minimums from the largest bars when minimums plus near-full flows overflow", () => {
-    // Near-full coverage (99%) with a long tiny tail: minimums plus flows
-    // exceed the band, so the largest bar gives up height to keep every
-    // row at the label minimum.
+  it("never steals from large bars: every bar keeps its absolute funded height", () => {
+    // Near-full coverage (99%) with a long tiny tail: nothing is taken
+    // from large bars to fund small ones — the largest flow always draws
+    // the largest bar, and the layout reports its canvas need instead of
+    // crushing rows to fit the plot.
     const targets = [merged("Big", 9100)];
     for (let i = 0; i < 9; i++) targets.push(merged(`T${i}`, 100));
     const layout = layoutGroupedIncomeSankey(
@@ -2712,15 +2890,18 @@ describe("layoutGroupedIncomeSankey", () => {
       targets.map((t, j) => ({ groupIndex: 0, targetIndex: j, value: t.value })),
       { width: 800, height: 400, minNodeHeight: 24 }
     );
-    // Every row keeps the minimum; the tail sits exactly on it.
-    for (const tgt of layout.targets) {
-      expect(tgt.h).toBeGreaterThanOrEqual(24 - 1e-9);
-    }
-    expect(layout.targets.slice(1).every((t) => Math.abs(t.h - 24) < 1e-9)).toBe(true);
-    // The donor shrank below its absolute flow height to fund the minimums.
+    // Every bar is exactly its funded share of the band — the donor keeps
+    // its absolute flow height and the tail keeps its own.
     const bandH = 400 - 8 - 8 - 6 * (10 - 1);
-    expect(layout.targets[0]!.h).toBeLessThan(((9100 * 0.99) / 10000) * bandH);
-    // Bands fill each bar exactly and the column still fits the plot.
+    expect(layout.targets[0]!.h).toBeCloseTo(((9100 * 0.99) / 10000) * bandH, 6);
+    for (const tgt of layout.targets.slice(1)) {
+      expect(tgt.h).toBeCloseTo(((100 * 0.99) / 10000) * bandH, 6);
+    }
+    expect(
+      layout.targets.slice(1).every((t) => t.h < layout.targets[0]!.h)
+    ).toBe(true);
+    // Bands fill each bar exactly, and the column bottom plus the pad is
+    // exactly the reported canvas need.
     for (const tgt of layout.targets) {
       const inH = layout.linksRight
         .filter((l) => l.targetIndex === layout.targets.indexOf(tgt))
@@ -2728,10 +2909,10 @@ describe("layoutGroupedIncomeSankey", () => {
       expect(inH).toBeCloseTo(tgt.h, 6);
     }
     const last = layout.targets[layout.targets.length - 1]!;
-    expect(last.y + last.h).toBeLessThanOrEqual(400 - 8 + 1e-6);
+    expect(layout.contentHeight).toBeCloseTo(last.y + last.h + 8, 6);
   });
 
-  it("renders minimum-height bars with no ribbons when there is no income", () => {
+  it("renders zero-height bars with pitch-separated labels when there is no income", () => {
     const layout = layoutGroupedIncomeSankey([], gGroups, gTargets, gLinks, {
       width: 800,
       height: 400,
@@ -2739,22 +2920,26 @@ describe("layoutGroupedIncomeSankey", () => {
     expect(layout.sources).toEqual([]);
     expect(layout.linksLeft).toEqual([]);
     expect(layout.linksRight).toEqual([]);
-    // Zero flow renders at the minimum label height (the default 8px here):
-    // uniform bars with no unfunded segment and no ribbons.
-    for (const mid of layout.middles) {
-      expect(mid.fundedValue).toBe(0);
-      expect(mid.unfundedValue).toBe(mid.value);
-      expect(mid.unfundedH).toBe(0);
-      expect(mid.h).toBe(8);
-      expect(Number.isFinite(mid.y)).toBe(true);
+    // Zero flow renders zero-height bars with no unfunded segment and no
+    // ribbons; labels still show via the reserved pitch, one slot apart.
+    for (const col of [layout.middles, layout.targets]) {
+      for (const node of col) {
+        expect(node.fundedValue).toBe(0);
+        expect(node.unfundedValue).toBe(node.value);
+        expect(node.unfundedH).toBe(0);
+        expect(node.h).toBe(0);
+        expect(Number.isFinite(node.y)).toBe(true);
+        expect(Number.isFinite(node.labelY)).toBe(true);
+      }
+      for (let i = 1; i < col.length; i++) {
+        expect(col[i]!.labelY - col[i - 1]!.labelY).toBeCloseTo(SANKEY_MIN_PITCH, 6);
+      }
     }
-    for (const tgt of layout.targets) {
-      expect(tgt.fundedValue).toBe(0);
-      expect(tgt.unfundedValue).toBe(tgt.value);
-      expect(tgt.unfundedH).toBe(0);
-      expect(tgt.h).toBe(8);
-      expect(Number.isFinite(tgt.y)).toBe(true);
-    }
+    // Labels anchor the minimum offset below each row top.
+    expect(layout.middles[0]!.labelY).toBeCloseTo(
+      layout.middles[0]!.y + SANKEY_LABEL_CENTER_MIN,
+      6
+    );
   });
 
   it("routes all income to a lone Remaining target when there is no spending", () => {
@@ -3041,9 +3226,12 @@ describe("sankeyAutoFitThreshold", () => {
     );
     const twoTargets = [item("A", 500), item("B", 500)];
     const twoLinks = twoTargets.map((t, i) => ({ groupIndex: 0, targetIndex: i, value: t.value }));
-    // 4 rows fit in 200px: $50 leaves 7 income rows but $100 merges to 2.
+    // No stop fits 200px (the fat $500 cells and the Remaining lane bind
+    // every layout), so the fallback picks the smallest contentHeight: $50
+    // (7 income rows) beats both the unmerged $0 and the over-merged $100,
+    // whose shorter column rescales every bar fatter.
     expect(sankeyAutoFitThreshold(groups, twoTargets, twoLinks, manyIncome, stops, 200)).toBe(
-      100
+      50
     );
   });
 

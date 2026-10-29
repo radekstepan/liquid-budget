@@ -6,6 +6,7 @@ import {
   fmtShort,
   colorAt,
   colorForName,
+  sankeyTargetColor,
   OTHER_BUCKET_COLOR,
   OVER_INCOME_COLOR,
   REMAINING_COLOR,
@@ -187,12 +188,25 @@ describe("colorForName", () => {
     expect(colors.size).toBeGreaterThan(1);
   });
 
-  it("always renders the Other bucket in slate", () => {
-    expect(colorForName("Other")).toBe(OTHER_BUCKET_COLOR);
+  it("hashes every name, including computed-row names: buckets resolve by flag, never by name", () => {
+    // colorForName is a pure name hash (canonical in @ynab/logic): a literal
+    // "Other" row keeps its own stable palette color instead of colliding
+    // with the merged bucket's slate. Buckets and plugs resolve through
+    // sankeyTargetColor by flag.
+    expect(PALETTE).toContain(colorForName("Other"));
+    expect(colorForName("Other")).not.toBe(OTHER_BUCKET_COLOR);
+    expect(
+      sankeyTargetColor({ name: "Other", bucket: true, isPlug: false })
+    ).toBe(OTHER_BUCKET_COLOR);
   });
 
-  it("renders Remaining and Over income in fixed semantic colors", () => {
-    expect(colorForName("Remaining")).toBe(REMAINING_COLOR);
-    expect(colorForName("Over income")).toBe(OVER_INCOME_COLOR);
+  it("renders Remaining and Over income rows by hash, plugs by flag", () => {
+    expect(PALETTE).toContain(colorForName("Remaining"));
+    expect(colorForName("Remaining")).not.toBe(REMAINING_COLOR);
+    expect(PALETTE).toContain(colorForName("Over income"));
+    expect(colorForName("Over income")).not.toBe(OVER_INCOME_COLOR);
+    expect(
+      sankeyTargetColor({ name: "Remaining", bucket: false, isPlug: true })
+    ).toBe(REMAINING_COLOR);
   });
 });
