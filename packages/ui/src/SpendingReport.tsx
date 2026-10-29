@@ -85,6 +85,26 @@ function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
 }
 
+// True when the OS asks for reduced motion: the spotlight cross-fade
+// drops to zero duration (instant, like the pre-transition behavior) and
+// hover stays fully functional — brightness-only either way, never
+// scale/lift/bounce. Reads the media query in an effect (never during
+// render) so server and hydration renders always agree.
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
+
 // Each ribbon carries one flat color — the color of its FINAL (right-column)
 // destination — through its whole length: right-hop ribbons their
 // category's or merchant's own color (one ribbon per group→target cell),
@@ -104,18 +124,26 @@ function truncateName(name: string, max = 26): string {
 // SANKEY_RIBBON_OPACITY — nearly as solid as the hover step, one small
 // step below it so the spotlight still reads as a brightening; while a
 // flow path is hovered the path's ribbons and bars brighten to
-// SANKEY_RIBBON_HOVER_OPACITY (ribbons render above the rest) and
-// everything outside the path dims to SANKEY_RIBBON_DIM_OPACITY, kept
-// far below rest so the off-path wash stays clearly dimmer. Bars share
-// their ribbons' exact fill at the same steps, so the line into a bar
-// always matches the bar. No CSS transition on these opacities: the
-// spotlight z-reorder paints instantly (DOM order is not transitionable),
-// so a fading opacity would show final z-order with pre-transition
-// brightness — the hovered bar flashing lighter than its own ribbons.
-// Instant changes keep the whole spotlight atomic in the first frame.
+// SANKEY_RIBBON_HOVER_OPACITY and everything outside the path dims to
+// SANKEY_RIBBON_DIM_OPACITY, kept far below rest so the off-path wash
+// stays clearly dimmer. Bars share their ribbons' exact fill at the same
+// steps, so the line into a bar always matches the bar. Brightness alone
+// carries the spotlight — the DOM order never changes with hover (no
+// z-reorder), so the brightness steps glide over
+// SANKEY_SPOTLIGHT_TRANSITION_MS instead of snapping: with a stable
+// z-order there is no "final z-order at pre-transition brightness" to
+// flash (the task-29 hazard), and rapid A→B→C sweeps just retarget the
+// in-flight cross-fade. Unchanged arms keep identical attributes, so no
+// transition triggers and nothing repaints (the task-30 invariant).
 export const SANKEY_RIBBON_OPACITY = 0.75;
 export const SANKEY_RIBBON_DIM_OPACITY = 0.12;
 export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
+// Cross-fade length for every spotlight brightness step (ribbons, bars,
+// hatch overlays, and dimming labels alike) — brightness-only easing,
+// never scale/lift/bounce, and zero under prefers-reduced-motion (see
+// usePrefersReducedMotion). Flash-safe only because the z-order is
+// stable — see above.
+export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 
 // Render-only bars — the merged "Other" buckets on every column and the
 // "Remaining" surplus plug — carry a light hatch (no bar carries a
@@ -217,6 +245,9 @@ export function SpendingReport({
   // that stay dimmed never flash through rest in between and the Bars
   // tooltip never blinks off between rows.
   const pushHover = useRafThrottledSet(setHover);
+  // Reduced-motion users get the instant (zero-duration) spotlight: same
+  // semantics, no glide.
+  const transitionMs = usePrefersReducedMotion() ? 0 : SANKEY_SPOTLIGHT_TRANSITION_MS;
   const { ref: chartRef, size: chartSize } = useElementSize<HTMLDivElement>();
 
   const flow = dimension === "categories" ? categoryFlow : merchantFlow;
@@ -804,8 +835,8 @@ export function SpendingReport({
   // lights its group and target plus every left ribbon feeding that group
   // (a merged cell carries every income's money, so one income cannot be
   // traced through it), and a left ribbon lights every cell continuing
-  // through its middle. Spotlighted ribbons brighten and render above the
-  // dimmed rest.
+  // through its middle. Spotlighted ribbons brighten in place — brightness
+  // alone carries the spotlight, never paint order.
   const hl = useMemo(() => {
     const none = {
       src: null as Set<number> | null,
@@ -925,29 +956,17 @@ export function SpendingReport({
         ? SANKEY_RIBBON_HOVER_OPACITY
         : SANKEY_RIBBON_DIM_OPACITY;
 
-  // Z-order: spotlighted ribbons render after (above) the dimmed rest, so
-  // the selected path is never buried under other legs. Stable: with no
-  // hover the layout order passes through unchanged.
-  const orderedLinksLeft = useMemo(() => {
-    const links = sankey?.linksLeft ?? [];
-    if (hl.ll == null) return links;
-    const lit: typeof links = [];
-    const dim: typeof links = [];
-    for (const l of links) {
-      (hl.ll.has(`${l.sourceIndex}:${l.targetIndex}`) ? lit : dim).push(l);
-    }
-    return [...dim, ...lit];
-  }, [sankey, hl]);
-  const orderedLinksRight = useMemo(() => {
-    const links = sankey?.linksRight ?? [];
-    if (hl.rl == null) return links;
-    const lit: typeof links = [];
-    const dim: typeof links = [];
-    for (const l of links) {
-      (hl.rl.has(`${l.sourceIndex}:${l.targetIndex}`) ? lit : dim).push(l);
-    }
-    return [...dim, ...lit];
-  }, [sankey, hl]);
+  // Z-order is stable: ribbons always render in layout order, hovered or
+  // not — the spotlight never re-sequences the DOM. That is what makes the
+  // brightness cross-fade flash-safe: with no reorder there is no instant
+  // final z-order to show at pre-transition brightness (the task-29
+  // flash), so the steps can glide instead of snapping. The off-path wash
+  // sits far below rest, so a lit leg painting under a nearly-transparent
+  // dim leg reads pure. (An earlier design rendered lit legs above the dim
+  // rest; brightness alone reads the same at these steps without the
+  // reorder.)
+  const linksLeft = sankey?.linksLeft ?? [];
+  const linksRight = sankey?.linksRight ?? [];
 
   return (
     <Panel
@@ -1352,7 +1371,7 @@ export function SpendingReport({
                     </text>
                   )
               )}
-              {orderedLinksLeft.map((link) => {
+              {linksLeft.map((link) => {
                 const subs = leftSubs.get(`${link.sourceIndex}:${link.targetIndex}`);
                 const lit = leftLit(link.sourceIndex, link.targetIndex);
                 const opacity = ribbonOpacity(lit, hl.ll != null);
@@ -1386,6 +1405,9 @@ export function SpendingReport({
                           fill={s.color}
                           fillOpacity={opacity}
                           stroke="none"
+                          style={{
+                            transition: `fill-opacity ${transitionMs}ms`,
+                          }}
                         />
                       ))}
                     </g>
@@ -1405,13 +1427,16 @@ export function SpendingReport({
                     fill={fill}
                     fillOpacity={opacity}
                     stroke="none"
-                    style={{ cursor: "pointer" }}
+                    style={{
+                      cursor: "pointer",
+                      transition: `fill-opacity ${transitionMs}ms`,
+                    }}
                     onMouseMove={(e) => pushHover(hoverPayload(e.clientX, e.clientY))}
                     onMouseLeave={() => pushHover(null)}
                   />
                 );
               })}
-              {orderedLinksRight.map((link) => {
+              {linksRight.map((link) => {
                 // Flat destination color through the whole length: each cell
                 // ribbon fills with the final category's or merchant's own
                 // color, so each ribbon reads as where the money lands —
@@ -1430,7 +1455,10 @@ export function SpendingReport({
                     fill={fill}
                     fillOpacity={ribbonOpacity(lit, hl.rl != null)}
                     stroke="none"
-                    style={{ cursor: "pointer" }}
+                    style={{
+                      cursor: "pointer",
+                      transition: `fill-opacity ${transitionMs}ms`,
+                    }}
                     onMouseMove={(e) =>
                       pushHover({
                         kind: "link",
@@ -1466,8 +1494,34 @@ export function SpendingReport({
                 // Bars too short for two lines show the name only, centered
                 // on the bar; taller bars keep name + amount.
                 const twoLine = showSankeySourceAmount(node.h);
+                // One hover target per row, like the right column: the <g>
+                // owns the row's hover, so the bar, name, and amount all
+                // spotlight the same path and moving between them never fires
+                // leave+enter (spotlight flicker). The transparent hit band
+                // bridges the dead space between the parts — the bar→label
+                // gap and the space between the two label lines — so the
+                // whole row band holds the hover. It spans the bar's exact
+                // vertical extent (adjacent rows never overlap) and runs
+                // from the SVG's left edge to the bar's right edge; nothing
+                // else interactive lives in the left gutter. Rendered
+                // beneath the bar and labels; invisible.
                 return (
-                  <g key={`src-${node.name}-${idx}`}>
+                  <g
+                    key={`src-${node.name}-${idx}`}
+                    style={{ cursor: "pointer" }}
+                    onMouseMove={(e) =>
+                      pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
+                    }
+                    onMouseLeave={() => pushHover(null)}
+                  >
+                    <rect
+                      data-testid="sankey-income-hit"
+                      x={0}
+                      y={node.y}
+                      width={node.x + node.w}
+                      height={Math.max(0, node.h)}
+                      fill="transparent"
+                    />
                     <rect
                       data-testid="sankey-income"
                       x={node.x}
@@ -1477,11 +1531,9 @@ export function SpendingReport({
                       fill={`url(#${SANKEY_INCOME_GRADIENT_ID_PREFIX}${idx})`}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
+                      style={{
+                        transition: `fill-opacity ${transitionMs}ms`,
+                      }}
                     />
                     {isBucket && (
                       <rect
@@ -1493,6 +1545,9 @@ export function SpendingReport({
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
                         fillOpacity={barOpacity}
                         pointerEvents="none"
+                        style={{
+                          transition: `fill-opacity ${transitionMs}ms`,
+                        }}
                       />
                     )}
                     <text
@@ -1503,11 +1558,9 @@ export function SpendingReport({
                       textAnchor="end"
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
+                      style={{
+                        transition: `opacity ${transitionMs}ms`,
+                      }}
                     >
                       {truncateName(node.name, sourceLabelMaxChars)}
                     </text>
@@ -1521,11 +1574,9 @@ export function SpendingReport({
                         fill="var(--y-ink-faint)"
                         className="y-num"
                         opacity={dim ? 0.4 : 1}
-                        style={{ cursor: "pointer" }}
-                        onMouseMove={(e) =>
-                          pushHover({ kind: "income", idx, x: e.clientX, y: e.clientY })
-                        }
-                        onMouseLeave={() => pushHover(null)}
+                        style={{
+                          transition: `opacity ${transitionMs}ms`,
+                        }}
                       >
                         {fmt(node.value)} · {r.flowPct}%
                       </text>
@@ -1547,8 +1598,27 @@ export function SpendingReport({
                     ? SANKEY_RIBBON_HOVER_OPACITY
                     : SANKEY_RIBBON_DIM_OPACITY;
                 const labelY = node.y + node.h / 2;
+                // One hover target per row, like the other columns: the <g>
+                // owns the row's hover, so the bar, name, and amount all
+                // spotlight the same path and moving between them never fires
+                // leave+enter (spotlight flicker). Deliberately no hit band
+                // bridging the bar→label gap: the middle labels sit in the
+                // ribbon zone, so a band painted with this row (above the
+                // ribbons) would swallow the ribbon hovers crossing it.
+                // Instead the ribbons beneath catch most gap pixels — the
+                // bands tile the bar's full height at its right edge, so
+                // bar→label travel passes through ribbon pixels (a correct
+                // switch to the ribbon, not a blink) — and the unified <g>
+                // kills the part↔part leave+enter outright.
                 return (
-                  <g key={`mid-${node.name}-${idx}`}>
+                  <g
+                    key={`mid-${node.name}-${idx}`}
+                    style={{ cursor: "pointer" }}
+                    onMouseMove={(e) =>
+                      pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
+                    }
+                    onMouseLeave={() => pushHover(null)}
+                  >
                     {/* Each middle bar fills with its own gradient — never
                         flat group color, never a hover overlay, never a
                         border. The segments are the outgoing cells' target
@@ -1567,11 +1637,9 @@ export function SpendingReport({
                       fill={`url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}${idx})`}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
+                      style={{
+                        transition: `fill-opacity ${transitionMs}ms`,
+                      }}
                     />
                     {isBucket && (
                       <rect
@@ -1583,6 +1651,9 @@ export function SpendingReport({
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
                         fillOpacity={barOpacity}
                         pointerEvents="none"
+                        style={{
+                          transition: `fill-opacity ${transitionMs}ms`,
+                        }}
                       />
                     )}
                     {/* Middle labels sit in the ribbon zone, so they carry
@@ -1599,15 +1670,14 @@ export function SpendingReport({
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
+                      style={{
+                        transition: `opacity ${transitionMs}ms`,
+                      }}
                     >
                       {truncateName(node.name)}
                     </text>
                     <text
+                      data-testid="sankey-group-amount"
                       x={sankey.middleLabelX}
                       y={node.h >= 26 ? labelY + 13 : labelY + 7}
                       fontSize={11}
@@ -1618,11 +1688,9 @@ export function SpendingReport({
                       strokeWidth={3}
                       strokeLinejoin="round"
                       paintOrder="stroke"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "group", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
+                      style={{
+                        transition: `opacity ${transitionMs}ms`,
+                      }}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
@@ -1691,6 +1759,9 @@ export function SpendingReport({
                       fill={color}
                       fillOpacity={barOpacity}
                       stroke="none"
+                      style={{
+                        transition: `fill-opacity ${transitionMs}ms`,
+                      }}
                     />
                     {isComputed && (
                       <rect
@@ -1702,6 +1773,9 @@ export function SpendingReport({
                         fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
                         fillOpacity={barOpacity}
                         pointerEvents="none"
+                        style={{
+                          transition: `fill-opacity ${transitionMs}ms`,
+                        }}
                       />
                     )}
                     <text
@@ -1711,6 +1785,9 @@ export function SpendingReport({
                       fontSize={12}
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
+                      style={{
+                        transition: `opacity ${transitionMs}ms`,
+                      }}
                     >
                       {truncateName(node.name)}
                     </text>
@@ -1722,6 +1799,9 @@ export function SpendingReport({
                       fill="var(--y-ink-faint)"
                       className="y-num"
                       opacity={dim ? 0.4 : 1}
+                      style={{
+                        transition: `opacity ${transitionMs}ms`,
+                      }}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>
