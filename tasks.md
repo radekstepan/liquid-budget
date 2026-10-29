@@ -68,4 +68,6 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey has these issues:
-- group by Categories. The category color no longer drives the income color; broke recently
+- Remaining doesn't have a parent category so it flows over other categories making a mess of the chart; fix!
+- The parent categories need to match the sankey arms to the right just like income categories/sources do. Right now the certical bars do not match the lines on the right. Or just don't show them like Merchants view seems to do
+- when you hover over different arms of sankey or labels on the right the transitions are too jarring. Put some transition when highlighting different sankeys so the groups don't flicker like crazy
