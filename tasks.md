@@ -68,6 +68,5 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey has these issues:
-- Remaining doesn't have a parent category so it flows over other categories making a mess of the chart; fix!
-- The parent categories need to match the sankey arms to the right just like income categories/sources do. Right now the certical bars do not match the lines on the right. Or just don't show them like Merchants view seems to do
-- when you hover over different arms of sankey or labels on the right the transitions are too jarring. Put some transition when highlighting different sankeys so the groups don't flicker like crazy
+- Categories view "Housing to "Mortgage Interest" line is thicker than "SAP Concur" to "Housing" of the same color
+- Categories view "Other" category the sankey lines going to it is a complete fucking mess. The "Other" parent category is even worse where it sort of terminates and nothing leaves from it
