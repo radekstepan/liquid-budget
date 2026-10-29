@@ -2541,6 +2541,58 @@ describe("layoutGroupedIncomeSankey", () => {
     }
   });
 
+  it("tiles incoming bands over each middle's drawn outgoing stack, slack below when floored", () => {
+    // Sibling of the outgoing-stacking contract above: the same minimum
+    // that lifts Big's bar to 24px must NOT stretch its incoming bands —
+    // they tile the 13.5px drawn outgoing stack from the bar's top edge,
+    // leaving the same slack below that the outgoing side has. Otherwise
+    // the income side enters the middle thicker than the category side
+    // leaves it, and same-color ribbons mismatch across the column
+    // (task-43: Housing → Mortgage Interest vs its SAP Concur sub-ribbon).
+    const small = Array.from({ length: 19 }, (_, i) => merged(`T${i}`, 10));
+    const layout = layoutGroupedIncomeSankey(
+      [merged("Pay", 10000)],
+      [merged("Big", 9810), merged("Tiny", 190)],
+      [merged("A", 9810), ...small],
+      [
+        { groupIndex: 0, targetIndex: 0, value: 9810 },
+        ...small.map((_, k) => ({ groupIndex: 1, targetIndex: k + 1, value: 10 })),
+      ],
+      { width: 800, height: 400, minNodeHeight: 24 }
+    );
+    const big = layout.middles[0]!;
+    const outH = layout.linksRight
+      .filter((l) => l.sourceIndex === 0)
+      .reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+    expect(big.h).toBe(24);
+    expect(outH).toBeCloseTo(13.5, 6);
+    // Incoming tiles the drawn stack — not the lifted bar.
+    const inBands = layout.linksLeft.filter((l) => l.targetIndex === 0);
+    expect(inBands).toHaveLength(1);
+    const inH = inBands.reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+    expect(inH).toBeCloseTo(outH, 6);
+    expect(inBands[0]!.ty0).toBeCloseTo(big.y, 6);
+    expect(inBands[0]!.ty1).toBeLessThan(big.y + big.h);
+    // No taper: the source span matches the target span.
+    expect(inBands[0]!.sy1 - inBands[0]!.sy0).toBeCloseTo(inH, 6);
+    // Unfloored middles are untouched: bands still fill the bar exactly.
+    const tiny = layout.middles[1]!;
+    const tinyIn = layout.linksLeft
+      .filter((l) => l.targetIndex === 1)
+      .reduce((s, l) => s + (l.ty1 - l.ty0), 0);
+    const tinyOut = layout.linksRight
+      .filter((l) => l.sourceIndex === 1)
+      .reduce((s, l) => s + (l.sy1 - l.sy0), 0);
+    expect(tinyIn).toBeCloseTo(tiny.h, 6);
+    expect(tinyOut).toBeCloseTo(tiny.h, 6);
+    // Sources still wrap their bands: every band sits inside its bar.
+    for (const link of layout.linksLeft) {
+      const src = layout.sources[link.sourceIndex]!;
+      expect(link.sy0).toBeGreaterThanOrEqual(src.y - 1e-9);
+      expect(link.sy1).toBeLessThanOrEqual(src.y + src.h + 1e-9);
+    }
+  });
+
   it("stacks all three columns top-down inside the padded plot area", () => {
     const W = 800;
     const H = 400;

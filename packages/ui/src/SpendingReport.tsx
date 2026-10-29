@@ -483,16 +483,22 @@ export function SpendingReport({
   // so the split is exact), in the cell's category color. linksRight runs
   // (middle, target) sorted, so each group's cells arrive in drawn target
   // order — the band nests them the same way they leave the group on the
-  // right. The plug band (past the last middle), every band in Merchants
-  // grouping, and any degenerate band (empty or lopsided spans) stay
-  // whole: those links have no entry here and render as one ribbon.
+  // right. Cells weigh in at their DRAWN heights, not their values:
+  // minimum label heights (and the donors funding them) distort drawn
+  // heights away from value proportions, and weighing by values would
+  // enter the middle at a different thickness per color than the category
+  // side leaves it (task-43). Undistorted cells stay proportional, so this
+  // agrees with values exactly when no minimum binds. The plug band (past
+  // the last middle), every band in Merchants grouping, and any degenerate
+  // band (empty or lopsided spans) stay whole: those links have no entry
+  // here and render as one ribbon.
   const leftSubs = useMemo(() => {
     const subs = new Map<string, LeftLinkSub[]>();
     if (sankey == null || dimension !== "categories") return subs;
     for (const l of sankey.linksLeft) {
       if (l.targetIndex >= sankey.middles.length) continue;
       const cells = sankey.linksRight.filter((r) => r.sourceIndex === l.targetIndex);
-      const values = cells.map((c) => c.value);
+      const values = cells.map((c) => c.sy1 - c.sy0);
       const sourceSpans = subdivideBandByValues([l.sy0, l.sy1], values);
       const targetSpans = subdivideBandByValues([l.ty0, l.ty1], values);
       if (sourceSpans.length === 0 || targetSpans.length !== sourceSpans.length) continue;

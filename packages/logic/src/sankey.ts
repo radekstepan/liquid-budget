@@ -1565,6 +1565,10 @@ export type GroupedIncomeSankeyLayout = {
  * - Middle bars wrap their outgoing bands, water-filled to the minimum
  *   label height from leftover plot space (never overflowing it); with no
  *   income there are no ribbons and every bar renders at the minimum.
+ *   Incoming bands tile the same drawn stack from the bar's top edge (in
+ *   source order), so a minimum-lifted bar keeps identical slack below on
+ *   both sides instead of stretching its incoming bands: each color
+ *   crosses the middle at one thickness (flow conservation, task-43).
  * - There is no unfunded segment in the geometry (unfundedH is always 0):
  *   the shortfall shows in tooltips and the header only. fundedValue and
  *   unfundedValue still report the funded/unfunded split in cents.
@@ -1773,14 +1777,20 @@ export function layoutGroupedIncomeSankey(
   const midFunded = grpItems.map((g) => g.value * coverage);
   const midUnfundedH = grpItems.map(() => 0);
 
-  // Left group-ribbon heights subdivide each middle bar in proportion to
-  // their values (Remaining bands were sized from the right).
+  // Left group-ribbon heights subdivide each middle's DRAWN outgoing stack
+  // in proportion to their values (Remaining bands were sized from the
+  // right): bands tile the stack from the bar's top edge, so when the
+  // minimum label height lifts a bar past its stack the incoming side keeps
+  // the same slack below that the outgoing side has — instead of stretching
+  // to fill the lifted bar while the category side leaves it thinner
+  // (task-43: each color crosses the middle at one thickness). Unfloored
+  // bars are untouched (the stack equals the bar height).
   for (let i = 0; i < grpItems.length; i++) {
-    const nodeH = midH[i] ?? 0;
+    const stackH = outStack[i] ?? 0;
     const fj = midFunded[i] ?? 0;
     if (fj > 0) {
       for (const k of midIn[i] ?? []) {
-        linkLH[k] = nodeH * ((left.links[k]?.value ?? 0) / fj);
+        linkLH[k] = stackH * ((left.links[k]?.value ?? 0) / fj);
       }
     }
   }
