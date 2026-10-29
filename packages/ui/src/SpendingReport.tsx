@@ -1485,8 +1485,33 @@ export function SpendingReport({
                     ? SANKEY_RIBBON_HOVER_OPACITY
                     : SANKEY_RIBBON_DIM_OPACITY;
                 const labelY = node.y + node.h / 2;
+                // One hover target per row: the <g> owns the row's hover, so
+                // the bar, title, and amount all spotlight the same path and
+                // moving between them never fires leave+enter (spotlight
+                // flicker). The transparent hit band bridges the dead space
+                // between the parts — the bar→label gap and the space between
+                // the two label lines — so the whole row band holds the hover.
+                // It spans the bar's exact vertical extent (adjacent rows
+                // never overlap) and runs to the SVG edge; nothing else
+                // interactive lives in the label zone. Rendered beneath the
+                // bar and labels; invisible.
                 return (
-                  <g key={`tgt-${node.name}-${idx}`}>
+                  <g
+                    key={`tgt-${node.name}-${idx}`}
+                    style={{ cursor: "pointer" }}
+                    onMouseMove={(e) =>
+                      pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
+                    }
+                    onMouseLeave={() => pushHover(null)}
+                  >
+                    <rect
+                      data-testid="sankey-target-hit"
+                      x={node.x}
+                      y={node.y}
+                      width={Math.max(0, chartSize.width - node.x)}
+                      height={Math.max(0, node.h)}
+                      fill="transparent"
+                    />
                     <rect
                       data-testid="sankey-node"
                       x={node.x}
@@ -1496,11 +1521,6 @@ export function SpendingReport({
                       fill={color}
                       fillOpacity={barOpacity}
                       stroke="none"
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
                     />
                     {isComputed && (
                       <rect
@@ -1521,26 +1541,17 @@ export function SpendingReport({
                       fontSize={12}
                       fill="var(--y-ink)"
                       opacity={dim ? 0.4 : 1}
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
                     >
                       {truncateName(node.name)}
                     </text>
                     <text
+                      data-testid="sankey-target-amount"
                       x={sankey.targetLabelX}
                       y={node.h >= 26 ? labelY + 13 : labelY + 7}
                       fontSize={11}
                       fill="var(--y-ink-faint)"
                       className="y-num"
                       opacity={dim ? 0.4 : 1}
-                      style={{ cursor: "pointer" }}
-                      onMouseMove={(e) =>
-                        pushHover({ kind: "node", idx, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseLeave={() => pushHover(null)}
                     >
                       {fmt(node.value)} · {r.flowPct}%
                     </text>

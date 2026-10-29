@@ -452,6 +452,63 @@ describe("SpendingReport", () => {
     expect(document.querySelector(".y-tip")).toBeNull();
   });
 
+  it("keeps one hover across a right-column row's bar, title, and amount", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bar = svg.querySelectorAll('[data-testid="sankey-node"]')[1]!;
+    const label = svg.querySelectorAll('[data-testid="sankey-target-label"]')[1]!;
+    const amount = svg.querySelectorAll('[data-testid="sankey-target-amount"]')[1]!;
+    // Hover the bar: the row's spotlight + tooltip show.
+    fireEvent.mouseMove(bar, { clientX: 700, clientY: 100 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    // Moving bar → title stays inside the row (a mouseout whose
+    // relatedTarget never leaves the row): hover must not clear — no
+    // leave+enter flicker of the spotlight. Assert before any re-enter,
+    // so a transient clear cannot hide behind the next set.
+    fireEvent.mouseOut(bar, { relatedTarget: label });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Groceries")).toBeInTheDocument();
+    fireEvent.mouseMove(label, { clientX: 720, clientY: 100 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    // Same for title → amount within the row.
+    fireEvent.mouseOut(label, { relatedTarget: amount });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    fireEvent.mouseMove(amount, { clientX: 720, clientY: 112 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    // Leaving the row entirely clears.
+    fireEvent.mouseLeave(amount);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
+  it("bridges the bar→label gap so dead space holds the row hover", () => {
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bars = svg.querySelectorAll('[data-testid="sankey-node"]');
+    const hits = svg.querySelectorAll('[data-testid="sankey-target-hit"]');
+    // One invisible hit band per right-column row.
+    expect(hits).toHaveLength(bars.length);
+    const hit = hits[1]!;
+    const bar = bars[1]!;
+    const label = svg.querySelectorAll('[data-testid="sankey-target-label"]')[1]!;
+    // The band covers the bar's exact vertical extent (adjacent rows never
+    // overlap) and reaches past the label start — with no visible paint.
+    expect(hit.getAttribute("x")).toBe(bar.getAttribute("x"));
+    expect(hit.getAttribute("y")).toBe(bar.getAttribute("y"));
+    expect(hit.getAttribute("height")).toBe(bar.getAttribute("height"));
+    expect(hit.getAttribute("fill")).toBe("transparent");
+    const hitRight = Number(hit.getAttribute("x")) + Number(hit.getAttribute("width"));
+    expect(hitRight).toBeGreaterThan(Number(label.getAttribute("x")));
+    // Hovering the dead gap between bar and label keeps the row's hover
+    // instead of clearing it.
+    fireEvent.mouseMove(bar, { clientX: 700, clientY: 100 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    fireEvent.mouseMove(hit, { clientX: 712, clientY: 100 });
+    expect(document.querySelector(".y-tip")).toBeInTheDocument();
+    fireEvent.mouseLeave(hit);
+    expect(document.querySelector(".y-tip")).toBeNull();
+  });
+
   it("shows merged-group detail when hovering the Other bucket", () => {
     const { container } = renderReport();
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
