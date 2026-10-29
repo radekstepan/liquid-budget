@@ -67,8 +67,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Bars has these issues:
-- it's trying to put gaps between the bars so they all show on the same page. NO. Make them all show one after another even if it means we'll have a scrollbar. DO NOT put artificial gaps between the bars. Keep the nice ones around and make them fixed, behavior from 2 days ago.
-
 Spending by Category - Sankey has these issues:
-- onhover amount or title say on the right has a different registered onhover event, so the chart will flicker as you move from one to another; I don't like it
+- group by Categories. The category color no longer drives the income color; broke recently
