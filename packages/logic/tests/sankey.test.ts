@@ -17,6 +17,7 @@ import {
   sankeyThresholdStep,
   sankeyThresholdStops,
   sortMergedGroupFlow,
+  subdivideBandByValues,
   SANKEY_THRESHOLD_STOPS,
   SANKEY_SOURCE_AMOUNT_MIN_HEIGHT,
   showSankeySourceAmount,
@@ -2705,5 +2706,39 @@ describe("sankeyAutoFitThreshold", () => {
   it("returns 0 for empty data or empty stops", () => {
     expect(sankeyAutoFitThreshold([], [], [], [], [0, 10, 25], 400)).toBe(0);
     expect(sankeyAutoFitThreshold(groups, targets, links, [item("Pay", 100)], [], 400)).toBe(0);
+  });
+});
+
+describe("subdivideBandByValues", () => {
+  it("splits a band into proportional spans in input order", () => {
+    // A $100 band over $50/$30/$20 cells: spans tile [10, 110] exactly —
+    // each span's height is its share of the band, in cell order.
+    const spans = subdivideBandByValues([10, 110], [5000, 3000, 2000]);
+    expect(spans).toHaveLength(3);
+    expect(spans[0]).toEqual({ y0: 10, y1: 60, valueIndex: 0 });
+    expect(spans[1]).toEqual({ y0: 60, y1: 90, valueIndex: 1 });
+    expect(spans[2]).toEqual({ y0: 90, y1: 110, valueIndex: 2 });
+  });
+
+  it("snaps the last span to the band edge and skips non-positive cells", () => {
+    // Float shares (1/3 each) still tile edge to edge: the last span ends
+    // exactly at y1, and the skipped zero/negative cells vanish while the
+    // survivors keep their input indices for color lookup.
+    const spans = subdivideBandByValues([0, 90], [1, 0, 1, -5, 1]);
+    expect(spans.map((s) => s.valueIndex)).toEqual([0, 2, 4]);
+    expect(spans[0]!.y0).toBe(0);
+    expect(spans[2]!.y1).toBe(90);
+    expect(spans[1]!.y0).toBe(spans[0]!.y1);
+    expect(spans[2]!.y0).toBe(spans[1]!.y1);
+    expect(spans[0]!.y1 - spans[0]!.y0).toBeCloseTo(30, 9);
+  });
+
+  it("returns no spans when nothing can split", () => {
+    // Empty, all non-positive, zero-total, and zero-height inputs all yield
+    // [] so the caller falls back to the whole band in the group color.
+    expect(subdivideBandByValues([0, 100], [])).toEqual([]);
+    expect(subdivideBandByValues([0, 100], [0, -3])).toEqual([]);
+    expect(subdivideBandByValues([50, 50], [5000])).toEqual([]);
+    expect(subdivideBandByValues([80, 20], [5000])).toEqual([]);
   });
 });

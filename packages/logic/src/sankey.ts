@@ -739,6 +739,57 @@ export function sankeyThresholdStep(stops: readonly number[], dollars: number): 
   return best;
 }
 
+export type SankeyBandSpan = {
+  /** Sub-band vertical extent; spans tile the input band edge to edge. */
+  y0: number;
+  y1: number;
+  /** Index into the input values, so colors survive skipped cells. */
+  valueIndex: number;
+};
+
+/**
+ * Subdivide an income band `[y0, y1]` into one span per positive cell
+ * value, proportional to value, in input order: the Categories-grouped
+ * income bar nests each income→group band's downstream categories inside
+ * it, so the category colors drive the bar's segments. Each category has
+ * exactly one parent group, so the split is exact — income i's span for
+ * category c is its fungible share of that category's funded cell.
+ *
+ * - Spans tile the band edge to edge (the last span snaps to y1, so float
+ *   shares leave no hairline gap); shared boundaries render as hard edges
+ *   downstream in sankeyIncomeGradientStops.
+ * - Non-positive values are skipped (defensive: layout cells are > 0);
+ *   survivors keep their input index for color lookup.
+ * - Empty, all non-positive, or zero-height input yields [] so the caller
+ *   falls back to the whole band in the group color.
+ */
+export function subdivideBandByValues(
+  band: readonly [number, number],
+  values: readonly number[]
+): SankeyBandSpan[] {
+  const [y0, y1] = band;
+  if (!(y1 > y0)) return [];
+  let total = 0;
+  for (const v of values) {
+    if (v > 0) total += v;
+  }
+  if (!(total > 0)) return [];
+  const live = values
+    .map((value, valueIndex) => ({ value, valueIndex }))
+    .filter((c) => c.value > 0);
+  const spans: SankeyBandSpan[] = [];
+  let y = y0;
+  live.forEach((c, k) => {
+    const last = k === live.length - 1;
+    // The last span snaps to the band edge instead of accumulating float
+    // error across the shares.
+    const ny = last ? y1 : y + ((y1 - y0) * c.value) / total;
+    spans.push({ y0: y, y1: ny, valueIndex: c.valueIndex });
+    y = ny;
+  });
+  return spans;
+}
+
 export type SankeyGeometryOptions = {
   /** Total SVG width/height in px. */
   width: number;

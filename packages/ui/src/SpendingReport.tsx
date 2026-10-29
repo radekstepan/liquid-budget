@@ -13,6 +13,7 @@ import {
   sankeyThresholdStops,
   showSankeySourceAmount,
   sortMergedGroupFlow,
+  subdivideBandByValues,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -38,6 +39,7 @@ import {
   OVER_INCOME_COLOR,
   useElementSize,
   useRafThrottledSet,
+  type SankeyIncomeBand,
 } from "./chartUtils.js";
 import { useLocalStorage } from "./useLocalStorage.js";
 
@@ -401,8 +403,8 @@ export function SpendingReport({
 
   // Flat destination color of a left-hop ribbon: its middle group's color —
   // except the full-width surplus ribbons, which carry the Remaining plug's
-  // green straight through to the right. Shared by the ribbon fills and the
-  // income bar gradients so each bar melts into exactly its ribbons' colors.
+  // green straight through to the right. Shared by the ribbon fills and, as
+  // the base color, by the income bar gradients.
   const leftFillFor = (targetIndex: number, targetName: string): string => {
     const plugTarget = sankey?.remainingTargetIndex;
     return targetIndex >= midRows.length && plugTarget != null
@@ -410,20 +412,52 @@ export function SpendingReport({
       : (midRows[targetIndex]?.color ?? colorForName(targetName));
   };
 
-  // One fill gradient per income bar: each bar stacks its outgoing
-  // ribbons' destination colors top-to-bottom with hard edges at the
-  // ribbon boundaries — no feathering, no border, no gray. A bar with no
-  // outgoing bands (defensive) falls back to the solid neutral income gray.
+  // One fill gradient per income bar: each bar stacks its outgoing bands
+  // top-to-bottom with hard edges at the band boundaries — no feathering,
+  // no border, no gray. In Categories grouping each income→group band
+  // subdivides by the group's downstream categories (each category has
+  // exactly one group, so the split is exact), and the category colors
+  // drive the bar's segments; in Merchants grouping each band stays one
+  // group-colored segment (merchants span groups, so per-merchant splits
+  // would repeat colors down the bar). The full-width Remaining band stays
+  // plug green in both. A bar with no outgoing bands (defensive) falls
+  // back to the solid neutral income gray.
   const incomeGradients = useMemo(() => {
     if (sankey == null) return [];
     return sankey.sources.map((bar, idx) => {
-      const bands = sankey.linksLeft
-        .filter((l) => l.sourceIndex === idx)
-        .map((l) => ({ y0: l.sy0, y1: l.sy1, color: leftFillFor(l.targetIndex, l.targetName) }));
+      const bands: SankeyIncomeBand[] = [];
+      for (const l of sankey.linksLeft) {
+        if (l.sourceIndex !== idx) continue;
+        const base = leftFillFor(l.targetIndex, l.targetName);
+        // Only real group bands split; the plug band (past the last
+        // middle) and every band in Merchants grouping stay whole.
+        if (dimension === "categories" && l.targetIndex < sankey.middles.length) {
+          // linksRight runs (middle, target) sorted, so each group's cells
+          // arrive in drawn target order — the bar nests them the same way
+          // they leave the group on the right.
+          const cells = sankey.linksRight.filter((r) => r.sourceIndex === l.targetIndex);
+          const spans = subdivideBandByValues(
+            [l.sy0, l.sy1],
+            cells.map((c) => c.value)
+          );
+          if (spans.length > 0) {
+            for (const s of spans) {
+              const targetIndex = cells[s.valueIndex]?.targetIndex;
+              bands.push({
+                y0: s.y0,
+                y1: s.y1,
+                color: targetIndex != null ? (tgtRows[targetIndex]?.color ?? base) : base,
+              });
+            }
+            continue;
+          }
+        }
+        bands.push({ y0: l.sy0, y1: l.sy1, color: base });
+      }
       return sankeyIncomeGradientStops(bar.y, bar.y + bar.h, bands);
     });
     // leftFillFor closes over the layout-derived rows, hence their deps.
-  }, [sankey, midRows, tgtRows]);
+  }, [sankey, midRows, tgtRows, dimension]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -1280,11 +1314,13 @@ export function SpendingReport({
               })}
               {sankey.sources.map((node, idx) => {
                 const r = srcRows[idx]!;
-                // Each income bar fills with its own gradient of outgoing
-                // ribbon colors — never flat gray, never a hover overlay,
-                // never a border. The merged Other bucket adds the
-                // render-only hatch. The bar joins the flow-path spotlight
-                // at the ribbons' own brightness steps.
+                // Each income bar fills with its own gradient — never flat
+                // gray, never a hover overlay, never a border. In Categories
+                // grouping the segments are the downstream category colors
+                // (see incomeGradients); in Merchants grouping they are the
+                // outgoing ribbons' group colors. The merged Other bucket
+                // adds the render-only hatch. The bar joins the flow-path
+                // spotlight at the ribbons' own brightness steps.
                 const isBucket = r.bucket === true;
                 const lit = hl.src != null && hl.src.has(idx);
                 const dim = hl.src != null && !hl.src.has(idx);

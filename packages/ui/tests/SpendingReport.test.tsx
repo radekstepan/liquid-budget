@@ -1921,7 +1921,7 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(leftLink);
   });
 
-  it("stacks each income bar's outgoing ribbon colors into its gradient at rest, with no overlay", () => {
+  it("stacks each income bar's category colors into its gradient at rest, with no overlay", () => {
     const { container } = renderReport();
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     const bar = svg.querySelector('[data-testid="sankey-income"]')!;
@@ -1932,35 +1932,50 @@ describe("SpendingReport", () => {
     // No border on the bar, hovered or not.
     expect(bar.getAttribute("stroke")).toBe("none");
     expect(bar.getAttribute("stroke-width")).toBeNull();
-    // Payroll's three outgoing bands run Bills, Everyday, Remaining: the
-    // gradient stacks those destination colors top-to-bottom with hard
-    // edges on the ribbon boundaries — two stops per band, sharing the
-    // boundary offsets — so each bar segment matches its ribbon exactly.
+    // Categories grouping: each income→group band subdivides by the
+    // group's downstream categories — Payroll's Bills band nests Mortgage
+    // Interest + Electric Bill, Everyday nests Groceries — so the category
+    // colors drive the bar's segments, with the Remaining plug green last.
+    // Two stops per sub-band, sharing the boundary offsets (hard edges).
     const stops = Array.from(
       svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
     ).map((s) => ({
       offset: Number(s.getAttribute("offset")),
       color: s.getAttribute("stop-color"),
     }));
-    expect(stops).toHaveLength(6);
-    expect(stops[0]).toEqual({ offset: 0, color: colorForName("Bills") });
-    expect(stops[stops.length - 1]).toEqual({ offset: 1, color: REMAINING_COLOR });
-    expect(stops.some((s) => s.color === colorForName("Everyday"))).toBe(true);
-    const colorOrder = stops.map((s) => s.color);
-    expect(colorOrder.indexOf(colorForName("Bills"))).toBeLessThan(
-      colorOrder.indexOf(colorForName("Everyday"))
-    );
-    expect(colorOrder.indexOf(colorForName("Everyday"))).toBeLessThan(
-      colorOrder.lastIndexOf(REMAINING_COLOR)
-    );
+    const mortgage = colorForName("Mortgage Interest");
+    const electric = colorForName("Electric Bill");
+    const groceries = colorForName("Groceries");
+    expect(stops.map((s) => s.color)).toEqual([
+      mortgage,
+      mortgage,
+      electric,
+      electric,
+      groceries,
+      groceries,
+      REMAINING_COLOR,
+      REMAINING_COLOR,
+    ]);
+    expect(stops[0]!.offset).toBe(0);
+    expect(stops[stops.length - 1]!.offset).toBe(1);
     for (let i = 1; i < stops.length; i++) {
       expect(stops[i]!.offset).toBeGreaterThanOrEqual(stops[i - 1]!.offset);
     }
-    // The shared boundary offsets are the hard edges between bands.
-    expect(stops[1]!.offset).toBe(stops[2]!.offset);
-    expect(stops[1]!.color).not.toBe(stops[2]!.color);
-    expect(stops[3]!.offset).toBe(stops[4]!.offset);
-    expect(stops[3]!.color).not.toBe(stops[4]!.color);
+    // The shared boundary offsets are the hard edges between sub-bands.
+    for (const [a, b] of [
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ]) {
+      expect(stops[a]!.offset).toBe(stops[b]!.offset);
+      expect(stops[a]!.color).not.toBe(stops[b]!.color);
+    }
+    // Sub-bands nest inside their group bands: Bills ($1,150 of $2,000)
+    // ends at 0.575, Everyday ($400 more) at 0.775 — each category span is
+    // its exact share of the bar.
+    expect(stops[1]!.offset).toBeCloseTo((100000 / 200000), 6);
+    expect(stops[3]!.offset).toBeCloseTo(115000 / 200000, 6);
+    expect(stops[5]!.offset).toBeCloseTo(155000 / 200000, 6);
     // Hovering brightens the bar through the spotlight steps without
     // swapping its fill: gradient in, gradient out.
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
@@ -1971,6 +1986,33 @@ describe("SpendingReport", () => {
     expect(svg.querySelector('[data-testid="sankey-income-hover"]')).toBeNull();
     fireEvent.mouseLeave(bar);
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+  });
+
+  it("keeps one group-colored segment per band in Merchants grouping", () => {
+    // Merchants span groups, so per-merchant subdivision would repeat
+    // colors down the bar: the Merchants income gradient keeps one
+    // group-colored segment per outgoing band, plug green last.
+    const { container } = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const stops = Array.from(
+      svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
+    ).map((s) => ({
+      offset: Number(s.getAttribute("offset")),
+      color: s.getAttribute("stop-color"),
+    }));
+    expect(stops.map((s) => s.color)).toEqual([
+      colorForName("Bills"),
+      colorForName("Bills"),
+      colorForName("Everyday"),
+      colorForName("Everyday"),
+      REMAINING_COLOR,
+      REMAINING_COLOR,
+    ]);
+    // No merchant color leaks into the bar.
+    for (const name of ["Bank of Example", "Whole Foods", "Corner Shop"]) {
+      expect(stops.some((s) => s.color === colorForName(name))).toBe(false);
+    }
   });
 
   it("sizes shortfall bars to their funded flow with a legible minimum", () => {
