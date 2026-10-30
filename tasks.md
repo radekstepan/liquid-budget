@@ -67,6 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey, still-held follow-up (task-49)
-- Says "still held", but why are you not showing this in the chart? Isn't each account an actual category?
+Spending by Category - Sankey, held-hatch follow-up (task-50)
+- For any lines/monies still held, can you do the stripey color like you do Other/Remaining? Can even the sankeys have that pattern?
 
