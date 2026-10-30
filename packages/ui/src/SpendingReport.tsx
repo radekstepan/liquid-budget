@@ -21,6 +21,7 @@ import {
   SANKEY_PAD_BOTTOM,
   SANKEY_PAD_TOP,
   SANKEY_SOURCE_GUTTER,
+  STILL_HELD_GROUP_LABEL,
   UNCATEGORIZED_GROUP_LABEL,
   type GroupedLeftCellLayout,
   type MergedSpendingItem,
@@ -67,6 +68,22 @@ export const SOURCE_AMOUNT_PX_PER_CHAR = 6;
 
 function truncateName(name: string, max = 26): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
+}
+
+// True when a right-column row is a still-held account row: every cell
+// arriving at it routes through the Still-held pseudo-group. Held cells
+// route ONLY through it — and a kept held row's group can never have
+// merged away (the group value always covers its cells), so this is exact
+// for kept rows. Callers exclude merged buckets first: a bucket is a
+// generic render-only row even when every folded row was held.
+function isHeldTarget(
+  incomingGroupIndices: readonly number[],
+  groupNameOf: (groupIndex: number) => string | undefined
+): boolean {
+  return (
+    incomingGroupIndices.length > 0 &&
+    incomingGroupIndices.every((g) => groupNameOf(g) === STILL_HELD_GROUP_LABEL)
+  );
 }
 
 // True when the OS asks for reduced motion: the spotlight cross-fade
@@ -179,11 +196,6 @@ export function SpendingReport({
   categoryFlow,
   merchantFlow,
   income,
-  // Money still held in off-budget (investment/intermediate) accounts over
-  // the range (see computeRetainedBalances): contributions and profit that
-  // were neither spent nor withdrawn. Rendered as the Still-held strip
-  // under the header; absent (tests, embeds), the strip hides.
-  retained = [],
   // Monthly series behind each flow (see computeMonthlySankeySeries): the
   // Sankey funds spending chronologically from these, so an income can only
   // spotlight spending it could actually have funded. Absent (tests,
@@ -203,7 +215,6 @@ export function SpendingReport({
   categoryFlow: SpendingGroupFlow;
   merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
-  retained?: SpendingItem[];
   categorySeries?: MonthlySankeySeries;
   merchantSeries?: MonthlySankeySeries;
   groupOrder?: readonly string[];
@@ -604,6 +615,9 @@ export function SpendingReport({
       const r = midRows[hover.idx];
       if (!r) return null;
       const isOther = r.bucket === true;
+      // The Still-held pseudo-group reads as holdings, never spending
+      // (mirrors the Uncategorized explainer below).
+      const isHeldGroup = !isOther && r.name === STILL_HELD_GROUP_LABEL;
       const spendPct =
         spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
       return (
@@ -613,7 +627,7 @@ export function SpendingReport({
           </div>
           <TipLabel
             color={r.color}
-            label="Spent"
+            label={isHeldGroup ? "Held" : "Spent"}
             value={fmt(r.value)}
             pct={r.flowPct + "%"}
           />
@@ -631,7 +645,9 @@ export function SpendingReport({
             <span>
               {isOther
                 ? `${r.mergedCount} smaller group${r.mergedCount === 1 ? "" : "s"} under ${fmt(Math.round(activeThreshold * 100))}`
-                : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
+                : isHeldGroup
+                  ? `${r.memberCount} ${r.memberCount === 1 ? "account" : "accounts"}`
+                  : `${r.memberCount} ${r.memberCount === 1 ? nounSingular : nounPlural} · ${spendPct}% of ${fmt(spentTotal)} spending`}
             </span>
           </div>
           {r.name === UNCATEGORIZED_GROUP_LABEL && (
@@ -640,6 +656,14 @@ export function SpendingReport({
               style={{ color: "rgba(242,245,247,0.65)" }}
             >
               <span>Spending with no category set</span>
+            </div>
+          )}
+          {isHeldGroup && (
+            <div
+              className="flex items-center gap-2 text-[11px] leading-[1.45] whitespace-nowrap"
+              style={{ color: "rgba(242,245,247,0.65)" }}
+            >
+              <span>Money that never left these accounts</span>
             </div>
           )}
         </div>
@@ -674,6 +698,13 @@ export function SpendingReport({
             })
             .sort((a, b) => b.value - a.value);
       const multiGroup = cells.length > 1;
+      // Still-held account rows read as holdings, never spending: every
+      // cell arriving at one routes through the Still-held pseudo-group
+      // (merged buckets stay generic — see isHeldTarget).
+      const isHeld =
+        !isOther &&
+        cells.length > 0 &&
+        cells.every((c) => c.name === STILL_HELD_GROUP_LABEL);
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
@@ -681,7 +712,7 @@ export function SpendingReport({
           </div>
           <TipLabel
             color={r.color}
-            label="Spent"
+            label={isHeld ? "Held" : "Spent"}
             value={fmt(r.value)}
             pct={r.pctOfTotal + "%"}
           />
@@ -692,7 +723,9 @@ export function SpendingReport({
             <span>
               {isOther
                 ? `${r.mergedCount} smaller ${r.mergedCount === 1 ? nounSingular : nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
-                : cells.length === 1
+                : isHeld
+                  ? "Unspent — still in this account"
+                  : cells.length === 1
                   ? `${r.pctOfTotal}% of ${fmt(spentTotal)} spending · in ${cells[0]!.name}`
                   : multiGroup
                     ? `${r.pctOfTotal}% of ${fmt(spentTotal)} spending · across ${cells.length} groups`
@@ -724,6 +757,17 @@ export function SpendingReport({
     if (!r) return null;
     const isOther = r.bucket === true;
     const isRemaining = r.isPlug;
+    // Still-held account rows read as holdings, never spending (merged
+    // buckets stay generic — see isHeldTarget).
+    const isHeld =
+      !isOther &&
+      !isRemaining &&
+      isHeldTarget(
+        (sankey?.linksRight ?? [])
+          .filter((l) => l.targetIndex === hover.idx)
+          .map((l) => l.sourceIndex),
+        (g) => sankey?.middles[g]?.name
+      );
     const spendPct =
       spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
     return (
@@ -733,7 +777,7 @@ export function SpendingReport({
         </div>
         <TipLabel
           color={r.color}
-          label={isRemaining ? "Left" : "Spent"}
+          label={isRemaining ? "Left" : isHeld ? "Held" : "Spent"}
           value={fmt(r.value)}
           pct={r.flowPct + "%"}
         />
@@ -753,7 +797,9 @@ export function SpendingReport({
               ? `${r.mergedCount} smaller ${r.mergedCount === 1 ? nounSingular : nounPlural} under ${fmt(Math.round(activeThreshold * 100))}`
               : isRemaining
                 ? `Unspent of ${fmt(totals.incomeTotal)} income`
-                : `${spendPct}% of ${fmt(spentTotal)} spending`}
+                : isHeld
+                  ? "Unspent — still in this account"
+                  : `${spendPct}% of ${fmt(spentTotal)} spending`}
           </span>
         </div>
       </div>
@@ -1140,32 +1186,6 @@ export function SpendingReport({
           </div>
         </div>
       </div>
-
-      {/* Still-held strip: unspent money sitting in off-budget
-          (investment/intermediate) accounts — contributions and profit that
-          were neither spent nor withdrawn in-range. Hidden when no account
-          holds a positive balance, so embeds without the retained prop see
-          no change. */}
-      {retained.length > 0 && (
-        <div
-          data-testid="still-held"
-          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--y-line-soft)] px-3 py-1.5 text-[11px]"
-          style={{ color: "var(--y-ink-soft)" }}
-        >
-          <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>
-            Still held
-          </span>
-          {retained.map((r) => (
-            <span key={r.name} className="inline-flex items-center gap-1">
-              <span style={{ color: "var(--y-ink-faint)" }}>·</span>
-              <span>{r.name}</span>{" "}
-              <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
-                {fmt(r.value)}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
 
       {viewMode === "bars" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 y-scroll">

@@ -290,6 +290,41 @@ describe("ReportsView", () => {
     expect(within(panel).queryByText("Shop B")).not.toBeInTheDocument();
   });
 
+  it("Spending tab draws still-held accounts as chart rows under the Still-held group", () => {
+    // Unmerged fixture: pin the auto-fit flag so the initial load keeps the
+    // threshold off instead of raising it to fit the 400px mock viewport.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "RRSP", kind: "offbudget", groupLabel: "Investments", balance: "40000", onBudget: false, sort: 1 }
+    );
+    data.transactions.push({
+      ...txn("2026-06", 2, "Transfer : RRSP", -400, 10),
+      transferAccountId: 5,
+    });
+    renderView({ data });
+    clickTab("Spending by Category");
+    const panel = findPanel("Spending by Category")!;
+    // Hermetic view state: Categories dimension, Sankey view, threshold off.
+    fireEvent.click(within(panel).getByRole("button", { name: "Categories" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Sankey" }));
+    const slider = within(panel).getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: "0" } });
+    // The $400 contribution still held in the RRSP draws as a target row
+    // under the Still-held pseudo-group (the task-48 strip is gone).
+    expect(panel.querySelector('[data-testid="still-held"]')).toBeNull();
+    expect(within(panel).getByText("Still held")).toBeInTheDocument();
+    expect(within(panel).getByText("RRSP")).toBeInTheDocument();
+    // Header: In $9,000, Out $650 spending + $400 held, Left the rest.
+    expect(within(panel).getByText("$9,000.00")).toBeInTheDocument();
+    expect(within(panel).getByText("$1,050.00")).toBeInTheDocument();
+    expect(within(panel).getByText("$7,950.00")).toBeInTheDocument();
+    // Bars view draws the held row too.
+    fireEvent.click(within(panel).getByRole("button", { name: "Bars" }));
+    expect(within(panel).getByText("RRSP")).toBeInTheDocument();
+    expect(within(panel).getByText("$400.00")).toBeInTheDocument();
+  });
+
   it("Spending tab re-totals the Sankey when the From month is narrowed", () => {
     renderView();
     clickTab("Spending by Category");

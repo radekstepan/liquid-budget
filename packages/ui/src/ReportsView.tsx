@@ -11,7 +11,6 @@ import {
   computeMonthlySurplus,
   computeIncomeBreakdown,
   computeMonthlySankeySeries,
-  computeRetainedBalances,
   computeSpendingGroupFlow,
   type NetWorthPoint,
   type SurplusMonthPoint,
@@ -148,14 +147,6 @@ export const ReportsView = memo(function ReportsView({
 
   const incomeItems: SpendingItem[] = useMemo(
     () => computeIncomeBreakdown(data, actualStart, actualEnd),
-    [data, actualStart, actualEnd]
-  );
-
-  // Money still held in off-budget (investment/intermediate) accounts over
-  // the range — contributions and profit that were neither spent nor
-  // withdrawn. Rendered as the Still-held strip under the header.
-  const retainedItems: SpendingItem[] = useMemo(
-    () => computeRetainedBalances(data, actualStart, actualEnd),
     [data, actualStart, actualEnd]
   );
 
@@ -302,7 +293,6 @@ export const ReportsView = memo(function ReportsView({
               categoryFlow={categoryFlow}
               merchantFlow={merchantFlow}
               income={incomeItems}
-              retained={retainedItems}
               categorySeries={categorySeries}
               merchantSeries={merchantSeries}
               groupOrder={groupOrder}

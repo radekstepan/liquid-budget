@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   computeDirectFlowLinks,
   computeIncomeBreakdown,
-  computeRetainedBalances,
+  computeMonthlySankeySeries,
+  computeSankeyViewModel,
   computeSpendingBreakdown,
   computeSpendingGroupFlow,
   layoutDirectIncomeSankey,
@@ -19,6 +20,8 @@ import {
   sankeyThresholdStep,
   sankeyThresholdStops,
   sortMergedGroupFlow,
+  STARTING_BALANCE_PAYEE,
+  STILL_HELD_GROUP_LABEL,
   subdivideBandByValues,
   SANKEY_THRESHOLD_STOPS,
   SANKEY_LABEL_CENTER_MIN,
@@ -36,6 +39,7 @@ import {
   SANKEY_SOURCE_LABEL_GAP,
   UNCATEGORIZED_GROUP_LABEL,
   type MergedSpendingItem,
+  type SpendingGroupFlow,
 } from "../src/sankey.js";
 import type { BudgetData, Transaction } from "../src/types.js";
 
@@ -1218,15 +1222,23 @@ describe("computeIncomeBreakdown", () => {
     expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
   });
 
-  it("lets an explicit isIncome:false win over the profit predicate", () => {
+  it("counts isIncome:false off-budget rows as profit (import-realistic: the flag is ignored off-budget)", () => {
     const data = makeData();
     data.accounts.push(
       { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 }
     );
+    // This used to assert an explicit isIncome:false excludes the row — that
+    // expectation encoded the bug (task-49): the YNAB4 import sets
+    // isIncome=false for EVERY off-budget regular row, and the budget engine
+    // ignores the flag off-budget (isIncomeTransaction returns false before
+    // ever reading it), so the guard excluded ALL genuine imported profit.
+    // Genuine profit counts regardless of the flag now.
     data.transactions.push(
       txn("2026-06-10", "Mystery Credit", 20000, null, { accountId: 5, isIncome: false })
     );
-    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([]);
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 20000 },
+    ]);
   });
 
   it("does not count investment contributions as income", () => {
@@ -1481,6 +1493,8 @@ describe("sankey flow-through attribution", () => {
     data.accounts.push(
       { id: 7, name: "Questrade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 6 }
     );
+    // The last pool still holds the unspent $50,000 at range end.
+    data.accounts.find((a) => a.id === 5)!.balance = "50000";
     data.categories.push(
       { id: 14, groupId: 1, name: "Downpayment", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
     );
@@ -1496,16 +1510,24 @@ describe("sankey flow-through attribution", () => {
     expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
       { name: "SAP Concur", value: 200000 },
     ]);
-    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
-      { name: "Downpayment", value: 150000 },
-    ]);
-    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
-      { name: "Title Company", value: 150000 },
-    ]);
-    // The $50,000 that never left the chain is still held in the last pool.
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
-      { name: "Wealthsimple Trade", value: 50000 },
-    ]);
+    // The $50,000 that never left the chain is a first-class chart row in
+    // both dimensions — the last pool under the Still-held pseudo-group —
+    // next to the final purchase (task-49 replaces the task-48 strip query
+    // with these row assertions).
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      expect(flow.targets).toContainEqual({ name: "Wealthsimple Trade", value: 50000 });
+      expect(flow.groups).toContainEqual({ name: STILL_HELD_GROUP_LABEL, value: 50000 });
+      const gi = flow.groups.findIndex((g) => g.name === STILL_HELD_GROUP_LABEL);
+      const ti = flow.targets.findIndex((t) => t.name === "Wealthsimple Trade");
+      expect(flow.links).toContainEqual({ groupIndex: gi, targetIndex: ti, value: 50000 });
+    }
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toContainEqual(
+      { name: "Downpayment", value: 150000 }
+    );
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toContainEqual(
+      { name: "Title Company", value: 150000 }
+    );
   });
 
   it("attributes appreciation to the growing account only (Questrade → Downpayment for the profit)", () => {
@@ -1535,12 +1557,21 @@ describe("sankey flow-through attribution", () => {
     expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
       { name: "Downpayment", value: 120000 },
     ]);
-    // Both pools fully cycled: nothing is still held anywhere.
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([]);
+    // Both pools fully cycled: no Still-held group anywhere, in either
+    // dimension (task-49 replaces the task-48 strip query with this).
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+      expect(flow.targets.some((t) => t.name === "Wealthsimple Trade")).toBe(false);
+      expect(flow.targets.some((t) => t.name === "Questrade")).toBe(false);
+    }
   });
 });
 
-describe("computeRetainedBalances", () => {
+describe("still-held accounts as chart rows", () => {
+  // Still-held off-budget accounts draw as first-class right-column rows
+  // (named by the account, routed through the Still-held pseudo-group) in
+  // both dimensions — replacing the task-48 strip.
   function heldData(): BudgetData {
     const data = makeData();
     data.accounts.push(
@@ -1552,120 +1583,443 @@ describe("computeRetainedBalances", () => {
     return data;
   }
 
-  it("shows unspent contributions per account, sorted descending", () => {
+  const setBalance = (data: BudgetData, id: number, balance: string) => {
+    data.accounts.find((a) => a.id === id)!.balance = balance;
+  };
+
+  // Held rows of a flow: targets fed ONLY through the Still-held group.
+  const heldTargetsOf = (flow: SpendingGroupFlow): { name: string; value: number }[] =>
+    flow.targets.filter((_, ti) => {
+      const incoming = flow.links.filter((l) => l.targetIndex === ti);
+      return (
+        incoming.length > 0 &&
+        incoming.every((l) => flow.groups[l.groupIndex]?.name === STILL_HELD_GROUP_LABEL)
+      );
+    });
+
+  const fundedInto = (
+    vm: ReturnType<typeof computeSankeyViewModel>,
+    source: string,
+    target: string
+  ): number => {
+    const si = vm.sources.findIndex((s) => s.name === source);
+    const cis = new Set(
+      vm.links
+        .map((l, k) => ({ l, k }))
+        .filter(({ l }) => vm.targets[l.targetIndex]?.name === target)
+        .map(({ k }) => k)
+    );
+    return vm.left.cells
+      .filter((c) => c.sourceIndex === si && cis.has(c.rightLinkIndex))
+      .reduce((s, c) => s + c.value, 0);
+  };
+
+  it("shows the original source → purchase ribbon plus a Still-held row for the remainder (all-time style)", () => {
     const data = heldData();
+    setBalance(data, 6, "40000");
+    data.categories.push(
+      { id: 14, groupId: 1, name: "Downpayment", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    data.transactions.push(
+      txn("2026-04-01", "Payroll", 100000, null),
+      txn("2026-04-02", "Transfer : RRSP", -100000, 14, { transferAccountId: 6 }),
+      txn("2026-05-03", "Dividend", 20000, null, { accountId: 6, isIncome: false }),
+      txn("2026-06-04", "Transfer : RRSP", 80000, null, { transferAccountId: 6 }),
+      txn("2026-06-05", "Title Company", -80000, 14)
+    );
+    // The import-realistic isIncome:false profit counts under the account.
+    const income = computeIncomeBreakdown(data, "2026-04", "2026-06");
+    expect(income).toEqual([
+      { name: "Payroll", value: 100000 },
+      { name: "RRSP", value: 20000 },
+    ]);
+    // Both dimensions draw the purchase AND the $400 remainder under the
+    // Still-held pseudo-group.
+    const catFlow = computeSpendingGroupFlow(data, "2026-04", "2026-06", "categories");
+    expect(catFlow.targets).toEqual([
+      { name: "Downpayment", value: 80000 },
+      { name: "RRSP", value: 40000 },
+    ]);
+    expect(catFlow.groups).toEqual([
+      { name: "Everyday", value: 80000 },
+      { name: STILL_HELD_GROUP_LABEL, value: 40000 },
+    ]);
+    expect(catFlow.links).toEqual([
+      { groupIndex: 0, targetIndex: 0, value: 80000 },
+      { groupIndex: 1, targetIndex: 1, value: 40000 },
+    ]);
+    const merchFlow = computeSpendingGroupFlow(data, "2026-04", "2026-06", "merchants");
+    expect(merchFlow.targets).toEqual([
+      { name: "Title Company", value: 80000 },
+      { name: "RRSP", value: 40000 },
+    ]);
+    expect(heldTargetsOf(merchFlow)).toEqual([{ name: "RRSP", value: 40000 }]);
+    // Funding: the original source reaches the purchase (Payroll →
+    // Downpayment) and the profit funds downstream too; both cells are
+    // fully funded, so no Remaining plug survives.
+    const series = computeMonthlySankeySeries(data, "2026-04", "2026-06", "categories");
+    const vm = computeSankeyViewModel(catFlow, income, series, { thresholdCents: 0 });
+    expect(vm.left.incomeTotal).toBe(120000);
+    expect(vm.left.spendingTotal).toBeCloseTo(120000, 9);
+    expect(fundedInto(vm, "Payroll", "Downpayment")).toBeGreaterThan(0);
+    expect(fundedInto(vm, "RRSP", "Downpayment")).toBeGreaterThan(0);
+    expect(fundedInto(vm, "Payroll", "Downpayment") + fundedInto(vm, "RRSP", "Downpayment")).toBeCloseTo(80000, 9);
+    expect(fundedInto(vm, "Payroll", "RRSP") + fundedInto(vm, "RRSP", "RRSP")).toBeCloseTo(40000, 9);
+    expect(vm.left.remainingBySource).toEqual([0, 0]);
+  });
+
+  it("funds downstream cells from isIncome:false profit (Questrade → Downpayment)", () => {
+    const data = heldData();
+    data.accounts.push(
+      { id: 8, name: "Questrade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 7 }
+    );
+    data.categories.push(
+      { id: 14, groupId: 1, name: "Downpayment", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
     data.transactions.push(
       txn("2026-06-01", "Payroll", 100000, null),
-      txn("2026-06-02", "Transfer : RRSP", -30000, 10, { transferAccountId: 6 }),
-      txn("2026-06-03", "Transfer : TFSA", -50000, 10, { transferAccountId: 7 }),
-      // An internal on-budget move touches no off-budget pool: held as-is.
-      txn("2026-06-04", "Transfer : Savings", -10000, null, { transferAccountId: 2 })
+      txn("2026-06-02", "Transfer : Questrade", -100000, 14, { transferAccountId: 8 }),
+      txn("2026-06-03", "Dividend", 20000, null, { accountId: 8, isIncome: false }),
+      txn("2026-06-04", "Transfer : Questrade", 120000, null, { transferAccountId: 8 }),
+      txn("2026-06-05", "Title Company", -120000, 14)
     );
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
-      { name: "TFSA", value: 50000 },
-      { name: "RRSP", value: 30000 },
+    // Questrade fully cycled (net zero): an income source only, no held row.
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([
+      { name: "Payroll", value: 100000 },
+      { name: "Questrade", value: 20000 },
     ]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.targets).toEqual([{ name: "Downpayment", value: 120000 }]);
+    expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+    // The profit FUNDS the purchase: Questrade → Downpayment. Single month,
+    // so the exact fungible share — 1/6 of the purchase.
+    const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", "categories");
+    const vm = computeSankeyViewModel(flow, income, series, { thresholdCents: 0 });
+    expect(fundedInto(vm, "Questrade", "Downpayment")).toBeCloseTo(20000, 9);
+  });
+
+  it("excludes Starting Balance appraisal rows from income, spending, and held", () => {
+    const data = heldData();
+    data.accounts.push(
+      { id: 8, name: "Home Value", kind: "offbudget", groupLabel: "Property", balance: "97900000", onBudget: false, sort: 7 },
+      { id: 9, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-97900000", onBudget: false, sort: 8 }
+    );
+    data.transactions.push(
+      txn("2026-04-21", STARTING_BALANCE_PAYEE, 97900000, null, { accountId: 8 }),
+      txn("2026-04-21", STARTING_BALANCE_PAYEE, -97900000, null, { accountId: 9 })
+    );
+    // The ±$979k appraisal pair is stock recognition: it appears NOWHERE.
+    expect(computeIncomeBreakdown(data, "2026-04", "2026-06")).toEqual([]);
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-04", "2026-06", dimension);
+      expect(flow.targets).toEqual([]);
+      expect(flow.groups).toEqual([]);
+      expect(flow.links).toEqual([]);
+    }
+  });
+
+  it("excludes on-budget and credit opening rows from income and merchant spending", () => {
+    const data = makeData();
+    data.accounts.push(
+      { id: 3, name: "Visa", kind: "credit", groupLabel: "Credit", balance: "-389784", onBudget: true, sort: 2 }
+    );
+    data.transactions = [
+      txn("2026-04-01", STARTING_BALANCE_PAYEE, 670000, null, { isIncome: true }),
+      txn("2026-04-01", STARTING_BALANCE_PAYEE, -389784, null, { accountId: 3 }),
+    ];
+    // The $6,700 on-budget opening balance is not income (even flagged
+    // isIncome:true); the credit opening balance is not merchant spending.
+    expect(computeIncomeBreakdown(data, "2026-04", "2026-06")).toEqual([]);
+    expect(computeSpendingBreakdown(data, "2026-04", "2026-06", "merchants")).toEqual([]);
+    expect(computeSpendingBreakdown(data, "2026-04", "2026-06", "categories")).toEqual([]);
+  });
+
+  it("excludes Starting Balance rows from held nets (but keeps them in the range-end stock)", () => {
+    const data = heldData();
+    // RRSP opened in-range ($1,000 stock recognition) plus a $400 real
+    // contribution; the held row values the FLOW only.
+    setBalance(data, 6, "140000");
+    data.transactions.push(
+      txn("2026-06-01", STARTING_BALANCE_PAYEE, 100000, null, { accountId: 6 }),
+      txn("2026-06-02", "Transfer : RRSP", -40000, 10, { transferAccountId: 6 })
+    );
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(heldTargetsOf(flow)).toEqual([{ name: "RRSP", value: 40000 }]);
+    expect(flow.groups).toContainEqual({ name: STILL_HELD_GROUP_LABEL, value: 40000 });
+  });
+
+  it("does not hold debt paydown: a positive range net with a negative range-end balance is excluded", () => {
+    const data = heldData();
+    data.accounts.push(
+      { id: 8, name: "Mortgage Debt", kind: "offbudget", groupLabel: "Property", balance: "-66025355", onBudget: false, sort: 7 }
+    );
+    data.categories.push(
+      { id: 14, groupId: 1, name: "Mortgage Principal", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    data.transactions.push(
+      // Categorized principal payments INTO the mortgage account: transfers,
+      // so never spending — but a +$325k range net for the account.
+      txn("2026-06-05", "Transfer : Mortgage Debt", -32500000, 14, { transferAccountId: 8 })
+    );
+    // Liability reduction is not holdings: no row in either dimension.
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+      expect(flow.targets.some((t) => t.name === "Mortgage Debt")).toBe(false);
+    }
+    // Sanity: the payment is not spending either (off-budget transfer leg).
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([]);
+  });
+
+  it("excludes accounts holding nothing at range end (in-range refill of a pre-range drawdown)", () => {
+    const data = heldData();
+    setBalance(data, 6, "0");
+    data.transactions.push(
+      txn("2026-05-02", "Transfer : RRSP", 50000, null, { transferAccountId: 6 }),
+      txn("2026-06-03", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 })
+    );
+    // June nets +$500 but the account holds $0 at range end (the $500
+    // refilled May's hole): no row.
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+  });
+
+  it("still holds money withdrawn after the range (range-end, not current, governs)", () => {
+    const data = heldData();
+    setBalance(data, 6, "0");
+    data.transactions.push(
+      txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
+      txn("2026-07-04", "Transfer : RRSP", 50000, null, { transferAccountId: 6 })
+    );
+    // At the June range end the RRSP held $500 — the July withdrawal adds
+    // back into the range-end stock, so the held row stands.
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(heldTargetsOf(flow)).toEqual([{ name: "RRSP", value: 50000 }]);
+  });
+
+  it("reconciles income = spending + held + remaining in both dimensions", () => {
+    const data = heldData();
+    setBalance(data, 6, "40000");
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -70000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Dividend", 10000, null, { accountId: 6, isIncome: false }),
+      txn("2026-06-04", "Transfer : RRSP", 40000, null, { transferAccountId: 6 }),
+      txn("2026-06-05", "Grocer", -30000, 10)
+    );
+    // Income $1,100 (Payroll + RRSP profit); RRSP nets +$400 held ($700 +
+    // $100 − $400); Groceries $300 spent; $400 unspent.
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([
+      { name: "Payroll", value: 100000 },
+      { name: "RRSP", value: 10000 },
+    ]);
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", dimension);
+      const vm = computeSankeyViewModel(flow, income, series, { thresholdCents: 0 });
+      const held = heldTargetsOf(flow).reduce((s, t) => s + t.value, 0);
+      const spending = flow.targets.reduce((s, t) => s + t.value, 0) - held;
+      const remaining = vm.left.remainingBySource.reduce((s, v) => s + v, 0);
+      expect(vm.left.incomeTotal).toBe(110000);
+      expect(spending).toBe(30000);
+      expect(held).toBe(40000);
+      expect(remaining).toBeCloseTo(40000, 9);
+      expect(spending + held + remaining).toBeCloseTo(vm.left.incomeTotal, 9);
+    }
+  });
+
+  it("keeps held months via scaled positive parts (withdrawals wash out)", () => {
+    const data = heldData();
+    setBalance(data, 6, "50000");
+    data.transactions.push(
+      txn("2026-04-02", "Transfer : RRSP", -60000, 10, { transferAccountId: 6 }),
+      txn("2026-05-03", "Transfer : RRSP", 20000, null, { transferAccountId: 6 }),
+      txn("2026-06-04", "Transfer : RRSP", -10000, 10, { transferAccountId: 6 })
+    );
+    // Nets [+60000, −20000, +10000] net +50000; positives total 70000.
+    const series = computeMonthlySankeySeries(data, "2026-04", "2026-06", "categories");
+    expect(series.months).toEqual(["2026-04", "2026-05", "2026-06"]);
+    expect(series.targetNames).toEqual(["RRSP"]);
+    expect(series.groupNames).toEqual([STILL_HELD_GROUP_LABEL]);
+    const col = series.cellByMonth.map((row) => row[0]);
+    expect(col[0]).toBeCloseTo((60000 * 50000) / 70000, 9);
+    expect(col[1]).toBe(0);
+    expect(col[2]).toBeCloseTo((10000 * 50000) / 70000, 9);
+    expect(col[0]! + col[1]! + col[2]!).toBeCloseTo(50000, 9);
+  });
+
+  it("funds held demands chronologically against spending (early income never funds late spending)", () => {
+    const data = heldData();
+    setBalance(data, 6, "100000");
+    data.transactions.push(
+      txn("2026-04-01", "Payroll", 100000, null),
+      txn("2026-04-02", "Transfer : RRSP", -100000, 10, { transferAccountId: 6 }),
+      txn("2026-05-01", "Bonus", 50000, null),
+      txn("2026-05-05", "Grocer", -50000, 10)
+    );
+    const income = computeIncomeBreakdown(data, "2026-04", "2026-05");
+    const flow = computeSpendingGroupFlow(data, "2026-04", "2026-05", "categories");
+    const series = computeMonthlySankeySeries(data, "2026-04", "2026-05", "categories");
+    const vm = computeSankeyViewModel(flow, income, series, { thresholdCents: 0 });
+    // April Payroll is fully absorbed by the April held demand; May Bonus
+    // alone funds the May groceries — the held cell competes
+    // chronologically in the same allocator.
+    expect(fundedInto(vm, "Payroll", "RRSP")).toBeCloseTo(100000, 9);
+    expect(fundedInto(vm, "Bonus", "RRSP")).toBeCloseTo(0, 9);
+    expect(fundedInto(vm, "Bonus", "Groceries")).toBeCloseTo(50000, 9);
+    expect(fundedInto(vm, "Payroll", "Groceries")).toBeCloseTo(0, 9);
+    expect(vm.left.remainingBySource).toEqual([0, 0]);
+  });
+
+  it("counts external profit as held and shifts held money on off→off moves", () => {
+    const data = heldData();
+    setBalance(data, 7, "80000");
+    data.transactions.push(
+      txn("2026-06-02", "Transfer : RRSP", -60000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Dividend", 20000, null, { accountId: 6, isIncome: false }),
+      txn("2026-06-04", "Transfer : TFSA", -80000, 10, { accountId: 6, transferAccountId: 7 })
+    );
+    // The $600 contribution plus $200 profit moved pools intact: RRSP nets
+    // to zero (omitted) and TFSA holds the full $800.
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(heldTargetsOf(flow)).toEqual([{ name: "TFSA", value: 80000 }]);
+    expect(flow.groups).toContainEqual({ name: STILL_HELD_GROUP_LABEL, value: 80000 });
+  });
+
+  it("omits fully-cycled and drawn-down accounts (clamped at zero)", () => {
+    const data = heldData();
+    setBalance(data, 6, "0");
+    setBalance(data, 7, "-20000");
+    data.transactions.push(
+      txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Transfer : RRSP", 50000, null, { transferAccountId: 6 }),
+      txn("2026-06-04", "Transfer : TFSA", -50000, 10, { transferAccountId: 7 }),
+      txn("2026-06-05", "Transfer : TFSA", 70000, null, { transferAccountId: 7 })
+    );
+    // RRSP fully cycled (net zero); TFSA drew down $200 of pre-period
+    // savings (net −$200) — neither draws a row.
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(heldTargetsOf(flow)).toEqual([]);
+    expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
   });
 
   it("falls back to an em-dash for a blank account name", () => {
     const data = heldData();
     data.accounts.push(
-      { id: 8, name: "   ", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 7 }
+      { id: 8, name: "   ", kind: "offbudget", groupLabel: "Investments", balance: "25000", onBudget: false, sort: 7 }
     );
     data.transactions.push(
       txn("2026-06-02", "Transfer : Blank", -25000, 10, { transferAccountId: 8 })
     );
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
-      { name: "—", value: 25000 },
-    ]);
-  });
-
-  it("nets withdrawals and direct spending against contributions", () => {
-    const data = heldData();
-    data.transactions.push(
-      txn("2026-06-01", "Payroll", 100000, null),
-      txn("2026-06-02", "Transfer : Wealthsimple Trade", -80000, 10, { transferAccountId: 5 }),
-      txn("2026-06-03", "Transfer : Wealthsimple Trade", 30000, null, { transferAccountId: 5 }),
-      txn("2026-06-04", "Broker Fee", -10000, 10, { accountId: 5 })
-    );
-    // $800 in, $300 withdrawn, $100 spent from the account: $400 still held.
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
-      { name: "Wealthsimple Trade", value: 40000 },
-    ]);
-  });
-
-  it("counts external profit as held and shifts held money on off→off moves", () => {
-    const data = heldData();
-    data.transactions.push(
-      txn("2026-06-01", "Payroll", 100000, null),
-      txn("2026-06-02", "Transfer : RRSP", -60000, 10, { transferAccountId: 6 }),
-      txn("2026-06-03", "Dividend", 20000, null, { accountId: 6 }),
-      txn("2026-06-04", "Transfer : TFSA", -80000, 10, { accountId: 6, transferAccountId: 7 })
-    );
-    // The $600 contribution plus $200 profit moved pools intact: RRSP nets
-    // to zero (omitted) and TFSA holds the full $800 — a move between pools
-    // creates nothing.
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
-      { name: "TFSA", value: 80000 },
-    ]);
-  });
-
-  it("omits fully-cycled and drawn-down accounts (clamped at zero)", () => {
-    const data = heldData();
-    data.transactions.push(
-      txn("2026-06-01", "Payroll", 100000, null),
-      txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
-      txn("2026-06-03", "Transfer : RRSP", 50000, null, { transferAccountId: 6 }),
-      // $700 out against $500 in: the extra $200 came from pre-period
-      // savings, so there is nothing left to hold.
-      txn("2026-06-04", "Transfer : TFSA", -50000, 10, { transferAccountId: 7 }),
-      txn("2026-06-05", "Transfer : TFSA", 70000, null, { transferAccountId: 7 })
-    );
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([]);
-  });
-
-  it("reconciles with the header Left when nothing lingers in the budget", () => {
-    const data = heldData();
-    data.transactions.push(
-      txn("2026-06-01", "Payroll", 100000, null),
-      txn("2026-06-02", "Transfer : RRSP", -70000, 10, { transferAccountId: 6 }),
-      txn("2026-06-03", "Grocer", -30000, 10)
-    );
-    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
-    const spending = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
-    const retained = computeRetainedBalances(data, "2026-06", "2026-06");
-    const left =
-      income.reduce((s, i) => s + i.value, 0) - spending.reduce((s, t) => s + t.value, 0);
-    // Every unspent dollar sits in the RRSP: Left equals retained exactly.
-    expect(left).toBe(70000);
-    expect(retained).toEqual([{ name: "RRSP", value: 70000 }]);
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    expect(heldTargetsOf(flow)).toEqual([{ name: "—", value: 25000 }]);
   });
 
   it("respects the month range, swaps reversed bounds, and skips split parents", () => {
     const data = heldData();
+    setBalance(data, 6, "80000");
+    setBalance(data, 7, "100000");
     data.transactions.push(
       txn("2026-05-20", "Transfer : RRSP", -30000, 10, { transferAccountId: 6 }),
       txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
       txn("2026-06-10", "Transfer : TFSA", -90000, 10, { transferAccountId: 7 })
     );
-    // A split parent moves no money itself (its children do); it must not
-    // inflate the held balance.
     const parent = txn("2026-06-11", "Split", -10000, null, { transferAccountId: 7 });
     data.transactions.push(
       parent,
       txn("2026-06-11", "Split child", -10000, 10, { parentId: parent.id, transferAccountId: 7 })
     );
-    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+    // June only: RRSP $500, TFSA $900 + $100 split child (the split parent
+    // moves no money itself).
+    expect(
+      heldTargetsOf(computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories"))
+    ).toEqual([
       { name: "TFSA", value: 100000 },
       { name: "RRSP", value: 50000 },
     ]);
     // Reversed bounds cover the same May–June span as the forward order.
-    expect(computeRetainedBalances(data, "2026-06", "2026-05")).toEqual(
-      computeRetainedBalances(data, "2026-05", "2026-06")
+    expect(
+      heldTargetsOf(computeSpendingGroupFlow(data, "2026-06", "2026-05", "categories"))
+    ).toEqual(heldTargetsOf(computeSpendingGroupFlow(data, "2026-05", "2026-06", "categories")));
+    expect(
+      heldTargetsOf(computeSpendingGroupFlow(data, "2026-05", "2026-05", "categories"))
+    ).toEqual([{ name: "RRSP", value: 30000 }]);
+  });
+
+  it("sorts the Still-held pseudo-group last in Budget order (mirroring Uncategorized)", () => {
+    const data = heldData();
+    setBalance(data, 6, "40000");
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -40000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Grocer", -30000, 10),
+      txn("2026-06-04", "Corner Shop", -50000, null)
     );
-    expect(computeRetainedBalances(data, "2026-05", "2026-05")).toEqual([
-      { name: "RRSP", value: 30000 },
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "merchants");
+    const merged = mergeGroupFlow(flow.groups, flow.targets, flow.links, 0);
+    const sorted = sortMergedGroupFlow(merged, ["Everyday"], "group", []);
+    // Known Budget groups first; the pseudo-groups trail in current
+    // (value-descending) order — Still held mirrors Uncategorized exactly.
+    expect(sorted.groups.map((g) => g.name)).toEqual([
+      "Everyday",
+      UNCATEGORIZED_GROUP_LABEL,
+      STILL_HELD_GROUP_LABEL,
     ]);
+    // Held targets trail with their group: no Budget rank, value-descending
+    // among the unknowns.
+    expect(sorted.targets.map((t) => t.name)).toEqual(["Grocer", "Corner Shop", "RRSP"]);
+  });
+
+  it("merges a held account with a same-named spending target as one more group leg", () => {
+    const data = heldData();
+    setBalance(data, 6, "40000");
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -40000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "RRSP", -10000, 10)
+    );
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "merchants");
+    // One RRSP row for the total $500 flow: $100 merchant spending via
+    // Everyday plus the $400 held cell via Still held (merchant-split
+    // precedent — the identity reconciles cell-wise).
+    expect(flow.targets).toEqual([{ name: "RRSP", value: 50000 }]);
+    const legs = flow.links
+      .map((l) => `${flow.groups[l.groupIndex]?.name}:${l.value}`)
+      .sort();
+    expect(legs).toEqual(["Everyday:10000", `${STILL_HELD_GROUP_LABEL}:40000`]);
+  });
+
+  it("draws one right-hop ribbon per cell with the Still-held group present", () => {
+    const data = heldData();
+    setBalance(data, 6, "40000");
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -40000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Grocer", -30000, 10)
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", "categories");
+    const vm = computeSankeyViewModel(flow, income, series, { thresholdCents: 0 });
+    const layout = layoutGroupedIncomeSankey(vm.sources, vm.groups, vm.targets, vm.links, {
+      width: 800,
+      height: 400,
+      leftDetail: "cells",
+      leftHop: vm.left,
+    });
+    // One ribbon per group→target cell — the held cell included — each in
+    // its target's color, and the Still-held middle bar wraps its band.
+    expect(layout.linksRight).toHaveLength(vm.links.length);
+    const heldLink = layout.linksRight.find((l) => l.targetName === "RRSP");
+    expect(heldLink?.sourceName).toBe(STILL_HELD_GROUP_LABEL);
+    expect(heldLink?.fill).toBe(layout.targets.find((t) => t.name === "RRSP")?.fill);
+    const heldMid = layout.middles.find((m) => m.name === STILL_HELD_GROUP_LABEL);
+    expect(heldMid?.value).toBe(40000);
+    // The surplus shrinks to the on-budget leftover: $1,000 in, $300 + $400 out.
+    expect(layout.remainingTargetIndex).toBe(layout.targets.length - 1);
+    expect(layout.targets[layout.remainingTargetIndex!]?.value).toBeCloseTo(30000, 9);
   });
 });
 

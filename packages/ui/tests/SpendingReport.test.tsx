@@ -105,6 +105,26 @@ const sampleMerchantFlow: SpendingGroupFlow = {
 
 const emptyFlow: SpendingGroupFlow = { groups: [], targets: [], links: [] };
 
+// Still-held fixture (task-49): an $800 purchase plus a $400 remainder held
+// in the RRSP, routed through the Still-held pseudo-group; $1,200 income
+// covers both exactly, so no Remaining plug draws.
+const heldCategoryFlow: SpendingGroupFlow = {
+  groups: [
+    { name: "Everyday", value: 80000 },
+    { name: "Still held", value: 40000 },
+  ],
+  targets: [
+    { name: "Downpayment", value: 80000 },
+    { name: "Wealthsimple RRSP", value: 40000 },
+  ],
+  links: [
+    { groupIndex: 0, targetIndex: 0, value: 80000 },
+    { groupIndex: 1, targetIndex: 1, value: 40000 },
+  ],
+};
+
+const heldIncome: SpendingItem[] = [{ name: "Payroll", value: 120000 }];
+
 // Income $2,000 vs spending $1,550: flow is $2,000 with a $450 Remaining plug.
 const sampleIncome: SpendingItem[] = [{ name: "Payroll", value: 200000 }];
 
@@ -146,39 +166,130 @@ describe("SpendingReport", () => {
     expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
-  it("shows the Still-held strip with per-account balances", () => {
+  it("draws still-held accounts as first-class Sankey rows under the Still-held group (no strip, no hatch)", () => {
+    // Task-49 replaces the task-48 Still-held strip with chart rows: one
+    // target row per held account, routed through the Still-held
+    // pseudo-group, in the account's own stable color with NO hatch (real
+    // accounts, not render artifacts).
     render(
       <SpendingReport
-        categoryFlow={sampleCategoryFlow}
-        merchantFlow={sampleMerchantFlow}
-        income={sampleIncome}
-        retained={[
-          { name: "TFSA", value: 50000 },
-          { name: "RRSP", value: 30000 },
-        ]}
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
       />
     );
-    const strip = screen.getByTestId("still-held");
-    expect(strip).toBeInTheDocument();
-    expect(within(strip as unknown as HTMLElement).getByText("Still held")).toBeInTheDocument();
-    expect(within(strip as unknown as HTMLElement).getByText("TFSA")).toBeInTheDocument();
-    expect(within(strip as unknown as HTMLElement).getByText("RRSP")).toBeInTheDocument();
-    expect(within(strip as unknown as HTMLElement).getByText("$500.00")).toBeInTheDocument();
-    expect(within(strip as unknown as HTMLElement).getByText("$300.00")).toBeInTheDocument();
+    expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
+    // Middle column: the Still-held pseudo-group bar + label.
+    const groupLabels = screen.getAllByTestId("sankey-group-label");
+    expect(groupLabels.map((el) => el.textContent)).toContain("Still held");
+    // Right column: the held account row with its value…
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    expect(targetLabels.map((el) => el.textContent)).toContain("Wealthsimple RRSP");
+    const targetAmounts = screen.getAllByTestId("sankey-target-amount");
+    expect(targetAmounts.map((el) => el.textContent)).toContain("$400.00 · 33%");
+    // …painted in its own stable hash color (never the bucket slate or the
+    // Remaining green), with no hatch overlay anywhere (no buckets, no
+    // plug — income exactly covers spending + held).
+    const nodes = screen.getAllByTestId("sankey-node");
+    const heldNode = nodes.find(
+      (n) => n.getAttribute("fill") === colorForName("Wealthsimple RRSP")
+    );
+    expect(heldNode).toBeDefined();
+    expect(heldNode?.getAttribute("fill")).toBe(
+      sankeyTargetColor({ name: "Wealthsimple RRSP", bucket: false, isPlug: false })
+    );
+    expect(screen.queryByTestId("sankey-bucket-hatch")).not.toBeInTheDocument();
+    // One ribbon per group→target cell, held cell included.
+    const rightLinks = screen
+      .getAllByTestId("sankey-link")
+      .filter((el) => el.getAttribute("data-side") === "right");
+    expect(rightLinks).toHaveLength(2);
+    // Header: Out covers spending + held, so Left reconciles to zero.
+    expect(screen.getAllByText("$1,200.00")).toHaveLength(2);
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
   });
 
-  it("hides the Still-held strip without retained balances", () => {
-    const { rerender } = renderReport();
-    expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
-    rerender(
+  it("draws still-held accounts as Bars rows with no hatch", () => {
+    render(
       <SpendingReport
-        categoryFlow={sampleCategoryFlow}
-        merchantFlow={sampleMerchantFlow}
-        income={sampleIncome}
-        retained={[]}
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+        initialView="bars"
       />
     );
     expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
+    expect(screen.getByText("Wealthsimple RRSP")).toBeInTheDocument();
+    expect(screen.getByText("$400.00")).toBeInTheDocument();
+    // No merged buckets anywhere, so no hatch def renders at all.
+    expect(screen.queryByTestId("bars-bucket-hatch-defs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bars-bucket-hatch")).not.toBeInTheDocument();
+  });
+
+  it("reads held rows as holdings in tooltips (Held, never Spent)", () => {
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    // Held target tooltip: "Held" + the still-in-account line.
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    const heldLabel = targetLabels.find((el) => el.textContent === "Wealthsimple RRSP")!;
+    fireEvent.mouseMove(heldLabel, { clientX: 700, clientY: 100 });
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Wealthsimple RRSP")).toBeInTheDocument();
+    expect(within(tip as unknown as HTMLElement).getByText("Held")).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("Unspent — still in this account")
+    ).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).queryByText("Spent")
+    ).not.toBeInTheDocument();
+    // Still-held group tooltip: "Held" + the account count + explainer.
+    const groupLabels = screen.getAllByTestId("sankey-group-label");
+    const heldGroup = groupLabels.find((el) => el.textContent === "Still held")!;
+    fireEvent.mouseMove(heldGroup, { clientX: 380, clientY: 100 });
+    const groupTip = document.querySelector(".y-tip")!;
+    expect(groupTip).toBeInTheDocument();
+    expect(within(groupTip as unknown as HTMLElement).getByText("Held")).toBeInTheDocument();
+    expect(within(groupTip as unknown as HTMLElement).getByText("1 account")).toBeInTheDocument();
+    expect(
+      within(groupTip as unknown as HTMLElement).getByText("Money that never left these accounts")
+    ).toBeInTheDocument();
+  });
+
+  it("spotlights a held target's full path without reordering the DOM (no z-reorder)", () => {
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    const orderOf = () =>
+      Array.from(container.querySelectorAll('[data-testid="sankey-link"]')).map((el) =>
+        el.getAttribute("d")
+      );
+    const before = orderOf();
+    // Hover the held target: its cell ribbon + Still-held group + funding
+    // income brighten, the spending leg dims — in place.
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    const heldLabel = targetLabels.find((el) => el.textContent === "Wealthsimple RRSP")!;
+    fireEvent.mouseMove(heldLabel, { clientX: 700, clientY: 100 });
+    const rightLinks = screen
+      .getAllByTestId("sankey-link")
+      .filter((el) => el.getAttribute("data-side") === "right");
+    const fills = new Map(
+      rightLinks.map((el) => [el.getAttribute("fill"), el.getAttribute("fill-opacity")])
+    );
+    expect(fills.get(colorForName("Wealthsimple RRSP"))).toBe(
+      String(SANKEY_RIBBON_HOVER_OPACITY)
+    );
+    expect(fills.get(colorForName("Downpayment"))).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(orderOf()).toEqual(before);
   });
 
   it("shows no explainer tooltip on the Left / Over header readout", () => {

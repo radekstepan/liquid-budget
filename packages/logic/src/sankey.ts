@@ -7,7 +7,7 @@
  * No React, no DB access.
  */
 
-import type { BudgetData } from "./types.js";
+import type { BudgetData, Transaction } from "./types.js";
 import { nextMonthKey, num } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
 import { isInternalTransfer, isOffBudgetTransfer } from "./transfers.js";
@@ -28,6 +28,24 @@ export type SpendingBreakdownItem = {
  * agree.
  */
 export const UNCATEGORIZED_GROUP_LABEL = "Uncategorized";
+
+/**
+ * Pseudo-group routing every still-held off-budget account's cell (mirrors
+ * the "Uncategorized" pseudo-group precedent: a middle-column group with no
+ * Budget position, so the "group" sort parks it last). Each qualifying
+ * account draws its own right-column target row under this group in both
+ * dimensions — first-class destinations like categories, named by the
+ * account. Exported so views and tests agree.
+ */
+export const STILL_HELD_GROUP_LABEL = "Still held";
+
+/**
+ * The app's reserved payee for stock-recognition rows (account openings,
+ * appraisals — see server/queries/accounts.ts): such rows move no money in
+ * the report range, so the income, spending, and held collectors all skip
+ * them. Matching this string is domain logic, not a hack.
+ */
+export const STARTING_BALANCE_PAYEE = "Starting Balance";
 
 export type SpendingGroupFlowLink = {
   /** Index into SpendingGroupFlow.groups. */
@@ -109,6 +127,9 @@ function collectSpendMonths(
   const cells = new Map<string, Map<string, number[]>>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
+    // Stock recognitions, never flows: "Starting Balance" rows (account
+    // openings, appraisals) are excluded from spending in both dimensions.
+    if (t.payee.trim() === STARTING_BALANCE_PAYEE) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
     // Every transfer leg is movement between pools, never terminal spending
     // (internal on-budget moves and credit payoffs via isInternalTransfer,
@@ -184,6 +205,9 @@ function collectIncomeMonths(
   };
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
+    // Stock recognitions, never flows: "Starting Balance" rows (account
+    // openings, appraisals) are excluded from income.
+    if (t.payee.trim() === STARTING_BALANCE_PAYEE) continue;
     const mk = t.date.slice(0, 7);
     if (mk < actualStart || mk > actualEnd) continue;
 
@@ -194,18 +218,165 @@ function collectIncomeMonths(
     } else if (
       t.transferAccountId == null &&
       t.categoryId == null &&
-      t.isIncome !== false &&
       num(t.amount) > 0 &&
       (accountMap.get(t.accountId)?.onBudget ?? true) === false
     ) {
       // External profit in an off-budget account, grouped under the
-      // account's own name (the account is the source).
+      // account's own name (the account is the source). The isIncome flag is
+      // deliberately NOT consulted here: the YNAB4 import sets isIncome=false
+      // for every off-budget regular row, and the budget engine ignores the
+      // flag off-budget too (isIncomeTransaction returns false before ever
+      // reading it) — so a guard on the flag would exclude ALL genuine
+      // interest/dividend/market-gain rows on imported data.
       const raw = accountMap.get(t.accountId)?.name.trim() ?? "";
       const name = raw === "" ? "—" : raw;
       add(name, mk, num(t.amount));
     }
   }
   return { months, sources };
+}
+
+/**
+ * Monthly still-held cells: account name -> per-month SIGNED net-change cents
+ * (parallel to `months`) for every off-budget account that still holds money
+ * over the range. Pure balance accounting (+amount where the account is the
+ * row's accountId, −amount where it is the transferAccountId), with no
+ * income/spending classification: contributions and external profit in,
+ * withdrawals and direct spending out. Split parents are excluded (only
+ * split children move money) and "Starting Balance" rows are excluded
+ * (stock recognitions, not flows).
+ *
+ * An account qualifies only when its range net change is POSITIVE and its
+ * range-end balance is POSITIVE (range-end = the stored current balance
+ * minus the signed post-range nets — post-range nets count every balance
+ * effect including later "Starting Balance" rows, because the range-end
+ * stock is a true balance, not a flow). The balance guard keeps liability
+ * reduction out: excluding opening rows exposes debt paydown as a positive
+ * range net, but a mortgage account still holds a negative balance, so it
+ * is never "held". Fully-cycled, zero, and drawn-down accounts stay
+ * excluded by the same clamp-at-zero philosophy as off-budget profit.
+ */
+function collectHeldMonths(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): { months: string[]; cells: Map<string, number[]> } {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  const months = enumerateMonthsInRange(actualStart, actualEnd);
+  const monthIndex = new Map(months.map((mk, i) => [mk, i]));
+
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  const offBudget = new Map<number, { name: string; balance: number }>();
+  for (const a of data.accounts) {
+    if (a.onBudget === false) {
+      const name = a.name.trim();
+      offBudget.set(a.id, { name: name === "" ? "—" : name, balance: num(a.balance) });
+    }
+  }
+
+  const inNets = new Map<number, number[]>();
+  const postNets = new Map<number, number>();
+  // The signed balance effects of one row on its off-budget side(s): +amount
+  // where the account holds the row, −amount where it is the transfer leg.
+  const effectsOf = (t: Transaction): [number, number][] => {
+    const amt = num(t.amount);
+    const out: [number, number][] = [];
+    if (offBudget.has(t.accountId)) out.push([t.accountId, amt]);
+    if (t.transferAccountId != null && offBudget.has(t.transferAccountId)) {
+      out.push([t.transferAccountId, -amt]);
+    }
+    return out;
+  };
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    const mk = t.date.slice(0, 7);
+    if (mk >= actualStart && mk <= actualEnd) {
+      // In-range flows exclude stock recognitions; mk passed the range
+      // check, so its month index always exists.
+      if (t.payee.trim() === STARTING_BALANCE_PAYEE) continue;
+      const mi = monthIndex.get(mk)!;
+      for (const [id, delta] of effectsOf(t)) {
+        let series = inNets.get(id);
+        if (!series) {
+          series = new Array<number>(months.length).fill(0);
+          inNets.set(id, series);
+        }
+        series[mi] = series[mi]! + delta;
+      }
+    } else if (mk > actualEnd) {
+      // Post-range nets feed the range-end STOCK guard, so they count every
+      // balance effect — including a later "Starting Balance" row (an
+      // account opened after the range held nothing at range end). Pre-range
+      // rows are irrelevant: range-end derives from the stored balance minus
+      // post-range effects.
+      for (const [id, delta] of effectsOf(t)) {
+        postNets.set(id, (postNets.get(id) ?? 0) + delta);
+      }
+    }
+  }
+
+  const cells = new Map<string, number[]>();
+  for (const [id, series] of inNets) {
+    const net = series.reduce((s, v) => s + v, 0);
+    if (!(net > 0)) continue;
+    // Nets keys are only ever set under an offBudget.has guard, so every
+    // lookup hits.
+    const acct = offBudget.get(id)!;
+    if (!(acct.balance - (postNets.get(id) ?? 0) > 0)) continue;
+    // Same-named accounts merge under one row (sums the months); held rows
+    // otherwise keep their own account name.
+    const prev = cells.get(acct.name);
+    if (prev) {
+      for (let m = 0; m < months.length; m++) prev[m] = prev[m]! + series[m]!;
+    } else {
+      cells.set(acct.name, [...series]);
+    }
+  }
+  return { months, cells };
+}
+
+/**
+ * Combined monthly cells behind a SpendingGroupFlow: the spending cells
+ * (collectSpendMonths) plus one STILL_HELD_GROUP_LABEL cell per still-held
+ * off-budget account (collectHeldMonths), keyed by account name in both
+ * dimensions. The range flow sums these months and the time-aware series
+ * keeps them, so both outputs agree by construction — and held demands
+ * compete with spending demands chronologically in the same allocator.
+ *
+ * A held account sharing its name with a spending target (a merchant named
+ * like the account, a category of the same name) merges into that target as
+ * one more group leg — the merchant-split precedent: the target row shows
+ * the total flow to that name, and the identity still reconciles cell-wise.
+ * (A real category group named "Still held" would merge the same way — the
+ * accepted shared-name edge the "Uncategorized" pseudo-group already has.)
+ */
+function collectFlowMonths(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string,
+  dimension: SpendingDimension
+): { months: string[]; cells: Map<string, Map<string, number[]>> } {
+  const spend = collectSpendMonths(data, startMonth, endMonth, dimension);
+  const held = collectHeldMonths(data, startMonth, endMonth);
+  for (const [name, nets] of held.cells) {
+    let row = spend.cells.get(name);
+    if (!row) {
+      row = new Map();
+      spend.cells.set(name, row);
+    }
+    const prev = row.get(STILL_HELD_GROUP_LABEL);
+    if (prev) {
+      for (let m = 0; m < spend.months.length; m++) prev[m] = prev[m]! + (nets[m] ?? 0);
+    } else {
+      row.set(STILL_HELD_GROUP_LABEL, [...nets]);
+    }
+  }
+  return spend;
 }
 
 /**
@@ -305,6 +476,15 @@ function buildSpendingGroupFlowFromCells(
  * that group) is spread proportionally instead of drawn as an (impossible)
  * negative ribbon. Uncategorized rows land in UNCATEGORIZED_GROUP_LABEL.
  *
+ * Still-held accounts as chart rows: every off-budget account that still
+ * holds money over the range (see collectHeldMonths: positive range net AND
+ * positive range-end balance) draws its own right-column target row named by
+ * the account, routed through the STILL_HELD_GROUP_LABEL pseudo-group — in
+ * BOTH dimensions, first-class destinations like categories. The Sankey's
+ * Remaining plug then shrinks to the on-budget leftover ± drawdowns, and
+ * the identity income = spending + held + remaining holds everywhere (with
+ * "spending" the non-held targets and "held" the Still-held cells).
+ *
  * Groups are derived from the kept targets' links (never from raw
  * transactions), so a dropped (net <= 0) target can never orphan a link:
  * every link points at a kept group and a kept target.
@@ -315,7 +495,7 @@ export function computeSpendingGroupFlow(
   endMonth: string,
   dimension: SpendingDimension
 ): SpendingGroupFlow {
-  const { cells } = collectSpendMonths(data, startMonth, endMonth, dimension);
+  const { cells } = collectFlowMonths(data, startMonth, endMonth, dimension);
   const range = new Map<string, Map<string, number>>();
   for (const [target, row] of cells) {
     const out = new Map<string, number>();
@@ -365,6 +545,11 @@ export type MonthlySankeySeries = {
  * a month with no positive activity contributes no slice. Dropped
  * (net <= 0) links contribute nothing, matching the range flow.
  *
+ * Still-held cells keep months by the same rule: withdrawals and direct
+ * spending wash out of the held value, and the surviving held money keeps
+ * its months — so held demands compete with spending demands chronologically
+ * in the same allocator.
+ *
  * Monthly income needs no scaling: every income row is positive by
  * definition, so each source column sums to its range total exactly.
  */
@@ -374,7 +559,7 @@ export function computeMonthlySankeySeries(
   endMonth: string,
   dimension: SpendingDimension
 ): MonthlySankeySeries {
-  const spend = collectSpendMonths(data, startMonth, endMonth, dimension);
+  const spend = collectFlowMonths(data, startMonth, endMonth, dimension);
   const income = collectIncomeMonths(data, startMonth, endMonth);
   const range = new Map<string, Map<string, number>>();
   for (const [target, row] of spend.cells) {
@@ -426,7 +611,8 @@ export function computeMonthlySankeySeries(
 
 /**
  * Aggregate net outflows over a contiguous month range (inclusive), grouped
- * by category name or merchant (payee) name. Returns items sorted by value
+ * by category name or merchant (payee) name — plus one row per still-held
+ * off-budget account, named by the account. Returns items sorted by value
  * descending. This is the right-column half of computeSpendingGroupFlow —
  * see that function for the row semantics; delegating (rather than
  * re-implementing the filters) keeps the two outputs identical by
@@ -483,8 +669,12 @@ export function computeSpendingBreakdown(
  * not corrections, so they are excluded here (merchant spending picks
  * them up instead). Categorized positive rows on off-budget accounts are
  * refunds, not profit: they net against spending and must not also count
- * as income. An explicit `isIncome: false` always wins (matches
- * isIncomeTransaction).
+ * as income. "Starting Balance" rows are excluded (stock recognitions, not
+ * flows). The `isIncome` flag is NOT consulted for off-budget rows: the
+ * YNAB4 import sets isIncome=false for every off-budget regular row, and
+ * the budget engine ignores the flag off-budget (isIncomeTransaction
+ * returns false before ever reading it) — matching the engine keeps
+ * genuine interest/dividend/market-gain rows counted on imported data.
  *
  * Returns items sorted by value descending.
  */
@@ -497,73 +687,6 @@ export function computeIncomeBreakdown(
   return [...sources.entries()]
     .map(([name, series]) => ({ name, value: series.reduce((s, v) => s + v, 0) }))
     .filter((s) => s.value > 0)
-    .sort((a, b) => b.value - a.value);
-}
-
-/**
- * Money still held in off-budget (investment/intermediate) accounts over a
- * contiguous month range (inclusive): each account's range net change —
- * contributions in, plus external profit recorded directly in it, minus
- * withdrawals out and spending paid straight from it — computed as pure
- * balance accounting (+amount where the account is the row's accountId,
- * −amount where it is the transferAccountId), with no income/spending
- * classification. Split parents are excluded; only split children move
- * money.
- *
- * Only accounts with a POSITIVE net change are returned, sorted by value
- * descending: a positive balance is money that flowed in and was neither
- * spent nor withdrawn in-range — still held. An account that drew down
- * earlier savings in-range (negative net change) is omitted by the same
- * clamp-at-zero philosophy as off-budget profit: the drawdown funded
- * spending that already shows under its final category, so there is nothing
- * left to hold. Fully cycled accounts (net zero) are omitted too.
- *
- * Reconciliation identity (with SIGNED nets): the header's Left
- * (incomeTotal − spendingTotal) equals the signed off-budget nets plus the
- * on-budget leftover — every unspent dollar sits either in an investment
- * account below or still in the budget. This function returns the
- * still-held half of that identity; the view never re-derives it.
- */
-export function computeRetainedBalances(
-  data: BudgetData,
-  startMonth: string,
-  endMonth: string
-): SpendingBreakdownItem[] {
-  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
-  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
-
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
-
-  const offBudget = new Map<number, string>();
-  for (const a of data.accounts) {
-    if (a.onBudget === false) {
-      const name = a.name.trim();
-      offBudget.set(a.id, name === "" ? "—" : name);
-    }
-  }
-
-  const nets = new Map<number, number>();
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    const mk = t.date.slice(0, 7);
-    if (mk < actualStart || mk > actualEnd) continue;
-    const amt = num(t.amount);
-    if (offBudget.has(t.accountId)) {
-      nets.set(t.accountId, (nets.get(t.accountId) ?? 0) + amt);
-    }
-    if (t.transferAccountId != null && offBudget.has(t.transferAccountId)) {
-      nets.set(t.transferAccountId, (nets.get(t.transferAccountId) ?? 0) - amt);
-    }
-  }
-
-  return [...nets.entries()]
-    .filter(([, value]) => value > 0)
-    // Nets keys are only ever set under an offBudget.has guard, so every
-    // lookup hits.
-    .map(([id, value]) => ({ name: offBudget.get(id)!, value }))
     .sort((a, b) => b.value - a.value);
 }
 
@@ -826,8 +949,9 @@ export type SankeyTargetSort = "amount" | "group";
  * Budget position — sort after the known names, value-descending (name,
  * then current position, break ties deterministically).
  *
- * - Names missing from `groupOrder` (the Uncategorized pseudo-group, the
- *   "—" fallback) sort after the known groups, keeping current order.
+ * - Names missing from `groupOrder` (the Uncategorized and Still-held
+ *   pseudo-groups, the "—" fallback) sort after the known groups, keeping
+ *   current order.
  * - The render-only Other buckets stay last on both columns.
  * - Targets with no incoming link (defensive: well-formed flows never
  *   produce them) sort after the grouped targets, value-descending.
