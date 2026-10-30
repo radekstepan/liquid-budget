@@ -69,3 +69,4 @@ Small, task-local details stay in the changeset, not the docs.
 
 Spending by Category - Sankey has these issues:
 - Categories view is great, lock it in as a "golden image". I need to make "Merchant" view the same - specifically I need the SAME color flowing from right to left. Right now we have "arms" of sankey going from merchants to parent categories and then the color does NOT match going further left to "Income". Look at "Categories" view. Onhover a category it highlights just that color flowing all the way to income (plus it highlights the parent category bar, that is fine). I want the same when on the "Merchant" view.
+This superficially looks fixed, but has issues. E.g. I hover on "Realstar" and it highlights "Redman Technology" income. That is NOT possible, these are different timelines. So looking better, but there is a fundamental calculation flaw in the logic.
