@@ -67,6 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey, held-hatch follow-up (task-50)
-- For any lines/monies still held, can you do the stripey color like you do Other/Remaining? Can even the sankeys have that pattern?
+Spending by Category - Sankey, bucket/plug ribbon hatch follow-up (task-51)
+- Do the same for Other and Remaining
 
