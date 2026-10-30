@@ -340,11 +340,12 @@ export function TruncHatchPattern({ id }: { id: string }) {
   );
 }
 
-// Light diagonal hatch marking render-only Sankey bars: the merged "Other"
-// buckets on every column and the "Remaining" surplus plug are drawn by the
-// renderer, not real rows, so they carry this pattern plus a dashed border
-// to read as computed at a glance. White lines stay visible over the slate,
-// green, and gray fills those bars use.
+// Light diagonal hatch marking computed/derived money: the merged "Other"
+// buckets on every column, the "Remaining" surplus plug, and still-held
+// balances (held bars, the Still-held group bar, and the ribbons carrying
+// held money) carry this pattern to read as derived at a glance, versus
+// terminal purchase flows. White lines stay visible over the slate,
+// green, gray, and account-color fills those elements use.
 export function SankeyBucketHatchPattern({ id }: { id: string }) {
   return (
     <pattern id={id} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">

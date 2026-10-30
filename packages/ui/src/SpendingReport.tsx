@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   fmt,
   computeSankeyViewModel,
@@ -144,9 +144,12 @@ export const SANKEY_RIBBON_HOVER_OPACITY = 0.85;
 // stable — see above.
 export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 
-// Render-only bars — the merged "Other" buckets on every column and the
-// "Remaining" surplus plug — carry a light hatch (no bar carries a
-// border), so computed rows never read as real ones.
+// The hatch marks computed/derived money — the merged "Other" buckets on
+// every column, the "Remaining" surplus plug, and still-held balances —
+// versus terminal purchase flows. Whole-held elements only (held target
+// bars, the Still-held group bar, right-hop ribbons into held targets,
+// left-hop sub-ribbons funding held cells): mixed bars and segments stay
+// solid. No bar carries a border; the hatch alone marks derived money.
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
 // Income bars fill with a hard-edged top-to-bottom gradient from the
@@ -523,6 +526,75 @@ export function SpendingReport({
     return groups;
   }, [sankey]);
 
+  // Right-column targets that are 100% held money (Sankey indices): kept
+  // non-plug rows whose every incoming cell routes through the Still-held
+  // pseudo-group (see isHeldTarget). Buckets stay out even when every
+  // folded row was held — a bucket is mixed by definition, and mixed
+  // elements never hatch. Drives the held hatch on target bars, right-hop
+  // ribbons into these targets, and left-hop sub-ribbons funding them.
+  const heldTargets = useMemo(() => {
+    const set = new Set<number>();
+    if (sankey == null) return set;
+    for (let i = 0; i < sankey.targets.length; i++) {
+      if (i === sankey.remainingTargetIndex) continue;
+      if (sankey.targets[i]?.bucket === true) continue;
+      if (
+        isHeldTarget(
+          sankey.linksRight.filter((l) => l.targetIndex === i).map((l) => l.sourceIndex),
+          (g) => sankey.middles[g]?.name
+        )
+      ) {
+        set.add(i);
+      }
+    }
+    return set;
+  }, [sankey]);
+
+  // Kept Still-held pseudo-group bars that are 100% held money (Sankey
+  // middle indices): every outgoing cell lands in a held target or a
+  // merged bucket (a bucket may have folded held rows — the money leaving
+  // this bar through that link is still held). In real data the Still-held
+  // group carries only held cells, so this is exactly the kept bar; the
+  // outgoing check keeps the whole-held rule exact instead of trusting
+  // the name alone.
+  const heldMiddles = useMemo(() => {
+    const set = new Set<number>();
+    if (sankey == null) return set;
+    sankey.middles.forEach((m, i) => {
+      if (m.bucket === true || m.name !== STILL_HELD_GROUP_LABEL) return;
+      const outs = sankey.linksRight.filter((l) => l.sourceIndex === i);
+      if (
+        outs.length > 0 &&
+        outs.every(
+          (l) =>
+            heldTargets.has(l.targetIndex) ||
+            sankey.targets[l.targetIndex]?.bucket === true
+        )
+      ) {
+        set.add(i);
+      }
+    });
+    return set;
+  }, [sankey, heldTargets]);
+
+  // Same rule over the merged columns for the Bars rows (merged target
+  // indices — the same indices the Bars rows and tooltips use).
+  const heldBars = useMemo(() => {
+    const set = new Set<number>();
+    merged.targets.forEach((t, i) => {
+      if (t.bucket === true) return;
+      if (
+        isHeldTarget(
+          merged.links.filter((l) => l.targetIndex === i).map((l) => l.groupIndex),
+          (g) => merged.groups[g]?.name
+        )
+      ) {
+        set.add(i);
+      }
+    });
+    return set;
+  }, [merged]);
+
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
     if (hover.kind === "income") {
@@ -698,13 +770,9 @@ export function SpendingReport({
             })
             .sort((a, b) => b.value - a.value);
       const multiGroup = cells.length > 1;
-      // Still-held account rows read as holdings, never spending: every
-      // cell arriving at one routes through the Still-held pseudo-group
-      // (merged buckets stay generic — see isHeldTarget).
-      const isHeld =
-        !isOther &&
-        cells.length > 0 &&
-        cells.every((c) => c.name === STILL_HELD_GROUP_LABEL);
+      // Still-held account rows read as holdings, never spending (merged
+      // buckets stay generic — see heldBars).
+      const isHeld = heldBars.has(hover.idx);
       return (
         <div className="space-y-[3px]">
           <div className="mb-1 text-[11px] font-bold" style={{ color: "#f2f5f7" }}>
@@ -758,16 +826,8 @@ export function SpendingReport({
     const isOther = r.bucket === true;
     const isRemaining = r.isPlug;
     // Still-held account rows read as holdings, never spending (merged
-    // buckets stay generic — see isHeldTarget).
-    const isHeld =
-      !isOther &&
-      !isRemaining &&
-      isHeldTarget(
-        (sankey?.linksRight ?? [])
-          .filter((l) => l.targetIndex === hover.idx)
-          .map((l) => l.sourceIndex),
-        (g) => sankey?.middles[g]?.name
-      );
+    // buckets stay generic — see heldTargets).
+    const isHeld = heldTargets.has(hover.idx);
     const spendPct =
       spentTotal !== 0 ? Math.round((r.value / spentTotal) * 100) : 0;
     return (
@@ -1196,13 +1256,13 @@ export function SpendingReport({
               list overflows and the outer scroller (overflow-y-auto) takes
               over. Rows never compress, stretch, or truncate to fit. */}
           <div className="mx-auto w-full max-w-[1100px]">
-            {/* Shared hatch def for bucket bars: the SAME pattern element
-                the Sankey overlays on its render-only rows (identical
-                angles, spacing, and colors — the two views cannot drift).
-                Bars and Sankey never render together, so this id stays
-                unique in the document. Zero-size and out of flow: no
-                layout effect. */}
-            {rows.some((r) => r.bucket === true) && (
+            {/* Shared hatch def for bucket and held bars: the SAME pattern
+                element the Sankey overlays on its derived-money rows
+                (identical angles, spacing, and colors — the two views
+                cannot drift). Bars and Sankey never render together, so
+                this id stays unique in the document. Zero-size and out of
+                flow: no layout effect. */}
+            {rows.some((r) => r.bucket === true || heldBars.has(r.i)) && (
               <svg
                 data-testid="bars-bucket-hatch-defs"
                 aria-hidden="true"
@@ -1258,13 +1318,15 @@ export function SpendingReport({
                       // Simple linear scale against the largest group; no
                       // truncation caps or axis breaks on this report.
                       const displayWidth = Math.round(Math.max(r.pctOfMax, r.value > 0 ? 1 : 0) * 100) / 100;
+                      // Hatched rows (merged Other buckets and whole-held
+                      // rows — disjoint sets) clip the hatch overlay to the
+                      // bar's rounded corners; normal rows keep no children.
+                      const hatched = r.bucket === true || heldBars.has(r.i);
                       return (
                         <div
                           className={
                             "relative h-full rounded-[3px] transition-[width] duration-150" +
-                            // Bucket rows clip the hatch overlay to the bar's
-                            // rounded corners; normal rows keep no children.
-                            (r.bucket === true ? " overflow-hidden" : "")
+                            (hatched ? " overflow-hidden" : "")
                           }
                           style={{
                             width: `${displayWidth}%`,
@@ -1274,14 +1336,33 @@ export function SpendingReport({
                         >
                           {/* Merged Other buckets carry the shared Sankey
                               hatch above the bar color (the same pattern def
-                              the Sankey paints on its render-only rows — Bars
-                              render no Remaining plug, so only `bucket` rows
-                              qualify). The row hover highlight paints the row
-                              behind the bar, so the hatch reads in rest and
-                              hover alike. */}
+                              the Sankey paints on its derived-money rows —
+                              Bars render no Remaining plug, so only `bucket`
+                              rows qualify for the bucket hatch). The row hover
+                              highlight paints the row behind the bar, so the
+                              hatch reads in rest and hover alike. */}
                           {r.bucket === true && (
                             <svg
                               data-testid="bars-bucket-hatch"
+                              aria-hidden="true"
+                              className="absolute inset-0 h-full w-full"
+                              pointerEvents="none"
+                            >
+                              <rect
+                                x={0}
+                                y={0}
+                                width="100%"
+                                height="100%"
+                                fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                              />
+                            </svg>
+                          )}
+                          {/* Whole-held rows carry the same shared hatch:
+                              still-held balances are derived money, like the
+                              buckets — never terminal purchases. */}
+                          {r.bucket !== true && heldBars.has(r.i) && (
+                            <svg
+                              data-testid="bars-held-hatch"
                               aria-hidden="true"
                               className="absolute inset-0 h-full w-full"
                               pointerEvents="none"
@@ -1439,18 +1520,39 @@ export function SpendingReport({
                       onMouseLeave={() => pushHover(null)}
                     >
                       {subs.map((s, si) => (
-                        <path
-                          key={`llsub-${si}`}
-                          data-testid="sankey-link"
-                          data-side="left"
-                          d={s.d}
-                          fill={s.fill}
-                          fillOpacity={ribbonOpacity(leftCellLit(s), hl.ll != null)}
-                          stroke="none"
-                          style={{
-                            transition: `fill-opacity ${transitionMs}ms`,
-                          }}
-                        />
+                        <Fragment key={`llsub-${si}`}>
+                          <path
+                            data-testid="sankey-link"
+                            data-side="left"
+                            d={s.d}
+                            fill={s.fill}
+                            fillOpacity={ribbonOpacity(leftCellLit(s), hl.ll != null)}
+                            stroke="none"
+                            style={{
+                              transition: `fill-opacity ${transitionMs}ms`,
+                            }}
+                          />
+                          {/* Sub-ribbons funding a held cell carry the shared
+                              hatch over the layout's own path (per-sub
+                              granularity, like the spotlight: siblings
+                              funding spending cells stay solid) — same
+                              opacity step and cross-fade as the solid sub, so
+                              the overlay brightens and dims with it. */}
+                          {heldTargets.has(s.targetIndex) && (
+                            <path
+                              data-testid="sankey-held-hatch"
+                              data-side="left"
+                              d={s.d}
+                              fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                              fillOpacity={ribbonOpacity(leftCellLit(s), hl.ll != null)}
+                              stroke="none"
+                              pointerEvents="none"
+                              style={{
+                                transition: `fill-opacity ${transitionMs}ms`,
+                              }}
+                            />
+                          )}
+                        </Fragment>
                       ))}
                     </g>
                   );
@@ -1483,9 +1585,9 @@ export function SpendingReport({
                 // the money lands, no matter which middle group it comes
                 // from — hovering one traces its through-line end to end.
                 const lit = rightLit(link.sourceIndex, link.targetIndex);
-                return (
+                const held = heldTargets.has(link.targetIndex);
+                const solid = (
                   <path
-                    key={`rl-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
                     data-side="right"
                     d={link.d}
@@ -1508,6 +1610,30 @@ export function SpendingReport({
                     }
                     onMouseLeave={() => pushHover(null)}
                   />
+                );
+                if (!held) return <Fragment key={`rl-${link.sourceIndex}-${link.targetIndex}`}>{solid}</Fragment>;
+                // Ribbons into a held target overlay the SAME layout path
+                // with the shared hatch — same opacity step and cross-fade
+                // as the solid ribbon, so the overlay brightens and dims
+                // with it. Static DOM order (no z-reorder, like the bucket
+                // overlays); pointer-events none so hover still hits the
+                // solid ribbon beneath.
+                return (
+                  <Fragment key={`rl-${link.sourceIndex}-${link.targetIndex}`}>
+                    {solid}
+                    <path
+                      data-testid="sankey-held-hatch"
+                      data-side="right"
+                      d={link.d}
+                      fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                      fillOpacity={ribbonOpacity(lit, hl.rl != null)}
+                      stroke="none"
+                      pointerEvents="none"
+                      style={{
+                        transition: `fill-opacity ${transitionMs}ms`,
+                      }}
+                    />
+                  </Fragment>
                 );
               })}
               {sankey.sources.map((node, idx) => {
@@ -1667,7 +1793,8 @@ export function SpendingReport({
                         border. The segments are the outgoing cells' target
                         colors, so every segment meets its ribbon exactly,
                         like the income bars. The merged Other bucket adds
-                        only the render-only hatch. The bar wraps the group's
+                        only the shared hatch (as does the Still-held group
+                        bar). The bar wraps the group's
                         funded flow; when spending exceeds income the gap
                         shows in the tooltip, not as a grey segment. */}
                     <rect
@@ -1686,6 +1813,23 @@ export function SpendingReport({
                     {isBucket && (
                       <rect
                         data-testid="sankey-bucket-hatch"
+                        x={node.x}
+                        y={node.y}
+                        width={node.w}
+                        height={Math.max(0, node.h)}
+                        fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                        fillOpacity={barOpacity}
+                        pointerEvents="none"
+                        style={{
+                          transition: `fill-opacity ${transitionMs}ms`,
+                        }}
+                      />
+                    )}
+                    {/* A whole-held Still-held group bar carries the shared
+                        hatch like the bucket bars (see heldMiddles). */}
+                    {heldMiddles.has(idx) && (
+                      <rect
+                        data-testid="sankey-held-hatch"
                         x={node.x}
                         y={node.y}
                         width={node.w}
@@ -1744,16 +1888,18 @@ export function SpendingReport({
                 // The target's own color, shared with every incoming ribbon,
                 // so each line into this bar reads as one color throughout —
                 // whichever middle group it arrives from.
-                // No borders, hovered or not: render-only rows — the merged
-                // Other bucket and the Remaining surplus plug — add only the
-                // hatch, and hovering brightens via the spotlight instead of
-                // stroking (an SVG stroke centers on the edge, so even a
-                // same-color stroke would paint 1px outside the bar and make
-                // it look bigger than the ribbon stack feeding it). The bar
-                // wraps the row's funded flow; when spending exceeds income
-                // the gap shows in the tooltip, not as a grey segment.
+                // No borders, hovered or not: derived-money rows — the merged
+                // Other bucket, the Remaining surplus plug, and whole-held
+                // rows — add only the hatch, and hovering brightens via the
+                // spotlight instead of stroking (an SVG stroke centers on the
+                // edge, so even a same-color stroke would paint 1px outside
+                // the bar and make it look bigger than the ribbon stack
+                // feeding it). The bar wraps the row's funded flow; when
+                // spending exceeds income the gap shows in the tooltip, not
+                // as a grey segment.
                 const color = r.color;
                 const isComputed = r.bucket === true || r.isPlug;
+                const isHeld = heldTargets.has(idx);
                 // Like the middle bars: the same fill at the ribbons' own
                 // rest/bright/dim steps, so each incoming line matches the
                 // bar exactly in every spotlight state.
@@ -1811,6 +1957,24 @@ export function SpendingReport({
                     {isComputed && (
                       <rect
                         data-testid="sankey-bucket-hatch"
+                        x={node.x}
+                        y={node.y}
+                        width={node.w}
+                        height={Math.max(0, node.h)}
+                        fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                        fillOpacity={barOpacity}
+                        pointerEvents="none"
+                        style={{
+                          transition: `fill-opacity ${transitionMs}ms`,
+                        }}
+                      />
+                    )}
+                    {/* Whole-held rows carry the shared hatch like the
+                        buckets (disjoint sets — a held row is never a
+                        bucket or the plug, so this never double-hatches). */}
+                    {isHeld && (
+                      <rect
+                        data-testid="sankey-held-hatch"
                         x={node.x}
                         y={node.y}
                         width={node.w}

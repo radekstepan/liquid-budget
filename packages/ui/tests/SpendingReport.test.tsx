@@ -166,11 +166,12 @@ describe("SpendingReport", () => {
     expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
-  it("draws still-held accounts as first-class Sankey rows under the Still-held group (no strip, no hatch)", () => {
+  it("draws still-held accounts as first-class Sankey rows under the Still-held group (no strip, shared held hatch)", () => {
     // Task-49 replaces the task-48 Still-held strip with chart rows: one
     // target row per held account, routed through the Still-held
-    // pseudo-group, in the account's own stable color with NO hatch (real
-    // accounts, not render artifacts).
+    // pseudo-group, in the account's own stable color. Task-50 hatches
+    // whole-held elements with the shared bucket pattern: held money is
+    // derived money, like the buckets — never a terminal purchase.
     render(
       <SpendingReport
         categoryFlow={heldCategoryFlow}
@@ -188,8 +189,7 @@ describe("SpendingReport", () => {
     const targetAmounts = screen.getAllByTestId("sankey-target-amount");
     expect(targetAmounts.map((el) => el.textContent)).toContain("$400.00 · 33%");
     // …painted in its own stable hash color (never the bucket slate or the
-    // Remaining green), with no hatch overlay anywhere (no buckets, no
-    // plug — income exactly covers spending + held).
+    // Remaining green).
     const nodes = screen.getAllByTestId("sankey-node");
     const heldNode = nodes.find(
       (n) => n.getAttribute("fill") === colorForName("Wealthsimple RRSP")
@@ -198,7 +198,24 @@ describe("SpendingReport", () => {
     expect(heldNode?.getAttribute("fill")).toBe(
       sankeyTargetColor({ name: "Wealthsimple RRSP", bucket: false, isPlug: false })
     );
+    // No buckets and no plug (income exactly covers spending + held), so
+    // no bucket hatch anywhere — but the held target bar carries the
+    // shared held hatch, painted from the same pattern def.
     expect(screen.queryByTestId("sankey-bucket-hatch")).not.toBeInTheDocument();
+    const heldRow = heldNode!.parentElement!;
+    const heldOverlay = heldRow.querySelector('[data-testid="sankey-held-hatch"]')!;
+    expect(heldOverlay).toBeInTheDocument();
+    expect(heldOverlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    expect(heldOverlay.getAttribute("x")).toBe(heldNode!.getAttribute("x"));
+    expect(heldOverlay.getAttribute("y")).toBe(heldNode!.getAttribute("y"));
+    expect(heldOverlay.getAttribute("width")).toBe(heldNode!.getAttribute("width"));
+    expect(heldOverlay.getAttribute("height")).toBe(heldNode!.getAttribute("height"));
+    // The spending row carries no hatch of either kind.
+    const spentNode = nodes.find(
+      (n) => n.getAttribute("fill") === colorForName("Downpayment")
+    )!;
+    expect(spentNode.parentElement!.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+    expect(spentNode.parentElement!.querySelector('[data-testid="sankey-bucket-hatch"]')).toBeNull();
     // One ribbon per group→target cell, held cell included.
     const rightLinks = screen
       .getAllByTestId("sankey-link")
@@ -209,8 +226,8 @@ describe("SpendingReport", () => {
     expect(screen.getByText("$0.00")).toBeInTheDocument();
   });
 
-  it("draws still-held accounts as Bars rows with no hatch", () => {
-    render(
+  it("draws still-held accounts as Bars rows with the shared held hatch", () => {
+    const { container } = render(
       <SpendingReport
         categoryFlow={heldCategoryFlow}
         merchantFlow={emptyFlow}
@@ -221,9 +238,23 @@ describe("SpendingReport", () => {
     expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
     expect(screen.getByText("Wealthsimple RRSP")).toBeInTheDocument();
     expect(screen.getByText("$400.00")).toBeInTheDocument();
-    // No merged buckets anywhere, so no hatch def renders at all.
-    expect(screen.queryByTestId("bars-bucket-hatch-defs")).not.toBeInTheDocument();
+    // No merged buckets, so no bucket hatch — but the held row carries the
+    // shared held hatch, painted from the same pattern def (which renders
+    // for held rows too).
     expect(screen.queryByTestId("bars-bucket-hatch")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bars-bucket-hatch-defs")).toBeInTheDocument();
+    const tracks = container.querySelectorAll(".y-bar-track");
+    expect(tracks).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="bars-held-hatch"]')).toHaveLength(1);
+    const overlays = Array.from(tracks, (t) =>
+      t.querySelector('[data-testid="bars-held-hatch"]')
+    );
+    // Downpayment first (larger), the held RRSP second.
+    expect(overlays[0]).toBeNull();
+    expect(overlays[1]).not.toBeNull();
+    expect(overlays[1]!.querySelector("rect")!.getAttribute("fill")).toBe(
+      `url(#${SANKEY_BUCKET_HATCH_ID})`
+    );
   });
 
   it("reads held rows as holdings in tooltips (Held, never Spent)", () => {
@@ -290,6 +321,283 @@ describe("SpendingReport", () => {
     );
     expect(fills.get(colorForName("Downpayment"))).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
     expect(orderOf()).toEqual(before);
+  });
+
+  it("hatches the Still-held group bar and never a spending group bar", () => {
+    // Task-50 (iv): the middle Still-held bar is entirely held money, so
+    // it carries the shared hatch; the Everyday bar stays solid.
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    const groups = screen.getAllByTestId("sankey-group");
+    const labels = screen.getAllByTestId("sankey-group-label");
+    expect(groups).toHaveLength(2);
+    for (let i = 0; i < groups.length; i++) {
+      const overlay = groups[i]!.parentElement!.querySelector(
+        '[data-testid="sankey-held-hatch"]'
+      );
+      if (labels[i]!.textContent === "Still held") {
+        expect(overlay).toBeInTheDocument();
+        expect(overlay!.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+        expect(overlay!.getAttribute("x")).toBe(groups[i]!.getAttribute("x"));
+        expect(overlay!.getAttribute("y")).toBe(groups[i]!.getAttribute("y"));
+        expect(overlay!.getAttribute("width")).toBe(groups[i]!.getAttribute("width"));
+        expect(overlay!.getAttribute("height")).toBe(groups[i]!.getAttribute("height"));
+      } else {
+        expect(overlay).toBeNull();
+      }
+    }
+  });
+
+  it("overlays right-hop ribbons into held targets with the identical path", () => {
+    // Task-50 (ii): the ribbon into the held account carries a hatch
+    // overlay path with the EXACT same `d` as the solid ribbon, painted
+    // from the shared pattern def; the ribbon into the spending category
+    // carries none.
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const rightSolids = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(rightSolids).toHaveLength(2);
+    const heldSolid = rightSolids.find(
+      (el) => el.getAttribute("fill") === colorForName("Wealthsimple RRSP")
+    )!;
+    const spentSolid = rightSolids.find(
+      (el) => el.getAttribute("fill") === colorForName("Downpayment")
+    )!;
+    // The overlay rides immediately after its solid ribbon with the
+    // identical path — no minimum-size hiding drops thin ribbons.
+    const heldOverlay = heldSolid.nextElementSibling!;
+    expect(heldOverlay.getAttribute("data-testid")).toBe("sankey-held-hatch");
+    expect(heldOverlay.getAttribute("d")).toBe(heldSolid.getAttribute("d"));
+    expect(heldOverlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    // No overlay follows the spending ribbon (its next sibling is the next
+    // solid element, never a held hatch).
+    const spentNext = spentSolid.nextElementSibling;
+    expect(spentNext?.getAttribute("data-testid")).not.toBe("sankey-held-hatch");
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-held-hatch"][data-side="right"]')
+    ).toHaveLength(1);
+  });
+
+  it("hatches only the held-funded sub-ribbons within a shared band", () => {
+    // Task-50 (iii): per-sub-ribbon granularity, mirroring the task-45
+    // spotlight. The Still-held band below funds two cells: the RRSP cell
+    // (held) and a Downpayment cell (spending — mixed incoming disqualifies
+    // the target). Only the held sub carries the overlay. (Artificial
+    // fixture: real flows never route a spending cell through the
+    // Still-held group — it exists to pin the per-sub rule.)
+    const mixedFlow: SpendingGroupFlow = {
+      groups: [
+        { name: "Everyday", value: 40000 },
+        { name: "Still held", value: 80000 },
+      ],
+      targets: [
+        { name: "Downpayment", value: 80000 },
+        { name: "Wealthsimple RRSP", value: 40000 },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 40000 },
+        { groupIndex: 1, targetIndex: 0, value: 40000 },
+        { groupIndex: 1, targetIndex: 1, value: 40000 },
+      ],
+    };
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={mixedFlow}
+        merchantFlow={emptyFlow}
+        income={[{ name: "Payroll", value: 120000 }]}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // The Payroll→Still-held band subdivides into two subs in one <g>:
+    // Downpayment (spending) and RRSP (held).
+    const rrspSub = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    ).find((el) => el.getAttribute("fill") === colorForName("Wealthsimple RRSP"))!;
+    const band = rrspSub.parentElement!;
+    const spendingSibling = Array.from(
+      band.querySelectorAll('[data-testid="sankey-link"]')
+    ).find((el) => el.getAttribute("fill") === colorForName("Downpayment"))!;
+    // The spending sibling in the SAME band stays solid…
+    expect(spendingSibling.nextElementSibling?.getAttribute("data-testid")).not.toBe(
+      "sankey-held-hatch"
+    );
+    // …while the held sub carries the overlay over its identical path.
+    const subOverlay = rrspSub.nextElementSibling!;
+    expect(subOverlay.getAttribute("data-testid")).toBe("sankey-held-hatch");
+    expect(subOverlay.getAttribute("data-side")).toBe("left");
+    expect(subOverlay.getAttribute("d")).toBe(rrspSub.getAttribute("d"));
+    expect(subOverlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    // No other left sub in the chart carries one (the Everyday band's
+    // Downpayment sub is spending too).
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-held-hatch"][data-side="left"]')
+    ).toHaveLength(1);
+    // …and the Still-held middle bar itself stays solid here: with a
+    // spending cell among its outgoing links it is mixed, not whole-held.
+    const groups = screen.getAllByTestId("sankey-group");
+    const labels = screen.getAllByTestId("sankey-group-label");
+    const stillHeld = groups[labels.findIndex((el) => el.textContent === "Still held")]!;
+    expect(
+      stillHeld.parentElement!.querySelector('[data-testid="sankey-held-hatch"]')
+    ).toBeNull();
+  });
+
+  it("brightens and dims held overlays with their ribbons (hover parity, no z-reorder)", () => {
+    // Task-50 (v): two held accounts — hovering one lights its own
+    // overlays (bar, right ribbon, funding sub) and dims the other's, at
+    // the ribbons' own rest/bright/dim steps with the same cross-fade, in
+    // place.
+    const twoHeldFlow: SpendingGroupFlow = {
+      groups: [
+        { name: "Everyday", value: 80000 },
+        { name: "Still held", value: 80000 },
+      ],
+      targets: [
+        { name: "Downpayment", value: 80000 },
+        { name: "Wealthsimple RRSP", value: 40000 },
+        { name: "Questrade TFSA", value: 40000 },
+      ],
+      links: [
+        { groupIndex: 0, targetIndex: 0, value: 80000 },
+        { groupIndex: 1, targetIndex: 1, value: 40000 },
+        { groupIndex: 1, targetIndex: 2, value: 40000 },
+      ],
+    };
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={twoHeldFlow}
+        merchantFlow={emptyFlow}
+        income={[{ name: "Payroll", value: 160000 }]}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Every held overlay sits immediately after its solid element (same
+    // path/geometry) and carries the spotlight cross-fade.
+    const overlays = Array.from(svg.querySelectorAll('[data-testid="sankey-held-hatch"]'));
+    expect(overlays.length).toBeGreaterThan(0);
+    for (const o of overlays) {
+      expect(o.getAttribute("style") ?? "").toMatch(
+        new RegExp(`fill-opacity ${SANKEY_SPOTLIGHT_TRANSITION_MS}ms`)
+      );
+    }
+    const opacityOf = (el: Element) => el.getAttribute("fill-opacity");
+    const solidOf = (o: Element) => {
+      const prev = o.previousElementSibling!;
+      expect(prev.getAttribute("data-testid")).not.toBe("sankey-held-hatch");
+      return prev;
+    };
+    // Rest: every overlay matches its solid at the rest step.
+    for (const o of overlays) {
+      expect(opacityOf(o)).toBe(String(SANKEY_RIBBON_OPACITY));
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+    }
+    const orderOf = () =>
+      Array.from(svg.querySelectorAll('[data-testid="sankey-held-hatch"]')).map((el) =>
+        el.tagName === "path" ? el.getAttribute("d") : el.getAttribute("y")
+      );
+    const before = orderOf();
+    // Hover the RRSP target: its overlays brighten with their solids, the
+    // TFSA overlays dim with theirs — in place.
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    const heldLabel = targetLabels.find((el) => el.textContent === "Wealthsimple RRSP")!;
+    fireEvent.mouseMove(heldLabel, { clientX: 700, clientY: 100 });
+    const ownerOf = (o: Element): string | null => {
+      // Bar overlays live in the row's <g> beside its label (direct
+      // children only — right-hop overlays sit at the svg root, where a
+      // descendant query would catch unrelated rows' labels); ribbon
+      // overlays follow the solid ribbon in the target's color.
+      const g = o.parentElement!;
+      const label = g.querySelector(
+        ':scope > [data-testid="sankey-target-label"], :scope > [data-testid="sankey-group-label"]'
+      );
+      if (label?.textContent === "Wealthsimple RRSP") return "rrsp";
+      if (label?.textContent === "Questrade TFSA") return "tfsa";
+      const solidFill = solidOf(o).getAttribute("fill");
+      if (solidFill === colorForName("Wealthsimple RRSP")) return "rrsp";
+      if (solidFill === colorForName("Questrade TFSA")) return "tfsa";
+      return null;
+    };
+    let bright = 0;
+    let dim = 0;
+    for (const o of overlays) {
+      const owner = ownerOf(o);
+      // The Still-held middle bar straddles both accounts (it feeds both
+      // cells), so it stays on the hovered path and brightens.
+      const want =
+        owner === "tfsa" ? String(SANKEY_RIBBON_DIM_OPACITY) : String(SANKEY_RIBBON_HOVER_OPACITY);
+      expect(opacityOf(o)).toBe(want);
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+      if (want === String(SANKEY_RIBBON_HOVER_OPACITY)) bright++;
+      else dim++;
+    }
+    expect(bright).toBeGreaterThan(0);
+    expect(dim).toBeGreaterThan(0);
+    expect(orderOf()).toEqual(before);
+    // Clearing the hover returns every overlay to rest with its solid.
+    fireEvent.mouseLeave(heldLabel);
+    for (const o of overlays) {
+      expect(opacityOf(o)).toBe(String(SANKEY_RIBBON_OPACITY));
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+    }
+    expect(orderOf()).toEqual(before);
+  });
+
+  it("never captures pointer events on held overlays (hover passes through)", () => {
+    // Task-50 (vi): every held overlay — Sankey bars, ribbons, sub-ribbons,
+    // and Bars rows — is pointer-events none, so hovering "through" one
+    // still hits the underlying target.
+    const { container, unmount } = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const overlays = svg.querySelectorAll('[data-testid="sankey-held-hatch"]');
+    expect(overlays.length).toBeGreaterThan(0);
+    for (const o of overlays) {
+      expect(o.getAttribute("pointer-events")).toBe("none");
+    }
+    // The solid ribbon beneath its overlay still takes the hover: moving
+    // onto the held right-hop ribbon spotlights its through-line and tips
+    // it, exactly as without the overlay.
+    const heldRibbon = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    ).find((el) => el.getAttribute("fill") === colorForName("Wealthsimple RRSP"))!;
+    fireEvent.mouseMove(heldRibbon, { clientX: 550, clientY: 200 });
+    expect(heldRibbon.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    const tip = document.querySelector(".y-tip")!;
+    expect(tip).toBeInTheDocument();
+    expect(
+      within(tip as unknown as HTMLElement).getByText("Still held → Wealthsimple RRSP")
+    ).toBeInTheDocument();
+    unmount();
+    // Bars rows: the overlay svg itself is pointer-events none.
+    const bars = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+        initialView="bars"
+      />
+    );
+    const barsOverlays = bars.container.querySelectorAll('[data-testid="bars-held-hatch"]');
+    expect(barsOverlays).toHaveLength(1);
+    expect(barsOverlays[0]!.getAttribute("pointer-events")).toBe("none");
   });
 
   it("shows no explainer tooltip on the Left / Over header readout", () => {
@@ -1251,7 +1559,7 @@ describe("SpendingReport", () => {
     // order never changes with hover.
     const ribbonLike = Array.from(
       svg.querySelectorAll(
-        '[data-testid="sankey-link"], [data-testid="sankey-group"], [data-testid="sankey-node"], [data-testid="sankey-income"], [data-testid="sankey-bucket-hatch"]'
+        '[data-testid="sankey-link"], [data-testid="sankey-group"], [data-testid="sankey-node"], [data-testid="sankey-income"], [data-testid="sankey-bucket-hatch"], [data-testid="sankey-held-hatch"]'
       )
     );
     expect(ribbonLike.length).toBeGreaterThan(0);
