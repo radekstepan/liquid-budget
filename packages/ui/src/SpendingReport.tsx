@@ -179,6 +179,11 @@ export function SpendingReport({
   categoryFlow,
   merchantFlow,
   income,
+  // Money still held in off-budget (investment/intermediate) accounts over
+  // the range (see computeRetainedBalances): contributions and profit that
+  // were neither spent nor withdrawn. Rendered as the Still-held strip
+  // under the header; absent (tests, embeds), the strip hides.
+  retained = [],
   // Monthly series behind each flow (see computeMonthlySankeySeries): the
   // Sankey funds spending chronologically from these, so an income can only
   // spotlight spending it could actually have funded. Absent (tests,
@@ -198,6 +203,7 @@ export function SpendingReport({
   categoryFlow: SpendingGroupFlow;
   merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
+  retained?: SpendingItem[];
   categorySeries?: MonthlySankeySeries;
   merchantSeries?: MonthlySankeySeries;
   groupOrder?: readonly string[];
@@ -1134,6 +1140,32 @@ export function SpendingReport({
           </div>
         </div>
       </div>
+
+      {/* Still-held strip: unspent money sitting in off-budget
+          (investment/intermediate) accounts — contributions and profit that
+          were neither spent nor withdrawn in-range. Hidden when no account
+          holds a positive balance, so embeds without the retained prop see
+          no change. */}
+      {retained.length > 0 && (
+        <div
+          data-testid="still-held"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--y-line-soft)] px-3 py-1.5 text-[11px]"
+          style={{ color: "var(--y-ink-soft)" }}
+        >
+          <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>
+            Still held
+          </span>
+          {retained.map((r) => (
+            <span key={r.name} className="inline-flex items-center gap-1">
+              <span style={{ color: "var(--y-ink-faint)" }}>·</span>
+              <span>{r.name}</span>{" "}
+              <span className="y-num font-semibold" style={{ color: "var(--y-ink)" }}>
+                {fmt(r.value)}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {viewMode === "bars" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 y-scroll">

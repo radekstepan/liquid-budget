@@ -500,6 +500,73 @@ export function computeIncomeBreakdown(
     .sort((a, b) => b.value - a.value);
 }
 
+/**
+ * Money still held in off-budget (investment/intermediate) accounts over a
+ * contiguous month range (inclusive): each account's range net change —
+ * contributions in, plus external profit recorded directly in it, minus
+ * withdrawals out and spending paid straight from it — computed as pure
+ * balance accounting (+amount where the account is the row's accountId,
+ * −amount where it is the transferAccountId), with no income/spending
+ * classification. Split parents are excluded; only split children move
+ * money.
+ *
+ * Only accounts with a POSITIVE net change are returned, sorted by value
+ * descending: a positive balance is money that flowed in and was neither
+ * spent nor withdrawn in-range — still held. An account that drew down
+ * earlier savings in-range (negative net change) is omitted by the same
+ * clamp-at-zero philosophy as off-budget profit: the drawdown funded
+ * spending that already shows under its final category, so there is nothing
+ * left to hold. Fully cycled accounts (net zero) are omitted too.
+ *
+ * Reconciliation identity (with SIGNED nets): the header's Left
+ * (incomeTotal − spendingTotal) equals the signed off-budget nets plus the
+ * on-budget leftover — every unspent dollar sits either in an investment
+ * account below or still in the budget. This function returns the
+ * still-held half of that identity; the view never re-derives it.
+ */
+export function computeRetainedBalances(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): SpendingBreakdownItem[] {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
+  }
+
+  const offBudget = new Map<number, string>();
+  for (const a of data.accounts) {
+    if (a.onBudget === false) {
+      const name = a.name.trim();
+      offBudget.set(a.id, name === "" ? "—" : name);
+    }
+  }
+
+  const nets = new Map<number, number>();
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    const mk = t.date.slice(0, 7);
+    if (mk < actualStart || mk > actualEnd) continue;
+    const amt = num(t.amount);
+    if (offBudget.has(t.accountId)) {
+      nets.set(t.accountId, (nets.get(t.accountId) ?? 0) + amt);
+    }
+    if (t.transferAccountId != null && offBudget.has(t.transferAccountId)) {
+      nets.set(t.transferAccountId, (nets.get(t.transferAccountId) ?? 0) - amt);
+    }
+  }
+
+  return [...nets.entries()]
+    .filter(([, value]) => value > 0)
+    // Nets keys are only ever set under an offBudget.has guard, so every
+    // lookup hits.
+    .map(([id, value]) => ({ name: offBudget.get(id)!, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
 /** Label for the unspent-income node on the target (right) side. */
 export const REMAINING_LABEL = "Remaining";
 /**

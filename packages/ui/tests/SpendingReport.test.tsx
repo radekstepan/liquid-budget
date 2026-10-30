@@ -146,6 +146,41 @@ describe("SpendingReport", () => {
     expect(screen.getByText("3 categories")).toBeInTheDocument();
   });
 
+  it("shows the Still-held strip with per-account balances", () => {
+    render(
+      <SpendingReport
+        categoryFlow={sampleCategoryFlow}
+        merchantFlow={sampleMerchantFlow}
+        income={sampleIncome}
+        retained={[
+          { name: "TFSA", value: 50000 },
+          { name: "RRSP", value: 30000 },
+        ]}
+      />
+    );
+    const strip = screen.getByTestId("still-held");
+    expect(strip).toBeInTheDocument();
+    expect(within(strip as unknown as HTMLElement).getByText("Still held")).toBeInTheDocument();
+    expect(within(strip as unknown as HTMLElement).getByText("TFSA")).toBeInTheDocument();
+    expect(within(strip as unknown as HTMLElement).getByText("RRSP")).toBeInTheDocument();
+    expect(within(strip as unknown as HTMLElement).getByText("$500.00")).toBeInTheDocument();
+    expect(within(strip as unknown as HTMLElement).getByText("$300.00")).toBeInTheDocument();
+  });
+
+  it("hides the Still-held strip without retained balances", () => {
+    const { rerender } = renderReport();
+    expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
+    rerender(
+      <SpendingReport
+        categoryFlow={sampleCategoryFlow}
+        merchantFlow={sampleMerchantFlow}
+        income={sampleIncome}
+        retained={[]}
+      />
+    );
+    expect(screen.queryByTestId("still-held")).not.toBeInTheDocument();
+  });
+
   it("shows no explainer tooltip on the Left / Over header readout", () => {
     renderReport();
     // The header readout is factual data only — hovering it explains nothing.

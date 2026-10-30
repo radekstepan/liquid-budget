@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeDirectFlowLinks,
   computeIncomeBreakdown,
+  computeRetainedBalances,
   computeSpendingBreakdown,
   computeSpendingGroupFlow,
   layoutDirectIncomeSankey,
@@ -1473,6 +1474,198 @@ describe("sankey flow-through attribution", () => {
       const into = flow.links.filter((l) => l.targetIndex === j).reduce((s, l) => s + l.value, 0);
       expect(into).toBeCloseTo(flow.targets[j]!.value, 9);
     }
+  });
+
+  it("flows the downpayment chain end to end (SAP Concur → Questrade → Wealthsimple Trade → Downpayment)", () => {
+    const data = flowData();
+    data.accounts.push(
+      { id: 7, name: "Questrade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 6 }
+    );
+    data.categories.push(
+      { id: 14, groupId: 1, name: "Downpayment", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    data.transactions.push(
+      txn("2026-06-01", "SAP Concur", 200000, null),
+      txn("2026-06-02", "Transfer : Questrade", -200000, 14, { transferAccountId: 7 }),
+      txn("2026-06-03", "Transfer : Wealthsimple Trade", -200000, 14, { accountId: 7, transferAccountId: 5 }),
+      txn("2026-06-04", "Transfer : Wealthsimple Trade", 150000, null, { transferAccountId: 5 }),
+      txn("2026-06-05", "Title Company", -150000, 14)
+    );
+    // The original external source funds the final purchase: every
+    // intermediate leg collapses, however deep the chain.
+    expect(computeIncomeBreakdown(data, "2026-06", "2026-06")).toEqual([
+      { name: "SAP Concur", value: 200000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Downpayment", value: 150000 },
+    ]);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "merchants")).toEqual([
+      { name: "Title Company", value: 150000 },
+    ]);
+    // The $50,000 that never left the chain is still held in the last pool.
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 50000 },
+    ]);
+  });
+
+  it("attributes appreciation to the growing account only (Questrade → Downpayment for the profit)", () => {
+    const data = flowData();
+    data.accounts.push(
+      { id: 7, name: "Questrade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 6 }
+    );
+    data.categories.push(
+      { id: 14, groupId: 1, name: "Downpayment", sort: 4, carryover: "0", goalTarget: null, linkedAccountId: null }
+    );
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : Questrade", -100000, 14, { transferAccountId: 7 }),
+      txn("2026-06-03", "Dividend", 20000, null, { accountId: 7 }),
+      txn("2026-06-04", "Transfer : Wealthsimple Trade", -120000, 14, { accountId: 7, transferAccountId: 5 }),
+      txn("2026-06-05", "Transfer : Wealthsimple Trade", 120000, null, { transferAccountId: 5 }),
+      txn("2026-06-06", "Title Company", -120000, 14)
+    );
+    // Questrade is a source for its $200 profit only; Wealthsimple Trade is
+    // pure pass-through principal, so it appears in NEITHER column.
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    expect(income).toEqual([
+      { name: "Payroll", value: 100000 },
+      { name: "Questrade", value: 20000 },
+    ]);
+    expect(income.some((i) => i.name === "Wealthsimple Trade")).toBe(false);
+    expect(computeSpendingBreakdown(data, "2026-06", "2026-06", "categories")).toEqual([
+      { name: "Downpayment", value: 120000 },
+    ]);
+    // Both pools fully cycled: nothing is still held anywhere.
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([]);
+  });
+});
+
+describe("computeRetainedBalances", () => {
+  function heldData(): BudgetData {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "Wealthsimple Trade", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 4 },
+      { id: 6, name: "RRSP", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 5 },
+      { id: 7, name: "TFSA", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 6 }
+    );
+    data.transactions = [];
+    return data;
+  }
+
+  it("shows unspent contributions per account, sorted descending", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -30000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Transfer : TFSA", -50000, 10, { transferAccountId: 7 }),
+      // An internal on-budget move touches no off-budget pool: held as-is.
+      txn("2026-06-04", "Transfer : Savings", -10000, null, { transferAccountId: 2 })
+    );
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "TFSA", value: 50000 },
+      { name: "RRSP", value: 30000 },
+    ]);
+  });
+
+  it("falls back to an em-dash for a blank account name", () => {
+    const data = heldData();
+    data.accounts.push(
+      { id: 8, name: "   ", kind: "offbudget", groupLabel: "Investments", balance: "0", onBudget: false, sort: 7 }
+    );
+    data.transactions.push(
+      txn("2026-06-02", "Transfer : Blank", -25000, 10, { transferAccountId: 8 })
+    );
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "—", value: 25000 },
+    ]);
+  });
+
+  it("nets withdrawals and direct spending against contributions", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : Wealthsimple Trade", -80000, 10, { transferAccountId: 5 }),
+      txn("2026-06-03", "Transfer : Wealthsimple Trade", 30000, null, { transferAccountId: 5 }),
+      txn("2026-06-04", "Broker Fee", -10000, 10, { accountId: 5 })
+    );
+    // $800 in, $300 withdrawn, $100 spent from the account: $400 still held.
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "Wealthsimple Trade", value: 40000 },
+    ]);
+  });
+
+  it("counts external profit as held and shifts held money on off→off moves", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -60000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Dividend", 20000, null, { accountId: 6 }),
+      txn("2026-06-04", "Transfer : TFSA", -80000, 10, { accountId: 6, transferAccountId: 7 })
+    );
+    // The $600 contribution plus $200 profit moved pools intact: RRSP nets
+    // to zero (omitted) and TFSA holds the full $800 — a move between pools
+    // creates nothing.
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "TFSA", value: 80000 },
+    ]);
+  });
+
+  it("omits fully-cycled and drawn-down accounts (clamped at zero)", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Transfer : RRSP", 50000, null, { transferAccountId: 6 }),
+      // $700 out against $500 in: the extra $200 came from pre-period
+      // savings, so there is nothing left to hold.
+      txn("2026-06-04", "Transfer : TFSA", -50000, 10, { transferAccountId: 7 }),
+      txn("2026-06-05", "Transfer : TFSA", 70000, null, { transferAccountId: 7 })
+    );
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([]);
+  });
+
+  it("reconciles with the header Left when nothing lingers in the budget", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-06-01", "Payroll", 100000, null),
+      txn("2026-06-02", "Transfer : RRSP", -70000, 10, { transferAccountId: 6 }),
+      txn("2026-06-03", "Grocer", -30000, 10)
+    );
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    const spending = computeSpendingBreakdown(data, "2026-06", "2026-06", "categories");
+    const retained = computeRetainedBalances(data, "2026-06", "2026-06");
+    const left =
+      income.reduce((s, i) => s + i.value, 0) - spending.reduce((s, t) => s + t.value, 0);
+    // Every unspent dollar sits in the RRSP: Left equals retained exactly.
+    expect(left).toBe(70000);
+    expect(retained).toEqual([{ name: "RRSP", value: 70000 }]);
+  });
+
+  it("respects the month range, swaps reversed bounds, and skips split parents", () => {
+    const data = heldData();
+    data.transactions.push(
+      txn("2026-05-20", "Transfer : RRSP", -30000, 10, { transferAccountId: 6 }),
+      txn("2026-06-02", "Transfer : RRSP", -50000, 10, { transferAccountId: 6 }),
+      txn("2026-06-10", "Transfer : TFSA", -90000, 10, { transferAccountId: 7 })
+    );
+    // A split parent moves no money itself (its children do); it must not
+    // inflate the held balance.
+    const parent = txn("2026-06-11", "Split", -10000, null, { transferAccountId: 7 });
+    data.transactions.push(
+      parent,
+      txn("2026-06-11", "Split child", -10000, 10, { parentId: parent.id, transferAccountId: 7 })
+    );
+    expect(computeRetainedBalances(data, "2026-06", "2026-06")).toEqual([
+      { name: "TFSA", value: 100000 },
+      { name: "RRSP", value: 50000 },
+    ]);
+    // Reversed bounds cover the same May–June span as the forward order.
+    expect(computeRetainedBalances(data, "2026-06", "2026-05")).toEqual(
+      computeRetainedBalances(data, "2026-05", "2026-06")
+    );
+    expect(computeRetainedBalances(data, "2026-05", "2026-05")).toEqual([
+      { name: "RRSP", value: 30000 },
+    ]);
   });
 });
 
