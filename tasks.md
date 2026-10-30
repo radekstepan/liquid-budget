@@ -67,6 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey
-- Were transfers complete ignored/removed? I want spending to "flow through" these categories if for example we kept depositing into Wealthsimple Trade, then withdrew from there to put down a downpayment on a house. I don't see this. We may have deposited in Questrade, then Wealthsimple Trade. Identify essentially where the money ended up in and where was the source. In this case you might say SAP Concur put money to Questrade then Wealthismple Trade and eventually downpayment. So you say SAP Concur - Downpayment (or whatere) the category is. BUT, the accounts themselves also appreciated money. If that is the case, then you need to say that say Questrade -> Downpayment. Do you get what I am after? I don't want you both showing me I kept depositing hundreds of thousands into Wealthismple Trade and then that Wealthsimple Trade was a source (income) for purchases. I want you to flow the money through. But also identify if we still have any account (we DO!) that we still have money in them. I still have RRSP, TFSA etc. Show it. And that some of the money was used on purchases. That is missing now.
+Spending by Category - Sankey, still-held follow-up (task-49)
+- Says "still held", but why are you not showing this in the chart? Isn't each account an actual category?
 
