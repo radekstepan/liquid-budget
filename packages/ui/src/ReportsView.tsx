@@ -10,6 +10,7 @@ import {
   computeNetWorthReport,
   computeMonthlySurplus,
   computeIncomeBreakdown,
+  computeMonthlySankeySeries,
   computeSpendingGroupFlow,
   type NetWorthPoint,
   type SurplusMonthPoint,
@@ -149,6 +150,19 @@ export const ReportsView = memo(function ReportsView({
     [data, actualStart, actualEnd]
   );
 
+  // Monthly series behind each spending flow: the Sankey funds spending
+  // chronologically from these (see computeMonthlySankeySeries), so a hover
+  // spotlights only income that could actually have funded the spending.
+  const categorySeries = useMemo(
+    () => computeMonthlySankeySeries(data, actualStart, actualEnd, "categories"),
+    [data, actualStart, actualEnd]
+  );
+
+  const merchantSeries = useMemo(
+    () => computeMonthlySankeySeries(data, actualStart, actualEnd, "merchants"),
+    [data, actualStart, actualEnd]
+  );
+
   // Budget view group order (by group.sort, like the Budget view itself) —
   // the Spending Sankey's "Group" sort mode orders its middle column by this.
   const groupOrder = useMemo(
@@ -279,6 +293,8 @@ export const ReportsView = memo(function ReportsView({
               categoryFlow={categoryFlow}
               merchantFlow={merchantFlow}
               income={incomeItems}
+              categorySeries={categorySeries}
+              merchantSeries={merchantSeries}
               groupOrder={groupOrder}
               categoryOrder={categoryOrder}
             />

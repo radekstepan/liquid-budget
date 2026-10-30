@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   fmt,
+  computeSankeyViewModel,
   mergeBelowThreshold,
   mergeGroupFlow,
   layoutGroupedIncomeSankey,
@@ -23,6 +24,7 @@ import {
   UNCATEGORIZED_GROUP_LABEL,
   type GroupedLeftCellLayout,
   type MergedSpendingItem,
+  type MonthlySankeySeries,
   type SankeyTargetSort,
   type SpendingBreakdownItem,
   type SpendingDimension,
@@ -177,6 +179,12 @@ export function SpendingReport({
   categoryFlow,
   merchantFlow,
   income,
+  // Monthly series behind each flow (see computeMonthlySankeySeries): the
+  // Sankey funds spending chronologically from these, so an income can only
+  // spotlight spending it could actually have funded. Absent (tests,
+  // embeds), the Sankey falls back to the legacy proportional split.
+  categorySeries,
+  merchantSeries,
   // Budget view group names in Budget order (group.sort) — the "Group"
   // sort mode orders the Sankey's middle column by this.
   groupOrder = [],
@@ -190,6 +198,8 @@ export function SpendingReport({
   categoryFlow: SpendingGroupFlow;
   merchantFlow: SpendingGroupFlow;
   income: SpendingItem[];
+  categorySeries?: MonthlySankeySeries;
+  merchantSeries?: MonthlySankeySeries;
   groupOrder?: readonly string[];
   categoryOrder?: readonly string[];
   initialView?: SpendingViewMode;
@@ -265,6 +275,23 @@ export function SpendingReport({
     () => sortMergedGroupFlow(merged, groupOrder, sort, categoryOrder),
     [merged, groupOrder, sort, categoryOrder]
   );
+  // Time-aware Sankey model: the same merged + sorted columns as above
+  // (the view model delegates to the same merge/sort calls, so Bars and
+  // Sankey cannot disagree) plus the chronological funding of each cell.
+  // Null without series — the layout then uses the legacy split.
+  const series = dimension === "categories" ? categorySeries : merchantSeries;
+  const timeAware = useMemo(
+    () =>
+      series == null
+        ? null
+        : computeSankeyViewModel(flow, income, series, {
+            thresholdCents: Math.round(activeThreshold * 100),
+            groupOrder,
+            sort,
+            categoryOrder,
+          }),
+    [flow, income, series, activeThreshold, groupOrder, sort, categoryOrder]
+  );
   // The header "(N in Other)" note covers all three merged columns.
   const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
 
@@ -334,23 +361,31 @@ export function SpendingReport({
   // fixed in the layout (unit-tested in @ynab/logic), never here.
   const sankey = useMemo(() => {
     if (chartSize.width <= 0 || chartSize.height <= 0) return null;
-    return layoutGroupedIncomeSankey(incomeRows, ordered.groups, ordered.targets, ordered.links, {
-      width: chartSize.width,
-      height: contentH,
-      padLeft: SANKEY_SOURCE_GUTTER,
-      padRight: LABEL_ZONE,
-      padTop: SANKEY_PAD_TOP,
-      padBottom: SANKEY_PAD_BOTTOM,
-      nodeGap: SANKEY_NODE_GAP,
-      minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
-      // Both groupings subdivide each income→group band into one
-      // sub-ribbon per downstream cell (layout leftCells), so each color
-      // crosses the middle as one contiguous block at its cell's thickness:
-      // the same through-color flows from the right column all the way to
-      // income in Categories and Merchants alike.
-      leftDetail: "cells",
-    });
-  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH]);
+    return layoutGroupedIncomeSankey(
+      timeAware?.sources ?? incomeRows,
+      timeAware?.groups ?? ordered.groups,
+      timeAware?.targets ?? ordered.targets,
+      timeAware?.links ?? ordered.links,
+      {
+        width: chartSize.width,
+        height: contentH,
+        padLeft: SANKEY_SOURCE_GUTTER,
+        padRight: LABEL_ZONE,
+        padTop: SANKEY_PAD_TOP,
+        padBottom: SANKEY_PAD_BOTTOM,
+        nodeGap: SANKEY_NODE_GAP,
+        minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
+        // Both groupings subdivide each income→middle band into one
+        // sub-ribbon per downstream cell (layout leftCells), so each color
+        // crosses the middle as one contiguous block at its cell's thickness:
+        // the same through-color flows from the right column all the way to
+        // income in Categories and Merchants alike — and with time-aware
+        // funding, only for income that could actually have funded the cell.
+        leftDetail: "cells",
+        ...(timeAware != null ? { leftHop: timeAware.left } : {}),
+      }
+    );
+  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, timeAware, chartSize.width, chartSize.height, contentH]);
 
   // Initial-load auto-fit: raise the Under threshold to the smallest stop
   // whose merged columns fit the measured container, so the Sankey shows
@@ -372,7 +407,8 @@ export function SpendingReport({
       flow.links,
       income,
       stops,
-      chartSize.height
+      chartSize.height,
+      series
     );
     if (best > activeThreshold) {
       setThresholdDollars(best);
@@ -385,6 +421,7 @@ export function SpendingReport({
     empty,
     flow,
     income,
+    series,
     stops,
     activeThreshold,
     setThresholdDollars,
@@ -719,20 +756,22 @@ export function SpendingReport({
 
   // Connected-highlight sets per hover (null = unconstrained, everything
   // stays at rest opacity). Hovering any bar spotlights its flow path: an
-  // income lights every line leading from it — its left ribbons plus its
-  // full downstream contribution, every right-hop cell in full (money is
-  // fungible, so that is every group and target) — and only the other
-  // incomes' bars dim; a target lights itself, EVERY cell arriving at it
-  // (including ribbons from non-dominant parent groups), every parent
-  // group feeding those cells, and the income ribbons feeding those
-  // groups — so a merchant split across groups traces its full path,
-  // never a single home; a group lights every line leading into it from
-  // every income plus every line leading out of it, with the bars on both
-  // ends. Ribbon hovers trace the through-line end to end: a right ribbon
-  // lights its group and target plus every left ribbon feeding that group
-  // (a merged cell carries every income's money, so one income cannot be
-  // traced through it), and a left ribbon lights every cell continuing
-  // through its middle. Spotlighted ribbons brighten in place — brightness
+  // income lights every line leading from it — its left ribbons plus the
+  // downstream cells it actually funds (its sub-ribbons), each in full —
+  // and only the other incomes' bars dim; a target lights itself, EVERY
+  // cell arriving at it (including ribbons from non-dominant parent
+  // groups), every parent group feeding those cells, and the income
+  // ribbons feeding those groups — so a merchant split across groups
+  // traces its full path, never a single home — while each income bar
+  // lights only when one of its slices into the target lights, so an
+  // income that never funded the target stays dim even when it funded the
+  // target's group for other rows; a group lights every line leading into
+  // it from every income plus every line leading out of it, with the bars
+  // on both ends. Ribbon hovers trace the through-line end to end: a right
+  // ribbon lights its group and target plus the left sub-ribbons funding
+  // that cell (one income CAN be traced through it — the cell's own
+  // slices), and a left ribbon lights the cells its band's slices
+  // continue into. Spotlighted ribbons brighten in place — brightness
   // alone carries the spotlight, never paint order.
   const hl = useMemo(() => {
     const none = {
@@ -756,11 +795,13 @@ export function SpendingReport({
         if (l.targetIndex < midCount) mid.add(l.targetIndex);
         else if (sankey.remainingTargetIndex != null) tgt.add(sankey.remainingTargetIndex);
       }
-      // Every cell carries this income's money (fungible proportional
-      // split), so the full downstream contribution lights in full.
-      for (const l of sankey.linksRight) {
-        rl.add(key(l.sourceIndex, l.targetIndex));
-        tgt.add(l.targetIndex);
+      // Only the cells this income actually funds (its sub-ribbons) light —
+      // each in full. Under the legacy proportional split that is every
+      // cell, so this matches the old "every line" behavior there.
+      for (const c of sankey.leftCells) {
+        if (c.sourceIndex !== hover.idx) continue;
+        rl.add(key(c.middleIndex, c.targetIndex));
+        tgt.add(c.targetIndex);
       }
       return { src: new Set([hover.idx]), mid, tgt, ll, rl };
     }
@@ -797,42 +838,77 @@ export function SpendingReport({
         mid.add(l.sourceIndex);
       }
       const ll = new Set<string>();
-      const src = new Set<number>();
       for (const l of sankey.linksLeft) {
         const plugLink = l.targetIndex >= midCount;
         if (isPlug ? !plugLink : !mid.has(l.targetIndex)) continue;
         ll.add(key(l.sourceIndex, l.targetIndex));
-        src.add(l.sourceIndex);
+      }
+      // An income bar lights only when one of its slices into the target
+      // lights (band AND cell on the path — the same predicate as
+      // leftCellLit below): funding the target's group for other rows is
+      // not enough. The plug path keeps its band sources (plug bands have
+      // no slices). Under the legacy split every band slices into every
+      // cell, so this matches the old band-level behavior there.
+      const src = new Set<number>();
+      if (isPlug) {
+        for (const l of sankey.linksLeft) {
+          if (l.targetIndex >= midCount) src.add(l.sourceIndex);
+        }
+      } else {
+        for (const c of sankey.leftCells) {
+          if (c.targetIndex !== hover.idx || !mid.has(c.middleIndex)) continue;
+          if (!ll.has(key(c.sourceIndex, c.middleIndex))) continue;
+          src.add(c.sourceIndex);
+        }
       }
       return { src, mid, tgt: new Set([hover.idx]), ll, rl };
     }
     // Ribbon hover: the ribbon plus its endpoint bars.
     if (hover.side === "left") {
       const isPlug = hover.b >= midCount;
-      // A group-bound left ribbon continues through its middle as every
-      // cell out of that middle; a plug ribbon ends at Remaining.
-      const cont = isPlug
-        ? []
-        : sankey.linksRight.filter((l) => l.sourceIndex === hover.b);
+      // A group-bound left ribbon continues through its middle as the cells
+      // its band's slices fund; a plug ribbon ends at Remaining. Under the
+      // legacy split that is every cell out of the middle.
+      const contKeys = new Set<string>();
+      const contTgt = new Set<number>();
+      if (!isPlug) {
+        for (const c of sankey.leftCells) {
+          if (c.sourceIndex !== hover.a || c.middleIndex !== hover.b) continue;
+          contKeys.add(key(c.middleIndex, c.targetIndex));
+          contTgt.add(c.targetIndex);
+        }
+      }
       return {
         src: new Set([hover.a]),
         mid: isPlug ? new Set<number>() : new Set([hover.b]),
         tgt:
           isPlug && sankey.remainingTargetIndex != null
             ? new Set([sankey.remainingTargetIndex])
-            : new Set(cont.map((l) => l.targetIndex)),
+            : contTgt,
         ll: new Set([key(hover.a, hover.b)]),
-        rl: new Set(cont.map((l) => key(l.sourceIndex, l.targetIndex))),
+        rl: contKeys,
       };
     }
-    // A merged cell carries every income's money: the through-line runs
-    // back through every left ribbon feeding its middle.
-    const back = sankey.linksLeft.filter((l) => l.targetIndex === hover.a);
+    // The through-line runs back through the left slices funding this cell:
+    // only incomes with a slice in it light. Under the legacy split that
+    // is every left ribbon feeding its middle.
+    const rk = sankey.linksRight.findIndex(
+      (l) => l.sourceIndex === hover.a && l.targetIndex === hover.b
+    );
+    const backSrc = new Set<number>();
+    const backLl = new Set<string>();
+    if (rk >= 0) {
+      for (const c of sankey.leftCells) {
+        if (c.rightLinkIndex !== rk) continue;
+        backSrc.add(c.sourceIndex);
+        backLl.add(key(c.sourceIndex, c.middleIndex));
+      }
+    }
     return {
-      src: new Set(back.map((l) => l.sourceIndex)),
+      src: backSrc,
       mid: new Set([hover.a]),
       tgt: new Set([hover.b]),
-      ll: new Set(back.map((l) => key(l.sourceIndex, l.targetIndex))),
+      ll: backLl,
       rl: new Set([key(hover.a, hover.b)]),
     };
   }, [hover, sankey]);

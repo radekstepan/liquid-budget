@@ -8,7 +8,7 @@
  */
 
 import type { BudgetData } from "./types.js";
-import { num } from "./format.js";
+import { nextMonthKey, num } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
 import { isInternalTransfer, isOffBudgetTransfer } from "./transfers.js";
 
@@ -59,57 +59,38 @@ export type SpendingGroupFlow = {
 };
 
 /**
- * Aggregate net outflows over a contiguous month range (inclusive) into a
- * two-level flow: category groups (middle column) feeding category or
- * merchant targets (right column).
- *
- * Row semantics (shared by both dimensions):
- * - Split-parent rows are excluded; only split children carry outflows.
- * - Income transactions are excluded (in category mode this is a no-op:
- *   income rows are uncategorized by definition).
- * - Refunds/returns (positive amounts on non-income rows) net against the
- *   cell's outflows; targets netting to <= 0 are dropped.
- * - No transfer leg counts as spending in either dimension, categorized
- *   or not: every transfer is movement between pools, and the terminal
- *   purchase (wherever its account sits) is the one spending record. In
- *   particular internal on-budget transfers (chequing to an on-budget
- *   savings account, credit-card payoffs) are excluded: counting the legs
- *   would show gross pass-through "spending" under `Transfer: <account>`
- *   payees that can never net out, since each leg names the OTHER account
- *   (a round-trip through a savings account is movement, not spending —
- *   only money that actually leaves the budget counts). Matches the
- *   internal-transfer exclusion in computeCashFlowRange.
- * - Off-budget transfers (any transfer touching an off-budget account: a
- *   contribution out, a withdrawal back, or a move between two off-budget
- *   accounts) are excluded in both dimensions: off-budget accounts are
- *   intermediate pools, so money flows THROUGH them — a contribution is
- *   movement, not a terminal outflow allocation, and a withdrawal never
- *   nets against spending. The final purchase (wherever its account sits)
- *   is the one spending record, attributed to the original income sources
- *   by the fungible left-hop allocation; an off-budget account appears as
- *   income only for its external profit (see computeIncomeBreakdown).
- *
- * Group attribution: in category mode each target has exactly one group
- * (its category's group; a dangling category falls back to "—"), so every
- * link is exact. In merchant mode a merchant's net value is attributed
- * across the groups with a positive net cell in proportion to those cells —
- * exact whenever no cell nets negative, and only a net-negative
- * (group, merchant) cell (a refund bigger than that merchant's spending in
- * that group) is spread proportionally instead of drawn as an (impossible)
- * negative ribbon. Uncategorized rows land in UNCATEGORIZED_GROUP_LABEL.
- *
- * Groups are derived from the kept targets' links (never from raw
- * transactions), so a dropped (net <= 0) target can never orphan a link:
- * every link points at a kept group and a kept target.
+ * Every month key in [startMonth, endMonth] (inclusive, ascending). Both ends
+ * swap when reversed, matching the range functions below.
  */
-export function computeSpendingGroupFlow(
+function enumerateMonthsInRange(startMonth: string, endMonth: string): string[] {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  const months: string[] = [];
+  // Bounded well past any real budget (a century of months): malformed
+  // keys must truncate, never hang the report.
+  for (let mk = actualStart, guard = 0; mk <= actualEnd && guard <= 1200; mk = nextMonthKey(mk), guard++) {
+    months.push(mk);
+  }
+  return months;
+}
+
+/**
+ * Monthly spending cells: target name -> group name -> per-month SIGNED net
+ * outflow cents (parallel to `months`). One pass over the transactions with
+ * the exact row semantics of computeSpendingGroupFlow (see that function) —
+ * the range flow sums these months, and the time-aware series keeps them, so
+ * both outputs agree by construction.
+ */
+function collectSpendMonths(
   data: BudgetData,
   startMonth: string,
   endMonth: string,
   dimension: SpendingDimension
-): SpendingGroupFlow {
+): { months: string[]; cells: Map<string, Map<string, number[]>> } {
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  const months = enumerateMonthsInRange(actualStart, actualEnd);
+  const monthIndex = new Map(months.map((mk, i) => [mk, i]));
 
   const splitParentIds = new Set<number>();
   for (const t of data.transactions) {
@@ -125,8 +106,7 @@ export function computeSpendingGroupFlow(
     return groupMap.get(cat.groupId) ?? "—";
   };
 
-  // Cells: target name -> group name -> net outflow cents.
-  const cells = new Map<string, Map<string, number>>();
+  const cells = new Map<string, Map<string, number[]>>();
   for (const t of data.transactions) {
     if (splitParentIds.has(t.id)) continue;
     if (isIncomeTransaction(t, accountMap)) continue;
@@ -156,10 +136,87 @@ export function computeSpendingGroupFlow(
       row = new Map();
       cells.set(name, row);
     }
+    let series = row.get(group);
+    if (!series) {
+      series = new Array<number>(months.length).fill(0);
+      row.set(group, series);
+    }
     // Amount < 0 is outflow (+ netOutflow); amount > 0 is a refund (- netOutflow).
-    row.set(group, (row.get(group) ?? 0) - num(t.amount));
+    // mk passed the range check above, so its month index always exists.
+    const mi = monthIndex.get(mk)!;
+    series[mi] = series[mi]! - num(t.amount);
+  }
+  return { months, cells };
+}
+
+/**
+ * Monthly income cells: source name -> per-month income cents (parallel to
+ * `months`; every entry >= 0). Same relationship to computeIncomeBreakdown as
+ * collectSpendMonths has to computeSpendingGroupFlow.
+ */
+function collectIncomeMonths(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string
+): { months: string[]; sources: Map<string, number[]> } {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  const months = enumerateMonthsInRange(actualStart, actualEnd);
+  const monthIndex = new Map(months.map((mk, i) => [mk, i]));
+
+  const splitParentIds = new Set<number>();
+  for (const t of data.transactions) {
+    if (t.parentId != null) splitParentIds.add(t.parentId);
   }
 
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+
+  const sources = new Map<string, number[]>();
+  const add = (name: string, mk: string, cents: number) => {
+    let series = sources.get(name);
+    if (!series) {
+      series = new Array<number>(months.length).fill(0);
+      sources.set(name, series);
+    }
+    // mk passed the range check, so its month index always exists.
+    const i = monthIndex.get(mk)!;
+    series[i] = series[i]! + cents;
+  };
+  for (const t of data.transactions) {
+    if (splitParentIds.has(t.id)) continue;
+    const mk = t.date.slice(0, 7);
+    if (mk < actualStart || mk > actualEnd) continue;
+
+    if (t.transferAccountId == null && isIncomeTransaction(t, accountMap)) {
+      const payee = t.payee.trim();
+      const name = payee === "" ? "—" : payee;
+      add(name, mk, num(t.amount));
+    } else if (
+      t.transferAccountId == null &&
+      t.categoryId == null &&
+      t.isIncome !== false &&
+      num(t.amount) > 0 &&
+      (accountMap.get(t.accountId)?.onBudget ?? true) === false
+    ) {
+      // External profit in an off-budget account, grouped under the
+      // account's own name (the account is the source).
+      const raw = accountMap.get(t.accountId)?.name.trim() ?? "";
+      const name = raw === "" ? "—" : raw;
+      add(name, mk, num(t.amount));
+    }
+  }
+  return { months, sources };
+}
+
+/**
+ * Attribute range-netted spending cells (target -> group -> net outflow
+ * cents) into the two-level group flow. Shared by computeSpendingGroupFlow
+ * and computeMonthlySankeySeries so the range flow and the monthly series
+ * attribute identically; see computeSpendingGroupFlow for the semantics.
+ */
+function buildSpendingGroupFlowFromCells(
+  cells: Map<string, Map<string, number>>
+): SpendingGroupFlow {
   const targets = [...cells.entries()]
     .map(([name, row]) => ({
       name,
@@ -204,6 +261,166 @@ export function computeSpendingGroupFlow(
     groups,
     targets: targets.map(({ name, value }) => ({ name, value })),
     links: outLinks,
+  };
+}
+
+/**
+ * Aggregate net outflows over a contiguous month range (inclusive) into a
+ * two-level flow: category groups (middle column) feeding category or
+ * merchant targets (right column).
+ *
+ * Row semantics (shared by both dimensions):
+ * - Split-parent rows are excluded; only split children carry outflows.
+ * - Income transactions are excluded (in category mode this is a no-op:
+ *   income rows are uncategorized by definition).
+ * - Refunds/returns (positive amounts on non-income rows) net against the
+ *   cell's outflows; targets netting to <= 0 are dropped.
+ * - No transfer leg counts as spending in either dimension, categorized
+ *   or not: every transfer is movement between pools, and the terminal
+ *   purchase (wherever its account sits) is the one spending record. In
+ *   particular internal on-budget transfers (chequing to an on-budget
+ *   savings account, credit-card payoffs) are excluded: counting the legs
+ *   would show gross pass-through "spending" under `Transfer: <account>`
+ *   payees that can never net out, since each leg names the OTHER account
+ *   (a round-trip through a savings account is movement, not spending —
+ *   only money that actually leaves the budget counts). Matches the
+ *   internal-transfer exclusion in computeCashFlowRange.
+ * - Off-budget transfers (any transfer touching an off-budget account: a
+ *   contribution out, a withdrawal back, or a move between two off-budget
+ *   accounts) are excluded in both dimensions: off-budget accounts are
+ *   intermediate pools, so money flows THROUGH them — a contribution is
+ *   movement, not a terminal outflow allocation, and a withdrawal never
+ *   nets against spending. The final purchase (wherever its account sits)
+ *   is the one spending record, attributed to the original income sources
+ *   by the time-aware fungible left-hop allocation; an off-budget account
+ *   appears as income only for its external profit (see
+ *   computeIncomeBreakdown).
+ *
+ * Group attribution: in category mode each target has exactly one group
+ * (its category's group; a dangling category falls back to "—"), so every
+ * link is exact. In merchant mode a merchant's net value is attributed
+ * across the groups with a positive net cell in proportion to those cells —
+ * exact whenever no cell nets negative, and only a net-negative
+ * (group, merchant) cell (a refund bigger than that merchant's spending in
+ * that group) is spread proportionally instead of drawn as an (impossible)
+ * negative ribbon. Uncategorized rows land in UNCATEGORIZED_GROUP_LABEL.
+ *
+ * Groups are derived from the kept targets' links (never from raw
+ * transactions), so a dropped (net <= 0) target can never orphan a link:
+ * every link points at a kept group and a kept target.
+ */
+export function computeSpendingGroupFlow(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string,
+  dimension: SpendingDimension
+): SpendingGroupFlow {
+  const { cells } = collectSpendMonths(data, startMonth, endMonth, dimension);
+  const range = new Map<string, Map<string, number>>();
+  for (const [target, row] of cells) {
+    const out = new Map<string, number>();
+    for (const [group, series] of row) {
+      out.set(group, series.reduce((s, v) => s + v, 0));
+    }
+    range.set(target, out);
+  }
+  return buildSpendingGroupFlowFromCells(range);
+}
+
+export type MonthlySankeySeries = {
+  /** Every month key in the range, ascending. Both matrices run parallel to this. */
+  months: string[];
+  /** Income source names, in computeIncomeBreakdown order for the same range. */
+  incomeNames: string[];
+  /** Group names, in flow.groups order. */
+  groupNames: string[];
+  /** Target names, in flow.targets order. */
+  targetNames: string[];
+  /**
+   * Income cents per (month, source). Every entry is >= 0 and each source
+   * column sums exactly to that source's range total.
+   */
+  incomeByMonth: number[][];
+  /**
+   * Spending cents per (month, range-flow link), in flow.links order. Every
+   * entry is >= 0 and each link column sums exactly to that link's range
+   * value — the scale target for time-aware funding.
+   */
+  cellByMonth: number[][];
+};
+
+/**
+ * Monthly spending and income series behind a SpendingGroupFlow: the same
+ * range-aggregated cells as computeSpendingGroupFlow/computeIncomeBreakdown,
+ * kept per month so the left hop can fund spending chronologically instead
+ * of spreading every income across the whole range (task-47: a 2015 income
+ * fully spent in 2015 must not fund 2020 spending just because both sit in
+ * the same report range).
+ *
+ * Monthly spending per link keeps the range link's value but follows the
+ * link's own months: each month takes its positive net's share of the
+ * range-attributed link value (scaled positive parts). Refund TIMING is
+ * deliberately washed out — a refund nets against the link's range value and
+ * the surviving spending keeps its months — while causality holds exactly:
+ * a month with no positive activity contributes no slice. Dropped
+ * (net <= 0) links contribute nothing, matching the range flow.
+ *
+ * Monthly income needs no scaling: every income row is positive by
+ * definition, so each source column sums to its range total exactly.
+ */
+export function computeMonthlySankeySeries(
+  data: BudgetData,
+  startMonth: string,
+  endMonth: string,
+  dimension: SpendingDimension
+): MonthlySankeySeries {
+  const spend = collectSpendMonths(data, startMonth, endMonth, dimension);
+  const income = collectIncomeMonths(data, startMonth, endMonth);
+  const range = new Map<string, Map<string, number>>();
+  for (const [target, row] of spend.cells) {
+    const out = new Map<string, number>();
+    for (const [group, series] of row) {
+      out.set(group, series.reduce((s, v) => s + v, 0));
+    }
+    range.set(target, out);
+  }
+  const flow = buildSpendingGroupFlowFromCells(range);
+
+  const months = spend.months;
+  const incomeNames = [...income.sources.entries()]
+    .map(([name, series]) => ({ name, value: series.reduce((s, v) => s + v, 0) }))
+    .filter((s) => s.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .map((s) => s.name);
+  const incomeByMonth = months.map((_, m) =>
+    // Names come straight from the map's keys, so every lookup hits.
+    incomeNames.map((name) => income.sources.get(name)![m]!)
+  );
+
+  const cellByMonth = months.map((_, m) =>
+    flow.links.map((link) => {
+      // Every link was attributed from these same cells, so its endpoint
+      // names and indices always resolve.
+      const target = flow.targets[link.targetIndex]!.name;
+      const group = flow.groups[link.groupIndex]!.name;
+      const nets = spend.cells.get(target)!.get(group)!;
+      let positives = 0;
+      for (const v of nets) {
+        if (v > 0) positives += v;
+      }
+      if (!(positives > 0)) return 0;
+      const pm = nets[m]!;
+      return pm > 0 ? (pm * link.value) / positives : 0;
+    })
+  );
+
+  return {
+    months,
+    incomeNames,
+    groupNames: flow.groups.map((g) => g.name),
+    targetNames: flow.targets.map((t) => t.name),
+    incomeByMonth,
+    cellByMonth,
   };
 }
 
@@ -276,44 +493,10 @@ export function computeIncomeBreakdown(
   startMonth: string,
   endMonth: string
 ): SpendingBreakdownItem[] {
-  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
-  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
-
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
-
-  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
-
-  const bySource = new Map<string, number>();
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    const mk = t.date.slice(0, 7);
-    if (mk < actualStart || mk > actualEnd) continue;
-
-    if (t.transferAccountId == null && isIncomeTransaction(t, accountMap)) {
-      const payee = t.payee.trim();
-      const name = payee === "" ? "—" : payee;
-      bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
-    } else if (
-      t.transferAccountId == null &&
-      t.categoryId == null &&
-      t.isIncome !== false &&
-      num(t.amount) > 0 &&
-      (accountMap.get(t.accountId)?.onBudget ?? true) === false
-    ) {
-      // External profit in an off-budget account, grouped under the
-      // account's own name (the account is the source).
-      const raw = accountMap.get(t.accountId)?.name.trim() ?? "";
-      const name = raw === "" ? "—" : raw;
-      bySource.set(name, (bySource.get(name) ?? 0) + num(t.amount));
-    }
-  }
-
-  return [...bySource.entries()]
-    .filter(([, v]) => v > 0)
-    .map(([name, value]) => ({ name, value }))
+  const { sources } = collectIncomeMonths(data, startMonth, endMonth);
+  return [...sources.entries()]
+    .map(([name, series]) => ({ name, value: series.reduce((s, v) => s + v, 0) }))
+    .filter((s) => s.value > 0)
     .sort((a, b) => b.value - a.value);
 }
 
@@ -426,6 +609,53 @@ export type MergedSpending = {
 /** Label used for the merged bucket. Exported so views and tests agree. */
 export const OTHER_BUCKET_LABEL = "Other";
 
+type MergePartition = {
+  merged: MergedSpendingItem[];
+  /** Input position -> merged position (the trailing Other slot for folded rows). */
+  remap: number[];
+  otherCount: number;
+  otherValue: number;
+};
+
+/**
+ * Single-column merge partition behind mergeBelowThreshold and
+ * mergeGroupFlow (kept rows stay in input order, "Other" sorts last), plus
+ * the input->merged index remap the monthly series aggregation reuses — one
+ * implementation, so the merged columns and the merged series can never
+ * assign a row differently.
+ */
+function partitionForMerge(
+  items: SpendingBreakdownItem[],
+  thresholdCents: number
+): MergePartition {
+  const merged: MergedSpendingItem[] = [];
+  const remap: number[] = new Array<number>(items.length).fill(-1);
+  let otherCount = 0;
+  let otherValue = 0;
+  items.forEach((it, i) => {
+    if (thresholdCents > 0 && it.value < thresholdCents) {
+      otherCount += 1;
+      otherValue += it.value;
+    } else {
+      remap[i] = merged.length;
+      merged.push({ ...it, mergedCount: 1 });
+    }
+  });
+  if (otherCount > 0) {
+    const otherIndex = merged.length;
+    merged.push({
+      name: OTHER_BUCKET_LABEL,
+      value: otherValue,
+      mergedCount: otherCount,
+      bucket: true,
+    });
+    for (let i = 0; i < remap.length; i++) {
+      if (remap[i]! < 0) remap[i] = otherIndex;
+    }
+  }
+  return { merged, remap, otherCount, otherValue };
+}
+
 /**
  * Fold every item strictly below `thresholdCents` into a single trailing
  * "Other" bucket (kept items stay sorted descending; "Other" always sorts
@@ -439,33 +669,8 @@ export function mergeBelowThreshold(
   items: SpendingBreakdownItem[],
   thresholdCents: number
 ): MergedSpending {
-  if (thresholdCents <= 0 || items.length === 0) {
-    return {
-      items: items.map((it) => ({ ...it, mergedCount: 1 })),
-      otherCount: 0,
-      otherValue: 0,
-    };
-  }
-  const kept: MergedSpendingItem[] = [];
-  let otherCount = 0;
-  let otherValue = 0;
-  for (const it of items) {
-    if (it.value < thresholdCents) {
-      otherCount += 1;
-      otherValue += it.value;
-    } else {
-      kept.push({ ...it, mergedCount: 1 });
-    }
-  }
-  if (otherCount > 0) {
-    kept.push({
-      name: OTHER_BUCKET_LABEL,
-      value: otherValue,
-      mergedCount: otherCount,
-      bucket: true,
-    });
-  }
-  return { items: kept, otherCount, otherValue };
+  const p = partitionForMerge(items, thresholdCents);
+  return { items: p.merged, otherCount: p.otherCount, otherValue: p.otherValue };
 }
 
 export type MergedGroupFlowLink = SpendingGroupFlowLink;
@@ -508,37 +713,8 @@ export function mergeGroupFlow(
   links: SpendingGroupFlowLink[],
   thresholdCents: number
 ): MergedGroupFlow {
-  const partition = (items: SpendingBreakdownItem[]) => {
-    const merged: MergedSpendingItem[] = [];
-    const remap: number[] = new Array<number>(items.length).fill(-1);
-    let otherCount = 0;
-    let otherValue = 0;
-    items.forEach((it, i) => {
-      if (thresholdCents > 0 && it.value < thresholdCents) {
-        otherCount += 1;
-        otherValue += it.value;
-      } else {
-        remap[i] = merged.length;
-        merged.push({ ...it, mergedCount: 1 });
-      }
-    });
-    if (otherCount > 0) {
-      const otherIndex = merged.length;
-      merged.push({
-        name: OTHER_BUCKET_LABEL,
-        value: otherValue,
-        mergedCount: otherCount,
-        bucket: true,
-      });
-      for (let i = 0; i < remap.length; i++) {
-        if (remap[i]! < 0) remap[i] = otherIndex;
-      }
-    }
-    return { merged, otherCount, otherValue, remap };
-  };
-
-  const g = partition(groups);
-  const t = partition(targets);
+  const g = partitionForMerge(groups, thresholdCents);
+  const t = partitionForMerge(targets, thresholdCents);
 
   const acc = new Map<string, number>();
   for (const l of links) {
@@ -684,6 +860,296 @@ export function sortMergedGroupFlow(
     links,
     otherCount: flow.otherCount,
     otherValue: flow.otherValue,
+  };
+}
+
+export type SankeyCellFunding = {
+  /** Index into the income-source column. */
+  sourceIndex: number;
+  /** Index into the right-hop cell (link) column. */
+  cellIndex: number;
+  /** Funded cents (always >= SANKEY_FUNDING_EPSILON_CENTS — dust never ships). */
+  value: number;
+};
+
+export type SankeyFundingResult = {
+  /** One entry per funded (source, cell) pair, sorted by (cellIndex, sourceIndex). */
+  funding: SankeyCellFunding[];
+  /** Funded cents per cell (funding into the cell sums to this). */
+  cellFunded: number[];
+  /** Unfunded cents per cell (cell value minus funded). */
+  cellUnfunded: number[];
+  /** Surplus cents per source (income never spent). */
+  remainingBySource: number[];
+  incomeTotal: number;
+  spendingTotal: number;
+};
+
+/**
+ * Funding values below this many cents are float dust, not money: the
+ * pool/backlog pro-rata loop multiplies fractions for a hundred-plus
+ * months, so fully-spent sources leave e-13 pool residuals that fund e-53
+ * "slices". Anything under a millionth of a cent draws no pixel and rounds
+ * to no cent, but an unpruned dust slice still joins hover sets and gradient
+ * stops — so allocation drops funding under this cutoff (the dust absorbs
+ * into the cell shortfall / source surplus it came from, keeping both
+ * conservation identities exact to the cutoff).
+ */
+export const SANKEY_FUNDING_EPSILON_CENTS = 1e-6;
+
+/**
+ * Fund every spending cell from the income pool, chronologically: each
+ * month's income joins a per-source pool, each month's cell demands (plus
+ * any backlog of still-unfunded earlier demands) draw from that pool
+ * pro-rata to its composition, and whatever the pool cannot cover waits as
+ * backlog for later income. The pool remainder at the end is the surplus
+ * (per source); the demand remainder is the shortfall (per cell).
+ *
+ * This is the time-aware replacement for the report-wide fungible pro-rata
+ * split (computeDirectFlowLinks): income can only fund demands once it has
+ * arrived, so a fully-spent early income can never fund late spending —
+ * while genuine savings still carry forward (a pool that never empties
+ * funds later demands) and arrears still resolve (early demands wait for
+ * late income instead of inventing a simultaneous over-and-under).
+ *
+ * Within a month money stays fungible (pro-rata across sources and cells);
+ * only the month boundary is causal. On a single-month range this collapses
+ * exactly to the legacy proportional split.
+ *
+ * Conservation: funding out of a source plus its surplus equals its income;
+ * funding into a cell plus its shortfall equals its spending.
+ */
+export function allocateCellFunding(
+  incomeByMonth: number[][],
+  cellByMonth: number[][]
+): SankeyFundingResult {
+  const monthCount = Math.max(incomeByMonth.length, cellByMonth.length);
+  const sourceCount = incomeByMonth.reduce((m, row) => Math.max(m, row.length), 0);
+  const cellCount = cellByMonth.reduce((m, row) => Math.max(m, row.length), 0);
+
+  const funded: number[][] = Array.from({ length: cellCount }, () =>
+    new Array<number>(sourceCount).fill(0)
+  );
+  const pool = new Array<number>(sourceCount).fill(0);
+  const backlog = new Array<number>(cellCount).fill(0);
+
+  // pool/backlog/demand/funded and the total arrays below are dense and
+  // indexed in range by construction; only the caller-owned matrix rows
+  // (ragged or short months) read through `??` fallbacks.
+  for (let m = 0; m < monthCount; m++) {
+    const inc = incomeByMonth[m] ?? [];
+    for (let s = 0; s < sourceCount; s++) {
+      pool[s] = pool[s]! + (inc[s] ?? 0);
+    }
+    const spend = cellByMonth[m] ?? [];
+    const demand = new Array<number>(cellCount).fill(0);
+    let dTotal = 0;
+    for (let c = 0; c < cellCount; c++) {
+      demand[c] = backlog[c]! + (spend[c] ?? 0);
+      dTotal += demand[c]!;
+    }
+    let pTotal = 0;
+    for (let s = 0; s < sourceCount; s++) pTotal += pool[s]!;
+    const fTotal = Math.min(pTotal, dTotal);
+    // A positive minimum implies positive pool AND demand, so both
+    // divisions below are safe.
+    if (fTotal > 0) {
+      for (let s = 0; s < sourceCount; s++) {
+        const fromSource = fTotal * (pool[s]! / pTotal);
+        pool[s] = pool[s]! - fromSource;
+        for (let c = 0; c < cellCount; c++) {
+          funded[c]![s] = funded[c]![s]! + fromSource * (demand[c]! / dTotal);
+        }
+      }
+      for (let c = 0; c < cellCount; c++) {
+        backlog[c] = demand[c]! - fTotal * (demand[c]! / dTotal);
+      }
+    } else {
+      for (let c = 0; c < cellCount; c++) backlog[c] = demand[c]!;
+    }
+  }
+
+  const cellTotals = new Array<number>(cellCount).fill(0);
+  for (const row of cellByMonth) {
+    row.forEach((v, c) => {
+      cellTotals[c] = cellTotals[c]! + v;
+    });
+  }
+  const incomeTotals = new Array<number>(sourceCount).fill(0);
+  for (const row of incomeByMonth) {
+    row.forEach((v, s) => {
+      incomeTotals[s] = incomeTotals[s]! + v;
+    });
+  }
+
+  const snap = (v: number): number => (Math.abs(v) < SANKEY_FUNDING_EPSILON_CENTS ? 0 : v);
+  const funding: SankeyCellFunding[] = [];
+  const cellFunded = new Array<number>(cellCount).fill(0);
+  const sourceOut = new Array<number>(sourceCount).fill(0);
+  for (let c = 0; c < cellCount; c++) {
+    for (let s = 0; s < sourceCount; s++) {
+      const v = funded[c]![s]!;
+      // Dust never becomes a slice: only real funding draws ribbons and
+      // joins hover sets. Dropped dust absorbs into the shortfall/surplus
+      // below, so conservation holds to the cutoff.
+      if (!(v >= SANKEY_FUNDING_EPSILON_CENTS)) continue;
+      cellFunded[c] = cellFunded[c]! + v;
+      sourceOut[s] = sourceOut[s]! + v;
+      funding.push({ sourceIndex: s, cellIndex: c, value: v });
+    }
+  }
+  funding.sort((a, b) => a.cellIndex - b.cellIndex || a.sourceIndex - b.sourceIndex);
+
+  const cellUnfunded = cellTotals.map((t, c) => snap(t - cellFunded[c]!));
+  const remainingBySource = incomeTotals.map((t, s) => snap(t - sourceOut[s]!));
+  const incomeTotal = incomeTotals.reduce((s, v) => s + v, 0);
+  const spendingTotal = cellTotals.reduce((s, v) => s + v, 0);
+  return { funding, cellFunded, cellUnfunded, remainingBySource, incomeTotal, spendingTotal };
+}
+
+export type SankeyLeftHopCell = {
+  /** Index into the view-model's income sources. */
+  sourceIndex: number;
+  /** Index into the view-model's right-hop links. */
+  rightLinkIndex: number;
+  /** Funded cents (always >= SANKEY_FUNDING_EPSILON_CENTS — dust never ships). */
+  value: number;
+};
+
+export type SankeyLeftHopModel = {
+  /**
+   * Per-(source, right-hop cell) funded cents. The layout aggregates these
+   * into income→middle bands and subdivides each band back into these exact
+   * slices — no proportional re-derivation, so a zero here draws nothing.
+   */
+  cells: SankeyLeftHopCell[];
+  /** Surplus cents per income source (index-aligned with the sources). */
+  remainingBySource: number[];
+  incomeTotal: number;
+  spendingTotal: number;
+};
+
+export type SankeyViewModel = {
+  /** Income column: identical to mergeBelowThreshold output for the inputs. */
+  sources: MergedSpendingItem[];
+  /** Middle column: identical to sortMergedGroupFlow output for the inputs. */
+  groups: MergedSpendingItem[];
+  /** Right column: identical to sortMergedGroupFlow output for the inputs. */
+  targets: MergedSpendingItem[];
+  /** Right-hop cells, in the same order as the sorted flow's links. */
+  links: MergedGroupFlowLink[];
+  /** Time-aware funding of those cells (indices key into sources/links). */
+  left: SankeyLeftHopModel;
+};
+
+/**
+ * The Sankey's complete data model: merged + sorted columns (via the same
+ * mergeGroupFlow/mergeBelowThreshold/sortMergedGroupFlow calls the Bars
+ * view uses, so the two views can never disagree) plus the time-aware
+ * funding of each right-hop cell from the monthly series.
+ *
+ * `series` must come from computeMonthlySankeySeries over the same
+ * (data, range, dimension) as `flow`/`income` — its matrices are
+ * index-aligned with flow.links and the income array. Merging aggregates
+ * the monthly series through the same partitions as the columns; sorting
+ * carries each cell's funding with it (matched by endpoint identity, never
+ * by position).
+ */
+export function computeSankeyViewModel(
+  flow: SpendingGroupFlow,
+  income: SpendingBreakdownItem[],
+  series: MonthlySankeySeries,
+  opts: {
+    thresholdCents: number;
+    groupOrder?: readonly string[];
+    sort?: SankeyTargetSort;
+    categoryOrder?: readonly string[];
+  }
+): SankeyViewModel {
+  const { thresholdCents } = opts;
+  const merged = mergeGroupFlow(flow.groups, flow.targets, flow.links, thresholdCents);
+  const mergedIncome = mergeBelowThreshold(income, thresholdCents);
+  const sorted = sortMergedGroupFlow(
+    merged,
+    opts.groupOrder ?? [],
+    opts.sort ?? "amount",
+    opts.categoryOrder ?? []
+  );
+
+  const gRemap = partitionForMerge(flow.groups, thresholdCents).remap;
+  const tRemap = partitionForMerge(flow.targets, thresholdCents).remap;
+  const iRemap = partitionForMerge(income, thresholdCents).remap;
+
+  const mergedIncomeCount = mergedIncome.items.length;
+  const mergedIncomeByMonth = series.months.map(() => new Array<number>(mergedIncomeCount).fill(0));
+  series.incomeByMonth.forEach((row, m) => {
+    row.forEach((v, s) => {
+      if (!(v > 0)) return;
+      // A misaligned caller series lands here; well-formed rows always hit.
+      const mi = iRemap[s] ?? -1;
+      if (mi < 0) return;
+      mergedIncomeByMonth[m]![mi] = mergedIncomeByMonth[m]![mi]! + v;
+    });
+  });
+
+  // Merged cells keyed exactly like mergeGroupFlow's re-aggregation.
+  const mergedKeyOf = (mg: number, mt: number) => `${mg}:${mt}`;
+  const mergedLinkIndex = new Map<string, number>();
+  merged.links.forEach((l, k) => mergedLinkIndex.set(mergedKeyOf(l.groupIndex, l.targetIndex), k));
+  const mergedCellByMonth = series.months.map(() => new Array<number>(merged.links.length).fill(0));
+  series.cellByMonth.forEach((row, m) => {
+    row.forEach((v, k) => {
+      if (!(v > 0)) return;
+      // Misaligned caller rows land in these guards; well-formed rows hit.
+      const link = flow.links[k];
+      if (!link) return;
+      const mg = gRemap[link.groupIndex] ?? -1;
+      const mt = tRemap[link.targetIndex] ?? -1;
+      const mk = mergedLinkIndex.get(mergedKeyOf(mg, mt));
+      if (mk == null) return;
+      mergedCellByMonth[m]![mk] = mergedCellByMonth[m]![mk]! + v;
+    });
+  });
+
+  const funding = allocateCellFunding(mergedIncomeByMonth, mergedCellByMonth);
+
+  // Sorting permutes the links: carry each cell's funding along by endpoint
+  // identity (name + bucket flag — a literal "Other" row and the merged
+  // Other bucket share a name but never an identity; the NUL joiner keeps
+  // even adversarial names unambiguous).
+  const identOf = (item: MergedSpendingItem) => `${item.bucket === true ? "b" : "r"}:${item.name}`;
+  const sortedLinkIndex = new Map<string, number>();
+  // Merge and sort only ever emit valid endpoint indices, and sorting is a
+  // permutation — so every merged link has exactly one sorted counterpart.
+  sorted.links.forEach((l, j) => {
+    const g = sorted.groups[l.groupIndex]!;
+    const t = sorted.targets[l.targetIndex]!;
+    sortedLinkIndex.set(`${identOf(g)}\u0000${identOf(t)}`, j);
+  });
+  const mergedToSorted = merged.links.map((l) => {
+    const g = merged.groups[l.groupIndex]!;
+    const t = merged.targets[l.targetIndex]!;
+    return sortedLinkIndex.get(`${identOf(g)}\u0000${identOf(t)}`)!;
+  });
+
+  const cells: SankeyLeftHopCell[] = [];
+  for (const f of funding.funding) {
+    const j = mergedToSorted[f.cellIndex]!;
+    cells.push({ sourceIndex: f.sourceIndex, rightLinkIndex: j, value: f.value });
+  }
+  cells.sort((a, b) => a.rightLinkIndex - b.rightLinkIndex || a.sourceIndex - b.sourceIndex);
+
+  return {
+    sources: mergedIncome.items,
+    groups: sorted.groups,
+    targets: sorted.targets,
+    links: sorted.links,
+    left: {
+      cells,
+      remainingBySource: funding.remainingBySource,
+      incomeTotal: funding.incomeTotal,
+      spendingTotal: funding.spendingTotal,
+    },
   };
 }
 
@@ -952,6 +1418,15 @@ export type SankeyGeometryOptions = {
    * contiguous thickness. Defaults to "bands".
    */
   leftDetail?: "bands" | "cells";
+  /**
+   * Explicit time-aware funding for the grouped layout (see
+   * computeSankeyViewModel): per-(source, right-hop cell) funded cents plus
+   * per-source surplus. When present the layout aggregates these into the
+   * income→middle bands and subdivides each band back into these exact
+   * slices — a zero draws nothing. When absent the layout falls back to the
+   * legacy report-wide proportional split (computeDirectFlowLinks).
+   */
+  leftHop?: SankeyLeftHopModel;
   /** Left gutter before the source node. Defaults to 8. */
   padLeft?: number;
   /** Right gutter after the target nodes (label zone). Defaults to 8. */
@@ -1095,6 +1570,10 @@ export function sankeyContentHeight(itemCount: number, containerHeight: number):
  * ties prefer the smaller stop — so the chart gets as close to the
  * viewport as merging allows. Empty stops yield 0. Callers pass the
  * measured container height.
+ *
+ * Pass the view's monthly series (when it has one) so the probe lays out
+ * the same time-aware funding the chart will draw; without it the probe
+ * uses the legacy proportional split.
  */
 export function sankeyAutoFitThreshold(
   groups: SpendingBreakdownItem[],
@@ -1102,30 +1581,45 @@ export function sankeyAutoFitThreshold(
   links: SpendingGroupFlowLink[],
   income: SpendingBreakdownItem[],
   stops: readonly number[],
-  containerHeight: number
+  containerHeight: number,
+  series?: MonthlySankeySeries
 ): number {
   if (stops.length === 0) return 0;
   let fallback = stops[0] ?? 0;
   let fallbackHeight = Number.POSITIVE_INFINITY;
   for (const stop of stops) {
     const thresholdCents = Math.round(stop * 100);
-    const merged = mergeGroupFlow(groups, targets, links, thresholdCents);
-    const mergedIncome = mergeBelowThreshold(income, thresholdCents);
     // Width is irrelevant to heights (the y-geometry never reads x), so a
     // fixed width keeps the probe reproducible; height is the container's.
-    const probe = layoutGroupedIncomeSankey(
-      mergedIncome.items,
-      merged.groups,
-      merged.targets,
-      merged.links,
-      {
-        width: 800,
-        height: Math.max(0, containerHeight),
-        padTop: SANKEY_PAD_TOP,
-        padBottom: SANKEY_PAD_BOTTOM,
-        nodeGap: SANKEY_NODE_GAP,
-      }
-    );
+    const probeOpts = {
+      width: 800,
+      height: Math.max(0, containerHeight),
+      padTop: SANKEY_PAD_TOP,
+      padBottom: SANKEY_PAD_BOTTOM,
+      nodeGap: SANKEY_NODE_GAP,
+    };
+    const probe =
+      series != null
+        ? (() => {
+            const vm = computeSankeyViewModel({ groups, targets, links }, income, series, {
+              thresholdCents,
+            });
+            return layoutGroupedIncomeSankey(vm.sources, vm.groups, vm.targets, vm.links, {
+              ...probeOpts,
+              leftHop: vm.left,
+            });
+          })()
+        : (() => {
+            const merged = mergeGroupFlow(groups, targets, links, thresholdCents);
+            const mergedIncome = mergeBelowThreshold(income, thresholdCents);
+            return layoutGroupedIncomeSankey(
+              mergedIncome.items,
+              merged.groups,
+              merged.targets,
+              merged.links,
+              probeOpts
+            );
+          })();
     if (probe.contentHeight < fallbackHeight) {
       fallbackHeight = probe.contentHeight;
       fallback = stop;
@@ -1783,9 +2277,11 @@ export type GroupedIncomeSankeyLayout = {
 /**
  * Lay out a three-column money-flow Sankey: income sources (left) flow into
  * category groups (middle), which flow into spending groups (right). The
- * left hop reuses computeDirectFlowLinks (fungible proportional allocation);
- * the right hop draws the exact group→target rollup cells scaled by the
- * uniform coverage ratio income/spending. Surplus income lands in a
+ * left hop reuses computeDirectFlowLinks (fungible proportional allocation),
+ * or the explicit per-cell funding passed via opts.leftHop (see
+ * computeSankeyViewModel); the right hop draws the exact group→target
+ * rollup cells scaled by the uniform coverage ratio income/spending, or at
+ * their explicit funded values. Surplus income lands in a
  * trailing Remaining target on the right, fed directly from the incomes —
  * unspent money bypasses groups through a dedicated lane below the middle
  * column, so those ribbons cross no bar and no middle→target ribbon.
@@ -1814,8 +2310,9 @@ export type GroupedIncomeSankeyLayout = {
  *   reserved pitch). Incoming bands tile the same drawn stack from the
  *   bar's top edge with no slack on either side.
  * - With leftDetail "cells", each income→middle band subdivides into one
- *   sub-ribbon per downstream cell (leftCells): siblings tile the source
- *   band edge to edge in cell order, while the target slots tile the
+ *   sub-ribbon per downstream cell (leftCells) — per FUNDED cell pair with
+ *   explicit funding, so an unfunded pair draws nothing: siblings tile the
+ *   source band edge to edge in cell order, while the target slots tile the
  *   middle's incoming stack in cell-major order — every income's slice of
  *   one cell adjacent — so each color enters the middle as one contiguous
  *   block at exactly the thickness it leaves it (flow conservation per
@@ -1900,28 +2397,112 @@ export function layoutGroupedIncomeSankey(
   targets.forEach((t, i) => {
     if (t.value > 0) tgtRemap.set(i, tgtRemap.size);
   });
-  const keptLinks = groupLinks.filter((l) => {
+  const keptLinks: SpendingGroupFlowLink[] = [];
+  const keptOrig: number[] = [];
+  groupLinks.forEach((l, k) => {
     const ng = grpRemap.get(l.groupIndex);
     const nt = tgtRemap.get(l.targetIndex);
-    return ng != null && nt != null && l.value > 0;
+    if (ng != null && nt != null && l.value > 0) {
+      keptLinks.push(l);
+      keptOrig.push(k);
+    }
   });
 
-  // Left hop values: incomes feed the groups proportionally, and any
-  // surplus feeds Remaining the same way (the plug is last by position).
-  const left = computeDirectFlowLinks(sources, grpItems);
+  // Explicit time-aware funding (see the leftHop option): per-(source,
+  // input-link) funded cents plus per-source surplus. Sources filter like
+  // the legacy path (positive only) with indices remapped; funding that
+  // references a dropped row or link is skipped (defensive: well-formed
+  // view models never produce it).
+  const leftHop = opts.leftHop ?? null;
+  const keptPosByOrig = new Map<number, number>();
+  keptOrig.forEach((orig, kp) => keptPosByOrig.set(orig, kp));
+  const keptFunded = new Array<number>(keptLinks.length).fill(0);
+  const keptFunding: Map<number, number>[] = keptLinks.map(() => new Map());
+  let explicitSrc: MergedSpendingItem[] = [];
+  let remainingMapped: number[] = [];
+  if (leftHop != null) {
+    const srcRemap = new Map<number, number>();
+    sources.forEach((s, i) => {
+      if (s.value > 0) {
+        srcRemap.set(i, explicitSrc.length);
+        explicitSrc.push(s);
+      }
+    });
+    remainingMapped = explicitSrc.map(() => 0);
+    sources.forEach((_, i) => {
+      const s = srcRemap.get(i);
+      if (s == null) return;
+      remainingMapped[s] = leftHop.remainingBySource[i] ?? 0;
+    });
+    for (const c of leftHop.cells) {
+      const s = srcRemap.get(c.sourceIndex);
+      const kp = keptPosByOrig.get(c.rightLinkIndex);
+      if (s == null || kp == null || !(c.value > 0)) continue;
+      keptFunding[kp]!.set(s, (keptFunding[kp]!.get(s) ?? 0) + c.value);
+      keptFunded[kp] = (keptFunded[kp] ?? 0) + c.value;
+    }
+  }
+
+  // Left hop values: incomes feed the groups proportionally (legacy), or
+  // through the explicit per-cell funding above; any surplus feeds
+  // Remaining the same way (the plug is last by position).
+  const left: {
+    sources: MergedSpendingItem[];
+    targets: MergedSpendingItem[];
+    links: DirectFlowLinkValue[];
+    incomeTotal: number;
+    spendingTotal: number;
+  } = (() => {
+    if (leftHop == null) return computeDirectFlowLinks(sources, grpItems);
+    const bandAcc = new Map<string, number>();
+    keptLinks.forEach((l, kp) => {
+      // Kept links passed the remap filter above, so the middle resolves.
+      const m = grpRemap.get(l.groupIndex)!;
+      for (const [s, v] of keptFunding[kp]!) {
+        const key = `${m}:${s}`;
+        bandAcc.set(key, (bandAcc.get(key) ?? 0) + v);
+      }
+    });
+    const links: DirectFlowLinkValue[] = [];
+    for (let m = 0; m < grpItems.length; m++) {
+      for (let s = 0; s < explicitSrc.length; s++) {
+        const value = bandAcc.get(`${m}:${s}`) ?? 0;
+        if (value > 0) links.push({ sourceIndex: s, targetIndex: m, value });
+      }
+    }
+    const plugValue = remainingMapped.reduce((sum, v) => sum + (v > 0 ? v : 0), 0);
+    const plugTargets: MergedSpendingItem[] =
+      plugValue > 0
+        ? [...grpItems, { name: REMAINING_LABEL, value: plugValue, mergedCount: 1 }]
+        : [...grpItems];
+    if (plugValue > 0) {
+      remainingMapped.forEach((v, s) => {
+        if (v > 0) links.push({ sourceIndex: s, targetIndex: grpItems.length, value: v });
+      });
+    }
+    return {
+      sources: explicitSrc,
+      targets: plugTargets,
+      links,
+      incomeTotal: explicitSrc.reduce((sum, s) => sum + s.value, 0),
+      spendingTotal: grpItems.reduce((sum, g) => sum + g.value, 0),
+    };
+  })();
   const { incomeTotal, spendingTotal } = left;
   const flowTotal = Math.max(incomeTotal, spendingTotal);
   const coverage = spendingTotal > 0 ? Math.min(1, incomeTotal / spendingTotal) : 1;
-  const hasRemaining = incomeTotal > spendingTotal;
+  const hasRemaining = leftHop != null
+    ? left.targets.length > grpItems.length
+    : incomeTotal > spendingTotal;
   const plugIndex = left.targets.length - 1;
 
   // Right column: spending targets plus the surplus plug. Funded values use
-  // the uniform coverage ratio (which is 1 whenever Remaining exists, so
-  // the plug is always fully funded).
+  // the uniform coverage ratio in the legacy path (which is 1 whenever
+  // Remaining exists, so the plug is always fully funded); the explicit
+  // path funds each target by its cells below, once rightVals exists.
   const rightItems: MergedSpendingItem[] = hasRemaining
     ? [...tgtItems, left.targets[plugIndex]!]
     : [...tgtItems];
-  const rightFunded = rightItems.map((t) => t.value * coverage);
   const remainingTargetIndex = hasRemaining ? rightItems.length - 1 : null;
 
   if (rightItems.length === 0 || flowTotal <= 0 || width <= 0 || height <= 0) {
@@ -1971,14 +2552,17 @@ export function layoutGroupedIncomeSankey(
   const flooredBand = (fundedValue: number): number =>
     fundedValue > 0 ? Math.max(fundedValue * pxPerCent, linkFloor) : 0;
 
-  // Right hop values: exact rollup cells at the uniform coverage ratio.
+  // Right hop values: exact rollup cells at the uniform coverage ratio
+  // (legacy), or at their explicit funded value (a fully unfunded cell
+  // drops out of the geometry; its shortfall shows in tooltips only).
   // Sorted by (middle, target) so bands run in target order within a
   // middle and in middle order within a target.
   const rightVals = keptLinks
-    .map((l) => ({
+    .map((l, kp) => ({
       middleIndex: grpRemap.get(l.groupIndex) ?? -1,
       targetIndex: tgtRemap.get(l.targetIndex) ?? -1,
-      value: l.value * coverage,
+      value: leftHop != null ? (keptFunded[kp] ?? 0) : l.value * coverage,
+      kp,
     }))
     .filter((l) => l.middleIndex >= 0 && l.targetIndex >= 0 && l.value > 0)
     .sort((a, b) => a.middleIndex - b.middleIndex || a.targetIndex - b.targetIndex);
@@ -2029,17 +2613,62 @@ export function layoutGroupedIncomeSankey(
     (midOut[i] ?? []).reduce((s, k) => s + (linkRH[k] ?? 0), 0)
   );
   const midH = [...outStack];
-  const midFunded = grpItems.map((g) => g.value * coverage);
+  const midFunded =
+    leftHop != null
+      ? grpItems.map((_, i) =>
+          // midOut is dense over the middles; rightVals indices resolve.
+          midOut[i]!.reduce((s, k) => s + rightVals[k]!.value, 0)
+        )
+      : grpItems.map((g) => g.value * coverage);
   const midUnfundedH = grpItems.map(() => 0);
+
+  // Funded cents per right-column target: the uniform share in the legacy
+  // path, the cells' funded sum in the explicit path (the plug is always
+  // fully funded — it only exists when income exceeds spending).
+  const rightFunded =
+    leftHop != null
+      ? rightItems.map((t, j) =>
+          // Non-plug targets index tgtIn (dense); the plug is fully funded.
+          remainingTargetIndex === j
+            ? t.value
+            : tgtIn[j]!.reduce((s, k) => s + rightVals[k]!.value, 0)
+        )
+      : rightItems.map((t) => t.value * coverage);
+
+  // Drawn weight of one explicit sub-ribbon: its cell's DRAWN band height
+  // times its share of the cell's funded value. Weights tile both edges
+  // exactly (each cell's block lands at exactly its outgoing thickness),
+  // so explicit sub-ribbons never taper — the value-proportional formula
+  // below only fits uniform funding, where every band shares every cell.
+  const explicitSubWeight = (rk: number, sourceIndex: number): number => {
+    const cell = rightVals[rk]!;
+    const funded = cell.value;
+    if (!(funded > 0)) return 0;
+    // The per-(cell, source) map is genuinely sparse: most pairs are
+    // unfunded, which is exactly what this reports.
+    const v = keptFunding[cell.kp]!.get(sourceIndex) ?? 0;
+    if (!(v > 0)) return 0;
+    return (linkRH[rk]! * v) / funded;
+  };
 
   // Left group-ribbon heights subdivide each middle's outgoing stack in
   // proportion to their values: bands tile the stack from the bar's top
   // edge, so the incoming stack always equals the outgoing stack exactly —
-  // no slack on either side, no stretching.
+  // no slack on either side, no stretching. The explicit cells path sums
+  // the sub-ribbon drawn weights instead (same total, exact per-slice
+  // tiling on both edges).
   for (let i = 0; i < grpItems.length; i++) {
     const stackH = outStack[i] ?? 0;
     const fj = midFunded[i] ?? 0;
-    if (fj > 0) {
+    if (leftHop != null && leftDetail === "cells") {
+      for (const k of midIn[i]!) {
+        let w = 0;
+        for (const rk of midOut[i]!) {
+          w += explicitSubWeight(rk, left.links[k]!.sourceIndex);
+        }
+        linkLH[k] = w;
+      }
+    } else if (fj > 0) {
       for (const k of midIn[i] ?? []) {
         linkLH[k] = stackH * ((left.links[k]?.value ?? 0) / fj);
       }
@@ -2296,6 +2925,68 @@ export function layoutGroupedIncomeSankey(
       const stackH = outStack[m] ?? 0;
       const fj = midFunded[m] ?? 0;
       if (cells.length === 0 || ins.length === 0 || !(stackH > 0) || !(fj > 0)) continue;
+      if (leftHop != null) {
+        // Explicit funding: one sub-ribbon per FUNDED (cell, income) pair
+        // only — an unfunded pair draws nothing. Cell-major order keeps
+        // each color's block contiguous at its outgoing thickness.
+        const live: { rk: number; lk: number; w: number }[] = [];
+        for (const rk of cells) {
+          for (const lk of ins) {
+            const w = explicitSubWeight(rk, linksLeft[lk]!.sourceIndex);
+            if (w > 0) live.push({ rk, lk, w });
+          }
+        }
+        if (live.length === 0) continue;
+        const targetSpans = subdivideBandByValues(
+          [midTop, midTop + stackH],
+          live.map((e) => e.w)
+        );
+        if (targetSpans.length !== live.length) continue;
+        const bandSubs = new Map<number, { rk: number; w: number; span: number }[]>();
+        live.forEach((e, span) => {
+          const list = bandSubs.get(e.lk) ?? [];
+          list.push({ rk: e.rk, w: e.w, span });
+          bandSubs.set(e.lk, list);
+        });
+        for (const lk of ins) {
+          const subs = bandSubs.get(lk) ?? [];
+          if (subs.length === 0) continue;
+          const band = linksLeft[lk]!;
+          const sourceSpans = subdivideBandByValues(
+            [band.sy0, band.sy1],
+            subs.map((e) => e.w)
+          );
+          if (sourceSpans.length !== subs.length) continue;
+          subs.forEach((e, c) => {
+            const src = sourceSpans[c]!;
+            const tgt = targetSpans[e.span]!;
+            const cell = rightVals[e.rk]!;
+            const targetIndex = cell.targetIndex;
+            // Live subs carry positive weight, which implies positive
+            // funding — the entry always exists.
+            const v = keptFunding[cell.kp]!.get(band.sourceIndex)!;
+            leftCells.push({
+              sourceIndex: band.sourceIndex,
+              middleIndex: m,
+              rightLinkIndex: e.rk,
+              targetIndex,
+              sourceName: band.sourceName,
+              middleName: grpItems[m]?.name ?? "",
+              targetName: tgtNodes[targetIndex]?.name ?? "",
+              value: v,
+              sy0: src.y0,
+              sy1: src.y1,
+              ty0: tgt.y0,
+              ty1: tgt.y1,
+              x0: band.x0,
+              x1: band.x1,
+              d: ribbonPath(band.x0, band.x1, src.y0, src.y1, tgt.y0, tgt.y1),
+              fill: tgtNodes[targetIndex]?.fill ?? "#888",
+            });
+          });
+        }
+        continue;
+      }
       const weights = cells.map((k) => linkRH[k] ?? 0);
       // Target slots: flat (cell, income) weights tile the incoming stack,
       // so each cell's block lands contiguously in outgoing cell order.

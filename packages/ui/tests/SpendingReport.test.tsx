@@ -4,6 +4,7 @@ import {
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   sankeyThresholdStops,
+  type MonthlySankeySeries,
   type SpendingGroupFlow,
 } from "@ynab/logic";
 import {
@@ -2871,5 +2872,107 @@ describe("SpendingReport", () => {
     fireEvent.mouseLeave(row);
     expect(document.querySelector(".y-tip")).toBeNull();
     expect(tracks[1]!.querySelector('[data-testid="bars-bucket-hatch"]')).not.toBeNull();
+  });
+
+  // Time-aware spotlight (task-47): the Realstar/Redman shape — one group
+  // spanning two eras, an early income fully consumed by early spending, a
+  // late merchant funded by late income. Hovering the late merchant must
+  // NOT spotlight the early income even though both route through Needs.
+  const eraMerchantFlow: SpendingGroupFlow = {
+    groups: [{ name: "Needs", value: 800000 }],
+    targets: [
+      { name: "Old Shop", value: 500000 },
+      { name: "New Shop", value: 300000 },
+    ],
+    links: [
+      { groupIndex: 0, targetIndex: 0, value: 500000 },
+      { groupIndex: 0, targetIndex: 1, value: 300000 },
+    ],
+  };
+  const eraIncome: SpendingItem[] = [
+    { name: "Early Pay", value: 500000 },
+    { name: "Late Pay", value: 300000 },
+  ];
+  const eraMerchantSeries: MonthlySankeySeries = {
+    months: ["2015-06", "2020-04"],
+    incomeNames: ["Early Pay", "Late Pay"],
+    groupNames: ["Needs"],
+    targetNames: ["Old Shop", "New Shop"],
+    incomeByMonth: [
+      [500000, 0],
+      [0, 300000],
+    ],
+    cellByMonth: [
+      [500000, 0],
+      [0, 300000],
+    ],
+  };
+  function renderEras() {
+    // Pin the auto-fit flag so the initial load keeps the threshold off.
+    sessionStorage.setItem(SANKEY_AUTOFIT_SESSION_KEY, "1");
+    return render(
+      <SpendingReport
+        categoryFlow={emptyFlow}
+        merchantFlow={eraMerchantFlow}
+        income={eraIncome}
+        merchantSeries={eraMerchantSeries}
+        initialView="sankey"
+        initialDimension="merchants"
+      />
+    );
+  }
+
+  it("does not spotlight the early income when hovering the late merchant", () => {
+    const { container } = renderEras();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    expect(nodes).toHaveLength(2);
+    fireEvent.mouseMove(nodes[1]!, { clientX: 600, clientY: 200 });
+    // The late income brightens; the early income — which funded Needs only
+    // for the early merchant — dims.
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    expect(incomes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    // Only the late slice out of the Needs band lights.
+    const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
+    expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual(["0.12", "0.85"]);
+    // Only the late cell lights; the group bar still joins the path.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual(["0.12", "0.85"]);
+    expect(svg.querySelector('[data-testid="sankey-group"]')!.getAttribute("fill-opacity")).toBe(
+      String(SANKEY_RIBBON_HOVER_OPACITY)
+    );
+    fireEvent.mouseLeave(nodes[1]!);
+  });
+
+  it("spotlights only the funded merchant when hovering the early income", () => {
+    const { container } = renderEras();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    fireEvent.mouseMove(incomes[0]!, { clientX: 100, clientY: 200 });
+    // The early merchant's cell lights in full; the late merchant dims.
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    expect(right.map((l) => l.getAttribute("fill-opacity"))).toEqual(["0.85", "0.12"]);
+    const nodes = svg.querySelectorAll('[data-testid="sankey-node"]');
+    expect(nodes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(nodes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    fireEvent.mouseLeave(incomes[0]!);
+  });
+
+  it("traces a right ribbon back only to the incomes funding its cell", () => {
+    const { container } = renderEras();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const right = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    fireEvent.mouseMove(right[1]!, { clientX: 500, clientY: 200 });
+    const incomes = svg.querySelectorAll('[data-testid="sankey-income"]');
+    expect(incomes[0]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_DIM_OPACITY));
+    expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    fireEvent.mouseLeave(right[1]!);
   });
 });

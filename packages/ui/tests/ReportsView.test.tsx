@@ -339,9 +339,12 @@ describe("ReportsView", () => {
     expect(within(panel).getByText("(2 in Other)")).toBeInTheDocument();
     const svg = panel.querySelector('[data-testid="sankey-svg"]')!;
     expect(svg.querySelectorAll('[data-testid="sankey-income"]')).toHaveLength(2);
-    // 2 incomes x (1 group nesting Groceries + Other) plus 2 full-width
-    // Remaining ribbons on the left; one ribbon per cell on the right.
-    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(8);
+    // Payroll nests Groceries + Other in its band, but the June Bonus nests
+    // Groceries only: the Other cell holds April Rent, which was funded
+    // months before the Bonus arrived (task-47: a June income cannot fund
+    // April spending). Plus 2 full-width Remaining ribbons on the left; one
+    // ribbon per cell on the right.
+    expect(svg.querySelectorAll('[data-testid="sankey-link"]')).toHaveLength(7);
   });
 
   it("Net Worth tab renders the SVG line/area graph with correct assets and debts", () => {
@@ -817,10 +820,11 @@ describe("ReportsView", () => {
     // money lands, in one flat color through its whole length.
     const left = svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]');
     const right = svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]');
-    // 2 incomes x (1 group nesting Groceries + Rent) plus 2 Remaining
-    // ribbons on the left; one ribbon per cell (2) on the right — never
-    // one per income.
-    expect(left).toHaveLength(6);
+    // Payroll nests Groceries + Rent in its band and the June Bonus nests
+    // Groceries only — Rent was paid in April, before the Bonus arrived
+    // (task-47) — plus 2 Remaining ribbons on the left; one ribbon per
+    // cell (2) on the right — never one per income.
+    expect(left).toHaveLength(5);
     expect(right).toHaveLength(2);
     // Flat destination fills on every ribbon — gradients live only on
     // the bars (two incomes plus the one middle), never on a ribbon.
@@ -831,8 +835,8 @@ describe("ReportsView", () => {
     const groceries = colorForName("Groceries");
     const rent = colorForName("Rent");
     // Links run middle-major, incomes within, sub-ribbons expanding
-    // inline per band.
-    const leftFills = [groceries, rent, groceries, rent, REMAINING_COLOR, REMAINING_COLOR];
+    // inline per band. The Bonus band carries no Rent slice (see above).
+    const leftFills = [groceries, rent, groceries, REMAINING_COLOR, REMAINING_COLOR];
     left.forEach((link, k) => {
       expect(link.getAttribute("fill")).toBe(leftFills[k]);
     });
@@ -863,11 +867,11 @@ describe("ReportsView", () => {
       svg.querySelectorAll(`#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0 stop`)
     ).map((s) => s.getAttribute("stop-color"));
     expect(midStops).toEqual([groceries, groceries, rent, rent]);
+    // No Bonus→Rent slice: the Bonus arrived after Rent was paid.
     const leftDestBySub = [
       nodeFills[0],
       nodeFills[1],
       nodeFills[0],
-      nodeFills[1],
       nodeFills[2],
       nodeFills[2],
     ];
