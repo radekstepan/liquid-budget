@@ -23,6 +23,7 @@ import {
 } from "../src/SpendingReport.js";
 import {
   colorForName,
+  OTHER_BUCKET_COLOR,
   REMAINING_COLOR,
   sankeyTargetColor,
   SANKEY_INCOME_COLOR,
@@ -124,6 +125,30 @@ const heldCategoryFlow: SpendingGroupFlow = {
 };
 
 const heldIncome: SpendingItem[] = [{ name: "Payroll", value: 120000 }];
+
+// Task-51: a middle bucket feeding a real target. At the $500 threshold
+// Odds ($450) folds into the middle Other bucket but funds Shared ($600,
+// kept); Trinkets ($100) folds into the right Other bucket. Income $2,000
+// vs spending $1,700 leaves a $300 Remaining plug.
+const bucketRibbonFlow: SpendingGroupFlow = {
+  groups: [
+    { name: "Bills", value: 125000 },
+    { name: "Odds", value: 45000 },
+  ],
+  targets: [
+    { name: "Mortgage Interest", value: 100000 },
+    { name: "Shared", value: 60000 },
+    { name: "Trinkets", value: 10000 },
+  ],
+  links: [
+    { groupIndex: 0, targetIndex: 0, value: 100000 },
+    { groupIndex: 0, targetIndex: 1, value: 15000 },
+    { groupIndex: 0, targetIndex: 2, value: 10000 },
+    { groupIndex: 1, targetIndex: 1, value: 45000 },
+  ],
+};
+
+const bucketRibbonIncome: SpendingItem[] = [{ name: "Payroll", value: 200000 }];
 
 // Income $2,000 vs spending $1,550: flow is $2,000 with a $450 Remaining plug.
 const sampleIncome: SpendingItem[] = [{ name: "Payroll", value: 200000 }];
@@ -598,6 +623,238 @@ describe("SpendingReport", () => {
     const barsOverlays = bars.container.querySelectorAll('[data-testid="bars-held-hatch"]');
     expect(barsOverlays).toHaveLength(1);
     expect(barsOverlays[0]!.getAttribute("pointer-events")).toBe("none");
+  });
+
+  it("overlays right-hop ribbons into Other-bucket targets with the identical path", () => {
+    // Task-51 (i): the ribbon into the merged right bucket carries a
+    // bucket-hatch overlay path with the EXACT same `d` as the solid
+    // ribbon, painted from the shared pattern def; ribbons into real
+    // categories carry none.
+    const { container } = renderReport(bucketRibbonFlow, emptyFlow, bucketRibbonIncome);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const rightSolids = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    // Bills→Mortgage, Bills→Shared, Bills→Other, Other→Shared.
+    expect(rightSolids).toHaveLength(4);
+    const bucketSolids = rightSolids.filter(
+      (el) => el.getAttribute("fill") === OTHER_BUCKET_COLOR
+    );
+    expect(bucketSolids).toHaveLength(1);
+    // The overlay rides immediately after its solid ribbon with the
+    // identical path — no minimum-size hiding drops thin ribbons.
+    const overlay = bucketSolids[0]!.nextElementSibling!;
+    expect(overlay.getAttribute("data-testid")).toBe("sankey-bucket-hatch");
+    expect(overlay.getAttribute("data-side")).toBe("right");
+    expect(overlay.getAttribute("d")).toBe(bucketSolids[0]!.getAttribute("d"));
+    expect(overlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    // Every ribbon into a real category stays solid under both hatch testids.
+    for (const el of rightSolids) {
+      if (el.getAttribute("fill") === OTHER_BUCKET_COLOR) continue;
+      const next = el.nextElementSibling?.getAttribute("data-testid");
+      expect(next).not.toBe("sankey-bucket-hatch");
+      expect(next).not.toBe("sankey-held-hatch");
+    }
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-bucket-hatch"][data-side="right"]')
+    ).toHaveLength(1);
+    // No held money in this fixture, so no held hatch anywhere.
+    expect(svg.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+  });
+
+  it("hatches full-width Remaining plug-lane ribbons with the identical path", () => {
+    // Task-51 (ii): income $2,000 vs spending $1,550 leaves a $450 plug —
+    // the full-width plug-lane ribbon carries a bucket-hatch overlay with
+    // the EXACT same `d`; every other left-hop ribbon stays solid.
+    const { container } = renderReport();
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const leftSolids = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    );
+    // Payroll→Bills subdivides (Mortgage + Electric), Payroll→Everyday is
+    // one Groceries sub, and the plug lane renders whole.
+    expect(leftSolids).toHaveLength(4);
+    const plug = leftSolids.filter((el) => el.getAttribute("fill") === REMAINING_COLOR);
+    expect(plug).toHaveLength(1);
+    const overlay = plug[0]!.nextElementSibling!;
+    expect(overlay.getAttribute("data-testid")).toBe("sankey-bucket-hatch");
+    expect(overlay.getAttribute("data-side")).toBe("left");
+    expect(overlay.getAttribute("d")).toBe(plug[0]!.getAttribute("d"));
+    expect(overlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    for (const el of leftSolids) {
+      if (el === plug[0]) continue;
+      const next = el.nextElementSibling?.getAttribute("data-testid");
+      expect(next).not.toBe("sankey-bucket-hatch");
+      expect(next).not.toBe("sankey-held-hatch");
+    }
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-bucket-hatch"][data-side="left"]')
+    ).toHaveLength(1);
+    // No bucket or held targets here, so the right hop stays fully solid.
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-bucket-hatch"][data-side="right"]')
+    ).toHaveLength(0);
+    expect(svg.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+  });
+
+  it("hatches only the bucket-funded sub-ribbons within a shared band", () => {
+    // Task-51 (iii): per-sub-ribbon granularity, mirroring the task-45
+    // spotlight and the task-50 held overlays. The Payroll→Bills band
+    // subdivides into three subs — Mortgage and Shared (real) plus the
+    // Trinkets bucket cell — and only the bucket sub carries the overlay.
+    const { container } = renderReport(bucketRibbonFlow, emptyFlow, bucketRibbonIncome);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bucketSub = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    ).find((el) => el.getAttribute("fill") === OTHER_BUCKET_COLOR)!;
+    const band = bucketSub.parentElement!;
+    const bandSubs = Array.from(band.querySelectorAll('[data-testid="sankey-link"]'));
+    // Mortgage + Shared + the bucket cell, all in the one band.
+    expect(bandSubs).toHaveLength(3);
+    // The real-category siblings in the SAME band stay solid…
+    for (const el of bandSubs) {
+      if (el === bucketSub) continue;
+      expect(el.nextElementSibling?.getAttribute("data-testid")).not.toBe(
+        "sankey-bucket-hatch"
+      );
+    }
+    // …while the bucket sub carries the overlay over its identical path.
+    const overlay = bucketSub.nextElementSibling!;
+    expect(overlay.getAttribute("data-testid")).toBe("sankey-bucket-hatch");
+    expect(overlay.getAttribute("data-side")).toBe("left");
+    expect(overlay.getAttribute("d")).toBe(bucketSub.getAttribute("d"));
+    expect(overlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    // …and the single Shared sub landing in the middle bucket stays solid
+    // too: it funds a real-target cell (rule pinned — see next test).
+    const sharedSubs = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    ).filter((el) => el.getAttribute("fill") === colorForName("Shared"));
+    expect(sharedSubs).toHaveLength(2);
+    const bucketBandSub = sharedSubs.find((el) => el.parentElement !== band)!;
+    expect(
+      bucketBandSub.parentElement!.querySelectorAll('[data-testid="sankey-link"]')
+    ).toHaveLength(1);
+    expect(bucketBandSub.nextElementSibling?.getAttribute("data-testid")).not.toBe(
+      "sankey-bucket-hatch"
+    );
+    // Two left overlays in total: the bucket sub plus the plug lane.
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-bucket-hatch"][data-side="left"]')
+    ).toHaveLength(2);
+  });
+
+  it("keeps middle-bucket → real-target ribbons solid while the middle bucket bar stays hatched", () => {
+    // Task-51 (iv): the hatch follows the DESTINATION — money ending as a
+    // terminal purchase stays solid even when its middle routing is
+    // merged. The middle-bucket→Shared ribbon stays solid (pinned: a
+    // future flip must update this test deliberately); only the middle
+    // bucket BAR keeps its row-level hatch.
+    const { container } = renderReport(bucketRibbonFlow, emptyFlow, bucketRibbonIncome);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const rightSolids = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="right"]')
+    );
+    // Bills→Shared plus middle-bucket→Shared: two cells, one color.
+    const sharedRibbons = rightSolids.filter(
+      (el) => el.getAttribute("fill") === colorForName("Shared")
+    );
+    expect(sharedRibbons).toHaveLength(2);
+    for (const el of sharedRibbons) {
+      const next = el.nextElementSibling?.getAttribute("data-testid");
+      expect(next).not.toBe("sankey-bucket-hatch");
+      expect(next).not.toBe("sankey-held-hatch");
+    }
+    // The middle bucket bar keeps its row-level hatch, geometry-matched…
+    const groups = screen.getAllByTestId("sankey-group");
+    expect(groups).toHaveLength(2);
+    const bucketBar = groups.find(
+      (g) => g.parentElement!.querySelector('rect[data-testid="sankey-bucket-hatch"]') != null
+    )!;
+    const barOverlay = bucketBar.parentElement!.querySelector(
+      'rect[data-testid="sankey-bucket-hatch"]'
+    )!;
+    expect(barOverlay.getAttribute("x")).toBe(bucketBar.getAttribute("x"));
+    expect(barOverlay.getAttribute("y")).toBe(bucketBar.getAttribute("y"));
+    expect(barOverlay.getAttribute("width")).toBe(bucketBar.getAttribute("width"));
+    expect(barOverlay.getAttribute("height")).toBe(bucketBar.getAttribute("height"));
+    // …while the kept Bills bar stays solid.
+    for (const g of groups) {
+      if (g === bucketBar) continue;
+      expect(
+        g.parentElement!.querySelector('[data-testid="sankey-bucket-hatch"]')
+      ).toBeNull();
+      expect(g.parentElement!.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+    }
+  });
+
+  it("bucket-hatch overlays brighten and dim with their ribbons in place", () => {
+    // Task-51 (v): extends the task-50 hover-parity test to the
+    // bucket/plug overlays — bars, right-hop ribbons, left-hop subs, and
+    // the plug-lane ribbon all ride the same spotlight steps as their
+    // solid elements, with no z-reorder.
+    const { container } = renderReport(bucketRibbonFlow, emptyFlow, bucketRibbonIncome);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Middle bucket bar, right bucket bar, plug bar, right-hop bucket
+    // ribbon, bucket sub, plug lane.
+    const overlays = Array.from(svg.querySelectorAll('[data-testid="sankey-bucket-hatch"]'));
+    expect(overlays).toHaveLength(6);
+    for (const o of overlays) {
+      expect(o.getAttribute("style") ?? "").toMatch(
+        new RegExp(`fill-opacity ${SANKEY_SPOTLIGHT_TRANSITION_MS}ms`)
+      );
+      expect(o.getAttribute("pointer-events")).toBe("none");
+    }
+    const opacityOf = (el: Element) => el.getAttribute("fill-opacity");
+    const solidOf = (o: Element) => {
+      const prev = o.previousElementSibling!;
+      expect(prev.getAttribute("data-testid")).not.toBe("sankey-bucket-hatch");
+      expect(prev.getAttribute("data-testid")).not.toBe("sankey-held-hatch");
+      return prev;
+    };
+    // Rest: every overlay matches its solid at the rest step.
+    for (const o of overlays) {
+      expect(opacityOf(o)).toBe(String(SANKEY_RIBBON_OPACITY));
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+    }
+    const orderOf = () =>
+      Array.from(svg.querySelectorAll('[data-testid="sankey-bucket-hatch"]')).map((el) =>
+        el.tagName === "path" ? el.getAttribute("d") : el.getAttribute("y")
+      );
+    const before = orderOf();
+    // Hover the Other target: its overlays brighten with their solids,
+    // the plug and middle-bucket overlays dim with theirs — in place.
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    const bucketLabel = targetLabels.find((el) => el.textContent === "Other")!;
+    fireEvent.mouseMove(bucketLabel, { clientX: 700, clientY: 100 });
+    let bright = 0;
+    let dim = 0;
+    for (const o of overlays) {
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+      expect([
+        String(SANKEY_RIBBON_HOVER_OPACITY),
+        String(SANKEY_RIBBON_DIM_OPACITY),
+      ]).toContain(opacityOf(o));
+      if (opacityOf(o) === String(SANKEY_RIBBON_HOVER_OPACITY)) bright++;
+      else dim++;
+    }
+    expect(bright).toBeGreaterThan(0);
+    expect(dim).toBeGreaterThan(0);
+    expect(orderOf()).toEqual(before);
+    // Clearing the hover returns every overlay to rest with its solid.
+    fireEvent.mouseLeave(bucketLabel);
+    for (const o of overlays) {
+      expect(opacityOf(o)).toBe(String(SANKEY_RIBBON_OPACITY));
+      expect(opacityOf(o)).toBe(opacityOf(solidOf(o)));
+    }
+    expect(orderOf()).toEqual(before);
   });
 
   it("shows no explainer tooltip on the Left / Over header readout", () => {
@@ -1910,7 +2167,10 @@ describe("SpendingReport", () => {
       expect(bar.getAttribute("stroke-width")).toBeNull();
     }
     // One hatch overlay per computed bar, painted from the shared pattern.
-    const hatches = svg.querySelectorAll('[data-testid="sankey-bucket-hatch"]');
+    // Scoped to rects: since task-51 the bucket-hatch testid also covers
+    // ribbon overlays (paths carrying data-side), pinned by their own
+    // tests below — this test stays about the bars.
+    const hatches = svg.querySelectorAll('rect[data-testid="sankey-bucket-hatch"]');
     expect(hatches).toHaveLength(4);
     for (const h of hatches) {
       expect(h.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);

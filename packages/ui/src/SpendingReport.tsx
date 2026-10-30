@@ -146,10 +146,15 @@ export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 
 // The hatch marks computed/derived money — the merged "Other" buckets on
 // every column, the "Remaining" surplus plug, and still-held balances —
-// versus terminal purchase flows. Whole-held elements only (held target
-// bars, the Still-held group bar, right-hop ribbons into held targets,
-// left-hop sub-ribbons funding held cells): mixed bars and segments stay
-// solid. No bar carries a border; the hatch alone marks derived money.
+// versus terminal purchase flows. Bars hatch by row (bucket, plug, and
+// whole-held bars); ribbons hatch by destination (right-hop ribbons into
+// bucket, plug, or held targets, plug-lane ribbons, and left-hop
+// sub-ribbons funding bucket, plug, or held cells — per-sub granularity,
+// like the spotlight). Whole-held elements only on the held side (mixed
+// bars and segments stay solid), and ribbons out of a middle bucket into
+// a real target stay solid — money ending as a terminal purchase reads
+// solid no matter its middle routing. No bar carries a border; the hatch
+// alone marks derived money.
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
 // Income bars fill with a hard-edged top-to-bottom gradient from the
@@ -594,6 +599,17 @@ export function SpendingReport({
     });
     return set;
   }, [merged]);
+
+  // Right-column rows whose ribbons hatch with the BUCKET pattern: a
+  // merged Other bucket target or the Remaining plug (by position, never
+  // by name). Held rows hatch under their own testid instead (see
+  // heldTargets); the sets are disjoint, so a ribbon never
+  // double-hatches. Destination-driven: a ribbon hatches iff the money
+  // it carries ENDS IN (right-hop) or FUNDS (left-hop) one of these
+  // rows — the middle it routes through never matters, so a ribbon out
+  // of a middle bucket into a real target stays solid.
+  const isBucketOrPlugTarget = (t: number): boolean =>
+    sankey?.targets[t]?.bucket === true || t === (sankey?.remainingTargetIndex ?? -1);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -1552,6 +1568,28 @@ export function SpendingReport({
                               }}
                             />
                           )}
+                          {/* Sub-ribbons funding a bucket-target or plug cell
+                              carry the same shared hatch under the bucket
+                              testid (per-sub granularity, like the held
+                              overlays: siblings funding real-category cells
+                              in the same band stay solid) — same opacity step
+                              and cross-fade as the solid sub. Disjoint from
+                              the held set (see isBucketOrPlugTarget), so a
+                              sub never double-hatches. */}
+                          {isBucketOrPlugTarget(s.targetIndex) && (
+                            <path
+                              data-testid="sankey-bucket-hatch"
+                              data-side="left"
+                              d={s.d}
+                              fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                              fillOpacity={ribbonOpacity(leftCellLit(s), hl.ll != null)}
+                              stroke="none"
+                              pointerEvents="none"
+                              style={{
+                                transition: `fill-opacity ${transitionMs}ms`,
+                              }}
+                            />
+                          )}
                         </Fragment>
                       ))}
                     </g>
@@ -1561,9 +1599,8 @@ export function SpendingReport({
                 // render the layout's own path and fill: one flat ribbon
                 // through the whole length, and the income side never colors
                 // one.
-                return (
+                const solid = (
                   <path
-                    key={`ll-${link.sourceIndex}-${link.targetIndex}`}
                     data-testid="sankey-link"
                     data-side="left"
                     d={link.d}
@@ -1578,6 +1615,37 @@ export function SpendingReport({
                     onMouseLeave={() => pushHover(null)}
                   />
                 );
+                // Only the full-width plug-lane ribbons hatch: b is the plug
+                // index (one past the last middle). Degenerate whole bands
+                // into a middle stay solid — the hatch follows the
+                // destination, and a middle is never a hatched target row.
+                if (link.targetIndex !== (sankey?.middles.length ?? -1)) {
+                  return (
+                    <Fragment key={`ll-${link.sourceIndex}-${link.targetIndex}`}>{solid}</Fragment>
+                  );
+                }
+                // Plug-lane ribbons overlay the SAME layout path with the
+                // shared hatch — same opacity step and cross-fade as the
+                // solid ribbon, so the overlay brightens and dims with it.
+                // Static DOM order (no z-reorder); pointer-events none so
+                // hover still hits the solid ribbon beneath.
+                return (
+                  <Fragment key={`ll-${link.sourceIndex}-${link.targetIndex}`}>
+                    {solid}
+                    <path
+                      data-testid="sankey-bucket-hatch"
+                      data-side="left"
+                      d={link.d}
+                      fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                      fillOpacity={opacity}
+                      stroke="none"
+                      pointerEvents="none"
+                      style={{
+                        transition: `fill-opacity ${transitionMs}ms`,
+                      }}
+                    />
+                  </Fragment>
+                );
               })}
               {linksRight.map((link) => {
                 // One ribbon per group→target cell, rendered from the
@@ -1586,6 +1654,7 @@ export function SpendingReport({
                 // from — hovering one traces its through-line end to end.
                 const lit = rightLit(link.sourceIndex, link.targetIndex);
                 const held = heldTargets.has(link.targetIndex);
+                const bucket = !held && isBucketOrPlugTarget(link.targetIndex);
                 const solid = (
                   <path
                     data-testid="sankey-link"
@@ -1611,18 +1680,25 @@ export function SpendingReport({
                     onMouseLeave={() => pushHover(null)}
                   />
                 );
-                if (!held) return <Fragment key={`rl-${link.sourceIndex}-${link.targetIndex}`}>{solid}</Fragment>;
-                // Ribbons into a held target overlay the SAME layout path
-                // with the shared hatch — same opacity step and cross-fade
-                // as the solid ribbon, so the overlay brightens and dims
-                // with it. Static DOM order (no z-reorder, like the bucket
-                // overlays); pointer-events none so hover still hits the
-                // solid ribbon beneath.
+                if (!held && !bucket) {
+                  return (
+                    <Fragment key={`rl-${link.sourceIndex}-${link.targetIndex}`}>{solid}</Fragment>
+                  );
+                }
+                // Ribbons into a held, bucket, or plug target overlay the
+                // SAME layout path with the shared hatch — same opacity step
+                // and cross-fade as the solid ribbon, so the overlay
+                // brightens and dims with it. Static DOM order (no
+                // z-reorder); pointer-events none so hover still hits the
+                // solid ribbon beneath. One overlay at most: the held and
+                // bucket/plug target sets are disjoint, and ribbons into
+                // real targets from any middle (even a middle bucket) stay
+                // solid — the hatch follows the destination.
                 return (
                   <Fragment key={`rl-${link.sourceIndex}-${link.targetIndex}`}>
                     {solid}
                     <path
-                      data-testid="sankey-held-hatch"
+                      data-testid={held ? "sankey-held-hatch" : "sankey-bucket-hatch"}
                       data-side="right"
                       d={link.d}
                       fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
