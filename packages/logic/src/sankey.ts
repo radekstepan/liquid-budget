@@ -1642,8 +1642,9 @@ export type GroupedRightLinkLayout = DirectSankeyLinkLayout;
 /**
  * One left-hop sub-ribbon: income i's share of one middle→target cell,
  * drawn in the cell's target color. Emitted only when leftDetail is
- * "cells" (the Categories grouping); the Merchants grouping renders whole
- * group-colored bands instead. Band-major in cell order, so siblings tile
+ * "cells" (both groupings request it, so the same through-color flows
+ * from the right column all the way to income everywhere). Band-major in
+ * cell order, so siblings tile
  * each source band edge to edge in the same order the cells leave the
  * middle — while the target slots tile each middle's incoming stack in
  * cell-major order (all incomes' slices of one cell adjacent), so each

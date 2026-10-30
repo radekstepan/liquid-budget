@@ -90,18 +90,15 @@ function usePrefersReducedMotion(): boolean {
 // Each ribbon carries one flat color — the color of its FINAL (right-column)
 // destination — through its whole length: right-hop ribbons their
 // category's or merchant's own color (one ribbon per group→target cell),
-// and in Categories grouping each left-hop income→group band subdivides
-// into one sub-ribbon per downstream cell (layout leftCells), in the same
-// category colors, landing in contiguous per-color blocks — so the line
-// from an income bar to a category bar reads as one color throughout at
-// one thickness. The full-width Remaining ribbons carry the plug's green,
-// and in Merchants grouping each left-hop band stays one group-colored
-// ribbon (merchants span groups, so per-merchant splits would repeat
-// colors down the bar). The category determines the color and it flows
-// backwards along every ribbon arriving at it, no matter which middle
-// group each ribbon comes from — the parent group never tints a ribbon,
-// and the income side never colors one either. Exported so tests can pin
-// the fills.
+// and each left-hop income→group band subdivides into one sub-ribbon per
+// downstream cell (layout leftCells), in the same target colors, landing
+// in contiguous per-color blocks — so the line from an income bar to a
+// category or merchant bar reads as one color throughout at one thickness
+// in both groupings. The full-width Remaining ribbons carry the plug's
+// green. The target determines the color and it flows backwards along
+// every ribbon arriving at it, no matter which middle group each ribbon
+// comes from — the parent group never tints a ribbon, and the income side
+// never colors one either. Exported so tests can pin the fills.
 //
 // Spotlight scale: at rest every ribbon and every bar sits at
 // SANKEY_RIBBON_OPACITY — nearly as solid as the hover step, one small
@@ -346,13 +343,14 @@ export function SpendingReport({
       padBottom: SANKEY_PAD_BOTTOM,
       nodeGap: SANKEY_NODE_GAP,
       minNodeHeight: SANKEY_NODE_MIN_HEIGHT,
-      // Categories grouping subdivides each income→group band into one
+      // Both groupings subdivide each income→group band into one
       // sub-ribbon per downstream cell (layout leftCells), so each color
-      // crosses the middle as one contiguous block at its cell's thickness;
-      // Merchants grouping renders whole group-colored bands.
-      leftDetail: dimension === "categories" ? "cells" : "bands",
+      // crosses the middle as one contiguous block at its cell's thickness:
+      // the same through-color flows from the right column all the way to
+      // income in Categories and Merchants alike.
+      leftDetail: "cells",
     });
-  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH, dimension]);
+  }, [incomeRows, ordered.groups, ordered.targets, ordered.links, chartSize.width, chartSize.height, contentH]);
 
   // Initial-load auto-fit: raise the Under threshold to the smallest stop
   // whose merged columns fit the measured container, so the Sankey shows
@@ -1329,10 +1327,10 @@ export function SpendingReport({
                     </g>
                   );
                 }
-                // Whole bands (Merchants grouping, the Remaining plug, and
-                // the degenerate fallback) render the layout's own path and
-                // fill: one flat ribbon through the whole length, and the
-                // income side never colors one.
+                // Whole bands (the Remaining plug and the degenerate fallback)
+                // render the layout's own path and fill: one flat ribbon
+                // through the whole length, and the income side never colors
+                // one.
                 return (
                   <path
                     key={`ll-${link.sourceIndex}-${link.targetIndex}`}
@@ -1387,12 +1385,12 @@ export function SpendingReport({
               {sankey.sources.map((node, idx) => {
                 const r = srcRows[idx]!;
                 // Each income bar fills with its own gradient — never flat
-                // gray, never a hover overlay, never a border. In Categories
-                // grouping the segments are the downstream category colors;
-                // in Merchants grouping they are the outgoing ribbons'
-                // group colors. The merged Other bucket adds the
-                // render-only hatch. The bar joins the flow-path spotlight
-                // at the ribbons' own brightness steps.
+                // gray, never a hover overlay, never a border. In both
+                // groupings the segments are the downstream cells' target
+                // colors, so every segment meets its sub-ribbon exactly. The
+                // merged Other bucket adds the render-only hatch. The bar
+                // joins the flow-path spotlight at the ribbons' own
+                // brightness steps.
                 const isBucket = r.bucket === true;
                 const lit = hl.src != null && hl.src.has(idx);
                 const dim = hl.src != null && !hl.src.has(idx);

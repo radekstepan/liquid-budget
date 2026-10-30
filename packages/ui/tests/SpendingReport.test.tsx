@@ -668,8 +668,10 @@ describe("SpendingReport", () => {
   it("shows only factual flow data when hovering a group→merchant ribbon", () => {
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
-    // Right ribbons: [Bills→Bank of Example, Everyday→Whole Foods, ...].
-    const link = container.querySelectorAll('[data-testid="sankey-link"]')[4]!;
+    // Left paths: Bills nests Bank of Example, Everyday nests Whole Foods +
+    // Corner Shop, plus the plug — so the right ribbons
+    // [Bills→Bank of Example, Everyday→Whole Foods, ...] start at index 4.
+    const link = container.querySelectorAll('[data-testid="sankey-link"]')[5]!;
     expect(link.getAttribute("data-side")).toBe("right");
     fireEvent.mouseMove(link, { clientX: 500, clientY: 200 });
     const tip = document.querySelector(".y-tip")!;
@@ -776,8 +778,8 @@ describe("SpendingReport", () => {
       nodeFills[3],
     ];
     // The middle bars segment by their outgoing cells (one gradient per
-    // bar), so the group's own hue appears on no bar — only on the
-    // Merchants left-hop ribbons and the tooltip dot.
+    // bar), so the group's own hue appears on no bar — only on the tooltip
+    // dot (and the no-outgoing-ribbons fallback gradient).
     expect(groupFills).toEqual([
       `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}0)`,
       `url(#${SANKEY_MIDDLE_GRADIENT_ID_PREFIX}1)`,
@@ -1020,14 +1022,34 @@ describe("SpendingReport", () => {
     const groups = svg.querySelectorAll('[data-testid="sankey-group"]');
     expect(groups[0]!.getAttribute("fill-opacity")).toBe("0.85");
     expect(groups[1]!.getAttribute("fill-opacity")).toBe("0.85");
-    // The income fans of both groups brighten: every left ribbon feeds a
-    // lit group here, so all four light.
+    // The income fans of both groups brighten with per-sub-ribbon
+    // granularity (Categories hover parity): each band's Airbnb slice lights
+    // while its sibling slices (Bank, Whole Foods) dim — the merchant's own
+    // color flowing all the way to income. Left paths run band-major with
+    // cells inline: Bills/Payroll, Bills/Bonus, Everyday/Payroll,
+    // Everyday/Bonus.
     const left = Array.from(svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]'));
     expect(left.map((l) => l.getAttribute("fill-opacity"))).toEqual([
       "0.85",
+      "0.12",
       "0.85",
+      "0.12",
       "0.85",
+      "0.12",
       "0.85",
+      "0.12",
+    ]);
+    // Every lit slice reads as the hovered merchant; the dimmed siblings
+    // keep their own colors (dimmed, not relit).
+    expect(left.map((l) => l.getAttribute("fill"))).toEqual([
+      airbnb,
+      colorForName("Bank of Example"),
+      airbnb,
+      colorForName("Bank of Example"),
+      airbnb,
+      colorForName("Whole Foods"),
+      airbnb,
+      colorForName("Whole Foods"),
     ]);
     // Every income funds every group proportionally, so both income bars
     // join the spotlight — the same contract as hovering a category in
@@ -2348,13 +2370,39 @@ describe("SpendingReport", () => {
     expect(bar.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
   });
 
-  it("keeps one group-colored segment per band in Merchants grouping", () => {
-    // Merchants span groups, so per-merchant subdivision would repeat
-    // colors down the bar: the Merchants income gradient keeps one
-    // group-colored segment per outgoing band, plug green last.
+  it("carries each merchant's color through the left hop in Merchants grouping", () => {
+    // Through-color parity with Categories grouping: each income→group band
+    // subdivides into one sub-ribbon per downstream merchant cell, in the
+    // merchant's own final color — the same color flows from the merchant
+    // bar on the right all the way to the income bar on the left. A merchant
+    // spanning groups repeats its color down the bar (once per band it funds);
+    // no group-colored ribbon survives on the left hop.
     const { container } = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    // Left paths: Bills nests Bank of Example, Everyday nests Whole Foods +
+    // Corner Shop, and the plug stays whole and green.
+    const left = Array.from(
+      svg.querySelectorAll('[data-testid="sankey-link"][data-side="left"]')
+    );
+    const bank = colorForName("Bank of Example");
+    const whole = colorForName("Whole Foods");
+    const corner = colorForName("Corner Shop");
+    expect(left.map((l) => l.getAttribute("fill"))).toEqual([
+      bank,
+      whole,
+      corner,
+      REMAINING_COLOR,
+    ]);
+    // No group color survives on the left hop: every ribbon reads as its
+    // final merchant.
+    for (const name of ["Bills", "Everyday"]) {
+      expect(left.some((l) => l.getAttribute("fill") === colorForName(name))).toBe(false);
+    }
+    // The income bar segments by the same merchant sub-ribbons — Bills
+    // ($1,000 of $2,000) ends at 0.5, Whole Foods ($300 more) at 0.65,
+    // Corner Shop ($200 more) at 0.75 — with the Remaining plug green last.
+    // Two stops per sub-band, sharing the boundary offsets (hard edges).
     const stops = Array.from(
       svg.querySelectorAll(`#${SANKEY_INCOME_GRADIENT_ID_PREFIX}0 stop`)
     ).map((s) => ({
@@ -2362,17 +2410,39 @@ describe("SpendingReport", () => {
       color: s.getAttribute("stop-color"),
     }));
     expect(stops.map((s) => s.color)).toEqual([
-      colorForName("Bills"),
-      colorForName("Bills"),
-      colorForName("Everyday"),
-      colorForName("Everyday"),
+      bank,
+      bank,
+      whole,
+      whole,
+      corner,
+      corner,
       REMAINING_COLOR,
       REMAINING_COLOR,
     ]);
-    // No merchant color leaks into the bar.
-    for (const name of ["Bank of Example", "Whole Foods", "Corner Shop"]) {
-      expect(stops.some((s) => s.color === colorForName(name))).toBe(false);
-    }
+    expect(stops[0]!.offset).toBe(0);
+    expect(stops[stops.length - 1]!.offset).toBe(1);
+    expect(stops[1]!.offset).toBeCloseTo(100000 / 200000, 6);
+    expect(stops[3]!.offset).toBeCloseTo(130000 / 200000, 6);
+    expect(stops[5]!.offset).toBeCloseTo(150000 / 200000, 6);
+    // Each sub-ribbon meets its bar segment pixel for pixel: parse the
+    // source slices out of the paths and land them on the gradient edges.
+    const bar = svg.querySelector('[data-testid="sankey-income"]')!;
+    const barY = Number(bar.getAttribute("y"));
+    const barH = Number(bar.getAttribute("height"));
+    const edges = [stops[0]!, stops[1]!, stops[3]!, stops[5]!, stops[7]!].map(
+      (s) => barY + s.offset * barH
+    );
+    const slices = left.map((l) => {
+      const nums = (l.getAttribute("d") ?? "").match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      return nums.length === 32
+        ? { sy0: nums[1]!, sy1: nums[31]!, ty0: nums[15]!, ty1: nums[17]! }
+        : { sy0: nums[1]!, sy1: nums[15]!, ty0: nums[7]!, ty1: nums[9]! };
+    });
+    slices.forEach((s, i) => {
+      expect(s.sy0).toBeCloseTo(edges[i]!, 1);
+      expect(s.sy1).toBeCloseTo(edges[i + 1]!, 1);
+      expect(s.sy1 - s.sy0).toBeCloseTo(s.ty1 - s.ty0, 2);
+    });
   });
 
   it("nests each income→group ribbon's downstream categories so ribbons match the bar", () => {
