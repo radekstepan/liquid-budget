@@ -68,4 +68,4 @@ Small, task-local details stay in the changeset, not the docs.
 ## Task list (in order)
 
 Spending by Category - Sankey has these issues:
-- Categories view hover on "Rent" it highlights the grey source of rent through "Needs" parent category, but also "Household", "Groceries" and other colors/arms of Sankey to the left. Those are different caregories, why are you highlighting them?
+- Categories view is great, lock it in as a "golden image". I need to make "Merchant" view the same - specifically I need the SAME color flowing from right to left. Right now we have "arms" of sankey going from merchants to parent categories and then the color does NOT match going further left to "Income". Look at "Categories" view. Onhover a category it highlights just that color flowing all the way to income (plus it highlights the parent category bar, that is fine). I want the same when on the "Merchant" view.
