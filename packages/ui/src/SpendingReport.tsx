@@ -148,15 +148,17 @@ export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 
 // The hatch marks computed/derived money — the merged "Other" buckets on
 // every column, the "Remaining" surplus plug, and still-held balances —
-// versus terminal purchase flows. Bars hatch by row (bucket, plug, and
-// whole-held bars); ribbons hatch by destination (right-hop ribbons into
-// bucket, plug, or held targets, plug-lane ribbons, and left-hop
-// sub-ribbons funding bucket, plug, or held cells — per-sub granularity,
-// like the spotlight). Whole-held elements only on the held side (mixed
-// bars and segments stay solid), and ribbons out of a middle bucket into
-// a real target stay solid — money ending as a terminal purchase reads
-// solid no matter its middle routing. No bar carries a border; the hatch
-// alone marks derived money.
+// versus terminal purchase flows. Middle and target bars hatch by row
+// (bucket, plug, and whole-held bars); ribbons hatch by destination
+// (right-hop ribbons into bucket, plug, or held targets, plug-lane
+// ribbons, and left-hop sub-ribbons funding bucket, plug, or held cells
+// — per-sub granularity, like the spotlight); income bars hatch by
+// segment (each bar segment funding a hatched sub-ribbon or plug band
+// hatches with it, since every segment meets its ribbon exactly). Mixed
+// middle bars stay solid, and ribbons out of a middle bucket into a real
+// target stay solid — money ending as a terminal purchase reads solid no
+// matter its middle routing. No bar carries a border; the hatch alone
+// marks derived money.
 export const SANKEY_BUCKET_HATCH_ID = "sankey-bucket-hatch";
 
 // Income bars fill with a hard-edged top-to-bottom gradient from the
@@ -665,6 +667,40 @@ export function SpendingReport({
   // of a middle bucket into a real target stays solid.
   const isBucketOrPlugTarget = (t: number): boolean =>
     sankey?.targets[t]?.bucket === true || t === (sankey?.remainingTargetIndex ?? -1);
+
+  // Per-income-bar hatch spans for the derived-money segments: every
+  // left-hop sub-ribbon funding a held, bucket, or plug cell hatches its
+  // source span (like the sub itself), and every plug-lane band hatches
+  // its source span (the plug ribbon hatches, so the bar segment it
+  // leaves hatches too). Spans reuse the layout's own sy0/sy1 — the same
+  // spans the bar's gradient segments paint — mapped verbatim, never
+  // recomputed. Degenerate whole bands into a middle stay solid: a middle
+  // is never a hatched row. One span per hatched sub/band (no merging),
+  // so each overlay maps 1:1 to its hatched ribbon.
+  const sourceHatchSpans = useMemo(() => {
+    const spans: { y0: number; y1: number; held: boolean }[][] = (
+      sankey?.sources ?? []
+    ).map(() => []);
+    if (sankey == null) return spans;
+    for (const c of sankey.leftCells) {
+      if (!(c.sy1 > c.sy0)) continue;
+      const held = heldTargets.has(c.targetIndex);
+      // Same rule as isBucketOrPlugTarget, inlined so the memo deps stay
+      // honest (the helper itself is re-created every render).
+      const bucketOrPlug =
+        sankey.targets[c.targetIndex]?.bucket === true ||
+        c.targetIndex === sankey.remainingTargetIndex;
+      if (!held && !bucketOrPlug) continue;
+      spans[c.sourceIndex]?.push({ y0: c.sy0, y1: c.sy1, held });
+    }
+    for (const l of sankey.linksLeft) {
+      if (l.targetIndex !== sankey.middles.length) continue;
+      if (!(l.sy1 > l.sy0)) continue;
+      spans[l.sourceIndex]?.push({ y0: l.sy0, y1: l.sy1, held: false });
+    }
+    for (const list of spans) list.sort((a, b) => a.y0 - b.y0);
+    return spans;
+  }, [sankey, heldTargets]);
 
   const tipContent: ReactNode | null = (() => {
     if (!hover) return null;
@@ -1871,6 +1907,30 @@ export function SpendingReport({
                         }}
                       />
                     )}
+                    {/* Derived-money segments hatch like their ribbons —
+                        held spans under the held testid, bucket/plug spans
+                        under the bucket one (disjoint, like the sub
+                        overlays). Skipped on whole-bucket bars, which
+                        already hatch end to end. Overlays ride the bar's
+                        own opacity step, so the segments brighten and dim
+                        with the bar instead of stroking it. */}
+                    {!isBucket &&
+                      (sourceHatchSpans[idx] ?? []).map((s, k) => (
+                        <rect
+                          key={`hatch-${k}`}
+                          data-testid={s.held ? "sankey-held-hatch" : "sankey-bucket-hatch"}
+                          x={node.x}
+                          y={s.y0}
+                          width={node.w}
+                          height={Math.max(0, s.y1 - s.y0)}
+                          fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                          fillOpacity={barOpacity}
+                          pointerEvents="none"
+                          style={{
+                            transition: `fill-opacity ${transitionMs}ms`,
+                          }}
+                        />
+                      ))}
                     <text
                       data-testid="sankey-income-label"
                       x={sankey.sourceLabelX}

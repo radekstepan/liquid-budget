@@ -583,6 +583,54 @@ describe("SpendingReport", () => {
     ).toBeNull();
   });
 
+  it("hatches the income-bar segment funding a held cell (geometry-matched, spotlight parity)", () => {
+    // Income bars hatch by segment: the bar span a hatched sub-ribbon
+    // leaves hatches with it, since every segment meets its ribbon
+    // exactly. Single held sub here, so a single strict sub-span.
+    const { container } = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bar = svg.querySelector('[data-testid="sankey-income"]')!;
+    const row = bar.parentElement!;
+    // One segment overlay per hatched left-hop sub: the RRSP sub alone.
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-held-hatch"][data-side="left"]')
+    ).toHaveLength(1);
+    const segs = row.querySelectorAll('rect[data-testid="sankey-held-hatch"]');
+    expect(segs).toHaveLength(1);
+    const seg = segs[0]!;
+    // Same x/width as the bar, a strict sub-span of its height.
+    expect(seg.getAttribute("x")).toBe(bar.getAttribute("x"));
+    expect(seg.getAttribute("width")).toBe(bar.getAttribute("width"));
+    const y = Number(seg.getAttribute("y"));
+    const h = Number(seg.getAttribute("height"));
+    const barY = Number(bar.getAttribute("y"));
+    const barH = Number(bar.getAttribute("height"));
+    expect(h).toBeGreaterThan(0);
+    expect(h).toBeLessThan(barH);
+    expect(y).toBeGreaterThanOrEqual(barY);
+    expect(y + h).toBeLessThanOrEqual(barY + barH);
+    // Shared pattern, pass-through pointer events, rest opacity = bar's.
+    expect(seg.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    expect(seg.getAttribute("pointer-events")).toBe("none");
+    expect(seg.getAttribute("fill-opacity")).toBe(bar.getAttribute("fill-opacity"));
+    // Spotlight parity: hovering the held target brightens bar and
+    // segment together, and clearing restores both.
+    const heldLabel = screen
+      .getAllByTestId("sankey-target-label")
+      .find((el) => el.textContent === "Wealthsimple RRSP")!;
+    fireEvent.mouseMove(heldLabel, { clientX: 700, clientY: 100 });
+    expect(seg.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
+    expect(seg.getAttribute("fill-opacity")).toBe(bar.getAttribute("fill-opacity"));
+    fireEvent.mouseLeave(heldLabel);
+    expect(seg.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_OPACITY));
+  });
+
   it("brightens and dims held overlays with their ribbons (hover parity, no z-reorder)", () => {
     // Task-50 (v): two held accounts — hovering one lights its own
     // overlays (bar, right ribbon, funding sub) and dims the other's, at
@@ -623,8 +671,16 @@ describe("SpendingReport", () => {
     }
     const opacityOf = (el: Element) => el.getAttribute("fill-opacity");
     const solidOf = (o: Element) => {
-      const prev = o.previousElementSibling!;
-      expect(prev.getAttribute("data-testid")).not.toBe("sankey-held-hatch");
+      // Bar-segment overlays share one solid bar, so consecutive overlays
+      // walk back past hatch siblings to it; ribbons and whole-bar
+      // overlays still sit immediately after their solid.
+      let prev = o.previousElementSibling!;
+      while (
+        prev.getAttribute("data-testid") === "sankey-held-hatch" ||
+        prev.getAttribute("data-testid") === "sankey-bucket-hatch"
+      ) {
+        prev = prev.previousElementSibling!;
+      }
       return prev;
     };
     // Rest: every overlay matches its solid at the rest step.
@@ -850,6 +906,36 @@ describe("SpendingReport", () => {
     ).toHaveLength(2);
   });
 
+  it("hatches income-bar segments funding bucket and plug money (one overlay per hatched left ribbon)", () => {
+    // The bucket sub and the plug lane each hatch the bar span they
+    // leave: two disjoint strict sub-spans of the kept income bar.
+    const { container } = renderReport(bucketRibbonFlow, emptyFlow, bucketRibbonIncome);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const bar = svg.querySelector('[data-testid="sankey-income"]')!;
+    const row = bar.parentElement!;
+    expect(
+      svg.querySelectorAll('[data-testid="sankey-bucket-hatch"][data-side="left"]')
+    ).toHaveLength(2);
+    const segs = Array.from(row.querySelectorAll('rect[data-testid="sankey-bucket-hatch"]'));
+    expect(segs).toHaveLength(2);
+    const barY = Number(bar.getAttribute("y"));
+    const barH = Number(bar.getAttribute("height"));
+    const spans = segs
+      .map((s) => ({ y: Number(s.getAttribute("y")), h: Number(s.getAttribute("height")) }))
+      .sort((a, b) => a.y - b.y);
+    for (const s of spans) {
+      expect(s.h).toBeGreaterThan(0);
+      expect(s.h).toBeLessThan(barH);
+      expect(s.y).toBeGreaterThanOrEqual(barY);
+      expect(s.y + s.h).toBeLessThanOrEqual(barY + barH);
+    }
+    expect(spans[0]!.y + spans[0]!.h).toBeLessThanOrEqual(spans[1]!.y);
+    // No held segments here: no held money in this fixture.
+    expect(row.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+  });
+
   it("keeps middle-bucket → real-target ribbons solid while the middle bucket bar stays hatched", () => {
     // Task-51 (iv): the hatch follows the DESTINATION — money ending as a
     // terminal purchase stays solid even when its middle routing is
@@ -906,9 +992,10 @@ describe("SpendingReport", () => {
     fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
     const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     // Middle bucket bar, right bucket bar, plug bar, right-hop bucket
-    // ribbon, bucket sub, plug lane.
+    // ribbon, bucket sub, plug lane, plus the income bar's bucket-sub and
+    // plug-band segments.
     const overlays = Array.from(svg.querySelectorAll('[data-testid="sankey-bucket-hatch"]'));
-    expect(overlays).toHaveLength(6);
+    expect(overlays).toHaveLength(8);
     for (const o of overlays) {
       expect(o.getAttribute("style") ?? "").toMatch(
         new RegExp(`fill-opacity ${SANKEY_SPOTLIGHT_TRANSITION_MS}ms`)
@@ -917,9 +1004,16 @@ describe("SpendingReport", () => {
     }
     const opacityOf = (el: Element) => el.getAttribute("fill-opacity");
     const solidOf = (o: Element) => {
-      const prev = o.previousElementSibling!;
-      expect(prev.getAttribute("data-testid")).not.toBe("sankey-bucket-hatch");
-      expect(prev.getAttribute("data-testid")).not.toBe("sankey-held-hatch");
+      // Bar-segment overlays share one solid bar, so consecutive overlays
+      // walk back past hatch siblings to it; ribbons and whole-bar
+      // overlays still sit immediately after their solid.
+      let prev = o.previousElementSibling!;
+      while (
+        prev.getAttribute("data-testid") === "sankey-held-hatch" ||
+        prev.getAttribute("data-testid") === "sankey-bucket-hatch"
+      ) {
+        prev = prev.previousElementSibling!;
+      }
       return prev;
     };
     // Rest: every overlay matches its solid at the rest step.
@@ -2269,16 +2363,55 @@ describe("SpendingReport", () => {
       expect(bar.getAttribute("stroke-dasharray")).toBeNull();
       expect(bar.getAttribute("stroke-width")).toBeNull();
     }
-    // One hatch overlay per computed bar, painted from the shared pattern.
-    // Scoped to rects: since task-51 the bucket-hatch testid also covers
-    // ribbon overlays (paths carrying data-side), pinned by their own
-    // tests below — this test stays about the bars.
+    // One hatch overlay per computed bar plus the kept income bar's
+    // derived-money segments, all painted from the shared pattern. Scoped
+    // to rects: since task-51 the bucket-hatch testid also covers ribbon
+    // overlays (paths carrying data-side), pinned by their own tests below
+    // — this test stays about the bars.
     const hatches = svg.querySelectorAll('rect[data-testid="sankey-bucket-hatch"]');
-    expect(hatches).toHaveLength(4);
+    expect(hatches).toHaveLength(7);
     for (const h of hatches) {
       expect(h.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
     }
     expect(svg.querySelector(`#${SANKEY_BUCKET_HATCH_ID}`)).not.toBeNull();
+  });
+
+  it("skips segment hatches on whole-bucket income bars (the bar already hatches end to end)", () => {
+    // Same three-income fixture as the render-only test: Side Gig +
+    // Cashback merge into the Other income bar, which hatches whole and
+    // carries no segment rects — while the kept Payroll bar hatches by
+    // segment (plug band plus bucket-cell subs, each a strict sub-span).
+    const { container } = renderReport(sampleCategoryFlow, sampleMerchantFlow, [
+      { name: "Payroll", value: 200000 },
+      { name: "Side Gig", value: 30000 },
+      { name: "Cashback", value: 5000 },
+    ]);
+    const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
+    fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
+    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
+    const rows = Array.from(svg.querySelectorAll('[data-testid="sankey-income"]')).map(
+      (b) => b.parentElement!
+    );
+    expect(rows).toHaveLength(2);
+    const bucketRow = rows.find(
+      (g) => g.querySelector('[data-testid="sankey-income-label"]')?.textContent === "Other"
+    )!;
+    const bucketBar = bucketRow.querySelector('[data-testid="sankey-income"]')!;
+    const bucketHatches = bucketRow.querySelectorAll(
+      'rect[data-testid="sankey-bucket-hatch"]'
+    );
+    expect(bucketHatches).toHaveLength(1);
+    expect(bucketHatches[0]!.getAttribute("y")).toBe(bucketBar.getAttribute("y"));
+    expect(bucketHatches[0]!.getAttribute("height")).toBe(bucketBar.getAttribute("height"));
+    const keptRow = rows.find((g) => g !== bucketRow)!;
+    const keptBar = keptRow.querySelector('[data-testid="sankey-income"]')!;
+    const keptSegs = keptRow.querySelectorAll('rect[data-testid="sankey-bucket-hatch"]');
+    expect(keptSegs).toHaveLength(3);
+    const barH = Number(keptBar.getAttribute("height"));
+    for (const s of Array.from(keptSegs)) {
+      expect(Number(s.getAttribute("height"))).toBeGreaterThan(0);
+      expect(Number(s.getAttribute("height"))).toBeLessThan(barH);
+    }
   });
 
   it("explains the over-income gap in tooltips instead of grey bar segments when spending exceeds income", () => {
