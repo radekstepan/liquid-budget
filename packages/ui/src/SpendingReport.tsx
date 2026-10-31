@@ -148,14 +148,13 @@ export const SANKEY_SPOTLIGHT_TRANSITION_MS = 120;
 
 // The hatch marks computed/derived money — the merged "Other" buckets on
 // every column, the "Remaining" surplus plug, and still-held balances —
-// versus terminal purchase flows. Middle and target bars hatch by row
-// (bucket, plug, and whole-held bars); ribbons hatch by destination
-// (right-hop ribbons into bucket, plug, or held targets, plug-lane
-// ribbons, and left-hop sub-ribbons funding bucket, plug, or held cells
-// — per-sub granularity, like the spotlight); income bars hatch by
-// segment (each bar segment funding a hatched sub-ribbon or plug band
-// hatches with it, since every segment meets its ribbon exactly). Mixed
-// middle bars stay solid, and ribbons out of a middle bucket into a real
+// versus terminal purchase flows. Target bars hatch by row (bucket, plug,
+// and whole-held bars); ribbons hatch by destination (right-hop ribbons
+// into bucket, plug, or held targets, plug-lane ribbons, and left-hop
+// sub-ribbons funding bucket, plug, or held cells — per-sub granularity,
+// like the spotlight); income and middle bars hatch by segment (each bar
+// segment funding a hatched ribbon hatches with it, since every segment
+// meets its ribbon exactly). Ribbons out of a middle bucket into a real
 // target stay solid — money ending as a terminal purchase reads solid no
 // matter its middle routing. No bar carries a border; the hatch alone
 // marks derived money.
@@ -697,6 +696,30 @@ export function SpendingReport({
       if (l.targetIndex !== sankey.middles.length) continue;
       if (!(l.sy1 > l.sy0)) continue;
       spans[l.sourceIndex]?.push({ y0: l.sy0, y1: l.sy1, held: false });
+    }
+    for (const list of spans) list.sort((a, b) => a.y0 - b.y0);
+    return spans;
+  }, [sankey, heldTargets]);
+
+  // Per-middle-bar hatch spans for the derived-money segments: the same
+  // rule as the income bars, one column over — every outgoing cell into
+  // a held, bucket, or plug target hatches its source span (the same
+  // spans the bar's gradient segments and right-hop ribbons paint),
+  // mapped verbatim from the layout's own linksRight geometry. One span
+  // per hatched cell, so each overlay maps 1:1 to its hatched ribbon.
+  const middleHatchSpans = useMemo(() => {
+    const spans: { y0: number; y1: number; held: boolean }[][] = (
+      sankey?.middles ?? []
+    ).map(() => []);
+    if (sankey == null) return spans;
+    for (const l of sankey.linksRight) {
+      if (!(l.sy1 > l.sy0)) continue;
+      const held = heldTargets.has(l.targetIndex);
+      const bucketOrPlug =
+        sankey.targets[l.targetIndex]?.bucket === true ||
+        l.targetIndex === sankey.remainingTargetIndex;
+      if (!held && !bucketOrPlug) continue;
+      spans[l.sourceIndex]?.push({ y0: l.sy0, y1: l.sy1, held });
     }
     for (const list of spans) list.sort((a, b) => a.y0 - b.y0);
     return spans;
@@ -2057,6 +2080,31 @@ export function SpendingReport({
                         }}
                       />
                     )}
+                    {/* Derived-money segments hatch like their ribbons —
+                        held spans under the held testid, bucket/plug spans
+                        under the bucket one (disjoint, like the right-hop
+                        overlays). Skipped on whole-hatched bars, which
+                        already hatch end to end. Overlays ride the bar's
+                        own opacity step, so the segments brighten and dim
+                        with the bar instead of stroking it. */}
+                    {!isBucket &&
+                      !heldMiddles.has(idx) &&
+                      (middleHatchSpans[idx] ?? []).map((s, k) => (
+                        <rect
+                          key={`hatch-${k}`}
+                          data-testid={s.held ? "sankey-held-hatch" : "sankey-bucket-hatch"}
+                          x={node.x}
+                          y={s.y0}
+                          width={node.w}
+                          height={Math.max(0, s.y1 - s.y0)}
+                          fill={`url(#${SANKEY_BUCKET_HATCH_ID})`}
+                          fillOpacity={barOpacity}
+                          pointerEvents="none"
+                          style={{
+                            transition: `fill-opacity ${transitionMs}ms`,
+                          }}
+                        />
+                      ))}
                     {/* Middle labels sit in the ribbon zone, so they carry
                         a fully opaque halo: no ribbon color can bleed
                         through and tint it. */}
