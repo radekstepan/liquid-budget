@@ -67,6 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey, on-budget held rows follow-up (task-52)
-- What about "EQ Bank" and other accounts like that? Why would we not show it just like we show RRSP, TFSA etc?
+Spending by Category - Sankey, still-held toggle follow-up (task-53)
+- Add a toggle that shows/hides the "Still held" flows in the Sankey chart (held group bar, held target rows, and their ribbons/sub-ribbons); when hidden, held amounts fold back into Remaining so income = spending + remaining still reconciles.
 
