@@ -9,7 +9,7 @@ import type {
   DuplicateAnalysisResult,
   ImportSummary,
 } from "@ynab/logic";
-import { MONTHS, parseMonthKey } from "@ynab/logic";
+import { MONTHS, parseMonthKey, insightAbsDiff } from "@ynab/logic";
 import { Icon, Button, Panel, Notice, Tooltip, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
 
@@ -635,7 +635,7 @@ export const Inspector = memo(function Inspector({
       {/* Card 3: Trends & Insights (3-Month Average) */}
       <Panel title="Trends & Insights" bodyClass="!p-[10px] space-y-1.5">
         {[...effectiveInsights]
-          .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+          .sort((a, b) => insightAbsDiff(b) - insightAbsDiff(a))
           .map((insight) => (
             <div
               key={insight.id}
@@ -645,9 +645,9 @@ export const Inspector = memo(function Inspector({
                 <div className="font-semibold text-[var(--y-ink)] truncate">
                   {insight.categoryName ?? insight.message}
                 </div>
-                {insight.amount != null && (
+                {insight.amount != null && insight.amount !== 0 && (
                   <div className="y-hint text-[10px] mt-0.5">
-                    {money(insight.amount)} this mo
+                    {money(insight.amount)} {insight.basis === "mtd" ? "so far" : "this mo"}
                   </div>
                 )}
               </div>
@@ -659,10 +659,16 @@ export const Inspector = memo(function Inspector({
                       insight.pctChange > 0 ? "text-[#c0483a]" : "text-[#2e7d32]"
                     )}
                   >
-                    {insight.pctChange >= 0 ? "+" : ""}
-                    {insight.pctChange}%
+                    {insight.amount === 0 ? (
+                      "$0"
+                    ) : (
+                      <>
+                        {insight.pctChange >= 0 ? "+" : ""}
+                        {insight.pctChange}%
+                      </>
+                    )}
                   </div>
-                  <div className="y-hint text-[9px]">vs 3-mo avg</div>
+                  <div className="y-hint text-[9px]">{insight.basis === "mtd" ? "vs MTD avg" : "vs 3-mo avg"}</div>
                 </div>
               ) : (
                 <div className="y-hint text-[10px]">{insight.message}</div>

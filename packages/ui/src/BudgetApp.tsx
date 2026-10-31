@@ -770,10 +770,6 @@ export function BudgetApp({
     () => computeTrailingNetWorth(data, month, 12),
     [data, month]
   );
-  const insights = useMemo(
-    () => computeMonthlyInsights(data, month, budget),
-    [data, month, budget]
-  );
 
   const assign = useCallback(
     async (categoryId: number, amount: number, m?: string) => {
@@ -1293,6 +1289,13 @@ export function BudgetApp({
   const duplicatesByAccount = useMemo(() => {
     return countDuplicatesByAccount(data.transactions);
   }, [data.transactions]);
+
+  // Trends use the live wall-date so the in-progress month compares
+  // same-day-to-same-day instead of month-to-date vs full-month average.
+  const insights = useMemo(
+    () => computeMonthlyInsights(data, month, budget, { asOfDate: todayDay }),
+    [data, month, budget, todayDay]
+  );
 
   // Single-click entry: resume a paused rule on the fly so posting never
   // takes two clicks. This performs exactly the resume-then-post the user

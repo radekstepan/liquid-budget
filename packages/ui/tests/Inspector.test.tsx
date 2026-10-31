@@ -389,4 +389,46 @@ describe("Inspector", () => {
       expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
     });
   });
+
+  describe("Trends & Insights", () => {
+    it("sorts trends by largest absolute move first", () => {
+      render(<Inspector {...baseProps} />);
+      const panel = screen.getByText("Trends & Insights").closest(".y-panel");
+      const names = within(panel!).getAllByText(/Dining Out|Groceries/, { selector: ".font-semibold" });
+      // Dining Out's $130 move sorts above Groceries' $100 move despite the smaller spend.
+      expect(names.map((n) => n.textContent)).toEqual(["Dining Out", "Groceries"]);
+    });
+
+    it("renders zero-spend trends as $0 with no amount subtitle", () => {
+      render(
+        <Inspector
+          {...baseProps}
+          insights={[
+            {
+              id: "trend-11",
+              type: "trend" as const,
+              categoryId: 11,
+              categoryName: "Category B",
+              amount: 0,
+              avgAmount: 10000,
+              pctChange: -100,
+              basis: "full" as const,
+              message: "Category B: $0.00 (-100% vs 3-mo avg)",
+            },
+          ]}
+        />
+      );
+      expect(screen.getByText("Category B")).toBeInTheDocument();
+      expect(screen.getByText("$0")).toBeInTheDocument();
+      expect(screen.queryByText(/-100%/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\$0\.00/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/this mo/)).not.toBeInTheDocument();
+    });
+
+    it("still renders the % change for nonzero trends", () => {
+      render(<Inspector {...baseProps} />);
+      expect(screen.getByText("+41%")).toBeInTheDocument();
+      expect(screen.getByText("+20%")).toBeInTheDocument();
+    });
+  });
 });

@@ -6,7 +6,7 @@
  */
 
 import type { BudgetData, Transaction } from "./types.js";
-import { fmt, num } from "./format.js";
+import { fmt, num, isValidISODate } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
 
 export type NetWorthPoint = {
@@ -401,17 +401,76 @@ export type SpendingInsight = {
   amount?: number;
   avgAmount?: number;
   pctChange?: number;
+  /** "mtd" when the comparison is month-to-date aligned, else "full". */
+  basis?: "full" | "mtd";
   message: string;
 };
 
+export type MonthlyInsightsOptions = {
+  /**
+   * Wall-clock date (YYYY-MM-DD) used to detect the in-progress month.
+   * When the viewed month is the `asOfDate` month, spend is compared
+   * same-day-to-same-day instead of month-to-date vs full-month average.
+   */
+  asOfDate?: string;
+};
+
 /**
- * Compute monthly trends and 3-month average comparisons sorted by % change.
+ * Minimum absolute % change for a trend to be shown. Anything smaller
+ * (+0%, +2%, ...) is noise, not a signal worth surfacing.
+ */
+export const MIN_INSIGHT_PCT_CHANGE = 5;
+
+/**
+ * Absolute dollar move vs the baseline: how much was saved or overspent
+ * in absolute terms. Used to sort trends (largest move first).
+ */
+export function insightAbsDiff(
+  insight: Pick<SpendingInsight, "amount" | "avgAmount">
+): number {
+  return Math.abs((insight.amount ?? 0) - (insight.avgAmount ?? 0));
+}
+
+/**
+ * Compute monthly trends and 3-month average comparisons, sorted by largest
+ * absolute dollar move vs the baseline. Trends within `MIN_INSIGHT_PCT_CHANGE`
+ * of the baseline are suppressed as noise.
+ *
+ * When `opts.asOfDate` falls in the viewed month, the month is still in
+ * progress, so both sides are cut off at the same day-of-month: current
+ * spend through day N is compared against the average spend through day N
+ * of the prior months. Categories with no baseline spend through day N
+ * (nothing due yet in either period) are suppressed instead of being
+ * reported as bogus savings; categories with $0 spend against a positive
+ * baseline are reported with -100% so the UI can render them as "$0".
+ * Completed past months always compare full month vs full-month average.
  */
 export function computeMonthlyInsights(
   data: BudgetData,
   month: string,
-  _budgetResult?: unknown
+  _budgetResult?: unknown,
+  opts?: MonthlyInsightsOptions
 ): SpendingInsight[] {
+  const asOfDate = opts?.asOfDate;
+  const asOfMonth =
+    asOfDate != null && isValidISODate(asOfDate) ? asOfDate.slice(0, 7) : null;
+
+  // Future month: nothing could have been spent yet, so any trend would be
+  // a bogus -100%.
+  if (asOfMonth != null && month > asOfMonth) {
+    return [
+      {
+        id: "clean-spending",
+        type: "clean",
+        message: "No trend data yet for a future month",
+      },
+    ];
+  }
+
+  // In-progress month: align both sides at the same day-of-month.
+  const cutoffDay =
+    asOfMonth === month && asOfDate != null ? Number(asOfDate.slice(8, 10)) : null;
+
   const insights: SpendingInsight[] = [];
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const catMap = new Map(data.categories.map((c) => [c.id, c.name]));
@@ -445,6 +504,10 @@ export function computeMonthlyInsights(
     if (!earliestMonth || mk < earliestMonth) {
       earliestMonth = mk;
     }
+
+    // Same-day alignment for the in-progress month: ignore spend after the
+    // cutoff day on both sides, including future-dated entries this month.
+    if (cutoffDay != null && Number(t.date.slice(8, 10)) > cutoffDay) continue;
 
     if (mk === month) {
       currentSpendByCat.set(
@@ -482,8 +545,15 @@ export function computeMonthlyInsights(
         const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
         const avg3mo = Math.round(totalPriorSpend / divisor);
         if (avg3mo > 0) {
+          // Mid-month net-refund spend is timing noise (returns posted
+          // before the corresponding purchases). Exact $0 is kept: against
+          // a positive baseline it renders as an informative "$0" row.
+          if (cutoffDay != null && currentSpend < 0) continue;
           const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
+          // Near-zero changes are noise, not trends.
+          if (Math.abs(pct) < MIN_INSIGHT_PCT_CHANGE) continue;
           const name = catMap.get(catId) ?? "Unknown";
+          const baselineLabel = cutoffDay != null ? "MTD 3-mo avg" : "3-mo avg";
           insights.push({
             id: `trend-${catId}`,
             type: "trend",
@@ -492,21 +562,25 @@ export function computeMonthlyInsights(
             amount: currentSpend,
             avgAmount: avg3mo,
             pctChange: pct,
-            message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs 3-mo avg)`,
+            basis: cutoffDay != null ? "mtd" : "full",
+            message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs ${baselineLabel})`,
           });
         }
       }
     }
   }
 
-  // Sort by % change descending
-  insights.sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0));
+  // Sort by largest absolute dollar move vs the baseline first
+  insights.sort((a, b) => insightAbsDiff(b) - insightAbsDiff(a));
 
   if (insights.length === 0) {
     insights.push({
       id: "clean-spending",
       type: "clean",
-      message: "Spending is steady within 3-month baseline",
+      message:
+        cutoffDay != null
+          ? "Not enough month-to-date data for trends yet"
+          : "Spending is steady within 3-month baseline",
     });
   }
 
