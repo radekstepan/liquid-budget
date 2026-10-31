@@ -1071,6 +1071,128 @@ export function sortMergedGroupFlow(
   };
 }
 
+/**
+ * Exclude still-held money from a spending flow and its monthly series: the
+ * logic-level transform behind the Spending Sankey's Still-held toggle.
+ * Drops every cell routed through the STILL_HELD_GROUP_LABEL pseudo-group —
+ * the Still-held middle-group bar, the held target rows, and (via the
+ * dropped series columns) their right-hop ribbons and left-hop funding
+ * sub-ribbons — and hands the surviving pair to the usual merge / sort /
+ * view-model pipeline, so the hidden held total refolds into the Remaining
+ * surplus plug through the existing allocator: income = spending + remaining
+ * still reconciles and no new plug or shortfall state exists.
+ *
+ * Semantics:
+ * - Kept rows hold their input positions (targets shrink in place, never
+ *   re-sort), so toggling only removes held rows — nothing jumps. The
+ *   (groupIndex, targetIndex) link sort survives because both index remaps
+ *   are order-preserving.
+ * - A target sharing its name with a held account (a merchant or category
+ *   named like the account — the accepted shared-name edge) SHRINKS by its
+ *   Still-held leg instead of vanishing: only pure-held targets drop.
+ * - Group values re-derive from the kept links (like
+ *   buildSpendingGroupFlowFromCells), so group values always agree with the
+ *   drawn ribbons; a real category group literally named "Still held" would
+ *   merge with held cells at collection already, so it excludes with them —
+ *   the same accepted edge the "Uncategorized" pseudo-group has.
+ * - The series keeps its months, income names, and income matrix untouched;
+ *   group/target names rebuild from the stripped flow and the cell matrix
+ *   drops exactly the excluded links' columns, so the pair stays
+ *   index-aligned for computeSankeyViewModel. A missing series (the legacy
+ *   no-series path) stays missing.
+ * - No Still-held group, no-op: returns the inputs' own references, so the
+ *   shown toggle state costs nothing and shares nothing.
+ */
+export function excludeHeldCells(
+  flow: SpendingGroupFlow,
+  series?: MonthlySankeySeries
+): { flow: SpendingGroupFlow; series: MonthlySankeySeries | undefined } {
+  const heldGroups = new Set<number>();
+  flow.groups.forEach((g, i) => {
+    if (g.name === STILL_HELD_GROUP_LABEL) heldGroups.add(i);
+  });
+  if (heldGroups.size === 0) return { flow, series };
+
+  const keptPositions: number[] = [];
+  const droppedByTarget = new Map<number, number>();
+  flow.links.forEach((l, k) => {
+    if (heldGroups.has(l.groupIndex)) {
+      droppedByTarget.set(l.targetIndex, (droppedByTarget.get(l.targetIndex) ?? 0) + l.value);
+    } else {
+      keptPositions.push(k);
+    }
+  });
+
+  const targetRemap = new Map<number, number>();
+  const targets: SpendingBreakdownItem[] = [];
+  flow.targets.forEach((t, i) => {
+    const value = t.value - (droppedByTarget.get(i) ?? 0);
+    if (!(value > 0)) return;
+    targetRemap.set(i, targets.length);
+    targets.push({ name: t.name, value });
+  });
+
+  const groupRemap = new Map<number, number>();
+  const groupNames: string[] = [];
+  flow.groups.forEach((g, i) => {
+    if (heldGroups.has(i)) return;
+    groupRemap.set(i, groupNames.length);
+    groupNames.push(g.name);
+  });
+
+  // (original position, new group, new target, value) for each surviving
+  // cell — the position keys the series column below, so the matrices can
+  // never misalign with the links, even on defensive drops.
+  const kept: { pos: number; g: number; t: number; value: number }[] = [];
+  for (const pos of keptPositions) {
+    const l = flow.links[pos]!;
+    const g = groupRemap.get(l.groupIndex) ?? -1;
+    const t = targetRemap.get(l.targetIndex) ?? -1;
+    if (g < 0 || t < 0 || !(l.value > 0)) continue;
+    kept.push({ pos, g, t, value: l.value });
+  }
+
+  // Groups re-derive from the kept links; a group left with no link drops
+  // (defensive: a kept link's target always survives, since its non-held
+  // legs alone keep it positive — well-formed flows never trigger this).
+  const groupTotals = new Map<number, number>();
+  for (const k of kept) {
+    groupTotals.set(k.g, (groupTotals.get(k.g) ?? 0) + k.value);
+  }
+  const finalRemap = new Map<number, number>();
+  const groups: SpendingBreakdownItem[] = [];
+  groupNames.forEach((name, g) => {
+    const value = groupTotals.get(g) ?? 0;
+    if (!(value > 0)) return;
+    finalRemap.set(g, groups.length);
+    groups.push({ name, value });
+  });
+
+  const links: SpendingGroupFlowLink[] = [];
+  const linkPositions: number[] = [];
+  for (const k of kept) {
+    const g = finalRemap.get(k.g) ?? -1;
+    if (g < 0) continue;
+    links.push({ groupIndex: g, targetIndex: k.t, value: k.value });
+    linkPositions.push(k.pos);
+  }
+
+  const outSeries =
+    series == null
+      ? undefined
+      : {
+          months: series.months,
+          incomeNames: series.incomeNames,
+          groupNames: groups.map((g) => g.name),
+          targetNames: targets.map((t) => t.name),
+          incomeByMonth: series.incomeByMonth,
+          cellByMonth: series.cellByMonth.map((row) =>
+            linkPositions.map((pos) => row[pos] ?? 0)
+          ),
+        };
+  return { flow: { groups, targets, links }, series: outSeries };
+}
+
 export type SankeyCellFunding = {
   /** Index into the income-source column. */
   sourceIndex: number;

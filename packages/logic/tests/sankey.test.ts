@@ -6,6 +6,7 @@ import {
   computeSankeyViewModel,
   computeSpendingBreakdown,
   computeSpendingGroupFlow,
+  excludeHeldCells,
   layoutDirectIncomeSankey,
   layoutGroupedIncomeSankey,
   layoutSankey,
@@ -2311,6 +2312,185 @@ describe("on-budget still-held rows", () => {
       expect(layout.targets.some((t) => t.name === REMAINING_LABEL)).toBe(false);
       expect(layout.remainingTargetIndex).toBeNull();
     }
+  });
+});
+
+describe("excludeHeldCells (Still-held toggle)", () => {
+  // Task-53: the Sankey-only Still-held toggle strips held cells at the
+  // logic level (flow + series pair) — never render-side — so the hidden
+  // held total refolds into the Remaining plug through the existing
+  // allocator. Same EQ-Bank fixture as the on-budget held tests: $2,000
+  // salary in, a $1,000 terminal purchase, $600 parked in EQ Bank and $400
+  // contributed to the RRSP — every dollar spent or held.
+  function eqBankData(): BudgetData {
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "EQ Bank", kind: "liquid", groupLabel: "Budget", balance: "60000", onBudget: true, sort: 2 },
+      { id: 6, name: "RRSP", kind: "offbudget", groupLabel: "Investments", balance: "40000", onBudget: false, sort: 3 }
+    );
+    data.transactions = [
+      txn("2026-06-01", "Payroll", 200000, null),
+      txn("2026-06-05", "Grocer", -100000, 10),
+      txn("2026-06-06", "Transfer : EQ Bank", -60000, null, { transferAccountId: 5 }),
+      txn("2026-06-07", "Transfer : RRSP", -40000, 10, { transferAccountId: 6 }),
+    ];
+    return data;
+  }
+
+  const heldTargetsOf = (flow: SpendingGroupFlow): string[] =>
+    flow.targets
+      .filter((_, ti) => {
+        const incoming = flow.links.filter((l) => l.targetIndex === ti);
+        return (
+          incoming.length > 0 &&
+          incoming.every((l) => flow.groups[l.groupIndex]?.name === STILL_HELD_GROUP_LABEL)
+        );
+      })
+      .map((t) => t.name);
+
+  it("strips the Still-held group, held targets, and their series columns (both dimensions)", () => {
+    const data = eqBankData();
+    const spendName = { categories: "Groceries", merchants: "Grocer" } as const;
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", dimension);
+      expect(heldTargetsOf(flow)).toEqual(["EQ Bank", "RRSP"]);
+      const { flow: stripped, series: strippedSeries } = excludeHeldCells(flow, series);
+      // The Still-held bar and both held rows vanish; the surviving
+      // purchase holds its position and value exactly.
+      expect(stripped.groups).toEqual([{ name: "Everyday", value: 100000 }]);
+      expect(stripped.targets).toEqual([{ name: spendName[dimension], value: 100000 }]);
+      expect(stripped.links).toEqual([{ groupIndex: 0, targetIndex: 0, value: 100000 }]);
+      // The series stays index-aligned: names rebuilt from the stripped
+      // flow, exactly the excluded links' columns dropped, income untouched.
+      expect(strippedSeries).toBeDefined();
+      expect(strippedSeries!.months).toEqual(["2026-06"]);
+      expect(strippedSeries!.incomeNames).toEqual(["Payroll"]);
+      expect(strippedSeries!.groupNames).toEqual(["Everyday"]);
+      expect(strippedSeries!.targetNames).toEqual([spendName[dimension]]);
+      expect(strippedSeries!.incomeByMonth).toEqual([[200000]]);
+      expect(strippedSeries!.cellByMonth).toEqual([[100000]]);
+      // Alignment invariant the view model relies on: each column sums to
+      // its link's value.
+      expect(strippedSeries!.cellByMonth[0]).toHaveLength(stripped.links.length);
+      strippedSeries!.cellByMonth[0]!.forEach((v, k) => {
+        expect(v).toBe(stripped.links[k]!.value);
+      });
+    }
+  });
+
+  it("shrinks (never drops) a target sharing its name with a held account", () => {
+    // A $50 bank fee paid TO "EQ Bank" (categorized purchase) while the EQ
+    // Bank account also holds $60: in merchant mode both land on one
+    // "EQ Bank" target as two legs — the accepted shared-name edge.
+    const data = makeData();
+    data.accounts.push(
+      { id: 5, name: "EQ Bank", kind: "liquid", groupLabel: "Budget", balance: "60000", onBudget: true, sort: 2 }
+    );
+    data.transactions = [
+      txn("2026-06-01", "Payroll", 200000, null),
+      txn("2026-06-06", "Transfer : EQ Bank", -60000, null, { transferAccountId: 5 }),
+      txn("2026-06-07", "EQ Bank", -50000, 10),
+    ];
+    const merch = computeSpendingGroupFlow(data, "2026-06", "2026-06", "merchants");
+    expect(merch.targets).toEqual([{ name: "EQ Bank", value: 110000 }]);
+    const { flow: stripped } = excludeHeldCells(merch);
+    // The target survives at its non-held value with its non-held leg; the
+    // Still-held group is gone, and both marginals still hold.
+    expect(stripped.targets).toEqual([{ name: "EQ Bank", value: 50000 }]);
+    expect(stripped.groups).toEqual([{ name: "Everyday", value: 50000 }]);
+    expect(stripped.links).toEqual([{ groupIndex: 0, targetIndex: 0, value: 50000 }]);
+    // Categories mode has no name clash (the purchase is "Groceries"), so
+    // the pure-held row drops instead.
+    const cat = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    const { flow: strippedCat } = excludeHeldCells(cat);
+    expect(strippedCat.targets).toEqual([{ name: "Groceries", value: 50000 }]);
+    expect(strippedCat.groups).toEqual([{ name: "Everyday", value: 50000 }]);
+  });
+
+  it("returns the inputs untouched when nothing is held", () => {
+    const data = makeData();
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-04", "2026-06", dimension);
+      const series = computeMonthlySankeySeries(data, "2026-04", "2026-06", dimension);
+      expect(flow.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+      const out = excludeHeldCells(flow, series);
+      expect(out.flow).toBe(flow);
+      expect(out.series).toBe(series);
+    }
+  });
+
+  it("refolds hidden held money into the Remaining plug with Left at $0 (both dimensions)", () => {
+    const data = eqBankData();
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", dimension);
+      const { flow: stripped, series: strippedSeries } = excludeHeldCells(flow, series);
+      const vm = computeSankeyViewModel(stripped, income, strippedSeries!, { thresholdCents: 0 });
+      // No held rows anywhere in the model.
+      expect(vm.groups.some((g) => g.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+      expect(vm.targets.map((t) => t.name)).not.toContain("EQ Bank");
+      expect(vm.targets.map((t) => t.name)).not.toContain("RRSP");
+      // The allocator sees $1,000 of demand against $2,000 of income, so
+      // the $1,000 held total lands in the per-source surplus.
+      expect(vm.left.incomeTotal).toBe(200000);
+      expect(vm.left.spendingTotal).toBeCloseTo(100000, 9);
+      expect(vm.left.remainingBySource).toHaveLength(1);
+      expect(vm.left.remainingBySource[0]).toBeCloseTo(100000, 9);
+      const layout = layoutGroupedIncomeSankey(vm.sources, vm.groups, vm.targets, vm.links, {
+        width: 800,
+        height: 400,
+        leftDetail: "cells",
+        leftHop: vm.left,
+      });
+      // The plug absorbs exactly the hidden held total through the existing
+      // Remaining path — income = spending + remaining reconciles to $0.
+      expect(layout.remainingTargetIndex).not.toBeNull();
+      const plug = layout.targets[layout.remainingTargetIndex!]!;
+      expect(plug.name).toBe(REMAINING_LABEL);
+      expect(plug.value).toBeCloseTo(100000, 9);
+      expect(layout.incomeTotal - layout.spendingTotal - plug.value).toBeCloseTo(0, 9);
+      expect(layout.middles.some((m) => m.name === STILL_HELD_GROUP_LABEL)).toBe(false);
+    }
+  });
+
+  it("keeps held rows routed through Still held with full funding when shown", () => {
+    // The toggle's default state runs the untouched pipeline: held rows
+    // route through the pseudo-group, fully funded, with no plug.
+    const data = eqBankData();
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    for (const dimension of ["categories", "merchants"] as const) {
+      const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", dimension);
+      const series = computeMonthlySankeySeries(data, "2026-06", "2026-06", dimension);
+      const vm = computeSankeyViewModel(flow, income, series, { thresholdCents: 0 });
+      expect(vm.groups).toContainEqual({ name: STILL_HELD_GROUP_LABEL, value: 100000, mergedCount: 1 });
+      expect(heldTargetsOf(flow)).toEqual(["EQ Bank", "RRSP"]);
+      expect(vm.left.remainingBySource).toEqual([0]);
+      const layout = layoutGroupedIncomeSankey(vm.sources, vm.groups, vm.targets, vm.links, {
+        width: 800,
+        height: 400,
+        leftDetail: "cells",
+        leftHop: vm.left,
+      });
+      expect(layout.remainingTargetIndex).toBeNull();
+    }
+  });
+
+  it("keeps the legacy no-series path aligned (a missing series stays missing)", () => {
+    const data = eqBankData();
+    const income = computeIncomeBreakdown(data, "2026-06", "2026-06");
+    const flow = computeSpendingGroupFlow(data, "2026-06", "2026-06", "categories");
+    const { flow: stripped, series: strippedSeries } = excludeHeldCells(flow);
+    expect(strippedSeries).toBeUndefined();
+    expect(stripped.groups).toEqual([{ name: "Everyday", value: 100000 }]);
+    // The legacy proportional split refolds the same way: the plug is
+    // income minus the surviving groups.
+    const legacy = computeDirectFlowLinks(
+      income.map((s) => ({ ...s, mergedCount: 1 })),
+      stripped.groups.map((g) => ({ ...g, mergedCount: 1 }))
+    );
+    expect(legacy.targets.at(-1)).toEqual({ name: REMAINING_LABEL, value: 100000, mergedCount: 1 });
   });
 });
 

@@ -3792,4 +3792,180 @@ describe("SpendingReport", () => {
     expect(incomes[1]!.getAttribute("fill-opacity")).toBe(String(SANKEY_RIBBON_HOVER_OPACITY));
     fireEvent.mouseLeave(right[1]!);
   });
+
+  it("Still-held toggle hides held rows and ribbons and refolds their money into Remaining", () => {
+    // Task-53: the $400 RRSP remainder hides from the Sankey only — the
+    // Still-held group bar, the held target row, and their ribbons vanish,
+    // and the Remaining plug absorbs the $400 through the existing surplus
+    // path. The header still reads the full flow (Out covers held, Left $0).
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    expect(screen.getByRole("button", { name: "On", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "On", exact: true }));
+    expect(screen.getByRole("button", { name: "Off", exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "On", exact: true })).not.toBeInTheDocument();
+    // The Still-held bar and the held target row are gone; only the
+    // purchase and the refolded plug remain.
+    const groupLabels = screen.getAllByTestId("sankey-group-label");
+    expect(groupLabels.map((el) => el.textContent)).toEqual(["Everyday"]);
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    expect(targetLabels.map((el) => el.textContent)).toEqual(["Downpayment", "Remaining"]);
+    const targetAmounts = screen.getAllByTestId("sankey-target-amount");
+    expect(targetAmounts.map((el) => el.textContent)).toContain("$400.00 · 33%");
+    // One right-hop ribbon (the purchase cell); no held hatch anywhere.
+    const rightLinks = screen
+      .getAllByTestId("sankey-link")
+      .filter((el) => el.getAttribute("data-side") === "right");
+    expect(rightLinks).toHaveLength(1);
+    expect(screen.queryByTestId("sankey-held-hatch")).not.toBeInTheDocument();
+    // Header and row count read the full flow, unchanged.
+    expect(screen.getAllByText("$1,200.00")).toHaveLength(2);
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.getByText("2 categories")).toBeInTheDocument();
+    // Toggling back restores the held rows.
+    fireEvent.click(screen.getByRole("button", { name: "Off", exact: true }));
+    expect(
+      screen.getAllByTestId("sankey-group-label").map((el) => el.textContent)
+    ).toContain("Still held");
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).toContain("Wealthsimple RRSP");
+  });
+
+  it("Still-held toggle refolds held money into the plug on the time-aware path", () => {
+    // Same refold with a monthly series (the production path — ReportsView
+    // always passes one): the allocator funds the surviving demand and the
+    // surplus becomes the plug.
+    const heldSeries: MonthlySankeySeries = {
+      months: ["2026-06"],
+      incomeNames: ["Payroll"],
+      groupNames: ["Everyday", "Still held"],
+      targetNames: ["Downpayment", "Wealthsimple RRSP"],
+      incomeByMonth: [[120000]],
+      cellByMonth: [[80000, 40000]],
+    };
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+        categorySeries={heldSeries}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "On", exact: true }));
+    expect(
+      screen.getAllByTestId("sankey-group-label").map((el) => el.textContent)
+    ).toEqual(["Everyday"]);
+    expect(screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)).toEqual([
+      "Downpayment",
+      "Remaining",
+    ]);
+    expect(
+      screen.getAllByTestId("sankey-target-amount").map((el) => el.textContent)
+    ).toContain("$400.00 · 33%");
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+  });
+
+  it("Still-held toggle hides held rows in the Merchants dimension too", () => {
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={heldCategoryFlow}
+        income={heldIncome}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "On", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Merchants", exact: true }));
+    expect(screen.getByText("Spending by Merchant")).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("sankey-group-label").map((el) => el.textContent)
+    ).toEqual(["Everyday"]);
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).toContain("Remaining");
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).not.toContain("Wealthsimple RRSP");
+  });
+
+  it("Still-held toggle persists across remounts", () => {
+    const first = render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "On", exact: true }));
+    expect(window.localStorage.getItem("ynab:reports:spendingShowHeld")).toBe("false");
+    first.unmount();
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+      />
+    );
+    // The remount reads the stored preference: still hidden, no click.
+    expect(screen.getByRole("button", { name: "Off", exact: true })).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).not.toContain("Wealthsimple RRSP");
+    expect(
+      screen.getAllByTestId("sankey-target-amount").map((el) => el.textContent)
+    ).toContain("$400.00 · 33%");
+  });
+
+  it("Still-held toggle leaves Bars rows and the header untouched while hidden", () => {
+    render(
+      <SpendingReport
+        categoryFlow={heldCategoryFlow}
+        merchantFlow={emptyFlow}
+        income={heldIncome}
+        initialView="bars"
+        initialShowHeld={false}
+      />
+    );
+    // Bars still lists the held row with its hatch; the header still reads
+    // the full flow.
+    expect(screen.getByText("Wealthsimple RRSP")).toBeInTheDocument();
+    expect(screen.getByText("$400.00")).toBeInTheDocument();
+    expect(screen.queryByTestId("bars-held-hatch")).toBeInTheDocument();
+    expect(screen.getAllByText("$1,200.00")).toHaveLength(2);
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    // The Sankey hides held rows under the same preference…
+    fireEvent.click(screen.getByRole("button", { name: "Sankey", exact: true }));
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).not.toContain("Wealthsimple RRSP");
+    // …and Bars still shows them when switching back.
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    expect(screen.getByText("Wealthsimple RRSP")).toBeInTheDocument();
+  });
+
+  it("Still-held toggle shows the Sankey empty state when only held money hides it all", () => {
+    // Only-held data with no income: hiding leaves the Sankey with nothing
+    // to draw, so it reads "No data" — while Bars still lists the row.
+    const onlyHeldFlow: SpendingGroupFlow = {
+      groups: [{ name: "Still held", value: 40000 }],
+      targets: [{ name: "Wealthsimple RRSP", value: 40000 }],
+      links: [{ groupIndex: 0, targetIndex: 0, value: 40000 }],
+    };
+    render(
+      <SpendingReport categoryFlow={onlyHeldFlow} merchantFlow={emptyFlow} income={[]} />
+    );
+    expect(
+      screen.getAllByTestId("sankey-target-label").map((el) => el.textContent)
+    ).toContain("Wealthsimple RRSP");
+    fireEvent.click(screen.getByRole("button", { name: "On", exact: true }));
+    expect(screen.getByText("No data for this timeframe.")).toBeInTheDocument();
+    expect(screen.queryByTestId("sankey-svg")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Bars", exact: true }));
+    expect(screen.getByText("Wealthsimple RRSP")).toBeInTheDocument();
+  });
 });

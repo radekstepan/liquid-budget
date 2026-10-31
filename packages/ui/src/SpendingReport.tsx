@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import {
   fmt,
   computeSankeyViewModel,
+  excludeHeldCells,
   mergeBelowThreshold,
   mergeGroupFlow,
   layoutGroupedIncomeSankey,
@@ -220,6 +221,7 @@ export function SpendingReport({
   categoryOrder = [],
   initialView = "sankey",
   initialDimension = "categories",
+  initialShowHeld = true,
 }: {
   categoryFlow: SpendingGroupFlow;
   merchantFlow: SpendingGroupFlow;
@@ -230,6 +232,7 @@ export function SpendingReport({
   categoryOrder?: readonly string[];
   initialView?: SpendingViewMode;
   initialDimension?: SpendingDimension;
+  initialShowHeld?: boolean;
 }) {
   const [viewMode, setViewMode] = useLocalStorage<SpendingViewMode>(
     "ynab:reports:spendingViewMode",
@@ -252,6 +255,16 @@ export function SpendingReport({
     "ynab:reports:spendingSort",
     "amount",
     (v): v is SankeyTargetSort => v === "amount" || v === "group"
+  );
+  // Sankey-only Still-held toggle: hiding removes the Still-held group bar,
+  // the held target rows, and their ribbons from the Sankey — the hidden
+  // held total refolds into the Remaining plug through the existing
+  // allocator. Bars rows, header totals, and the Under merging read the
+  // full flow either way. Shown by default (today's behavior).
+  const [showHeld, setShowHeld] = useLocalStorage<boolean>(
+    "ynab:reports:spendingShowHeld",
+    initialShowHeld,
+    (v): v is boolean => typeof v === "boolean"
   );
   const [hover, setHover] = useState<Hover | null>(null);
   // Mousemove fires far more often than the display refreshes; coalescing
@@ -295,28 +308,55 @@ export function SpendingReport({
     () => mergeBelowThreshold(income, Math.round(activeThreshold * 100)),
     [income, activeThreshold]
   );
+  const series = dimension === "categories" ? categorySeries : merchantSeries;
+  // Sankey-scoped inputs: the Still-held toggle strips held cells here — a
+  // logic-level transform of the flow+series pair, never render-side
+  // filtering — so funding, merging, sorting, and the Remaining plug all
+  // see consistent inputs. Shown (the default) passes the full pair
+  // through untouched.
+  const sankeyInputs = useMemo(
+    () => (showHeld ? { flow, series } : excludeHeldCells(flow, series)),
+    [showHeld, flow, series]
+  );
+  const sankeyFlow = sankeyInputs.flow;
+  const sankeySeries = sankeyInputs.series;
+  // The Sankey's own merged columns: the full `merged` when shown (same
+  // reference — the default path is today's behavior exactly), a
+  // held-excluded merge when hidden. Header totals and Bars rows always
+  // read `merged`.
+  const sankeyMerged = useMemo(
+    () =>
+      showHeld
+        ? merged
+        : mergeGroupFlow(
+            sankeyFlow.groups,
+            sankeyFlow.targets,
+            sankeyFlow.links,
+            Math.round(activeThreshold * 100)
+          ),
+    [showHeld, merged, sankeyFlow, activeThreshold]
+  );
   // Column order for the Sankey layout (a permutation — sums and marginals
   // are untouched, so the header totals and Bars rows read `merged`).
   const ordered = useMemo(
-    () => sortMergedGroupFlow(merged, groupOrder, sort, categoryOrder),
-    [merged, groupOrder, sort, categoryOrder]
+    () => sortMergedGroupFlow(sankeyMerged, groupOrder, sort, categoryOrder),
+    [sankeyMerged, groupOrder, sort, categoryOrder]
   );
-  // Time-aware Sankey model: the same merged + sorted columns as above
-  // (the view model delegates to the same merge/sort calls, so Bars and
-  // Sankey cannot disagree) plus the chronological funding of each cell.
+  // Time-aware Sankey model: the merged + sorted columns from above
+  // (the same merge/sort calls Bars uses, so the two views cannot disagree
+  // while held rows show) plus the chronological funding of each cell.
   // Null without series — the layout then uses the legacy split.
-  const series = dimension === "categories" ? categorySeries : merchantSeries;
   const timeAware = useMemo(
     () =>
-      series == null
+      sankeySeries == null
         ? null
-        : computeSankeyViewModel(flow, income, series, {
+        : computeSankeyViewModel(sankeyFlow, income, sankeySeries, {
             thresholdCents: Math.round(activeThreshold * 100),
             groupOrder,
             sort,
             categoryOrder,
           }),
-    [flow, income, series, activeThreshold, groupOrder, sort, categoryOrder]
+    [sankeyFlow, income, sankeySeries, activeThreshold, groupOrder, sort, categoryOrder]
   );
   // The header "(N in Other)" note covers all three merged columns.
   const mergedOtherCount = merged.otherCount + mergedIncome.otherCount;
@@ -358,6 +398,11 @@ export function SpendingReport({
   const incomeRows: MergedSpendingItem[] = mergedIncome.items;
 
   const empty = incomeRows.length === 0 && merged.targets.length === 0;
+  // Sankey-scoped emptiness for the chart below: hiding held rows can leave
+  // the Sankey with nothing to draw (only-held data, no income) while Bars
+  // still lists the held rows — so the Sankey's own empty state reads the
+  // held-excluded columns. Identical to `empty` while held rows show.
+  const sankeyEmpty = incomeRows.length === 0 && sankeyMerged.targets.length === 0;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
   // Epsilon rule: with full partitioning (every dollar spent or held) Left
@@ -372,21 +417,22 @@ export function SpendingReport({
 
   // The chart grows past the viewport when rows need more room (the
   // container scrolls) instead of crushing labels onto each other. Counts
-  // come from the raw inputs (plus the future Remaining plug): raw lengths
-  // can only overestimate the layout's filtered columns, erring toward
-  // harmless slack rather than crushed rows.
-  const contentH = useMemo(
-    () =>
-      sankeyContentHeight(
-        Math.max(
-          incomeRows.length,
-          merged.groups.length,
-          merged.targets.length + (totals.incomeTotal > totals.spendingTotal ? 1 : 0)
-        ),
-        chartSize.height
+  // come from the Sankey's own merged columns (plus the future Remaining
+  // plug, detected against the held-excluded spending so a refolded plug
+  // still reserves its row): merged lengths can only overestimate the
+  // layout's filtered columns, erring toward harmless slack rather than
+  // crushed rows.
+  const contentH = useMemo(() => {
+    const sankeySpendingTotal = sankeyMerged.targets.reduce((s, x) => s + x.value, 0);
+    return sankeyContentHeight(
+      Math.max(
+        incomeRows.length,
+        sankeyMerged.groups.length,
+        sankeyMerged.targets.length + (totals.incomeTotal > sankeySpendingTotal ? 1 : 0)
       ),
-    [incomeRows.length, merged.groups.length, merged.targets.length, totals.incomeTotal, totals.spendingTotal, chartSize.height]
-  );
+      chartSize.height
+    );
+  }, [incomeRows.length, sankeyMerged, totals.incomeTotal, chartSize.height]);
 
   // Math-first: the layout owns EVERYTHING drawn below — node bars, ribbon
   // paths, sub-ribbon paths, bar gradient stops, fills, and label anchors —
@@ -436,13 +482,13 @@ export function SpendingReport({
     autoFittedRef.current = true;
     markSankeyAutoFitDone();
     const best = sankeyAutoFitThreshold(
-      flow.groups,
-      flow.targets,
-      flow.links,
+      sankeyFlow.groups,
+      sankeyFlow.targets,
+      sankeyFlow.links,
       income,
       stops,
       chartSize.height,
-      series
+      sankeySeries
     );
     if (best > activeThreshold) {
       setThresholdDollars(best);
@@ -453,9 +499,9 @@ export function SpendingReport({
     chartSize.width,
     chartSize.height,
     empty,
-    flow,
+    sankeyFlow,
     income,
-    series,
+    sankeySeries,
     stops,
     activeThreshold,
     setThresholdDollars,
@@ -1231,6 +1277,30 @@ export function SpendingReport({
               </div>
             </div>
           )}
+          {viewMode === "sankey" && (
+            <div className="flex items-center gap-1.5">
+              <span className="y-caps text-[10px]" style={{ color: "var(--y-ink-faint)" }}>Held</span>
+              <Tooltip
+                tip={
+                  showHeld
+                    ? "Hide still-held flows (their money folds into Remaining)"
+                    : "Show still-held flows"
+                }
+              >
+                <Button
+                  size="sm"
+                  variant={showHeld ? "primary" : "default"}
+                  active={showHeld}
+                  onClick={() => {
+                    setShowHeld(!showHeld);
+                    setHover(null);
+                  }}
+                >
+                  {showHeld ? "On" : "Off"}
+                </Button>
+              </Tooltip>
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <Tooltip
               tip={
@@ -1437,10 +1507,10 @@ export function SpendingReport({
           }}
           onMouseLeave={() => pushHover(null)}
         >
-          {empty && (
+          {sankeyEmpty && (
             <div className="grid h-full place-items-center y-hint">No data for this timeframe.</div>
           )}
-          {!empty && sankey != null && chartSize.width > 0 && chartSize.height > 0 && (
+          {!sankeyEmpty && sankey != null && chartSize.width > 0 && chartSize.height > 0 && (
             <svg
               data-testid="sankey-svg"
               width={chartSize.width}
