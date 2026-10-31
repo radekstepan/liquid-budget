@@ -67,6 +67,6 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey, bucket/plug ribbon hatch follow-up (task-51)
-- Do the same for Other and Remaining
+Spending by Category - Sankey, on-budget held rows follow-up (task-52)
+- What about "EQ Bank" and other accounts like that? Why would we not show it just like we show RRSP, TFSA etc?
 
