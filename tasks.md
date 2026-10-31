@@ -67,6 +67,5 @@ Small, task-local details stay in the changeset, not the docs.
 
 ## Task list (in order)
 
-Spending by Category - Sankey, still-held toggle follow-up (task-53)
-- Add a toggle that shows/hides the "Still held" flows in the Sankey chart (held group bar, held target rows, and their ribbons/sub-ribbons); when hidden, held amounts fold back into Remaining so income = spending + remaining still reconciles.
+No pending tasks.
 
