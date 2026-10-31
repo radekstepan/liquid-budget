@@ -30,11 +30,12 @@ export type SpendingBreakdownItem = {
 export const UNCATEGORIZED_GROUP_LABEL = "Uncategorized";
 
 /**
- * Pseudo-group routing every still-held off-budget account's cell (mirrors
- * the "Uncategorized" pseudo-group precedent: a middle-column group with no
+ * Pseudo-group routing every still-held account's cell (mirrors the
+ * "Uncategorized" pseudo-group precedent: a middle-column group with no
  * Budget position, so the "group" sort parks it last). Each qualifying
- * account draws its own right-column target row under this group in both
- * dimensions — first-class destinations like categories, named by the
+ * account — on-budget savings like EQ Bank just like off-budget RRSP/TFSA
+ * pools — draws its own right-column target row under this group in both
+ * dimensions: first-class destinations like categories, named by the
  * account. Exported so views and tests agree.
  */
 export const STILL_HELD_GROUP_LABEL = "Still held";
@@ -238,13 +239,13 @@ function collectIncomeMonths(
 
 /**
  * Monthly still-held cells: account name -> per-month SIGNED net-change cents
- * (parallel to `months`) for every off-budget account that still holds money
- * over the range. Pure balance accounting (+amount where the account is the
- * row's accountId, −amount where it is the transferAccountId), with no
- * income/spending classification: contributions and external profit in,
- * withdrawals and direct spending out. Split parents are excluded (only
- * split children move money) and "Starting Balance" rows are excluded
- * (stock recognitions, not flows).
+ * (parallel to `months`) for EVERY account — on- or off-budget — that still
+ * holds money over the range. Pure balance accounting (+amount where the
+ * account is the row's accountId, −amount where it is the transferAccountId),
+ * with no income/spending classification: salary and contributions and
+ * external profit in, purchases and withdrawals and transfers out. Split
+ * parents are excluded (only split children move money) and "Starting
+ * Balance" rows are excluded (stock recognitions, not flows).
  *
  * An account qualifies only when its range net change is POSITIVE and its
  * range-end balance is POSITIVE (range-end = the stored current balance
@@ -252,9 +253,20 @@ function collectIncomeMonths(
  * effect including later "Starting Balance" rows, because the range-end
  * stock is a true balance, not a flow). The balance guard keeps liability
  * reduction out: excluding opening rows exposes debt paydown as a positive
- * range net, but a mortgage account still holds a negative balance, so it
- * is never "held". Fully-cycled, zero, and drawn-down accounts stay
- * excluded by the same clamp-at-zero philosophy as off-budget profit.
+ * range net, but a mortgage account — or a credit card carrying a balance —
+ * still holds a negative balance, so it is never "held". Fully-cycled,
+ * zero, and drawn-down accounts stay excluded by the same clamp-at-zero
+ * philosophy as off-budget profit.
+ *
+ * Internal on→on transfers net across accounts by construction (chequing
+ * −$1k / savings +$1k for one move), so a round-trip nets zero per account
+ * and creates no rows, while a one-way move shifts held money between rows
+ * without creating any. Conservation (pinned by unit tests): income −
+ * spending = Σ signed on-nets + Σ signed off-nets over the included row
+ * set — so with positive-only held rows on both sides the Remaining plug
+ * is ≤ 0 and normally never renders: the plug DISSOLVES into per-account
+ * cash rows, surviving only as a safety net on positive breaks
+ * (missing-account legs, dust).
  */
 function collectHeldMonths(
   data: BudgetData,
@@ -271,23 +283,24 @@ function collectHeldMonths(
     if (t.parentId != null) splitParentIds.add(t.parentId);
   }
 
-  const offBudget = new Map<number, { name: string; balance: number }>();
+  const tracked = new Map<number, { name: string; balance: number }>();
   for (const a of data.accounts) {
-    if (a.onBudget === false) {
-      const name = a.name.trim();
-      offBudget.set(a.id, { name: name === "" ? "—" : name, balance: num(a.balance) });
-    }
+    const name = a.name.trim();
+    tracked.set(a.id, { name: name === "" ? "—" : name, balance: num(a.balance) });
   }
 
   const inNets = new Map<number, number[]>();
   const postNets = new Map<number, number>();
-  // The signed balance effects of one row on its off-budget side(s): +amount
+  // The signed balance effects of one row on its account side(s): +amount
   // where the account holds the row, −amount where it is the transfer leg.
+  // Legs naming accounts absent from the data drop out (missing-account
+  // legs): their unmatched side is exactly the positive break the Remaining
+  // plug survives to cover.
   const effectsOf = (t: Transaction): [number, number][] => {
     const amt = num(t.amount);
     const out: [number, number][] = [];
-    if (offBudget.has(t.accountId)) out.push([t.accountId, amt]);
-    if (t.transferAccountId != null && offBudget.has(t.transferAccountId)) {
+    if (tracked.has(t.accountId)) out.push([t.accountId, amt]);
+    if (t.transferAccountId != null && tracked.has(t.transferAccountId)) {
       out.push([t.transferAccountId, -amt]);
     }
     return out;
@@ -324,9 +337,9 @@ function collectHeldMonths(
   for (const [id, series] of inNets) {
     const net = series.reduce((s, v) => s + v, 0);
     if (!(net > 0)) continue;
-    // Nets keys are only ever set under an offBudget.has guard, so every
+    // Nets keys are only ever set under a tracked.has guard, so every
     // lookup hits.
-    const acct = offBudget.get(id)!;
+    const acct = tracked.get(id)!;
     if (!(acct.balance - (postNets.get(id) ?? 0) > 0)) continue;
     // Same-named accounts merge under one row (sums the months); held rows
     // otherwise keep their own account name.
@@ -343,10 +356,11 @@ function collectHeldMonths(
 /**
  * Combined monthly cells behind a SpendingGroupFlow: the spending cells
  * (collectSpendMonths) plus one STILL_HELD_GROUP_LABEL cell per still-held
- * off-budget account (collectHeldMonths), keyed by account name in both
- * dimensions. The range flow sums these months and the time-aware series
- * keeps them, so both outputs agree by construction — and held demands
- * compete with spending demands chronologically in the same allocator.
+ * account, on- or off-budget (collectHeldMonths), keyed by account name in
+ * both dimensions. The range flow sums these months and the time-aware
+ * series keeps them, so both outputs agree by construction — and held
+ * demands compete with spending demands chronologically in the same
+ * allocator.
  *
  * A held account sharing its name with a spending target (a merchant named
  * like the account, a category of the same name) merges into that target as
@@ -476,14 +490,17 @@ function buildSpendingGroupFlowFromCells(
  * that group) is spread proportionally instead of drawn as an (impossible)
  * negative ribbon. Uncategorized rows land in UNCATEGORIZED_GROUP_LABEL.
  *
- * Still-held accounts as chart rows: every off-budget account that still
- * holds money over the range (see collectHeldMonths: positive range net AND
- * positive range-end balance) draws its own right-column target row named by
- * the account, routed through the STILL_HELD_GROUP_LABEL pseudo-group — in
- * BOTH dimensions, first-class destinations like categories. The Sankey's
- * Remaining plug then shrinks to the on-budget leftover ± drawdowns, and
- * the identity income = spending + held + remaining holds everywhere (with
- * "spending" the non-held targets and "held" the Still-held cells).
+ * Still-held accounts as chart rows: every account — on-budget savings
+ * like EQ Bank just like off-budget RRSP/TFSA pools — that still holds
+ * money over the range (see collectHeldMonths: positive range net AND
+ * positive range-end balance) draws its own right-column target row named
+ * by the account, routed through the STILL_HELD_GROUP_LABEL pseudo-group —
+ * in BOTH dimensions, first-class destinations like categories. Full
+ * partitioning dissolves the Remaining plug: income − spending − held ≤ 0
+ * normally, so the plug renders only on positive breaks (missing-account
+ * legs, dust) as a safety net — kept, never removed. The identity
+ * income = spending + held + remaining holds everywhere (with "spending"
+ * the non-held targets and "held" the Still-held cells).
  *
  * Groups are derived from the kept targets' links (never from raw
  * transactions), so a dropped (net <= 0) target can never orphan a link:
@@ -612,8 +629,8 @@ export function computeMonthlySankeySeries(
 /**
  * Aggregate net outflows over a contiguous month range (inclusive), grouped
  * by category name or merchant (payee) name — plus one row per still-held
- * off-budget account, named by the account. Returns items sorted by value
- * descending. This is the right-column half of computeSpendingGroupFlow —
+ * account, on- or off-budget, named by the account. Returns items sorted by
+ * value descending. This is the right-column half of computeSpendingGroupFlow —
  * see that function for the row semantics; delegating (rather than
  * re-implementing the filters) keeps the two outputs identical by
  * construction.

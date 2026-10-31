@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import {
+  SANKEY_FUNDING_EPSILON_CENTS,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   sankeyThresholdStops,
@@ -125,6 +126,28 @@ const heldCategoryFlow: SpendingGroupFlow = {
 };
 
 const heldIncome: SpendingItem[] = [{ name: "Payroll", value: 120000 }];
+
+// On-budget held fixture (task-52): a $1,000 purchase plus $600 still held
+// in EQ Bank and $400 in the RRSP, all routed through the Still-held
+// pseudo-group; $2,000 income covers everything exactly, so no plug draws.
+const onBudgetHeldFlow: SpendingGroupFlow = {
+  groups: [
+    { name: "Everyday", value: 100000 },
+    { name: "Still held", value: 100000 },
+  ],
+  targets: [
+    { name: "Groceries", value: 100000 },
+    { name: "EQ Bank", value: 60000 },
+    { name: "RRSP", value: 40000 },
+  ],
+  links: [
+    { groupIndex: 0, targetIndex: 0, value: 100000 },
+    { groupIndex: 1, targetIndex: 1, value: 60000 },
+    { groupIndex: 1, targetIndex: 2, value: 40000 },
+  ],
+};
+
+const onBudgetHeldIncome: SpendingItem[] = [{ name: "Payroll", value: 200000 }];
 
 // Task-51: a middle bucket feeding a real target. At the $500 threshold
 // Odds ($450) folds into the middle Other bucket but funds Shared ($600,
@@ -280,6 +303,86 @@ describe("SpendingReport", () => {
     expect(overlays[1]!.querySelector("rect")!.getAttribute("fill")).toBe(
       `url(#${SANKEY_BUCKET_HATCH_ID})`
     );
+  });
+
+  it("draws on-budget held rows just like off-budget ones (same group, hatch, and dissolved plug)", () => {
+    // Task-52: the view is fully generic over the Still-held pseudo-group —
+    // an on-budget EQ Bank row renders exactly like the off-budget RRSP one
+    // with no view-side special-casing.
+    render(
+      <SpendingReport
+        categoryFlow={onBudgetHeldFlow}
+        merchantFlow={emptyFlow}
+        income={onBudgetHeldIncome}
+      />
+    );
+    const groupLabels = screen.getAllByTestId("sankey-group-label");
+    expect(groupLabels.map((el) => el.textContent)).toContain("Still held");
+    const targetLabels = screen.getAllByTestId("sankey-target-label");
+    expect(targetLabels.map((el) => el.textContent)).toContain("EQ Bank");
+    expect(targetLabels.map((el) => el.textContent)).toContain("RRSP");
+    // Both held bars carry the shared held hatch in their own stable color
+    // (located by row label — RRSP and Groceries share a hash color, so a
+    // fill lookup would land on the spending row).
+    for (const name of ["EQ Bank", "RRSP"]) {
+      const label = targetLabels.find((el) => el.textContent === name)!;
+      expect(label).toBeDefined();
+      const row = label.closest("g")!;
+      const heldNode = row.querySelector('[data-testid="sankey-node"]')!;
+      expect(heldNode.getAttribute("fill")).toBe(colorForName(name));
+      const overlay = row.querySelector('[data-testid="sankey-held-hatch"]')!;
+      expect(overlay).toBeInTheDocument();
+      expect(overlay.getAttribute("fill")).toBe(`url(#${SANKEY_BUCKET_HATCH_ID})`);
+    }
+    // The spending row carries no hatch of either kind.
+    const spentRow = targetLabels.find((el) => el.textContent === "Groceries")!.closest("g")!;
+    expect(spentRow.querySelector('[data-testid="sankey-held-hatch"]')).toBeNull();
+    expect(spentRow.querySelector('[data-testid="sankey-bucket-hatch"]')).toBeNull();
+    // Full partitioning: no buckets, no plug, header Left reconciles to $0.
+    expect(screen.queryByTestId("sankey-bucket-hatch")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remaining")).not.toBeInTheDocument();
+    expect(screen.getByText("Left:")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.queryByText("Over:")).not.toBeInTheDocument();
+  });
+
+  it("clamps allocator-epsilon Left dust to $0 but keeps a real one-cent shortfall on the Over path", () => {
+    // Task-52 epsilon rule: |Left| under the allocator's own epsilon is
+    // not money — the header reads "Left: $0.00", never "Over".
+    const dust = SANKEY_FUNDING_EPSILON_CENTS / 2;
+    const dustyFlow: SpendingGroupFlow = {
+      groups: [{ name: "Everyday", value: 10000 + dust }],
+      targets: [{ name: "Groceries", value: 10000 + dust }],
+      links: [{ groupIndex: 0, targetIndex: 0, value: 10000 + dust }],
+    };
+    const { unmount } = render(
+      <SpendingReport
+        categoryFlow={dustyFlow}
+        merchantFlow={emptyFlow}
+        income={[{ name: "Payroll", value: 10000 }]}
+      />
+    );
+    // Without the clamp this reads "Over:" (remaining is −dust); clamped
+    // it reads "Left: $0.00".
+    expect(screen.getByText("Left:")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.queryByText("Over:")).not.toBeInTheDocument();
+    unmount();
+    // Boundary: a real one-cent shortfall still reads "Over: $0.01".
+    const shortFlow: SpendingGroupFlow = {
+      groups: [{ name: "Everyday", value: 10001 }],
+      targets: [{ name: "Groceries", value: 10001 }],
+      links: [{ groupIndex: 0, targetIndex: 0, value: 10001 }],
+    };
+    render(
+      <SpendingReport
+        categoryFlow={shortFlow}
+        merchantFlow={emptyFlow}
+        income={[{ name: "Payroll", value: 10000 }]}
+      />
+    );
+    expect(screen.getByText("Over:")).toBeInTheDocument();
+    expect(screen.getByText("$0.01")).toBeInTheDocument();
   });
 
   it("reads held rows as holdings in tooltips (Held, never Spent)", () => {

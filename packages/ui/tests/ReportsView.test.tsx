@@ -692,9 +692,19 @@ describe("ReportsView", () => {
     // the contribution as a Retirement allocation.
     clickTab("Spending by Category");
     expect(screen.getByText("Vacation")).toBeInTheDocument();
-    expect(screen.getAllByText("$500.00").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("$500.00 · 17%")).toHaveLength(2);
     expect(screen.queryByText("Retirement")).not.toBeInTheDocument();
     expect(screen.getByText("Payroll")).toBeInTheDocument();
+    // Task-52: Chequing still holds the $2,500 surplus at range end, so it
+    // draws its own Still-held row — Out covers spending + held ($3,000),
+    // Left reconciles to zero, and no Remaining plug survives. (The old
+    // "$500.00 Out" assertion encoded the pre-52 plug behavior.)
+    expect(screen.getByText("Chequing")).toBeInTheDocument();
+    expect(screen.getByText("Still held")).toBeInTheDocument();
+    expect(screen.getAllByText("$3,000.00")).toHaveLength(2);
+    expect(screen.getByText("Left:")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.queryByText("Remaining")).not.toBeInTheDocument();
   });
 
   it("BUG-45: updates automatic date range when older transactions are imported if untouched", () => {

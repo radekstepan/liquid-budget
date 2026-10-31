@@ -15,6 +15,7 @@ import {
   sankeyThresholdStops,
   showSankeySourceAmount,
   sortMergedGroupFlow,
+  SANKEY_FUNDING_EPSILON_CENTS,
   SANKEY_LEFT_LABEL_INSET,
   SANKEY_NODE_GAP,
   SANKEY_NODE_MIN_HEIGHT,
@@ -359,7 +360,15 @@ export function SpendingReport({
   const empty = incomeRows.length === 0 && merged.targets.length === 0;
   const nounSingular = dimension === "categories" ? "category" : "merchant";
   const nounPlural = dimension === "categories" ? "categories" : "merchants";
-  const remaining = totals.remaining;
+  // Epsilon rule: with full partitioning (every dollar spent or held) Left
+  // reconciles to exactly zero — but fractional-cent amounts can leave
+  // allocator-scale dust on either side of it. Anything under the
+  // allocator's own epsilon (SANKEY_FUNDING_EPSILON_CENTS) is not money, so
+  // the header clamps it to $0 and reads "Left", never "Over" — agreeing
+  // with the layout's plug, which snaps the same way via
+  // allocateCellFunding. A real shortfall (≥ one cent) still reads "Over".
+  const remaining =
+    Math.abs(totals.remaining) < SANKEY_FUNDING_EPSILON_CENTS ? 0 : totals.remaining;
 
   // The chart grows past the viewport when rows need more room (the
   // container scrolls) instead of crushing labels onto each other. Counts
