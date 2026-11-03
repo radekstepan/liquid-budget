@@ -5,7 +5,7 @@ import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, categories, categoryGroups, transactions } from "./schema.js";
 import { TransactionError } from "./queries/transactions.js";
-import { findOrCreatePayee, getPayeeByName, updatePayee } from "./queries/payees.js";
+import { findOrCreatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
 
 export type ImportCsvInput = {
@@ -229,38 +229,40 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       const categoryId = account.onBudget && row.category
         ? resolveImportCategory(row.category, categoryRows)
         : null;
-      // Link the row to a payee entity (creating it on first sight, BUG-16) and
-      // fall back to the payee's auto-category when the statement row carries no
-      // resolvable category. Off-budget accounts stay uncategorized, matching the
-      // explicit-category resolution above.
-      const knownPayee = getPayeeByName(db, row.payee ?? "");
-      let payeeRow = findOrCreatePayee(db, row.payee ?? "");
-      // A brand-new payee inherits the category most recently used with that
-      // name, so the first statement that mentions it still categorizes like
-      // history. Existing payees — including ones whose default was cleared —
-      // are left alone.
-      if (!knownPayee && payeeRow.autoCategoryId == null) {
-        const prior = db
-          .select({ categoryId: transactions.categoryId })
-          .from(transactions)
-          .where(
-            and(
-              eq(transactions.payee, payeeRow.name),
-              isNotNull(transactions.categoryId)
+      // Link the row to a payee entity (creating it on first sight, BUG-16).
+      // The row itself stays uncategorized unless the statement carries an
+      // explicit category or a rename rule corrected the payee — in which
+      // case the clean name's default (or last use) populates the row,
+      // mirroring a manual payee rename. Off-budget accounts stay
+      // uncategorized, matching the explicit-category resolution above.
+      const payeeRow = findOrCreatePayee(db, row.payee ?? "");
+      let effectiveCategoryId = categoryId;
+      const wasRenamed = (row.payee ?? "") !== (rawRow.payee ?? "");
+      if (effectiveCategoryId === null && account.onBudget && wasRenamed) {
+        if (payeeRow.autoCategoryId != null) {
+          effectiveCategoryId = payeeRow.autoCategoryId;
+        } else {
+          const renamedPrior = db
+            .select({ categoryId: transactions.categoryId })
+            .from(transactions)
+            .where(
+              and(
+                eq(transactions.payee, row.payee ?? ""),
+                isNotNull(transactions.categoryId)
+              )
             )
-          )
-          .orderBy(desc(transactions.date), desc(transactions.id))
-          .limit(1)
-          .get();
-        if (prior?.categoryId != null) {
-          payeeRow = (await updatePayee(db, payeeRow.id, { autoCategoryId: prior.categoryId })) ?? payeeRow;
+            .orderBy(desc(transactions.date), desc(transactions.id))
+            .limit(1)
+            .get();
+          if (renamedPrior?.categoryId != null) {
+            effectiveCategoryId = renamedPrior.categoryId;
+          }
         }
       }
-      const effectiveCategoryId =
-        categoryId === null && account.onBudget && payeeRow.autoCategoryId != null
-          ? payeeRow.autoCategoryId
-          : categoryId;
-      const isIncome = effectiveCategoryId == null && amount > 0 && !!account.onBudget && account.kind !== "credit";
+      // YNAB4-style: imports never auto-mark income. Positive rows stay
+      // uncategorized (highlighted) until the user explicitly categorizes
+      // them as Income via the category picker.
+      const isIncome = false;
       const [inserted] = await db
         .insert(transactions)
         .values({

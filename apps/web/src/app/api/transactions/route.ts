@@ -125,6 +125,7 @@ export async function POST(req: Request) {
       flagColor: body.flagColor ?? null,
       transferAccountId: body.mode === "transfer" ? body.transferAccountId : null,
       incomeMonth: body.incomeMonth,
+      ...(body.mode === "single" && body.isIncome !== undefined ? { isIncome: body.isIncome } : {}),
     });
     return Response.json(row);
   } catch (e) {
@@ -199,6 +200,9 @@ export async function PATCH(req: Request) {
     const patch: Parameters<typeof updateTransaction>[2] = {};
     if (body.accountId !== undefined) patch.accountId = body.accountId;
     if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if ("isIncome" in body && (body as { isIncome?: boolean }).isIncome !== undefined) {
+      patch.isIncome = (body as { isIncome: boolean }).isIncome;
+    }
     if ("transferAccountId" in body && body.transferAccountId !== undefined) {
       patch.transferAccountId = body.transferAccountId;
     } else if (isExplicitSingle) {

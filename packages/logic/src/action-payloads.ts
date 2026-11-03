@@ -21,6 +21,12 @@ export type SingleTransactionSavePayload = {
   flagColor?: TransactionFlagColor | null;
   transferAccountId?: null;
   incomeMonth?: string | null;
+  /**
+   * Explicit income flag distinguishing "Income: Available ..." (true) from
+   * "Uncategorized" (false) when categoryId is null. Omitted for backwards
+   * compatibility — the server infers from amount when absent.
+   */
+  isIncome?: boolean;
   subTransactions?: undefined;
 };
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor, fireEvent, within } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent, within, cleanup } from "@testing-library/react";
 import React from "react";
 import { BudgetAppShell } from "../src/components/BudgetAppShell";
 import { makeSeedBudgetData, type BudgetData } from "@ynab/logic";
@@ -45,6 +45,7 @@ describe("BudgetAppShell (BUG-06: optimistic transaction income reclassification
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -222,8 +223,8 @@ describe("BudgetAppShell (BUG-06: optimistic transaction income reclassification
 
     const modal = screen.getByText("Edit Transaction").closest(".y-modal") as HTMLElement;
 
-    // Select "Income: Available this month" (value: "")
-    pickFromOpenSearchableByValue(modal, "Category", "");
+    // Select "Income: Available this month" (value: "__income__")
+    pickFromOpenSearchableByValue(modal, "Category", "__income__");
 
     // Save changes
     const saveBtn = within(modal).getByRole("button", { name: /save changes/i });
@@ -231,10 +232,11 @@ describe("BudgetAppShell (BUG-06: optimistic transaction income reclassification
       fireEvent.click(saveBtn);
     });
 
-    // Verify PATCH was called with categoryId: null
+    // Verify PATCH was called with categoryId: null and explicit isIncome
     await waitFor(() => {
       expect(patchBody).not.toBeNull();
       expect(patchBody.categoryId).toBeNull();
+      expect(patchBody.isIncome).toBe(true);
     });
 
     // In optimistic state, the register row should no longer show Internet, iPhone

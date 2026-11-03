@@ -1,4 +1,4 @@
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type {
   BulkUpdateTransactionPatch,
   ClearedStatus,
@@ -28,7 +28,7 @@ import {
 } from "../invariants.js";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { accounts, categories, transactions } from "../schema.js";
+import { accounts, categories, payees, transactions } from "../schema.js";
 import { learnRenameRuleFromPayees } from "./rename-rules.js";
 
 export type CreateTransactionInput = {
@@ -154,6 +154,38 @@ export function sanitizeFlagState(value: unknown): TransactionFlagState {
   return (TRANSACTION_FLAG_COLORS as readonly string[]).includes(value)
     ? (value as TransactionFlagColor)
     : null;
+}
+
+/**
+ * Last category used with a payee name (YNAB4-style auto-fill).
+ * Prefers the payee entity's default when set, else the most recent
+ * categorized transaction with that exact name (excluding `excludeId`).
+ * Returns null when the payee has no history.
+ */
+async function lastCategoryForPayee(
+  db: Database,
+  payeeName: string,
+  excludeId?: number
+): Promise<number | null> {
+  const trimmed = payeeName.trim();
+  if (!trimmed) return null;
+  const [payeeRow] = await db
+    .select({ autoCategoryId: payees.autoCategoryId })
+    .from(payees)
+    .where(eq(payees.name, trimmed));
+  if (payeeRow?.autoCategoryId != null) return payeeRow.autoCategoryId;
+  const conditions = [
+    eq(transactions.payee, trimmed),
+    isNotNull(transactions.categoryId),
+  ];
+  if (excludeId != null) conditions.push(ne(transactions.id, excludeId));
+  const [prior] = await db
+    .select({ categoryId: transactions.categoryId })
+    .from(transactions)
+    .where(and(...conditions))
+    .orderBy(desc(transactions.date), desc(transactions.id))
+    .limit(1);
+  return prior?.categoryId ?? null;
 }
 
 async function applyBalance(db: Database, accountId: number, delta: number) {
@@ -389,13 +421,12 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       incomeMonth = null;
     } else {
       categoryId = input.categoryId ?? null;
-      // Uncategorized positive inflow = income, regardless of split
-      // nesting — this matches `createSplitWithChildren`'s child
-      // semantics (BUG-18.2). Split children honour an explicit
-      // `isIncome` override just like top-level rows do.
-      const isEligibleForIncome = categoryId == null;
+      // An explicit isIncome distinguishes "Income" (true) from
+      // "Uncategorized" (false) when the category is null. Income is only
+      // valid for positive inflows; anything else stays uncategorized.
+      const isEligibleForIncome = categoryId == null && amount > 0;
       isIncome = isEligibleForIncome
-        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : amount > 0)
+        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : true)
         : false;
       incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
     }
@@ -898,6 +929,40 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
     const srcOnBudget = srcAccount?.onBudget ?? true;
     const srcKind = srcAccount?.kind ?? "liquid";
 
+    // YNAB4-style payee auto-fill: renaming an uncategorized row to a payee
+    // with history populates the category (unless the caller explicitly
+    // chose a category or Income). Mirrors CSV import's rename-rule
+    // categorization.
+    if (
+      patch.payee != null &&
+      String(patch.payee).trim() !== "" &&
+      String(patch.payee).trim() !== current.payee.trim() &&
+      current.categoryId == null &&
+      !current.isIncome &&
+      (!("categoryId" in p) || (p.categoryId as number | null) == null) &&
+      !("isIncome" in p) &&
+      current.transferAccountId == null &&
+      newTransferAccountId == null &&
+      !isSplitParent &&
+      srcOnBudget &&
+      srcKind !== "credit"
+    ) {
+      const suggested = await lastCategoryForPayee(db, String(patch.payee), id);
+      if (suggested != null) {
+        p.categoryId = suggested;
+      } else {
+        // No history: preserve uncategorized (don't flip an inflow to
+        // income just because the payee was fixed). An explicit isIncome
+        // in the patch still wins via the recompute below.
+        if (!("isIncome" in p)) {
+          p.isIncome = current.isIncome;
+          if (!current.isIncome) {
+            p.incomeMonth = null;
+          }
+        }
+      }
+    }
+
     if (newTransferAccountId != null) {
       const destOnBudget = await isAccountOnBudget(db, newTransferAccountId);
       if (patch.payee !== undefined && !String(patch.payee).trim()) {
@@ -935,16 +1000,33 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         p.categoryId = null;
       }
       const finalCatId = "categoryId" in p ? (p.categoryId as number | null) : current.categoryId;
-      // Matches `createSplitWithChildren` / createSplit update semantics:
-      // an uncategorized positive inflow is income even when it is a
-      // split child (BUG-18.2).
-      const isEligibleForIncome = finalCatId == null;
+      const isEligibleForIncome = finalCatId == null && newAmount > 0;
 
-      const isIncome = isEligibleForIncome
-        ? ("isIncome" in p ? Boolean(p.isIncome) : newAmount > 0)
-        : false;
-      p.isIncome = isIncome;
-      if (!isIncome) {
+      // Only recompute income when the categorization inputs actually
+      // changed (value comparison, not mere presence — the modal always
+      // sends categoryId). Unrelated edits (status, memo, flag) preserve
+      // the existing flag, so approving an uncategorized inflow leaves it
+      // uncategorized (highlighted) YNAB4-style instead of flipping to
+      // income. An explicit isIncome in the patch always wins.
+      const categoryChanged =
+        "categoryId" in p && (p.categoryId as number | null) !== current.categoryId;
+      const amountChanged = "amount" in p && Number(p.amount) !== Number(current.amount);
+      const accountChanged = "accountId" in p && Number(p.accountId) !== current.accountId;
+      const incomeExplicit = "isIncome" in p;
+      const incomeMonthChanged =
+        "incomeMonth" in p && (p.incomeMonth as string | null) !== (current.incomeMonth ?? null);
+      if (categoryChanged || amountChanged || accountChanged || incomeExplicit || incomeMonthChanged) {
+        const isIncome = isEligibleForIncome
+          ? ("isIncome" in p ? Boolean(p.isIncome) : true)
+          : false;
+        p.isIncome = isIncome;
+        if (!isIncome) {
+          p.incomeMonth = null;
+        }
+      } else if (!isEligibleForIncome && current.isIncome) {
+        // Safety: a categorized row (or non-positive amount) must never
+        // stay flagged as income.
+        p.isIncome = false;
         p.incomeMonth = null;
       }
     }

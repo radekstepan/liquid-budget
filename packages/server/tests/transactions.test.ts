@@ -1091,8 +1091,9 @@ describe("transactions queries", () => {
       });
 
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
-      expect(update?.set).toMatchObject({ status: "c", isIncome: false });
+      expect(update?.set).toMatchObject({ status: "c" });
       expect(update?.set).not.toHaveProperty("categoryId");
+      expect(update?.set).not.toHaveProperty("isIncome");
     });
 
     it("BUG-19: preserves incomeMonth on income transaction when updating single field (e.g. status) with undefined fields", async () => {
@@ -1116,9 +1117,10 @@ describe("transactions queries", () => {
       });
 
       const update = mock.calls.find((c) => c.op === "update" && c.table === "transactions");
-      expect(update?.set).toMatchObject({ status: "c", isIncome: true });
+      expect(update?.set).toMatchObject({ status: "c" });
       expect(update?.set).not.toHaveProperty("incomeMonth");
       expect(update?.set).not.toHaveProperty("categoryId");
+      expect(update?.set).not.toHaveProperty("isIncome");
     });
 
     it("rejects setting status to 'r' via updateTransaction", async () => {
@@ -5620,6 +5622,118 @@ describe("transactions queries", () => {
           });
         });
       });
+    });
+  });
+
+  describe("payee rename auto-categorization (YNAB4-style)", () => {
+    it("auto-populates category from last use when renaming an uncategorized payee", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      // History: last use of "BC Ferries" was cat2 (Rent), earlier was cat1.
+      await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-06-01",
+        payee: "BC Ferries",
+        amount: -1000,
+      });
+      await createTransaction(db, {
+        accountId,
+        categoryId: cat2Id,
+        date: "2026-07-01",
+        payee: "BC Ferries",
+        amount: -2000,
+      });
+      // Uncategorized imported row with messy payee.
+      const [messy] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId,
+          categoryId: null,
+          date: "2026-08-13",
+          payee: "BCF1",
+          memo: "",
+          amount: -1500,
+          status: "u",
+          createdAt: "",
+          isIncome: false,
+          needsReview: true,
+        })
+        .returning();
+
+      // Simulate modal save: payee changed, category left empty (null).
+      const updated = await updateTransaction(db, messy!.id, {
+        payee: "BC Ferries",
+        categoryId: null,
+      });
+      expect(updated?.payee).toBe("BC Ferries");
+      expect(updated?.categoryId).toBe(cat2Id);
+      expect(updated?.isIncome).toBe(false);
+    });
+
+    it("does not overwrite an explicitly chosen category when renaming payee", async () => {
+      const db = openMigratedDb();
+      const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+
+      await createTransaction(db, {
+        accountId,
+        categoryId: cat1Id,
+        date: "2026-07-01",
+        payee: "BC Ferries",
+        amount: -2000,
+      });
+      const [messy] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId,
+          categoryId: null,
+          date: "2026-08-13",
+          payee: "BCF1",
+          memo: "",
+          amount: -1500,
+          status: "u",
+          createdAt: "",
+          isIncome: false,
+          needsReview: true,
+        })
+        .returning();
+
+      const updated = await updateTransaction(db, messy!.id, {
+        payee: "BC Ferries",
+        categoryId: cat2Id,
+      });
+      expect(updated?.categoryId).toBe(cat2Id);
+    });
+
+    it("preserves uncategorized inflow (isIncome false) on unrelated edits", async () => {
+      const db = openMigratedDb();
+      const { accountId } = await seedTestData(db);
+
+      const [inflow] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId,
+          categoryId: null,
+          date: "2026-08-13",
+          payee: "New Employer",
+          memo: "",
+          amount: 50000,
+          status: "u",
+          createdAt: "",
+          isIncome: false,
+          needsReview: true,
+        })
+        .returning();
+
+      // Approving / memo-only edits must not flip it to income.
+      const approved = await updateTransaction(db, inflow!.id, { status: "c" });
+      expect(approved?.categoryId).toBeNull();
+      expect(approved?.isIncome).toBe(false);
+
+      const memoEdit = await updateTransaction(db, inflow!.id, { memo: "August pay" });
+      expect(memoEdit?.categoryId).toBeNull();
+      expect(memoEdit?.isIncome).toBe(false);
     });
   });
 });

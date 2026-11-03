@@ -75,7 +75,7 @@ test("deleting a category with transactions prompts for reassign target", async 
   await fillSearchlist(txModal, "e.g. Whole Foods", `PW Tx ${stamp}`);
 
   // Select the newly created category in the searchable dropdown
-  await openSearchField(txModal, "Income: Available this month");
+  await openSearchField(txModal, "Select category…");
   await page.locator('.y-dropdown button[role="option"]').filter({ hasText: catName }).click();
 
   await txModal.getByRole("button", { name: "Save Transaction" }).click();

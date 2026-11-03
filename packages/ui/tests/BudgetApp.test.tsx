@@ -328,6 +328,13 @@ describe("BudgetApp", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-5.50" },
     });
+    // Pick a category (scoped to the modal: the register header also has a "Category" button).
+    const modal = document.querySelector(".y-modal") as HTMLElement;
+    fireEvent.click(within(modal).getByRole("button", { name: /category/i }));
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.getAttribute("data-value") === "2")!;
+    fireEvent.click(option);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     });
@@ -337,6 +344,7 @@ describe("BudgetApp", () => {
     expect(call?.args[0]).toMatchObject({
       payee: "Coffee",
       amount: -550,
+      categoryId: 2,
     });
   });
 

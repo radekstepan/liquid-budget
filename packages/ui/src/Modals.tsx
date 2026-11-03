@@ -231,12 +231,38 @@ export function TransactionModal({
   }, [accounts, accountId]);
   const isOffBudget = selectedAccount ? !selectedAccount.onBudget : false;
 
+  // Last-used category per payee (excluding the row being edited), so
+  // typing a known payee into a blank category auto-fills it YNAB4-style.
+  const lastCategoryByPayee = useMemo(() => {
+    const map = new Map<string, { date: string; id: number; categoryId: number }>();
+    for (const t of allTransactions ?? []) {
+      if (t.categoryId == null) continue;
+      if (initial?.id != null && t.id === initial.id) continue;
+      const key = (t.payee ?? "").trim();
+      if (!key) continue;
+      const prev = map.get(key);
+      if (!prev || t.date > prev.date || (t.date === prev.date && t.id > prev.id)) {
+        map.set(key, { date: t.date, id: t.id, categoryId: t.categoryId });
+      }
+    }
+    return map;
+  }, [allTransactions, initial?.id]);
+
   const isInitialDeferred =
     initial?.categoryId == null &&
     !!initial?.incomeMonth &&
     initial.incomeMonth > (initial.date ? initial.date.slice(0, 7) : "");
-  const [categoryId, setCategoryId] = useState<number | "" | "__deferred__">(
-    initial?.categoryId ?? (isInitialDeferred ? "__deferred__" : "")
+  const initialCategoryPick: number | "" | "__income__" | "__deferred__" =
+    initial?.categoryId ??
+    (isInitialDeferred
+      ? "__deferred__"
+      : initial
+        ? initial.isIncome
+          ? "__income__"
+          : ""
+        : "");
+  const [categoryId, setCategoryId] = useState<number | "" | "__income__" | "__deferred__">(
+    initialCategoryPick
   );
   const [date, setDate] = useState(initial?.date ?? defaultDate ?? todayISO());
   const [incomeMonth, setIncomeMonth] = useState<string>(
@@ -686,7 +712,15 @@ export function TransactionModal({
               <Field label="Payee">
                 <SearchList
                   value={payee}
-                  onChange={setPayee}
+                  onChange={(v) => {
+                    setPayee(v);
+                    // Single mode with a blank category: fill from the last
+                    // time this payee was used (never overwrites a pick).
+                    if (mode === "single" && !isOffBudget && categoryId === "") {
+                      const hit = lastCategoryByPayee.get(v.trim());
+                      if (hit) setCategoryId(hit.categoryId);
+                    }
+                  }}
                   options={payees}
                   allowCreate
                   placeholder="e.g. Whole Foods"
@@ -736,12 +770,21 @@ export function TransactionModal({
               <Field label="Category">
                 <Select
                   value={categoryId}
-                  onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
+                  onChange={(v) =>
+                    setCategoryId(
+                      v === "" || v === "__income__" || v === "__deferred__" ? v : Number(v)
+                    )
+                  }
                   className="w-full"
                   searchable
                 >
-                  <option value="">Income: Available this month</option>
-                  <option value="__deferred__">Income: Available next month</option>
+                  <option value="" disabled>Select category…</option>
+                  {selectedAccount?.kind !== "credit" && (
+                    <>
+                      <option value="__income__">Income: Available this month</option>
+                      <option value="__deferred__">Income: Available next month</option>
+                    </>
+                  )}
                   {groups && groups.length > 0 ? (
                     groups.map((g) => (
                       <optgroup key={g.id} label={g.name}>
@@ -779,7 +822,11 @@ export function TransactionModal({
             <Field label={isBoundaryOutflow ? "Category (required for boundary transfer outflow)" : "Category"}>
               <Select
                 value={categoryId}
-                onChange={(v) => setCategoryId(v === "" || v === "__deferred__" ? v : Number(v))}
+                onChange={(v) =>
+                  setCategoryId(
+                    v === "" || v === "__income__" || v === "__deferred__" ? v : Number(v)
+                  )
+                }
                 className="w-full"
                 searchable
               >
@@ -787,7 +834,8 @@ export function TransactionModal({
                   <option value="" disabled>Select category…</option>
                 ) : (
                   <>
-                    <option value="">Income: Available this month</option>
+                    <option value="" disabled>Select category…</option>
+                    <option value="__income__">Income: Available this month</option>
                     <option value="__deferred__">Income: Available next month</option>
                   </>
                 )}

@@ -38,7 +38,7 @@ export type TransactionFormData = {
   mode: "single" | "transfer" | "split";
   id?: number;
   accountId: number;
-  categoryId?: number | "" | "__deferred__" | null;
+  categoryId?: number | "" | "__income__" | "__deferred__" | null;
   date: string;
   payee?: string;
   memo?: string;
@@ -150,6 +150,7 @@ export function toTransactionPayload(
     if (
       isBoundaryOutflow &&
       (formData.categoryId === "" ||
+        formData.categoryId === "__income__" ||
         formData.categoryId === "__deferred__" ||
         formData.categoryId == null)
     ) {
@@ -180,9 +181,16 @@ export function toTransactionPayload(
       if (isBoundaryOutflow) {
         finalCatId = Number(formData.categoryId);
       } else {
+        // Blank blocks save (force an explicit Income/category pick);
+        // legacy null/undefined still means Income.
+        if (formData.categoryId === "") return null;
         const isDeferred = formData.categoryId === "__deferred__";
         finalCatId =
-          formData.categoryId === "" || isDeferred ? null : Number(formData.categoryId);
+          formData.categoryId === "__income__" ||
+          isDeferred ||
+          formData.categoryId == null
+            ? null
+            : Number(formData.categoryId);
         incMonth = isDeferred
           ? formData.incomeMonth || nextMonthKey(date.slice(0, 7))
           : null;
@@ -283,14 +291,34 @@ export function toTransactionPayload(
   const rawPayee = (formData.payee ?? "").trim();
   if (!rawPayee) return null;
 
+  // Blank (no selection) blocks save on-budget — the user must pick a real
+  // category or explicit Income. Off-budget ignores the category entirely.
+  // Legacy null/undefined keeps the old inference so existing callers don't
+  // change behavior.
+  if (!isOffBudget && formData.categoryId === "") return null;
+  const isIncomePick =
+    !isOffBudget &&
+    (formData.categoryId === "__income__" || formData.categoryId === "__deferred__");
+  // Income picks are only valid for positive inflows on non-credit
+  // accounts; anything else must choose a real category.
+  if (isIncomePick && (amountCents <= 0 || selectedAccount?.kind === "credit")) {
+    return null;
+  }
   const isDeferred = !isOffBudget && formData.categoryId === "__deferred__";
   const finalCatId =
-    isOffBudget || formData.categoryId === "" || isDeferred || formData.categoryId == null
+    isOffBudget ||
+    formData.categoryId === "__income__" ||
+    isDeferred ||
+    formData.categoryId == null
       ? null
       : Number(formData.categoryId);
   const incMonth = isDeferred
     ? formData.incomeMonth || nextMonthKey(date.slice(0, 7))
     : null;
+  // Explicit income flag so the server can distinguish "Income" from
+  // "Uncategorized" when the category is null.
+  const explicitIsIncome =
+    finalCatId != null || isOffBudget ? false : amountCents > 0;
 
   const payload: SingleTransactionSavePayload = {
     mode: "single",
@@ -304,6 +332,7 @@ export function toTransactionPayload(
     status: finalStatus,
     flagColor: savedFlagColor,
     incomeMonth: incMonth,
+    isIncome: explicitIsIncome,
     transferAccountId: null,
     subTransactions: undefined,
   };

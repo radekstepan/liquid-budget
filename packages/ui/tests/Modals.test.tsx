@@ -229,12 +229,111 @@ describe("TransactionModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "-42.50" },
     });
+    pickFromOpenSearchableByValue(/category/i, "10");
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Whole Foods",
       amount: -4250,
+      categoryId: 10,
+    });
+  });
+
+  it("blocks save on a blank category until one is picked", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Employer" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "100.00" },
+    });
+    expect(screen.getByRole("button", { name: /save transaction/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave).not.toHaveBeenCalled();
+
+    pickFromOpenSearchableByValue(/category/i, "__income__");
+    expect(screen.getByRole("button", { name: /save transaction/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
       categoryId: null,
+      isIncome: true,
+    });
+  });
+
+  it("sends isIncome true when Income is explicitly picked for an inflow", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "Employer" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "100.00" },
+    });
+    pickFromOpenSearchableByValue(/category/i, "__income__");
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      categoryId: null,
+      isIncome: true,
+    });
+  });
+
+  it("auto-fills a blank category from the last time the payee was used", () => {
+    const onSave = vi.fn();
+    render(
+      <TransactionModal
+        accounts={accounts}
+        categories={categories}
+        defaultAccountId={null}
+        allTransactions={[
+          {
+            id: 1,
+            accountId: 1,
+            categoryId: 11,
+            date: "2026-07-01",
+            payee: "BC Ferries",
+            memo: "",
+            amount: "-2000",
+            status: "c",
+            parentId: null,
+            transferAccountId: null,
+          },
+        ]}
+        onClose={() => {}}
+        onSave={onSave}
+      />
+    );
+    fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
+      target: { value: "BC Ferries" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "-15.00" },
+    });
+    // Typing the known payee filled the category, so save is enabled.
+    expect(screen.getByRole("button", { name: /save transaction/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      payee: "BC Ferries",
+      categoryId: 11,
     });
   });
 
@@ -292,10 +391,12 @@ describe("TransactionModal", () => {
     fireEvent.change(screen.getByPlaceholderText("0.00"), {
       target: { value: "1000" },
     });
+    pickFromOpenSearchableByValue(/category/i, "__income__");
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       payee: "Payroll",
       amount: 100000,
+      isIncome: true,
     });
   });
 
@@ -334,8 +435,9 @@ describe("TransactionModal", () => {
     fireEvent.change(input, { target: { value: "iga" } });
     fireEvent.click(screen.getByRole("option", { name: "IGA" }));
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-10" } });
+    pickFromOpenSearchableByValue(/category/i, "10");
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
-    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "IGA" });
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "IGA", categoryId: 10 });
   });
 
   it("saves a brand-new payee typed into the field (create allowed)", () => {
@@ -354,8 +456,9 @@ describe("TransactionModal", () => {
       target: { value: "New Coffee Shop" },
     });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "-5" } });
+    pickFromOpenSearchableByValue(/category/i, "10");
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
-    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "New Coffee Shop" });
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ payee: "New Coffee Shop", categoryId: 10 });
   });
 
   it("groups category options by group and lets the user search within them", () => {
@@ -1024,6 +1127,7 @@ describe("TransactionModal", () => {
       // +100 inflow to Chequing from Brokerage
       fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "100" } });
       pickFromOpenSearchableByValue(/transfer to/i, "3");
+      pickFromOpenSearchableByValue(/^category$/i, "__income__");
 
       const saveBtn = screen.getByRole("button", { name: /save transaction/i });
       expect(saveBtn).toBeEnabled();
@@ -1679,6 +1783,7 @@ describe("TransactionModal", () => {
       fireEvent.change(openSearchlistByPlaceholder("e.g. Whole Foods"), {
         target: { value: "Test Payee" },
       });
+      pickFromOpenSearchableByValue(/category/i, "10");
       const saveBtn = screen.getByRole("button", { name: /save transaction/i });
 
       // Default amount is empty -> disabled

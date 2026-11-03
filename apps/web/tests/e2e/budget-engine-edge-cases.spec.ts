@@ -117,7 +117,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
       await payeeInput.press("Enter");
     }
 
-    const catInput = await openSearchField(txModal, "Income: Available this month");
+    const catInput = await openSearchField(txModal, "Select category…");
     await catInput.fill(catName);
     await page.locator('.y-dropdown button[role="option"]').filter({ hasText: catName }).click();
 
@@ -197,7 +197,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
       await payeeInput.press("Enter");
     }
 
-    const catInput = await openSearchField(txModal, "Income: Available this month");
+    const catInput = await openSearchField(txModal, "Select category…");
     await catInput.fill(catName);
     await page.locator('.y-dropdown button[role="option"]').filter({ hasText: catName }).click();
 
@@ -266,7 +266,7 @@ test.describe("Budget Engine & Calculation Edge Cases", () => {
       await payeeInput.press("Enter");
     }
 
-    const catInput = await openSearchField(txModal, "Income: Available this month");
+    const catInput = await openSearchField(txModal, "Select category…");
     await catInput.fill(catName);
     await page.locator('.y-dropdown button[role="option"]').filter({ hasText: catName }).click();
 

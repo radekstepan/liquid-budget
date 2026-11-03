@@ -190,7 +190,7 @@ test.describe("Split Transaction Edge Cases", () => {
     await modal.locator('input[type="date"]').first().fill("2026-06-15");
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
 
-    const catInput = await openSearchField(modal, "Income: Available this month");
+    const catInput = await openSearchField(modal, "Select category…");
     await catInput.fill("Groceries");
     await page.locator('.y-dropdown button[role="option"]').filter({ hasText: "Groceries" }).click();
 

@@ -553,7 +553,12 @@ export function BudgetAppShell({
             initialIsIncome = false;
             initialIncomeMonth = null;
           } else {
-            initialIsIncome = initialCatId == null && t.amount > 0;
+            const explicit =
+              "isIncome" in t && (t as { isIncome?: boolean }).isIncome !== undefined
+                ? Boolean((t as { isIncome: boolean }).isIncome)
+                : undefined;
+            initialIsIncome =
+              initialCatId == null && t.amount > 0 ? (explicit ?? true) : false;
             if (!initialIsIncome) initialIncomeMonth = null;
           }
         }
@@ -793,19 +798,36 @@ export function BudgetAppShell({
             nextIsIncome = false;
             nextIncomeMonth = null;
           } else {
-            // Liquid cash on-budget account
+            // Liquid cash on-budget account: mirror the server's
+            // value-change preservation so unrelated edits don't flip
+            // uncategorized inflows to income optimistically.
             const finalCatId = "categoryId" in t ? (t.categoryId ?? null) : (currentTarget.categoryId ?? null);
             nextCategoryId = finalCatId;
-            const isEligibleForIncome = finalCatId == null;
-            const isIncome = isEligibleForIncome
-              ? ("isIncome" in t && t.isIncome !== undefined ? Boolean(t.isIncome) : newAmount > 0)
-              : false;
-            nextIsIncome = isIncome;
-            if (!isIncome) {
+            const isEligibleForIncome = finalCatId == null && newAmount > 0;
+            const categoryChanged =
+              "categoryId" in t && (t.categoryId ?? null) !== (currentTarget.categoryId ?? null);
+            const amountChanged = t.amount !== undefined && t.amount !== num(currentTarget.amount);
+            const accountChanged = t.accountId !== undefined && t.accountId !== currentTarget.accountId;
+            const incomeExplicit = "isIncome" in t && t.isIncome !== undefined;
+            const incomeMonthChanged =
+              "incomeMonth" in t && (t.incomeMonth ?? null) !== (currentTarget.incomeMonth ?? null);
+            if (categoryChanged || amountChanged || accountChanged || incomeExplicit || incomeMonthChanged) {
+              const isIncome = isEligibleForIncome
+                ? (incomeExplicit ? Boolean(t.isIncome) : true)
+                : false;
+              nextIsIncome = isIncome;
+              if (!isIncome) {
+                nextIncomeMonth = null;
+              } else if ("incomeMonth" in t) {
+                nextIncomeMonth = t.incomeMonth ?? null;
+              } else {
+                nextIncomeMonth = currentTarget.incomeMonth ?? null;
+              }
+            } else if (!isEligibleForIncome && currentTarget.isIncome) {
+              nextIsIncome = false;
               nextIncomeMonth = null;
-            } else if ("incomeMonth" in t) {
-              nextIncomeMonth = t.incomeMonth ?? null;
             } else {
+              nextIsIncome = currentTarget.isIncome ?? false;
               nextIncomeMonth = currentTarget.incomeMonth ?? null;
             }
           }
@@ -897,7 +919,9 @@ export function BudgetAppShell({
               t.subTransactions !== undefined ||
               t.date !== undefined ||
               t.categoryId !== undefined ||
-              t.incomeMonth !== undefined
+              t.incomeMonth !== undefined ||
+              t.payee !== undefined ||
+              ("isIncome" in t && t.isIncome !== undefined)
             ),
           }
         )

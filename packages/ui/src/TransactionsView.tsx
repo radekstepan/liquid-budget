@@ -1373,6 +1373,10 @@ export const TransactionsView = memo(function TransactionsView({
                   const otherAccountName = otherAccount?.name ?? "Account";
                   const catName =
                     t.categoryId != null ? categoryById.get(t.categoryId)?.name ?? "" : "";
+                  // Income rows (isIncome, no category) show "Income";
+                  // uncategorized rows stay blank.
+                  const isIncomeRow =
+                    !isSplit && !isTransfer && t.categoryId == null && !!t.isIncome;
                   const displayPayee = isIncoming
                     ? `Transfer : ${accountById.get(t.accountId)?.name ?? "Unknown"}`
                     : isChildRow && t.transferAccountId != null
@@ -1480,7 +1484,12 @@ export const TransactionsView = memo(function TransactionsView({
                       <td
                         className={cx("truncate", isChildRow && "text-[11px]")}
                         style={{
-                          color: isSplit || isTransfer ? "var(--y-blue)" : "var(--y-ink-soft)",
+                          color:
+                            isSplit || isTransfer
+                              ? "var(--y-blue)"
+                              : isIncomeRow
+                                ? "var(--y-green-dk)"
+                                : "var(--y-ink-soft)",
                         }}
                       >
                         {isSplit ? (
@@ -1501,6 +1510,8 @@ export const TransactionsView = memo(function TransactionsView({
                               {catName ? <span className="truncate">{catName}</span> : null}
                             </button>
                           </Tooltip>
+                        ) : isIncomeRow ? (
+                          "Income"
                         ) : (
                           catName
                         )}

@@ -724,6 +724,22 @@ describe("TransactionsView", () => {
       expect(visiblePayees()).toEqual(["SORTX F Purple", "SORTX F Red", "SORTX F None"]);
     });
 
+    it("sorts rows by category with blank uncategorized cells first ascending", () => {
+      const data = makeSeedBudgetData();
+      data.transactions = [
+        ...data.transactions,
+        { ...mk(1, "SORTX C Store"), categoryId: 11 }, // Groceries
+        mk(2, "SORTX C Blank"),
+      ];
+      renderView(data);
+
+      fireEvent.click(screen.getByRole("button", { name: /^category$/i }));
+      expect(visiblePayees()).toEqual(["SORTX C Blank", "SORTX C Store"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^category$/i }));
+      expect(visiblePayees()).toEqual(["SORTX C Store", "SORTX C Blank"]);
+    });
+
     it("keeps the selection column width and reserves sort indicator space", () => {
       const { container } = renderView();
       const firstTh = screen.getAllByRole("columnheader")[0]!;
@@ -1929,6 +1945,78 @@ describe("TransactionsView", () => {
       });
       expect(screen.getByText("Duplicate transactions")).toBeInTheDocument();
     });
+  });
+
+  it("leaves the category cell blank for uncategorized rows and labels income rows", () => {
+    const data = makeSeedBudgetData();
+    const uncategorizedOutflow = {
+      id: 9101,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-09-05",
+      payee: "Mystery Store",
+      memo: "",
+      amount: "-1234",
+      status: "u" as const,
+      transferAccountId: null,
+      parentId: null,
+      isIncome: false,
+      needsReview: true,
+    };
+    const uncategorizedInflow = {
+      id: 9102,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-09-05",
+      payee: "Mystery Employer",
+      memo: "",
+      amount: "50000",
+      status: "u" as const,
+      transferAccountId: null,
+      parentId: null,
+      isIncome: false,
+      needsReview: true,
+    };
+    const incomeRow = {
+      id: 9103,
+      accountId: 1,
+      categoryId: null,
+      date: "2026-09-04",
+      payee: "Employer",
+      memo: "",
+      amount: "60000",
+      status: "c" as const,
+      transferAccountId: null,
+      parentId: null,
+      isIncome: true,
+    };
+    data.transactions = [...data.transactions, uncategorizedOutflow, uncategorizedInflow, incomeRow];
+    render(
+      <TransactionsView
+        data={data}
+        accountFilter={1}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onReconcile={() => {}}
+        onCycleStatus={() => {}}
+      />
+    );
+
+    const row9101 = document.querySelector('tr[data-txn-id="9101"]')!;
+    const row9102 = document.querySelector('tr[data-txn-id="9102"]')!;
+    const row9103 = document.querySelector('tr[data-txn-id="9103"]')!;
+    expect(row9101.textContent).not.toContain("Uncategorized");
+    expect(row9102.textContent).not.toContain("Uncategorized");
+    expect(row9103.textContent).toContain("Income");
+    // Category cells render blank (header and cell indexes align).
+    const headers = screen.getAllByRole("columnheader");
+    const catIdx = headers.findIndex((h) => h.textContent?.includes("Category"));
+    expect(catIdx).toBeGreaterThan(0);
+    for (const row of [row9101, row9102]) {
+      const cells = row.querySelectorAll("td");
+      expect(cells[catIdx]!.textContent).toBe("");
+    }
   });
 });
 

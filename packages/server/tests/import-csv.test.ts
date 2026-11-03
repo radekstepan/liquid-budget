@@ -125,14 +125,15 @@ describe("importCsvTransactions", () => {
     );
   });
 
-  it("marks positive uncategorized on-budget rows as income for liquid accounts", async () => {
+  it("leaves positive uncategorized on-budget rows as uncategorized (not income) for liquid accounts", async () => {
     const accountId = await seedAccount();
     await importCsvTransactions(db, {
       accountId,
       rows: [row({ payee: "Employer", amountCents: 50000 })],
     });
     const data = await getBudgetData(db);
-    expect(data.transactions[0]!.isIncome).toBe(true);
+    expect(data.transactions[0]!.categoryId).toBeNull();
+    expect(data.transactions[0]!.isIncome).toBe(false);
   });
 
   it("does not mark positive uncategorized rows on credit card accounts as income (BUG-05)", async () => {
@@ -643,7 +644,7 @@ describe("importCsvTransactions", () => {
     expect(afterData.accounts.find((a) => a.id === accountId)?.balance).toBe(String(100000 - 2808));
   });
 
-  it("BUG-16: links imported rows to payee entities and applies auto-categorization", async () => {
+  it("BUG-16: links imported rows to payee entities but leaves them uncategorized without a rename", async () => {
     const accountId = await seedAccount();
     const [g] = await db
       .insert(schema.categoryGroups)
@@ -662,7 +663,8 @@ describe("importCsvTransactions", () => {
       .values({ groupId: g!.id, name: "Income", sort: 2, carryover: 0 })
       .returning();
 
-    // Pre-register payees carrying auto-categorization rules
+    // Pre-register payees carrying auto-categorization rules — imports
+    // ignore them unless a rename rule corrects the payee.
     await db
       .insert(schema.payees)
       .values([
@@ -675,7 +677,7 @@ describe("importCsvTransactions", () => {
       rows: [
         row({ rowNumber: 2, payee: "Supermarket", amountCents: -1000 }),
         row({ rowNumber: 3, payee: "Employer", amountCents: 50000 }),
-        // Explicit CSV category must win over the payee's auto-category
+        // An explicit CSV category is still applied.
         row({ rowNumber: 4, payee: "Supermarket", amountCents: -2000, category: "Household" }),
         // First sight of a payee: a payees row is created for it
         row({ rowNumber: 5, payee: "New Cafe", amountCents: -300 }),
@@ -699,21 +701,22 @@ describe("importCsvTransactions", () => {
       expect(t.payeeId).toBe(payeeIdByName.get(t.payee));
     }
 
-    // autoCategoryId is applied when the row carries no category
-    const autoCategorized = txByPayee("Supermarket").find((t) => t.amount === "-1000")!;
-    expect(autoCategorized.categoryId).toBe(groceries!.id);
+    // No rename: defaults are ignored, rows stay uncategorized.
+    const plain = txByPayee("Supermarket").find((t) => t.amount === "-1000")!;
+    expect(plain.categoryId).toBeNull();
+    expect(plain.isIncome).toBe(false);
 
-    // An explicit CSV category takes precedence over autoCategoryId
+    // An explicit CSV category is still applied.
     const explicit = txByPayee("Supermarket").find((t) => t.amount === "-2000")!;
     expect(explicit.categoryId).toBe(household!.id);
 
-    // The income row is auto-categorized instead of falling into uncategorized income
+    // The inflow stays uncategorized (not income) without a rename.
     const salary = txByPayee("Employer")[0]!;
-    expect(salary.categoryId).toBe(income!.id);
+    expect(salary.categoryId).toBeNull();
     expect(salary.isIncome).toBe(false);
   });
 
-  it("gives a new payee the default category of the last transaction with that payee", async () => {
+  it("leaves rows uncategorized without a rename even when the payee has history", async () => {
     const accountId = await seedAccount();
     const [g] = await db
       .insert(schema.categoryGroups)
@@ -763,13 +766,14 @@ describe("importCsvTransactions", () => {
     const payeeRows = await db.select().from(schema.payees);
     expect(payeeRows).toHaveLength(1);
     expect(payeeRows[0]!.name).toBe("Corner Store");
-    expect(payeeRows[0]!.autoCategoryId).toBe(dining!.id);
+    expect(payeeRows[0]!.autoCategoryId).toBeNull();
 
     const data = await getBudgetData(db);
     const imported = data.transactions.find(
       (t) => t.payee === "Corner Store" && t.amount === "-500"
     )!;
-    expect(imported.categoryId).toBe(dining!.id);
+    expect(imported.categoryId).toBeNull();
+    expect(imported.isIncome).toBe(false);
   });
 
   it("leaves a new payee without history uncategorized", async () => {
@@ -823,6 +827,106 @@ describe("importCsvTransactions", () => {
     const payeeRows = await db.select().from(schema.payees);
     expect(payeeRows).toHaveLength(1);
     expect(payeeRows[0]!.autoCategoryId).toBeNull();
+  });
+
+  it("leaves positive rows uncategorized (isIncome false) so they stay highlighted YNAB4-style", async () => {
+    const accountId = await seedAccount();
+    await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ payee: "New Employer", amountCents: 50000 })],
+    });
+    const data = await getBudgetData(db);
+    expect(data.transactions[0]!.categoryId).toBeNull();
+    expect(data.transactions[0]!.isIncome).toBe(false);
+  });
+
+  it("populates category from last use when a rename rule corrects the payee on import", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [groceries] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+
+    // History under the clean name; no payee default yet.
+    await db.insert(schema.transactions).values({
+      accountId,
+      categoryId: groceries!.id,
+      date: "2026-07-01",
+      payee: "BC Ferries",
+      memo: "",
+      amount: -2000,
+      status: "c",
+      createdAt: "",
+      isIncome: false,
+    });
+    await createRenameRule(db, {
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "BCF1", amountCents: -1500 })],
+    });
+    expect(out.count).toBe(1);
+
+    const data = await getBudgetData(db);
+    const imported = data.transactions.find(
+      (t) => t.payee === "BC Ferries" && t.amount === "-1500"
+    )!;
+    expect(imported).toBeDefined();
+    expect(imported.categoryId).toBe(groceries!.id);
+    expect(imported.isIncome).toBe(false);
+  });
+
+  it("prefers the payee default over history when a rename rule corrects the payee", async () => {
+    const accountId = await seedAccount();
+    const [g] = await db
+      .insert(schema.categoryGroups)
+      .values({ name: "Everyday", sort: 0, isCreditCardPayments: false })
+      .returning();
+    const [groceries] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Groceries", sort: 0, carryover: 0 })
+      .returning();
+    const [dining] = await db
+      .insert(schema.categories)
+      .values({ groupId: g!.id, name: "Dining", sort: 1, carryover: 0 })
+      .returning();
+
+    // History says Groceries, but the payee default says Dining.
+    await db.insert(schema.transactions).values({
+      accountId,
+      categoryId: groceries!.id,
+      date: "2026-07-01",
+      payee: "BC Ferries",
+      memo: "",
+      amount: -2000,
+      status: "c",
+      createdAt: "",
+      isIncome: false,
+    });
+    await db.insert(schema.payees).values({ name: "BC Ferries", autoCategoryId: dining!.id, createdAt: "" });
+    await createRenameRule(db, {
+      sourcePattern: "BCF1",
+      targetPayee: "BC Ferries",
+    });
+
+    const out = await importCsvTransactions(db, {
+      accountId,
+      rows: [row({ rowNumber: 2, payee: "BCF1", amountCents: -1500 })],
+    });
+    expect(out.count).toBe(1);
+
+    const data = await getBudgetData(db);
+    const imported = data.transactions.find(
+      (t) => t.payee === "BC Ferries" && t.amount === "-1500"
+    )!;
+    expect(imported.categoryId).toBe(dining!.id);
   });
 });
 

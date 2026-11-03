@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor, fireEvent, within } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent, within, cleanup } from "@testing-library/react";
 import React from "react";
 import { BudgetAppShell } from "../src/components/BudgetAppShell";
 import { makeSeedBudgetData } from "@ynab/logic";
+
+function pickCategoryInModal(value: string): void {
+  const modal = document.querySelector(".y-modal") as HTMLElement;
+  fireEvent.click(within(modal).getByRole("button", { name: /category/i }));
+  const option = screen
+    .getAllByRole("option")
+    .find((o) => o.getAttribute("data-value") === value)!;
+  fireEvent.click(option);
+}
 
 describe("BudgetAppShell (BUG-24)", () => {
   const initialBudget = makeSeedBudgetData();
@@ -15,6 +24,7 @@ describe("BudgetAppShell (BUG-24)", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -96,6 +106,9 @@ describe("BudgetAppShell (BUG-24)", () => {
     // Fill in Amount
     const amountInput = screen.getByPlaceholderText("0.00");
     fireEvent.change(amountInput, { target: { value: "-15.50" } });
+
+    // Pick a category (blank blocks save)
+    pickCategoryInModal("11");
 
     // Save transaction
     const saveBtn = screen.getByRole("button", { name: /save transaction/i });
@@ -263,6 +276,9 @@ describe("BudgetAppShell (BUG-24)", () => {
     // Fill Amount: -50.00
     const amountInput = screen.getByPlaceholderText("0.00");
     fireEvent.change(amountInput, { target: { value: "-50.00" } });
+
+    // Pick a category (blank blocks save)
+    pickCategoryInModal("11");
 
     // Save transaction
     const saveBtn = screen.getByRole("button", { name: /save transaction/i });

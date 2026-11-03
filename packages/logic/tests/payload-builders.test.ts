@@ -44,6 +44,7 @@ describe("toTransactionPayload", () => {
         status: "c",
         flagColor: "blue",
         incomeMonth: null,
+        isIncome: false,
         transferAccountId: null,
         subTransactions: undefined,
       });
@@ -90,7 +91,68 @@ describe("toTransactionPayload", () => {
       if (payload?.mode === "single") {
         expect(payload.categoryId).toBeNull();
         expect(payload.incomeMonth).toBe("2026-07");
+        expect(payload.isIncome).toBe(true);
       }
+    });
+
+    it("blocks save on blank category and builds Income from the explicit pick", () => {
+      const blank = toTransactionPayload(
+        {
+          mode: "single",
+          accountId: 1,
+          date: "2026-06-15",
+          payee: "Mystery",
+          amount: "100.00",
+          categoryId: "",
+        },
+        { accounts }
+      );
+      expect(blank).toBeNull();
+
+      const income = toTransactionPayload(
+        {
+          mode: "single",
+          accountId: 1,
+          date: "2026-06-15",
+          payee: "Employer",
+          amount: "100.00",
+          categoryId: "__income__",
+        },
+        { accounts }
+      );
+      expect(income?.mode).toBe("single");
+      if (income?.mode === "single") {
+        expect(income.categoryId).toBeNull();
+        expect(income.isIncome).toBe(true);
+      }
+    });
+
+    it("rejects Income picks for outflows and credit accounts", () => {
+      const outflowIncome = toTransactionPayload(
+        {
+          mode: "single",
+          accountId: 1,
+          date: "2026-06-15",
+          payee: "Store",
+          amount: "-10.00",
+          categoryId: "__income__",
+        },
+        { accounts }
+      );
+      expect(outflowIncome).toBeNull();
+
+      const creditIncome = toTransactionPayload(
+        {
+          mode: "single",
+          accountId: 3, // credit
+          date: "2026-06-15",
+          payee: "Refund",
+          amount: "10.00",
+          categoryId: "__income__",
+        },
+        { accounts }
+      );
+      expect(creditIncome).toBeNull();
     });
 
     it("rejects when payee is empty or whitespace", () => {
@@ -146,6 +208,7 @@ describe("toTransactionPayload", () => {
         status: "c",
         flagColor: undefined,
         incomeMonth: null,
+        isIncome: false,
         transferAccountId: null,
         subTransactions: undefined,
       });
