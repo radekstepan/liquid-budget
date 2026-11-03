@@ -467,11 +467,18 @@ export const Select: React.FC<SelectProps> = ({
     if (open) {
       // Capture the items at the moment of opening so subsequent re-renders
       // (e.g. parent state changes) can't mutate what `commit(i)` reads.
+      // Intentionally keyed on the closed→open transition only: `items` gets
+      // a fresh identity whenever the parent re-renders with inline <option>
+      // children, so depending on it would wipe the typed search query (and
+      // reset the snapshot + active row) on any background re-render — a
+      // toast expiring, the sync indicator toggling, or typing in another
+      // field of the same modal.
       setOpenItems(items);
       setActiveIdx(selectedIdx);
       setQuery("");
     }
-  }, [open, items, selectedIdx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

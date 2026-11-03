@@ -241,6 +241,44 @@ describe("Dropdown (Select)", () => {
       expect(onChange).toHaveBeenCalledWith("2");
     });
 
+    it("keeps the typed query when the parent re-renders while open (inline children)", () => {
+      // Regression test: modal pickers (Account/Category/Transfer-to) render
+      // <Select searchable> with inline <option> children, a fresh array on
+      // every parent render. Any background re-render while the dropdown is
+      // open — a toast expiring, the sync indicator toggling, typing in
+      // another field of the same modal — must not wipe the filter query.
+      function Harness({ bump }: { bump: number }) {
+        const [v, setV] = useState("1");
+        return (
+          <>
+            <span data-testid="bump">{bump}</span>
+            <Select value={v} onChange={setV} searchable ariaLabel="Account">
+              {accounts.map((a) => (
+                <option key={a.value} value={a.value}>
+                  {a.label}
+                </option>
+              ))}
+            </Select>
+          </>
+        );
+      }
+      const { rerender } = render(<Harness bump={0} />);
+      fireEvent.click(screen.getByRole("button", { name: /account/i }));
+      const input = screen.getByRole("textbox", { name: /account/i });
+      fireEvent.change(input, { target: { value: "cre" } });
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "Credit Card",
+      ]);
+
+      rerender(<Harness bump={1} />);
+      expect(screen.getByTestId("bump")).toHaveTextContent("1");
+
+      expect(screen.getByRole("textbox", { name: /account/i })).toHaveValue("cre");
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "Credit Card",
+      ]);
+    });
+
     it("hides the input and shows the picked value on the trigger after committing", () => {
       const onChange = vi.fn();
       function Harness() {
