@@ -3,6 +3,7 @@ import AdmZip from "adm-zip";
 import {
   classifyBoundaryTransfer,
   dollarsToCents,
+  isTransferPayee,
   nextMonthKey,
   todayISO,
   TRANSACTION_DUPLICATE_FLAG,
@@ -13,7 +14,7 @@ import {
 import { duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
-import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
 import { setSettings } from "./settings.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
@@ -453,6 +454,12 @@ export async function importYnab4(
         if (typeof p.name !== "string" || !p.name.trim()) continue;
         const payeeRow = findOrCreatePayee(db, p.name, undefined, p.entityId);
         payeeDbIdMap.set(p.entityId, payeeRow.id);
+        // G-04: YNAB4 `enabled === false` payees import as archived
+        // (mirrors `accounts.archived`; written back as `enabled`).
+        // Missing `enabled` means enabled (YNAB4 defaults it to true).
+        if (p.enabled === false && !payeeRow.archived) {
+          db.update(payees).set({ archived: true }).where(eq(payees.id, payeeRow.id)).run();
+        }
       }
     }
 
@@ -1562,6 +1569,89 @@ export async function importYnab4(
             .where(eq(payees.id, localPayeeId))
             .run();
         }
+      }
+    }
+
+    // 5c. Import YNAB4 payee rename conditions into rename_rules (G-04).
+    //
+    // Operator audit (`data/StringCondition.as`,
+    // `data/StringOperator.as`, `com/ynab/enums/EnumBase.as`): exactly
+    // four operators exist — Contains, Is, StartsWith, EndsWith
+    // (serialized under the static property names, parsed
+    // case-insensitively). Only `Is` maps faithfully onto our rule
+    // engine (an exact, case-insensitive source_pattern → target
+    // payee). Prefix/substring operators have no equivalent in our
+    // full-match `[N]`/`[X]` patterns, so those conditions land in
+    // warnings instead of being silently dropped. `locations` (plus
+    // top-level `payeeLocations`) have no counterpart (no maps
+    // feature) and `autoFillMemo`/`autoFillAmount` have no
+    // payee-autofill target — both deliberately dropped (counts in
+    // warnings, details in the changeset). `targetAccountId` transfer
+    // payees stay skipped by design (modeled via transferAccountId),
+    // reported as one aggregated notice.
+    {
+      let transferPayeeCount = 0;
+      let droppedLocationCount = (ynabData.payeeLocations || []).filter((l: any) => !l?.isTombstone).length;
+      let droppedAutoFillCount = 0;
+      const importedAt = new Date().toISOString();
+      for (const p of yPayees) {
+        if (p.isTombstone) continue;
+        if (typeof p.name !== "string" || !p.name.trim()) continue;
+        if (p.targetAccountId) {
+          transferPayeeCount++;
+          continue;
+        }
+        if (Array.isArray(p.locations)) {
+          droppedLocationCount += p.locations.filter((l: any) => !l?.isTombstone).length;
+        }
+        const autoFillMemo = typeof p.autoFillMemo === "string" ? p.autoFillMemo.trim() : "";
+        const autoFillAmount = Number(p.autoFillAmount ?? 0);
+        if (autoFillMemo !== "" || (Number.isFinite(autoFillAmount) && autoFillAmount !== 0)) {
+          droppedAutoFillCount++;
+        }
+        const conditions = Array.isArray(p.renameConditions) ? p.renameConditions : [];
+        for (const c of conditions) {
+          if (c?.isTombstone) continue;
+          const operator = typeof c?.operator === "string" ? c.operator.trim() : "";
+          const operand = typeof c?.operand === "string" ? c.operand.trim() : "";
+          if (!operator || !operand) {
+            warnings.push(
+              `Payee "${p.name.trim()}": skipped a rename condition with a missing operator or blank text (YNAB4 never matches those)`
+            );
+            continue;
+          }
+          if (operator.toLowerCase() !== "is") {
+            warnings.push(
+              `Payee "${p.name.trim()}": skipped rename condition with operator "${operator}" (operand "${operand}"); only "Is" maps to an exact rename rule`
+            );
+            continue;
+          }
+          if (isTransferPayee(operand)) {
+            warnings.push(
+              `Payee "${p.name.trim()}": skipped rename condition for transfer-like text "${operand}" (rename rules never apply to transfers)`
+            );
+            continue;
+          }
+          await db
+            .insert(renameRules)
+            .values({ sourcePattern: operand, targetPayee: p.name.trim(), createdAt: importedAt })
+            .onConflictDoNothing();
+        }
+      }
+      if (transferPayeeCount > 0) {
+        warnings.push(
+          `Skipped ${transferPayeeCount} transfer payee(s) (targetAccountId set); transfers are modeled via transferAccountId, not payee rows`
+        );
+      }
+      if (droppedLocationCount > 0) {
+        warnings.push(
+          `Dropped ${droppedLocationCount} payee location(s) (YNAB4 map pins); there is no maps feature to hold them`
+        );
+      }
+      if (droppedAutoFillCount > 0) {
+        warnings.push(
+          `Dropped default memo/amount autofill on ${droppedAutoFillCount} payee(s); only default categories are imported`
+        );
       }
     }
 

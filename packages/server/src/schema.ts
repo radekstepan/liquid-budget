@@ -107,6 +107,11 @@ export const payees = sqliteTable(
     autoCategoryId: integer("auto_category_id").references(() => categories.id, {
       onDelete: "set null",
     }),
+    /**
+     * YNAB4 `payees[].enabled === false` (disabled/hidden payees, G-04).
+     * Mirrors `accounts.archived`; written back as `enabled` on export.
+     */
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull().default(""),
   },
   (t) => ({

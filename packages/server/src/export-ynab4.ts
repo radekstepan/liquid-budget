@@ -245,7 +245,8 @@ export async function exportYnab4(
         entityId,
         name: trimmed,
         entityType: "payee",
-        enabled: true,
+        // G-04: round-trip the archived flag YNAB4 calls `enabled`.
+        enabled: !(matchPayee?.archived ?? false),
       });
     }
     return entityId;
