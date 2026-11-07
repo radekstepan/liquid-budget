@@ -84,6 +84,20 @@ export const assignments = sqliteTable(
   })
 );
 
+/**
+ * Key-value store for budget-level settings imported from YNAB4
+ * (G-02): locale/currency formatting from `.ybsettings`
+ * (`currencySymbol`, `currencyISOSymbol`, `decimalSeparator`,
+ * `groupSeparator`, `dateFormat`, `budgetName`) plus document metadata
+ * from the `.ynab4` JSON root (`budgetType`, `currencyLocale`,
+ * `dateLocale`, `strictBudget`). Wiped and rewritten on every YNAB4
+ * import; read back by the YNAB4 exporter so locales round-trip.
+ */
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export const payees = sqliteTable(
   "payees",
   {
@@ -271,3 +285,4 @@ export type Reconciliation = typeof reconciliations.$inferSelect;
 export type Recurring = typeof recurring.$inferSelect;
 export type RecurringSubTransaction = typeof recurringSubTransactions.$inferSelect;
 export type RenameRule = typeof renameRules.$inferSelect;
+export type Setting = typeof settings.$inferSelect;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDefaultDb, importYnab4, extractYnab4DataFromZip } from "@ynab/server";
+import { getDefaultDb, importYnab4, extractYnab4DataFromZip, type Ynab4BudgetMetaData } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
@@ -16,17 +16,19 @@ export async function POST(req: NextRequest) {
     let ynabData: any;
     let settingsXml: string | undefined;
     let warnings: string[] = [];
+    let budgetMetaData: Ynab4BudgetMetaData | undefined;
     try {
       const extracted = extractYnab4DataFromZip(arrayBuffer);
       ynabData = extracted.ynabData;
       settingsXml = extracted.settingsXml;
       warnings = extracted.warnings;
+      budgetMetaData = extracted.budgetMetaData;
     } catch (e: any) {
       return NextResponse.json({ error: e.message || "Invalid backup archive" }, { status: 400 });
     }
 
     const db = getDefaultDb();
-    const summary = await importYnab4(db, ynabData, settingsXml, { warnings });
+    const summary = await importYnab4(db, ynabData, settingsXml, { warnings, budgetMetaData });
 
     return NextResponse.json({ ok: true, summary });
   } catch (e: any) {

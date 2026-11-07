@@ -4,6 +4,7 @@ import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { CURRENT_BUDGET_DATA_VERSION } from "./import-ynab4.js";
 import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { getAllSettings } from "./settings.js";
 import { getBudgetData } from "./queries/budget.js";
 
 const FLAG_NAMES: Record<string, string> = {
@@ -92,6 +93,11 @@ export interface ExportYnab4Options {
   decimalSeparator?: string;
   groupSeparator?: string;
   dateFormat?: string;
+  /** `.ynab4` budgetMetaData half (G-02); stored settings win over defaults. */
+  budgetType?: string;
+  currencyLocale?: string;
+  dateLocale?: string;
+  strictBudget?: string;
 }
 
 export async function exportYnab4(
@@ -165,15 +171,18 @@ export async function exportYnab4(
     return t?.entityId || `tx-${txId}`;
   };
 
-  // 1. Budget Metadata
+  // 1. Budget Metadata (G-02): explicit options win, then the
+  // settings persisted at import, then the stock YNAB4 defaults —
+  // hardcoded en_US/Personal/TRUE only when nothing was stored.
+  const stored = await getAllSettings(db);
   const budgetMetaData = {
-    currencyLocale: "en_US",
-    dateLocale: "en_US",
-    strictBudget: "TRUE",
-    budgetType: "Personal",
+    currencyLocale: options?.currencyLocale ?? stored.currencyLocale ?? "en_US",
+    dateLocale: options?.dateLocale ?? stored.dateLocale ?? "en_US",
+    strictBudget: options?.strictBudget ?? stored.strictBudget ?? "TRUE",
+    budgetType: options?.budgetType ?? stored.budgetType ?? "Personal",
     entityId: "budget-metadata",
     entityType: "budgetMetaData",
-    currencyISOSymbol: options?.currencyISOSymbol ?? "USD",
+    currencyISOSymbol: options?.currencyISOSymbol ?? stored.currencyISOSymbol ?? "USD",
   };
 
   // 2. Accounts
@@ -662,12 +671,12 @@ export async function exportYnab4(
     reconciliations: yReconciliations,
   };
 
-  const budgetName = options?.budgetName ?? "Budget";
-  const currencySymbol = options?.currencySymbol ?? "$";
-  const currencyISOSymbol = options?.currencyISOSymbol ?? "USD";
-  const decimalSeparator = options?.decimalSeparator ?? ".";
-  const groupSeparator = options?.groupSeparator ?? ",";
-  const dateFormat = options?.dateFormat ?? "YYYY-MM-DD";
+  const budgetName = options?.budgetName ?? stored.budgetName ?? "Budget";
+  const currencySymbol = options?.currencySymbol ?? stored.currencySymbol ?? "$";
+  const currencyISOSymbol = options?.currencyISOSymbol ?? stored.currencyISOSymbol ?? "USD";
+  const decimalSeparator = options?.decimalSeparator ?? stored.decimalSeparator ?? ".";
+  const groupSeparator = options?.groupSeparator ?? stored.groupSeparator ?? ",";
+  const dateFormat = options?.dateFormat ?? stored.dateFormat ?? "YYYY-MM-DD";
 
   const settingsXml = `<?xml version="1.0" encoding="utf-8"?>
 <com.ynab.dataAccess.settings.MachineBudgetSettingsVO>

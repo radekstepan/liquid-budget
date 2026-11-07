@@ -15,6 +15,7 @@ import type { Db } from "./client.js";
 import { withTransaction } from "./transaction.js";
 import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { resetDatabase } from "./seed.js";
+import { setSettings } from "./settings.js";
 import { recomputeAccountBalances } from "./queries/diagnostics.js";
 import { findOrCreatePayee } from "./queries/payees.js";
 
@@ -120,10 +121,32 @@ export interface Ynab4Settings {
   budgetName?: string;
 }
 
+/**
+ * Subset of the `.ynab4` JSON root's `budgetMetaData` we persist
+ * (G-02). Mirrors YNAB4's `BudgetMetaDataVO` (`budgetType,
+ * currencyISOSymbol, currencyLocale, dateLocale, strictBudget`).
+ */
+export interface Ynab4BudgetMetaData {
+  budgetType?: string;
+  currencyISOSymbol?: string;
+  currencyLocale?: string;
+  dateLocale?: string;
+  strictBudget?: string;
+}
+
+/** Merged budget settings: `.ybsettings` XML + `.ynab4` budgetMetaData. */
+export type Ynab4BudgetSettings = Ynab4Settings & Ynab4BudgetMetaData;
+
 export interface ExtractedYnab4Data {
   ynabData: any;
   settingsXml?: string;
   settings?: Ynab4Settings;
+  /**
+   * Whitelisted `budgetMetaData` from the `.ynab4` JSON root
+   * (G-02). Forwarded to `importYnab4` via options alongside the
+   * XML parse so both halves are persisted.
+   */
+  budgetMetaData?: Ynab4BudgetMetaData;
   /**
    * Non-fatal archive-level notices: an older (but supported)
    * budgetDataVersion, or multi-device `devices/`/`Snapshots/` entries
@@ -235,7 +258,13 @@ export function parseYnab4SettingsXml(xmlStr?: string): Ynab4Settings {
 
   const matchTag = (tag: string) => {
     const match = xmlStr.match(new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`, "i"));
-    return match ? unescapeXml(match[1]?.trim()) : undefined;
+    if (!match) return undefined;
+    const raw = unescapeXml(match[1]);
+    const trimmed = raw.trim();
+    // G-02: a whitespace-only value is significant for separators
+    // (e.g. cs_CZ uses a space group separator) — only trim when
+    // something non-whitespace remains.
+    return trimmed !== "" ? trimmed : raw;
   };
 
   settings.currencySymbol = matchTag("currencySymbol");
@@ -246,6 +275,25 @@ export function parseYnab4SettingsXml(xmlStr?: string): Ynab4Settings {
   settings.budgetName = matchTag("budgetName") || matchTag("budgetTitle");
 
   return settings;
+}
+
+/**
+ * Whitelist-parse the `.ynab4` JSON root's `budgetMetaData` (G-02).
+ * Only known string fields survive; anything else (arrays, objects,
+ * numbers) is dropped so a hostile backup can't smuggle junk into
+ * the settings table.
+ */
+export function parseYnab4BudgetMetaData(raw: unknown): Ynab4BudgetMetaData {
+  const meta: Ynab4BudgetMetaData = {};
+  if (raw == null || typeof raw !== "object") return meta;
+  const src = raw as Record<string, unknown>;
+  for (const key of ["budgetType", "currencyISOSymbol", "currencyLocale", "dateLocale", "strictBudget"] as const) {
+    const v = src[key];
+    if (typeof v === "string" && v.trim() !== "") {
+      meta[key] = v.trim();
+    }
+  }
+  return meta;
 }
 
 /** YNAB4 flag color name → our enum. Unknown/missing values map to null. */
@@ -302,7 +350,8 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
     ...collectYnab4PackageWarnings(zipEntries.map((e) => e.entryName)),
   ];
   const settings = settingsXml ? parseYnab4SettingsXml(settingsXml) : undefined;
-  return { ynabData, settingsXml, settings, warnings };
+  const budgetMetaData = parseYnab4BudgetMetaData(ynabData.budgetMetaData);
+  return { ynabData, settingsXml, settings, budgetMetaData, warnings };
 }
 
 /**
@@ -337,6 +386,12 @@ export interface ImportYnab4Options {
    * `ImportSummary.warnings` alongside version notices.
    */
   warnings?: string[];
+  /**
+   * `budgetMetaData` parsed from the `.ynab4` JSON root (G-02).
+   * Falls back to `ynabData.budgetMetaData` when omitted, so direct
+   * programmatic callers that pass the raw document need no changes.
+   */
+  budgetMetaData?: Ynab4BudgetMetaData;
 }
 
 export async function importYnab4(
@@ -1819,17 +1874,31 @@ export async function importYnab4(
       }
     }
 
-    const settings =
+    const xmlSettings =
       typeof settingsXmlOrObj === "string"
         ? parseYnab4SettingsXml(settingsXmlOrObj)
         : settingsXmlOrObj;
+    // G-02: merge the `.ybsettings` half with the `.ynab4`
+    // `budgetMetaData` half (explicit option wins, otherwise the
+    // document root), then persist both so the exporter can write
+    // them back. The document root wins on overlap
+    // (`currencyISOSymbol` exists in both halves).
+    const budgetMetaData =
+      options?.budgetMetaData ?? parseYnab4BudgetMetaData(ynabData?.budgetMetaData);
+    const settings: Ynab4BudgetSettings = { ...xmlSettings, ...budgetMetaData };
+    // `resetDatabase` above wiped the settings table; rewrite it with
+    // only the defined values so a partial document leaves no blanks.
+    await setSettings(db, settings);
+    // Preserve the historical summary shape: `settings` stays undefined
+    // when the backup carried no settings at all.
+    const hasSettings = Object.values(settings).some((v) => v !== undefined);
 
     const result: ImportSummary = {
       accounts: accountIdMap.size,
       categoryGroups: groupSort,
       categories: categoryIdMap.size,
       transactions: totalImportedTxCount,
-      settings,
+      settings: hasSettings ? settings : undefined,
       duplicatesSkipped: skippedDuplicates,
       warnings,
     };

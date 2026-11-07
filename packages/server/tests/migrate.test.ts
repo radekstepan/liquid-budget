@@ -132,12 +132,12 @@ describe("Drizzle migrations", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as Array<{ name: string }>;
     const tableNames = tables.map((t) => t.name);
-    // 10 app tables + __drizzle_migrations + sqlite_sequence (the
+    // 12 app tables + __drizzle_migrations + sqlite_sequence (the
     // SQLite-internal bookkeeping table for AUTOINCREMENT columns).
     // No duplicates. sqlite_sequence is excluded from the count.
     const systemTables = new Set(["__drizzle_migrations", "sqlite_sequence"]);
     const appTableCount = tableNames.filter((n) => !systemTables.has(n)).length;
-    expect(appTableCount).toBe(11);
+    expect(appTableCount).toBe(12);
   });
 
   it("enforces DB-level CHECK constraints (UNI-29 / BUG-12, F-19)", () => {
