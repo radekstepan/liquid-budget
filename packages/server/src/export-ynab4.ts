@@ -208,13 +208,30 @@ export async function exportYnab4(
   };
 
   // 2. Accounts
+  // G-03: prefer the verbatim YNAB4 type preserved at import
+  // (`account_type_raw`); fall back to the kind mapping for accounts
+  // created in-app (raw is null there).
+  const KNOWN_YNAB4_ACCOUNT_TYPES = new Set([
+    "Checking",
+    "Savings",
+    "CreditCard",
+    "Cash",
+    "LineofCredit",
+    "Paypal",
+    "MerchantAccount",
+    "InvestmentAccount",
+    "Mortgage",
+    "OtherAsset",
+    "OtherLiability",
+  ]);
   const yAccounts = allAccounts.map((a) => {
-    let accountType = "Checking";
-    if (a.kind === "credit") {
-      accountType = "CreditCard";
-    } else if (a.kind === "offbudget") {
-      accountType = "InvestmentAccount";
-    }
+    // G-03: prefer the verbatim YNAB4 type preserved at import; fall
+    // back to the kind mapping for accounts created in-app (raw is
+    // null there) or for unexpected stored values.
+    const raw =
+      a.accountTypeRaw && KNOWN_YNAB4_ACCOUNT_TYPES.has(a.accountTypeRaw) ? a.accountTypeRaw : null;
+    const accountType =
+      raw ?? (a.kind === "credit" ? "CreditCard" : a.kind === "offbudget" ? "InvestmentAccount" : "Checking");
 
     return {
       entityId: a.entityId || `acc-${a.id}`,
@@ -224,8 +241,10 @@ export async function exportYnab4(
       sortableIndex: (a.sort ?? 0) * 1000,
       lastReconciledDate: a.lastReconciledAt || null,
       lastReconciledBalance: a.lastReconciledBalance != null ? Math.round(a.lastReconciledBalance * 10) : null,
+      lastEnteredCheckNumber: -1,
       hidden: Boolean(a.archived),
       isClosed: Boolean(a.archived),
+      note: a.notes || "",
       isTombstone: false,
       entityType: "account",
       entityVersion: `acc-v-${a.id}`,
@@ -352,6 +371,9 @@ export async function exportYnab4(
           parentMonthlyBudgetId: `MB/${month}`,
           categoryId: catEntityId,
           budgeted: Math.round(a.amount * 10),
+          // G-07: per-category note round-trips; explicit-zero
+          // assignments keep the month present on re-import.
+          note: a.note || "",
           overspendingHandling: cat?.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
           entityType: "monthlyCategoryBudget",
           entityVersion: `mcb-v-${month}-${a.categoryId}`,

@@ -409,9 +409,12 @@ describe("importYnab4 full import", () => {
     expect(byName.has("Transfer : Savings")).toBe(false);
   });
 
-  it("imports assignments only for non-zero budgeted amounts and ignores tombstones", async () => {
+  it("imports assignments for budgeted rows including explicit zeros, and ignores tombstones", async () => {
     await importYnab4(db, ynabData);
     const { assignments } = await getBudgetData(db);
+    // The only explicit-zero row in the fixture targets tombstoned sc2,
+    // so it is skipped for its category — not for being zero (see the
+    // dedicated G-07 test for explicit-zero + note coverage).
     expect(assignments).toHaveLength(1);
     expect(assignments[0]).toMatchObject({ amount: "50000", month: "2026-06" });
   });
@@ -1020,7 +1023,7 @@ describe("importYnab4 full import", () => {
     expect(Number(updatedSavings.balance)).toBe(25000);
   });
 
-  it("BUG-14: imports real reconciliations row, links transactions to reconciliationId, and unreconcile reliably unlocks all rows", async () => {
+  it("BUG-14: stock files create no reconciliation rows; account fields carry the last-reconciled state and rows keep their real locked flags", async () => {
     const importData = {
       accounts: [
         {
@@ -1083,14 +1086,10 @@ describe("importYnab4 full import", () => {
     expect(acc?.lastReconciledBalance).toBe(50000);
 
     const recs = await db.select().from(schema.reconciliations);
-    expect(recs).toHaveLength(1);
-    expect(recs[0]).toMatchObject({
-      accountId: acc!.id,
-      reconciledAt: "2026-05-15",
-      statementDate: "2026-05-15",
-      statementBalance: 50000,
-      adjustmentTransactionId: null,
-    });
+    // G-09: stock YNAB4 never writes a `reconciliations[]` array, so no
+    // rows are synthesized — the account-level fields above are the only
+    // reconciliation state. History claims no phantom statement precision.
+    expect(recs).toHaveLength(0);
 
     const txs = await db.select().from(schema.transactions);
     expect(txs).toHaveLength(3);
@@ -1098,23 +1097,23 @@ describe("importYnab4 full import", () => {
     const recTxs = txs.filter((t) => t.status === "r");
     expect(recTxs).toHaveLength(2);
     for (const rt of recTxs) {
-      expect(rt.reconciliationId).toBe(recs[0]!.id);
-      expect(rt.reconciledAt).toBe("2026-05-15");
+      // The YNAB4 `cleared: "Reconciled"` lock flag is real source data,
+      // so rows stay "r" — with the transaction date but no linked round.
+      expect(rt.reconciliationId).toBeNull();
+      expect(rt.reconciledAt).toBe(rt.date);
     }
 
-    // Now unreconcile the account
+    // With no reconciliation rounds, unreconcile only clears the
+    // account-level fields; the imported lock flags are untouched (they
+    // were never produced by an in-app round).
     const unrec = await unreconcileAccount(db, acc!.id);
-    expect(unrec.flipped).toBe(2);
+    expect(unrec.flipped).toBe(0);
     expect(unrec.deletedAdjustmentId).toBeNull();
 
-    // Verify all transactions are unlocked back to 'c'
+    // Rows keep their imported lock flags.
     const updatedTxs = await db.select().from(schema.transactions);
-    const flippedTxs = updatedTxs.filter((t) => t.id === recTxs[0]!.id || t.id === recTxs[1]!.id);
-    for (const ft of flippedTxs) {
-      expect(ft.status).toBe("c");
-      expect(ft.reconciledAt).toBeNull();
-      expect(ft.reconciliationId).toBeNull();
-    }
+    const stillLocked = updatedTxs.filter((t) => t.status === "r");
+    expect(stillLocked).toHaveLength(2);
 
     // Account metadata cleared
     const [clearedAcc] = await db.select().from(schema.accounts);
@@ -1287,7 +1286,7 @@ describe("importYnab4 full import", () => {
     expect(budget.recurring[0]!.anchorDay).toBe(31);
   });
 
-  it("BUG-08: imports reconciled split parent as 'r' with reconciliationId and allows unreconcileAccount to unlock it", async () => {
+  it("BUG-08: imports reconciled split parent as 'r' without a synthesized reconciliation row", async () => {
     const backupData = {
       accounts: [
         {
@@ -1333,11 +1332,13 @@ describe("importYnab4 full import", () => {
 
     const [acc] = await db.select().from(schema.accounts);
     expect(acc).toBeDefined();
-    expect(acc?.lastReconciledAt).toBe("2026-05-10");
+    // G-09: no `reconciliations[]` array and no lastReconciledDate, so
+    // no account-level state and no synthesized rows — only the real
+    // per-row lock flags import.
+    expect(acc?.lastReconciledAt).toBeNull();
 
     const recs = await db.select().from(schema.reconciliations);
-    expect(recs).toHaveLength(1);
-    const recId = recs[0]!.id;
+    expect(recs).toHaveLength(0);
 
     const txs = await db.select().from(schema.transactions);
     expect(txs).toHaveLength(3); // 1 parent + 2 children
@@ -1345,28 +1346,21 @@ describe("importYnab4 full import", () => {
     const parent = txs.find((t) => t.parentId === null);
     expect(parent).toBeDefined();
     expect(parent?.status).toBe("r");
-    expect(parent?.reconciliationId).toBe(recId);
+    expect(parent?.reconciliationId).toBeNull();
     expect(parent?.reconciledAt).toBe("2026-05-10");
 
     const children = txs.filter((t) => t.parentId !== null);
     expect(children).toHaveLength(2);
     for (const c of children) {
       expect(c.status).toBe("r");
-      expect(c.reconciliationId).toBe(recId);
+      expect(c.reconciliationId).toBeNull();
       expect(c.reconciledAt).toBe("2026-05-10");
     }
 
-    // Now unreconcile the account
-    const unrec = await unreconcileAccount(db, acc!.id);
-    expect(unrec.flipped).toBe(2); // 2 children flipped
-
-    // Verify all transactions (parent + children) are unlocked back to 'c'
-    const updatedTxs = await db.select().from(schema.transactions);
-    for (const t of updatedTxs) {
-      expect(t.status).toBe("c");
-      expect(t.reconciledAt).toBeNull();
-      expect(t.reconciliationId).toBeNull();
-    }
+    // No reconciliation rounds exist, and the account was never marked
+    // reconciled at the account level, so unreconcile refuses — the
+    // imported lock flags stay as YNAB4 recorded them.
+    await expect(unreconcileAccount(db, acc!.id)).rejects.toThrow(/never been reconciled/);
   });
 
   it("does not seed credit card payment carryover from arbitrary uncategorized purchases (BUG-18)", async () => {

@@ -508,7 +508,28 @@ export async function importYnab4(
       .sort((a: any, b: any) => (a.sortableIndex ?? 0) - (b.sortableIndex ?? 0));
 
     const yReconciliations = (ynabData.reconciliations || []).filter((r: any) => !r.isTombstone);
+    // G-09: `reconciliations[]` is our own extension — stock YNAB4 never
+    // writes this array (it persists only `AccountVO.lastReconciledDate` /
+    // `lastReconciledBalance` plus per-register `cleared` flags). It is
+    // non-empty only for backups produced by our own exporter (or hand
+    // edits); stock files take the account-fields-only path below.
     const hasExplicitReconciliations = yReconciliations.length > 0;
+
+    // G-03: `lastEnteredCheckNumber` has no column (check-number support
+    // is not modeled) — counted once here so the drop is reported in
+    // warnings, never silent. YNAB4 defaults the field to -1.
+    let droppedCheckNumberCount = 0;
+    for (const acc of nonTombstoneAccounts) {
+      const lec = acc?.lastEnteredCheckNumber;
+      if (lec !== undefined && lec !== null && lec !== "" && Number(lec) !== -1) {
+        droppedCheckNumberCount++;
+      }
+    }
+    if (droppedCheckNumberCount > 0) {
+      warnings.push(
+        `Dropped lastEnteredCheckNumber on ${droppedCheckNumberCount} account(s); check-number tracking is not modeled`
+      );
+    }
 
     for (const acc of nonTombstoneAccounts) {
       accOnBudgetMap.set(acc.entityId, !!acc.onBudget);
@@ -545,79 +566,16 @@ export async function importYnab4(
           recBalance = acc.lastReconciledBalance != null ? convertAmount(Number(acc.lastReconciledBalance)) : null;
         }
       } else {
-        // Check if account has reconciled transactions or lastReconciledDate
-        const reconciledTxDates: string[] = [];
-        let reconciledSumCents = 0;
-        let hasReconciledRows = false;
-
-        for (const t of yTransactions) {
-          if (t.isTombstone) continue;
-          const isParentOnAccount = t.accountId === acc.entityId;
-          const isTopLevelReconciled = t.cleared === "Reconciled";
-          const hasSubs = Array.isArray(t.subTransactions) && t.subTransactions.length > 0;
-
-          if (isParentOnAccount) {
-            if (hasSubs) {
-              if (isTopLevelReconciled) {
-                hasReconciledRows = true;
-                if (t.date) reconciledTxDates.push(t.date);
-                reconciledSumCents += convertAmount(t.amount || 0);
-              } else {
-                for (const st of t.subTransactions) {
-                  if (!st.isTombstone && st.cleared === "Reconciled") {
-                    hasReconciledRows = true;
-                    if (t.date) reconciledTxDates.push(t.date);
-                    reconciledSumCents += convertAmount(st.amount || 0);
-                  }
-                }
-              }
-            } else {
-              if (isTopLevelReconciled) {
-                hasReconciledRows = true;
-                if (t.date) reconciledTxDates.push(t.date);
-                reconciledSumCents += convertAmount(t.amount || 0);
-              }
-            }
-          } else {
-            const isTopTransferTarget =
-              t.targetAccountId === acc.entityId ||
-              (t.payeeId && t.payeeId === `Payee/Transfer:${acc.entityId}`);
-            if (isTopTransferTarget && isTopLevelReconciled && !hasSubs) {
-              hasReconciledRows = true;
-              if (t.date) reconciledTxDates.push(t.date);
-              reconciledSumCents += -convertAmount(t.amount || 0);
-            } else if (hasSubs) {
-              for (const st of t.subTransactions) {
-                if (st.isTombstone) continue;
-                const isSubTransferTarget =
-                  st.targetAccountId === acc.entityId ||
-                  (st.payeeId && st.payeeId === `Payee/Transfer:${acc.entityId}`);
-                if (isSubTransferTarget && (isTopLevelReconciled || st.cleared === "Reconciled")) {
-                  hasReconciledRows = true;
-                  if (t.date) reconciledTxDates.push(t.date);
-                  reconciledSumCents += -convertAmount(st.amount || 0);
-                }
-              }
-            }
-          }
-        }
-
-        const hasReconciled = Boolean(acc.lastReconciledDate) || hasReconciledRows;
-
-        if (hasReconciled) {
-          let latestDate = acc.lastReconciledDate;
-          if (!latestDate && reconciledTxDates.length > 0) {
-            reconciledTxDates.sort();
-            latestDate = reconciledTxDates[reconciledTxDates.length - 1];
-          }
-          recDate = latestDate || todayISO();
-
-          if (acc.lastReconciledBalance != null) {
-            recBalance = convertAmount(Number(acc.lastReconciledBalance));
-          } else {
-            recBalance = reconciledSumCents;
-          }
-        }
+        // G-09 stock path: no `reconciliations[]` array (stock YNAB4 never
+        // writes one). Carry just the account-level fields YNAB4 actually
+        // persists (`AccountVO.lastReconciledDate/Balance`); never
+        // synthesize reconciliation rows, so imported history claims no
+        // phantom statement precision. Per-row `cleared: "Reconciled"`
+        // flags still map to status "r" below (with the date but no
+        // reconciliationId).
+        recDate = acc.lastReconciledDate ?? null;
+        recBalance =
+          acc.lastReconciledBalance != null ? convertAmount(Number(acc.lastReconciledBalance)) : null;
       }
 
       const [row] = await db
@@ -635,6 +593,13 @@ export async function importYnab4(
           archived: isArchived,
           // G-03 (cheap): preserve the YNAB4 account note verbatim.
           notes: typeof acc.note === "string" ? acc.note : "",
+          // G-03: preserve the verbatim YNAB4 account type; `kind`
+          // above keeps driving app logic, the exporter prefers this
+          // raw value when present.
+          accountTypeRaw:
+            typeof acc.accountType === "string" && acc.accountType.trim() !== ""
+              ? acc.accountType
+              : null,
         })
         .returning();
 
@@ -664,23 +629,11 @@ export async function importYnab4(
             accountReconciliationDateMap.set(acc.entityId, rDate);
           }
         }
-      } else if (recDate != null && recBalance != null) {
-        const [rec] = await db
-          .insert(reconciliations)
-          .values({
-            accountId: row!.id,
-            reconciledAt: recDate,
-            statementDate: recDate,
-            statementBalance: recBalance,
-            adjustmentTransactionId: null,
-          })
-          .returning();
-
-        if (rec) {
-          accountReconciliationIdMap.set(acc.entityId, rec.id);
-          accountReconciliationDateMap.set(acc.entityId, recDate);
-        }
       }
+      // G-09: no row synthesis for stock files (no `reconciliations[]`
+      // array) — only the account-level `lastReconciledAt/Balance`
+      // fields above. Rows below are created solely for explicit
+      // (exporter-shaped) reconciliation rounds.
     }
 
     // 3. Insert Category Groups and Categories
@@ -808,31 +761,52 @@ export async function importYnab4(
     }
 
     // 4. Insert Assignments (Monthly Budgets)
+    // G-07: import explicit-zero budgets verbatim whenever the month
+    // exists in YNAB4 (only null-budgeted rows carry no amount and are
+    // skipped). Per-category notes persist on `assignments.note`;
+    // month-level `MonthlyBudget.note` has no home and is reported as
+    // a dropped warning instead.
+    let monthLevelNoteCount = 0;
+    let droppedCategoryNoteCount = 0;
     for (const mb of yBudgets) {
       if (mb.isTombstone) continue;
       if (!mb.monthlySubCategoryBudgets) continue;
       const month = mb.month.substring(0, 7); // Convert "2014-08-01" -> "2014-08"
+      if (typeof mb.note === "string" && mb.note.trim() !== "") monthLevelNoteCount++;
 
       for (const msb of mb.monthlySubCategoryBudgets) {
         if (msb.isTombstone) continue;
-        if (msb.budgeted !== 0 && msb.budgeted != null) {
-          const catId = categoryIdMap.get(msb.categoryId);
-          if (catId) {
-            const amt = convertAmount(msb.budgeted);
-            await db
-              .insert(assignments)
-              .values({
-                categoryId: catId,
-                month,
-                amount: amt,
-              })
-              .onConflictDoUpdate({
-                target: [assignments.categoryId, assignments.month],
-                set: { amount: amt },
-              });
-          }
+        if (msb.budgeted == null) continue;
+        const catId = categoryIdMap.get(msb.categoryId);
+        if (!catId) {
+          if (typeof msb.note === "string" && msb.note.trim() !== "") droppedCategoryNoteCount++;
+          continue;
         }
+        const amt = convertAmount(msb.budgeted);
+        const note = typeof msb.note === "string" ? msb.note : "";
+        await db
+          .insert(assignments)
+          .values({
+            categoryId: catId,
+            month,
+            amount: amt,
+            note,
+          })
+          .onConflictDoUpdate({
+            target: [assignments.categoryId, assignments.month],
+            set: { amount: amt, note },
+          });
       }
+    }
+    if (monthLevelNoteCount > 0) {
+      warnings.push(
+        `Dropped month-level budget notes on ${monthLevelNoteCount} month(s); only per-category notes are imported`
+      );
+    }
+    if (droppedCategoryNoteCount > 0) {
+      warnings.push(
+        `Dropped per-category budget notes on ${droppedCategoryNoteCount} row(s) whose category was not imported`
+      );
     }
 
     // 5. Insert Transactions
@@ -973,19 +947,25 @@ export async function importYnab4(
 
       if (hasSubs) {
         // Split transaction parent
+        // G-06: import every live leg verbatim, including 0-amount legs
+        // (they are valid YNAB4 rows). Only a parent with literally no
+        // non-tombstone children is skipped — there is nothing to
+        // import. Zero-sum parents import with amount 0 (the DB no
+        // longer forbids zero amounts; balance math is unaffected
+        // because split parents are excluded from balance sums and
+        // zero legs contribute 0).
         let payee = payeeMap.get(t.payeeId) || "";
         const parentPayeeId = (t.payeeId && payeeDbIdMap.get(t.payeeId)) || null;
-        const nonTombstoneSubs = (t.subTransactions || []).filter((st: any) => !st.isTombstone);
-        const nonZeroSubs = nonTombstoneSubs.filter((st: any) => convertAmount(st.amount) !== 0);
+        const liveSubs = (t.subTransactions || []).filter((st: any) => !st.isTombstone);
 
-        if (nonZeroSubs.length === 0) {
+        if (liveSubs.length === 0) {
           skippedDuplicates.push({
             accountName: accNameMap.get(accId) || "",
             date: t.date,
             payee,
             memo: t.memo || "",
             amount: 0,
-            reason: "Zero-amount split transaction",
+            reason: "Split transaction with no live children",
           });
           continue;
         }
@@ -1006,22 +986,16 @@ export async function importYnab4(
           : isParentReconciled
           ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null
           : null;
+        // G-09: a YNAB4 `cleared: "Reconciled"` flag always maps to
+        // status "r" (with the derived date, even when no explicit
+        // reconciliation row exists to link — `reconciliationId` stays
+        // null for stock files). The lock state is real source data;
+        // only the statement row was phantom.
         const effectiveParentStatus = isParentReconciled
-          ? parentRecId != null ? "r" : "c"
+          ? "r"
           : t.cleared === "Uncleared" ? "u" : "c";
 
-        const parentSplitAmount = nonZeroSubs.reduce((sum: number, st: any) => sum + convertAmount(st.amount), 0);
-        if (parentSplitAmount === 0) {
-          skippedDuplicates.push({
-            accountName: accNameMap.get(accId) || "",
-            date: t.date,
-            payee,
-            memo: t.memo || "",
-            amount: 0,
-            reason: "Zero-sum split transaction",
-          });
-          continue;
-        }
+        const parentSplitAmount = liveSubs.reduce((sum: number, st: any) => sum + convertAmount(st.amount), 0);
 
         const parentLineage = extractYnab4TxLineage(t);
         const [insertedT] = await db
@@ -1054,9 +1028,9 @@ export async function importYnab4(
         totalImportedTxCount++;
 
         if (insertedT) {
-          let allChildrenReconciled = nonZeroSubs.length > 0;
+          let allChildrenReconciled = liveSubs.length > 0;
 
-          for (const st of nonZeroSubs) {
+          for (const st of liveSubs) {
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let subCatId = (accIsOnBudget && categoryIdMap.get(st.categoryId)) || null;
             let subPayee = "";
@@ -1131,7 +1105,7 @@ export async function importYnab4(
               ? parentRecDate ?? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null
               : null;
             const effectiveChildStatus = isChildReconciled
-              ? childRecId != null ? "r" : "c"
+              ? "r"
               : (t.cleared === "Uncleared" || st.cleared === "Uncleared") ? "u" : "c";
 
             let effectiveChildDestStatus: "u" | "c" | "r" | null = null;
@@ -1156,7 +1130,7 @@ export async function importYnab4(
                   ? accountReconciliationDateMap.get(destAccEntId) ?? t.date ?? null
                   : null;
                 effectiveChildDestStatus = isDestReconciled
-                  ? childDestRecId != null ? "r" : "c"
+                  ? "r"
                   : destPartner.cleared === "Uncleared" ? "u" : "c";
               } else {
                 effectiveChildDestStatus = effectiveChildStatus;
@@ -1352,7 +1326,7 @@ export async function importYnab4(
               ? accountReconciliationDateMap.get(sourceAccEntityId) ?? t.date ?? null
               : null;
             const effectiveSrcStatus = isSrcReconciled
-              ? srcRecId != null ? "r" : "c"
+              ? "r"
               : (sourceYTx?.cleared === "Uncleared" ? "u" : "c");
 
             const isDestReconciled = destYTx?.cleared === "Reconciled" || Boolean(destYTx?.reconciliationId);
@@ -1368,7 +1342,7 @@ export async function importYnab4(
               ? accountReconciliationDateMap.get(destAccEntityId) ?? t.date ?? null
               : null;
             const effectiveDestStatus = isDestReconciled
-              ? destRecId != null ? "r" : "c"
+              ? "r"
               : (destYTx?.cleared === "Uncleared" ? "u" : "c");
 
             const sourceLineage = extractYnab4TxLineage(sourceYTx);
@@ -1472,7 +1446,7 @@ export async function importYnab4(
               amount: fallbackAmt,
               status:
                 isTxReconciled
-                  ? txRecId != null ? "r" : "c"
+                  ? "r"
                   : cleared === "Uncleared"
                     ? "u"
                     : "c",
@@ -1595,7 +1569,7 @@ export async function importYnab4(
             amount: regularAmt,
             status:
               isTxReconciled
-                ? txRecId != null ? "r" : "c"
+                ? "r"
                 : t.cleared === "Uncleared"
                   ? "u"
                   : "c",

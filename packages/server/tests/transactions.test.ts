@@ -4685,20 +4685,23 @@ describe("transactions queries", () => {
       ).rejects.toThrow(/Amount cannot be zero/);
     });
 
-    it("enforces database CHECK constraint for amount != 0 on direct SQL insert", async () => {
+    it("allows zero amounts on direct SQL insert (G-06: YNAB4 zero legs / zero-sum parents import verbatim)", async () => {
       const db = openMigratedDb();
       const { accountId } = await seedTestData(db);
 
-      expect(() => {
-        db.insert(schema.transactions)
-          .values({
-            accountId,
-            date: "2026-06-15",
-            amount: 0,
-            status: "c",
-          })
-          .run();
-      }).toThrow(/CHECK constraint failed: transactions_amount_check/);
+      // The `transactions_amount_check` DB constraint was dropped so the
+      // importer can preserve YNAB4 zero-amount rows verbatim. The API
+      // layer (`assertValidAmount`) still rejects user-created zeros.
+      const [row] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId,
+          date: "2026-06-15",
+          amount: 0,
+          status: "c",
+        })
+        .returning();
+      expect(row!.amount).toBe(0);
     });
 
     describe("BUG-06: editing split children categories and fields without invalid balance failures", () => {

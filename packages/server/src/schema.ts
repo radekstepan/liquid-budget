@@ -24,6 +24,15 @@ export const accounts = sqliteTable(
     lastReconciledBalance: integer("last_reconciled_balance"),
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
     notes: text("notes").notNull().default(""),
+    /**
+     * Verbatim YNAB4 `AccountVO.accountType` (G-03: Checking, Savings,
+     * CreditCard, Cash, LineofCredit, Paypal, MerchantAccount,
+     * InvestmentAccount, Mortgage, OtherAsset, OtherLiability).
+     * `kind` keeps driving app logic; the exporter prefers this raw
+     * value when present so round-trips preserve the original type.
+     * Null for accounts created in-app (kind mapping applies).
+     */
+    accountTypeRaw: text("account_type_raw"),
   },
   (t) => ({
     kindCheck: check("accounts_kind_check", sql`${t.kind} IN ('liquid', 'credit', 'offbudget')`),
@@ -77,6 +86,12 @@ export const assignments = sqliteTable(
       .references(() => categories.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
     amount: integer("amount").notNull().default(0),
+    /**
+     * YNAB4 `MonthlySubCategoryBudgetVO.note` (G-07). Month-level
+     * `MonthlyBudget.note` has no home and is reported as a dropped
+     * warning on import instead.
+     */
+    note: text("note").notNull().default(""),
   },
   (t) => ({
     uniq: uniqueIndex("assignments_cat_month_uniq").on(t.categoryId, t.month),
@@ -187,7 +202,11 @@ export const transactions = sqliteTable(
       "transactions_transfer_status_check",
       sql`${t.transferStatus} IS NULL OR ${t.transferStatus} IN ('u', 'c', 'r')`
     ),
-    amountCheck: check("transactions_amount_check", sql`${t.amount} != 0`),
+    // No amount != 0 CHECK (G-06): YNAB4 split legs and zero-sum
+    // parents import verbatim with amount 0. User-facing creation
+    // still rejects zero via assertValidAmount; balance math is
+    // unaffected (split parents are excluded from sums, zero legs
+    // contribute 0).
     transferNotSelfCheck: check(
       "transactions_transfer_not_self_check",
       sql`${t.transferAccountId} IS NULL OR ${t.accountId} != ${t.transferAccountId}`
