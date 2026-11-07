@@ -43,6 +43,28 @@ function statusToCleared(status: string | null | undefined): string {
   }
 }
 
+/**
+ * YNAB4 per-tx lineage back onto the wire (G-05). Our `transactions`
+ * columns map 1:1 to YNAB4 keys (`checkNumber` on `BaseTransactionVO`;
+ * `FITID`/`YNABID`/`importedPayee`/`source` on `MatchableTransactionVO`).
+ * Nulls stay null so untouched rows export clean.
+ */
+function txLineage(t: {
+  checkNumber: string | null | undefined;
+  fitid: string | null | undefined;
+  ynabId: string | null | undefined;
+  importedPayee: string | null | undefined;
+  source: string | null | undefined;
+}) {
+  return {
+    checkNumber: t.checkNumber ?? null,
+    FITID: t.fitid ?? null,
+    YNABID: t.ynabId ?? null,
+    importedPayee: t.importedPayee ?? null,
+    source: t.source ?? null,
+  };
+}
+
 function formatFrequency(freq: string | null | undefined): string {
   if (!freq) return "Monthly";
   const f = freq.toLowerCase().replace(/[\s_-]+/g, "");
@@ -339,6 +361,11 @@ export async function exportYnab4(
   });
 
   // 6. Transactions
+  // G-05 note: every emitted row hardcodes `accepted: true`. Our match
+  // workflow differs from YNAB4's import-match flow, so `accepted` is
+  // intentionally not modeled — the importer reports rows that carried
+  // `accepted === false` / match links as warnings instead of silently
+  // claiming fidelity.
   const childrenByParent = new Map<number, (typeof allTransactions[number])[]>();
   const parentTransactions: (typeof allTransactions[number])[] = [];
 
@@ -408,6 +435,7 @@ export async function exportYnab4(
             cleared: statusToCleared(destClearedStatus),
             flag: flagToName(ch.flagColor),
             memo: ch.memo || "",
+            ...txLineage(ch),
             payeeId: `Payee/Transfer:${parentAccEntityId}`,
             transferTransactionId: childTxEntityId,
             categoryId: null,
@@ -427,6 +455,7 @@ export async function exportYnab4(
           parentTransactionId: parentTxEntityId,
           amount: Math.round(ch.amount * 10),
           memo: ch.memo || "",
+          checkNumber: ch.checkNumber ?? null,
           categoryId: subCatId,
           targetAccountId: subTargetAccId,
           payeeId: subTransferPayeeId || childPayeeId || payeeId,
@@ -448,6 +477,7 @@ export async function exportYnab4(
         cleared: statusToCleared(t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
+        ...txLineage(t),
         payeeId,
         categoryId: parentCatId,
         subTransactions,
@@ -491,6 +521,7 @@ export async function exportYnab4(
         cleared: statusToCleared(t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
+        ...txLineage(t),
         payeeId: `Payee/Transfer:${destAccEntityId}`,
         transferTransactionId: destTxEntityId,
         categoryId: srcCatId,
@@ -512,6 +543,7 @@ export async function exportYnab4(
         cleared: statusToCleared(t.transferStatus ?? t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
+        ...txLineage(t),
         payeeId: `Payee/Transfer:${sourceAccEntityId}`,
         transferTransactionId: srcTxEntityId,
         categoryId: destCatId,
@@ -545,6 +577,7 @@ export async function exportYnab4(
         cleared: statusToCleared(t.status),
         flag: flagToName(t.flagColor),
         memo: t.memo || "",
+        ...txLineage(t),
         payeeId,
         categoryId: catId,
         reconciliationId: recId,
@@ -623,6 +656,7 @@ export async function exportYnab4(
       date: r.nextDate,
       amount: Math.round(r.amount * 10),
       frequency: formatFrequency(r.frequency),
+      twiceAMonthStartDay: r.secondAnchorDay ?? null,
       payeeId,
       targetAccountId: targetAccId,
       categoryId: catId,

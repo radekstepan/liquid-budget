@@ -227,7 +227,10 @@ describe("importYnab4 full import", () => {
       categoryGroups: 3, // Everyday + "Hidden Categories" + "Credit Card Payments"
       categories: 1, // only mapped subcategories (sc1); CC-payment cats aren't in the map
       transactions: 6, // 1 regular + 1 transfer (de-duplicated from pair) + 1 income + 1 split parent + 2 split children
-      warnings: [], // unversioned fixture: no notices
+      warnings: [
+        // G-08: EVERYWEEK is not a real YNAB4 frequency — monthly fallback is now reported, not silent.
+        'Unknown scheduled frequency "EVERYWEEK" on 1 schedule(s); falling back to monthly',
+      ], // unversioned fixture: no version notices
       duplicatesSkipped: [
         {
           accountName: "Visa",
@@ -420,7 +423,7 @@ describe("importYnab4 full import", () => {
 
     const byPayee = new Map(recurring.map((r) => [r.payee, r]));
     expect(byPayee.get("Grocery Store")).toBeTruthy();
-    // EVERYWEEK is not a supported frequency → falls back to monthly.
+    // EVERYWEEK is not a supported frequency → falls back to monthly (G-08: with a warning).
     expect(byPayee.get("Grocery Store")!.frequency).toBe("monthly");
 
     // The transfer scheduled row resolves the "Payee/Transfer:" convention.

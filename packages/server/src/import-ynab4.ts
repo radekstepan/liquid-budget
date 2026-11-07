@@ -320,6 +320,37 @@ export function ynabFlagToColor(flag: unknown): TransactionFlagColor | null {
 }
 
 /**
+ * Per-transaction OFX/check lineage carried by YNAB4 (G-05).
+ * `checkNumber` lives on `BaseTransactionVO` (so split children have
+ * it too); `FITID`/`YNABID`/`importedPayee`/`source` live on
+ * `MatchableTransactionVO` (top-level rows only — split children
+ * never carry them, but the extractor tolerates them anyway).
+ */
+export interface Ynab4TxLineage {
+  checkNumber: string | null;
+  fitid: string | null;
+  ynabId: string | null;
+  importedPayee: string | null;
+  source: string | null;
+}
+
+function cleanLineageString(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  return value;
+}
+
+/** Pull the persistable lineage fields off any YNAB4 tx/sub-tx object. */
+export function extractYnab4TxLineage(src: any): Ynab4TxLineage {
+  return {
+    checkNumber: cleanLineageString(src?.checkNumber),
+    fitid: cleanLineageString(src?.FITID),
+    ynabId: cleanLineageString(src?.YNABID),
+    importedPayee: cleanLineageString(src?.importedPayee),
+    source: cleanLineageString(src?.source),
+  };
+}
+
+/**
  * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
  */
 export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): ExtractedYnab4Data {
@@ -805,6 +836,63 @@ export async function importYnab4(
     }
 
     // 5. Insert Transactions
+    // G-05: YNAB4 import-match workflow fields we deliberately do not
+    // model (`matchedTransactions`, `parentTransactionIdIfMatched`,
+    // `dateEnteredFromSchedule`, and `accepted`). Our match workflow
+    // differs, so every row imports as accepted and the link fields are
+    // dropped — counted here so the loss is reported in warnings,
+    // never silent. (Export hardcodes `accepted: true` for the same
+    // reason; see export-ynab4.ts.)
+    {
+      let unacceptedCount = 0;
+      let matchedCount = 0;
+      let scheduleLinkCount = 0;
+      const countRow = (row: any) => {
+        if (row?.accepted === false) unacceptedCount++;
+        if (
+          Array.isArray(row?.matchedTransactions) &&
+          row.matchedTransactions.some((m: any) => !m?.isTombstone)
+        ) {
+          matchedCount++;
+        }
+        if (typeof row?.parentTransactionIdIfMatched === "string" && row.parentTransactionIdIfMatched.trim() !== "") {
+          matchedCount++;
+        }
+        const entered = row?.dateEnteredFromSchedule;
+        if ((typeof entered === "string" && entered.trim() !== "") || typeof entered === "number") {
+          scheduleLinkCount++;
+        }
+      };
+      for (const t of yTransactions) {
+        if (t.isTombstone) continue;
+        countRow(t);
+        for (const st of t.subTransactions || []) {
+          if (!st?.isTombstone) countRow(st);
+        }
+      }
+      for (const st of yScheduled) {
+        if (st?.isTombstone) continue;
+        countRow(st);
+        for (const sub of st.subTransactions || []) {
+          if (!sub?.isTombstone) countRow(sub);
+        }
+      }
+      if (unacceptedCount > 0) {
+        warnings.push(
+          `Dropped "accepted === false" match state on ${unacceptedCount} YNAB4 row(s); our match workflow differs, so all rows import as accepted`
+        );
+      }
+      if (matchedCount > 0) {
+        warnings.push(
+          `Dropped YNAB4 import-match links (matchedTransactions/parentTransactionIdIfMatched) on ${matchedCount} row(s); our match workflow differs`
+        );
+      }
+      if (scheduleLinkCount > 0) {
+        warnings.push(
+          `Dropped YNAB4 schedule-entry links (dateEnteredFromSchedule) on ${scheduleLinkCount} row(s); recurring history is not linked to schedules`
+        );
+      }
+    }
     const accNameMap = new Map<number, string>();
     const allAccountsForMap = await db.select().from(accounts);
     for (const a of allAccountsForMap) accNameMap.set(a.id, a.name);
@@ -935,6 +1023,7 @@ export async function importYnab4(
           continue;
         }
 
+        const parentLineage = extractYnab4TxLineage(t);
         const [insertedT] = await db
           .insert(transactions)
           .values({
@@ -948,6 +1037,11 @@ export async function importYnab4(
             amount: parentSplitAmount,
             status: effectiveParentStatus,
             flagColor: ynabFlagToColor(t.flag),
+            checkNumber: parentLineage.checkNumber,
+            fitid: parentLineage.fitid,
+            ynabId: parentLineage.ynabId,
+            importedPayee: parentLineage.importedPayee,
+            source: parentLineage.source,
             transferAccountId: null,
             parentId: null,
             isIncome: isParentIncome,
@@ -1075,6 +1169,7 @@ export async function importYnab4(
               allChildrenReconciled = false;
             }
 
+            const childLineage = extractYnab4TxLineage(st);
             await db.insert(transactions).values({
               entityId: st.entityId,
               transferEntityId: childDestTxEntityId,
@@ -1088,6 +1183,11 @@ export async function importYnab4(
               status: effectiveChildStatus,
               transferStatus: effectiveChildDestStatus,
               flagColor: ynabFlagToColor(st.flag),
+              checkNumber: childLineage.checkNumber,
+              fitid: childLineage.fitid,
+              ynabId: childLineage.ynabId,
+              importedPayee: childLineage.importedPayee,
+              source: childLineage.source,
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
               isIncome: isChildIncome,
@@ -1271,6 +1371,7 @@ export async function importYnab4(
               ? destRecId != null ? "r" : "c"
               : (destYTx?.cleared === "Uncleared" ? "u" : "c");
 
+            const sourceLineage = extractYnab4TxLineage(sourceYTx);
             await db.insert(transactions).values({
               entityId: sourceYTx?.entityId ?? t.entityId,
               transferEntityId: destYTx?.entityId ?? (partner?.entityId || t.transferTransactionId || null),
@@ -1284,6 +1385,11 @@ export async function importYnab4(
               status: effectiveSrcStatus,
               transferStatus: effectiveDestStatus,
               flagColor: ynabFlagToColor(t.flag),
+              checkNumber: sourceLineage.checkNumber,
+              fitid: sourceLineage.fitid,
+              ynabId: sourceLineage.ynabId,
+              importedPayee: sourceLineage.importedPayee,
+              source: sourceLineage.source,
               transferAccountId: destAccId,
               parentId: null,
               isIncome: isTransferIncome,
@@ -1354,6 +1460,7 @@ export async function importYnab4(
               ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null
               : null;
 
+            const fallbackLineage = extractYnab4TxLineage(t);
             await db.insert(transactions).values({
               entityId: t.entityId,
               accountId: accId,
@@ -1370,6 +1477,11 @@ export async function importYnab4(
                     ? "u"
                     : "c",
               flagColor: ynabFlagToColor(t.flag),
+              checkNumber: fallbackLineage.checkNumber,
+              fitid: fallbackLineage.fitid,
+              ynabId: fallbackLineage.ynabId,
+              importedPayee: fallbackLineage.importedPayee,
+              source: fallbackLineage.source,
               transferAccountId: null,
               parentId: null,
               isIncome: isTxIncome,
@@ -1471,6 +1583,7 @@ export async function importYnab4(
             ? accountReconciliationDateMap.get(t.accountId) ?? t.date ?? null
             : null;
 
+          const plainLineage = extractYnab4TxLineage(t);
           await db.insert(transactions).values({
             entityId: t.entityId,
             accountId: accId,
@@ -1487,6 +1600,11 @@ export async function importYnab4(
                   ? "u"
                   : "c",
             flagColor,
+            checkNumber: plainLineage.checkNumber,
+            fitid: plainLineage.fitid,
+            ynabId: plainLineage.ynabId,
+            importedPayee: plainLineage.importedPayee,
+            source: plainLineage.source,
             transferAccountId: destAccId,
             parentId: null,
             isIncome: isTxIncome,
@@ -1753,6 +1871,12 @@ export async function importYnab4(
     }
 
     // 7. Insert Scheduled (Recurring) Transactions
+    // G-08: unknown frequencies warn instead of silently becoming
+    // monthly; single-child scheduled splits collapse to plain rows
+    // with a warning. Both aggregate so one exotic backup can't flood
+    // the summary.
+    const unknownFrequencies = new Map<string, number>();
+    let collapsedSingleChildSplits = 0;
     for (const st of yScheduled) {
       if (st.isTombstone) continue;
 
@@ -1798,6 +1922,7 @@ export async function importYnab4(
         parentAmount = nonZeroSubs.reduce((sum: number, sub: any) => sum + convertAmount(sub.amount), 0);
       } else if (nonZeroSubs.length === 1) {
         // A single child is not a valid split; collapse to a regular recurring transaction
+        collapsedSingleChildSplits++;
         const single = nonZeroSubs[0]!;
         parentAmount = convertAmount(single.amount);
         catId = (accIsOnBudget && categoryIdMap.get(single.categoryId)) || null;
@@ -1879,6 +2004,7 @@ export async function importYnab4(
         "never",
       ];
       if (!validFrequencies.includes(frequency)) {
+        unknownFrequencies.set(st.frequency ?? "", (unknownFrequencies.get(st.frequency ?? "") ?? 0) + 1);
         frequency = "monthly";
       }
 
@@ -1890,6 +2016,17 @@ export async function importYnab4(
           ? parseInt(st.date.slice(8, 10), 10)
           : 1;
       const anchorDay = Math.min(31, Math.max(1, parsedAnchor));
+      // G-08: YNAB4 `twiceAMonthStartDay` (`ScheduledTransactionVO`) —
+      // the second leg of twice-a-month schedules. Stored whenever it
+      // is a plausible day-of-month; YNAB4 defaults the int to 0 when
+      // unset, which we normalize to null.
+      const parsedSecondAnchor =
+        typeof st.twiceAMonthStartDay === "number" &&
+        !isNaN(st.twiceAMonthStartDay) &&
+        st.twiceAMonthStartDay >= 1 &&
+        st.twiceAMonthStartDay <= 31
+          ? Math.floor(st.twiceAMonthStartDay)
+          : null;
 
       const [insertedR] = await db
         .insert(recurring)
@@ -1905,6 +2042,7 @@ export async function importYnab4(
           frequency,
           nextDate: st.date,
           anchorDay,
+          secondAnchorDay: parsedSecondAnchor,
           active,
           transferAccountId,
         })
@@ -1962,6 +2100,16 @@ export async function importYnab4(
           });
         }
       }
+    }
+    for (const [raw, count] of unknownFrequencies) {
+      warnings.push(
+        `Unknown scheduled frequency "${raw}" on ${count} schedule(s); falling back to monthly`
+      );
+    }
+    if (collapsedSingleChildSplits > 0) {
+      warnings.push(
+        `Collapsed ${collapsedSingleChildSplits} single-child scheduled split(s) to plain recurring rows (YNAB4 splits need 2+ children)`
+      );
     }
 
     const xmlSettings =

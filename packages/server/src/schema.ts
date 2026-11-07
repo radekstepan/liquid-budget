@@ -137,6 +137,20 @@ export const transactions = sqliteTable(
     memo: text("memo").notNull().default(""),
     amount: integer("amount").notNull().default(0),
     status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
+    /**
+     * YNAB4 `checkNumber` (G-05, `BaseTransactionVO`). Nullable free-text
+     * (check users); round-tripped verbatim on export.
+     */
+    checkNumber: text("check_number"),
+    /**
+     * OFX-lineage fields (G-05, `MatchableTransactionVO`: `FITID`,
+     * `YNABID`, `importedPayee`, `source`). Persisted verbatim so a
+     * later OFX re-import can dedupe; not yet used for matching.
+     */
+    fitid: text("fitid"),
+    ynabId: text("ynab_id"),
+    importedPayee: text("imported_payee"),
+    source: text("source"),
     flagColor: text("flag_color"),
     createdAt: text("created_at").notNull().default(""),
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),
@@ -219,6 +233,11 @@ export const recurring = sqliteTable(
     frequency: text("frequency").notNull().default("monthly"),
     nextDate: text("next_date").notNull(),
     anchorDay: integer("anchor_day"),
+    /**
+     * YNAB4 `twiceAMonthStartDay` (G-08, `ScheduledTransactionVO`).
+     * Second leg of twice-a-month schedules; null otherwise.
+     */
+    secondAnchorDay: integer("second_anchor_day"),
     memo: text("memo").notNull().default(""),
     flagColor: text("flag_color"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
