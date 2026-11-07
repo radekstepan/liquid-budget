@@ -124,6 +124,99 @@ export interface ExtractedYnab4Data {
   ynabData: any;
   settingsXml?: string;
   settings?: Ynab4Settings;
+  /**
+   * Non-fatal archive-level notices: an older (but supported)
+   * budgetDataVersion, or multi-device `devices/`/`Snapshots/` entries
+   * that were not imported. Forward to `importYnab4` via its options
+   * so they surface in `ImportSummary.warnings`.
+   */
+  warnings: string[];
+}
+
+/**
+ * YNAB4 data-version policy (see docs/ynab4-import-gaps.md G-01).
+ *
+ * Stock YNAB4 rejects budgets older than 2.6 and treats 4.2.0 as current.
+ * Backups without `fileMetaData.budgetDataVersion` predate the 4.0
+ * migration (or are legacy-XML conversions) and cannot be trusted to
+ * parse, so the zip boundary rejects them instead of misparsing.
+ */
+export const MIN_SUPPORTED_BUDGET_DATA_VERSION: [number, number, number] = [2, 6, 0];
+export const CURRENT_BUDGET_DATA_VERSION = "4.2.0";
+const CURRENT_BUDGET_DATA_VERSION_TUPLE: [number, number, number] = [4, 2, 0];
+
+/**
+ * Parse a `budgetDataVersion` value (string like "4.2.0"/"4.2" or a
+ * plain number like 4.2) into a [major, minor, patch] tuple.
+ * Returns null when the value is missing or unparseable.
+ */
+export function parseBudgetDataVersion(value: unknown): [number, number, number] | null {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) return null;
+    return parseBudgetDataVersion(String(value));
+  }
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(".");
+  if (parts.length < 1 || parts.length > 3) return null;
+  const nums: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    nums.push(Number(part));
+  }
+  while (nums.length < 3) nums.push(0);
+  return [nums[0]!, nums[1]!, nums[2]!];
+}
+
+function compareVersionTuples(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i]! !== b[i]!) return a[i]! < b[i]! ? -1 : 1;
+  }
+  return 0;
+}
+
+function formatVersionTuple(t: [number, number, number]): string {
+  return `${t[0]}.${t[1]}.${t[2]}`;
+}
+
+/**
+ * Enforce the version gate: throw a descriptive error when
+ * `fileMetaData.budgetDataVersion` is missing/unparseable or older
+ * than 2.6. Returns the normalized version string on success.
+ */
+export function assertYnab4BudgetDataVersion(ynabData: any): string {
+  const raw = ynabData?.fileMetaData?.budgetDataVersion;
+  const parsed = parseBudgetDataVersion(raw);
+  if (parsed == null) {
+    throw new Error(
+      "Could not determine YNAB4 budgetDataVersion (missing fileMetaData.budgetDataVersion); " +
+        "refusing to import a backup that may predate YNAB4 2.6"
+    );
+  }
+  if (compareVersionTuples(parsed, MIN_SUPPORTED_BUDGET_DATA_VERSION) < 0) {
+    throw new Error(
+      `Unsupported YNAB4 budgetDataVersion "${String(raw).trim()}"; minimum supported version is 2.6`
+    );
+  }
+  return formatVersionTuple(parsed);
+}
+
+/**
+ * Collect non-fatal version warnings for data that passed the gate:
+ * a single notice when the version is older than the current 4.2.0.
+ */
+export function collectYnab4VersionWarnings(ynabData: any): string[] {
+  const raw = ynabData?.fileMetaData?.budgetDataVersion;
+  const parsed = parseBudgetDataVersion(raw);
+  if (parsed == null) return [];
+  if (compareVersionTuples(parsed, CURRENT_BUDGET_DATA_VERSION_TUPLE) < 0) {
+    return [
+      `YNAB4 budgetDataVersion "${String(raw).trim()}" is older than ${CURRENT_BUDGET_DATA_VERSION}; ` +
+        "some newer fields may be missing after import",
+    ];
+  }
+  return [];
 }
 
 function unescapeXml(str: string | null | undefined): string {
@@ -201,12 +294,78 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
   }
 
   const ynabData = JSON.parse(ynab4JsonStr);
+  // Version gate (G-01): reject backups that predate fileMetaData (4.0)
+  // or the 2.6 floor before any import step can misparse them.
+  assertYnab4BudgetDataVersion(ynabData);
+  const warnings = [
+    ...collectYnab4VersionWarnings(ynabData),
+    ...collectYnab4PackageWarnings(zipEntries.map((e) => e.entryName)),
+  ];
   const settings = settingsXml ? parseYnab4SettingsXml(settingsXml) : undefined;
-  return { ynabData, settingsXml, settings };
+  return { ynabData, settingsXml, settings, warnings };
 }
 
-export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: string | Ynab4Settings) {
+/**
+ * Warn (never throw) when a backup archive carries multi-device sync
+ * state alongside the main budget: stock YNAB4 packages hold a
+ * `Budget.ymeta` pointer plus `devices/` diffs and `Snapshots/`, while
+ * `.y4backup` exports zip the whole package. We import only the
+ * `.ynab4` payload, so surface the skipped sync state explicitly.
+ */
+export function collectYnab4PackageWarnings(entryNames: string[]): string[] {
+  const warnings: string[] = [];
+  const normalized = entryNames.map((n) => n.replace(/\\/g, "/"));
+  const hasDevices = normalized.some((n) => /(^|\/)devices(\/|$)/i.test(n));
+  const hasSnapshots = normalized.some((n) => /(^|\/)snapshots(\/|$)/i.test(n));
+  if (hasDevices) {
+    warnings.push(
+      'Backup archive contains multi-device sync state ("devices/" entries); only the main .ynab4 budget file was imported'
+    );
+  }
+  if (hasSnapshots) {
+    warnings.push(
+      'Backup archive contains historic snapshots ("Snapshots/" entries); only the main .ynab4 budget file was imported'
+    );
+  }
+  return warnings;
+}
+
+export interface ImportYnab4Options {
+  /**
+   * Archive-level warnings from `extractYnab4DataFromZip` (e.g.
+   * `devices/`/`Snapshots/` entries). Merged into
+   * `ImportSummary.warnings` alongside version notices.
+   */
+  warnings?: string[];
+}
+
+export async function importYnab4(
+  db: Db,
+  ynabData: any,
+  settingsXmlOrObj?: string | Ynab4Settings,
+  options?: ImportYnab4Options
+) {
   return withTransaction(db, async () => {
+    // Version gate (G-01): versioned data older than 2.6 is rejected
+    // before the wipe, so a failed import never destroys the ledger.
+    // A missing version is tolerated here for programmatic callers;
+    // the zip boundary (extractYnab4DataFromZip) already rejects it.
+    const rawVersion = ynabData?.fileMetaData?.budgetDataVersion;
+    if (rawVersion !== undefined && rawVersion !== null) {
+      assertYnab4BudgetDataVersion(ynabData);
+    }
+    // Archive-level warnings forwarded from extraction plus our own
+    // version notice, deduplicated so the zip→import path never
+    // reports the same notice twice.
+    const seenWarnings = new Set<string>();
+    const warnings = [...(options?.warnings ?? []), ...collectYnab4VersionWarnings(ynabData)].filter(
+      (w) => {
+        if (seenWarnings.has(w)) return false;
+        seenWarnings.add(w);
+        return true;
+      }
+    );
+
     // Detect amount scale: stock YNAB4 backups use milliunits (×1000),
     // but decimal-dollar conversions also exist. See BUG-01.
     const isMilliunit = detectMilliunitScale(ynabData);
@@ -381,6 +540,8 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
           lastReconciledAt: recDate,
           lastReconciledBalance: recBalance,
           archived: isArchived,
+          // G-03 (cheap): preserve the YNAB4 account note verbatim.
+          notes: typeof acc.note === "string" ? acc.note : "",
         })
         .returning();
 
@@ -1670,6 +1831,7 @@ export async function importYnab4(db: Db, ynabData: any, settingsXmlOrObj?: stri
       transactions: totalImportedTxCount,
       settings,
       duplicatesSkipped: skippedDuplicates,
+      warnings,
     };
     return result;
   });

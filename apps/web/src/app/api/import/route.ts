@@ -15,16 +15,18 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     let ynabData: any;
     let settingsXml: string | undefined;
+    let warnings: string[] = [];
     try {
       const extracted = extractYnab4DataFromZip(arrayBuffer);
       ynabData = extracted.ynabData;
       settingsXml = extracted.settingsXml;
+      warnings = extracted.warnings;
     } catch (e: any) {
       return NextResponse.json({ error: e.message || "Invalid backup archive" }, { status: 400 });
     }
 
     const db = getDefaultDb();
-    const summary = await importYnab4(db, ynabData, settingsXml);
+    const summary = await importYnab4(db, ynabData, settingsXml, { warnings });
 
     return NextResponse.json({ ok: true, summary });
   } catch (e: any) {

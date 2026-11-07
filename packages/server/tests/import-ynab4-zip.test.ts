@@ -35,6 +35,7 @@ describe("Stage 1: extractYnab4DataFromZip", () => {
   it("extracts ynabData and settingsXml from an in-memory zip archive", () => {
     const zip = new AdmZip();
     const mockJson = {
+      fileMetaData: { budgetDataVersion: "4.2.0" },
       budgetMetaData: { currencyLocale: "en_CA" },
       accounts: [{ entityId: "acc1", accountName: "Checking" }],
       transactions: [],
@@ -49,6 +50,7 @@ describe("Stage 1: extractYnab4DataFromZip", () => {
 
     expect(result.ynabData).toEqual(mockJson);
     expect(result.settingsXml).toBe(mockXml);
+    expect(result.warnings).toEqual([]);
   });
 
   it("throws a descriptive error if no .ynab4 entry exists in the zip", () => {
@@ -63,6 +65,7 @@ describe("Stage 1: extractYnab4DataFromZip", () => {
 
 describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () => {
   const syntheticYnab4Data = {
+    fileMetaData: { budgetDataVersion: "4.2.0" },
     budgetMetaData: {
       currencyLocale: "en_CA",
       dateLocale: "en_CA",
@@ -304,6 +307,7 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
     expect(summary.accounts).toBe(4); // 4 active, 1 tombstone dropped
     expect(summary.categoryGroups).toBe(4); // Housing, Daily Expenses, Hidden Categories, Credit Card Payments
     expect(summary.categories).toBe(4); // Rent, Utilities, Groceries, Old Car Maintenance
+    expect(summary.warnings).toEqual([]); // current data version: no notices
 
     const data = await getBudgetData(db);
     const byName = new Map(data.accounts.map((a) => [a.name, a]));
@@ -360,5 +364,151 @@ describe("Stage 2: 2-stage import with comprehensive synthetic YNAB4 data", () =
     expect(frequencies).toContain("monthly");
     expect(frequencies).toContain("twiceamonth");
     expect(frequencies).toContain("everyothermonth");
+  });
+});
+
+describe("G-01: budgetDataVersion gate and package-entry warnings", () => {
+  function buildZip(payload: unknown, extraEntries: Record<string, string> = {}): Buffer {
+    const zip = new AdmZip();
+    zip.addFile("budget.ynab4", Buffer.from(JSON.stringify(payload), "utf-8"));
+    for (const [name, content] of Object.entries(extraEntries)) {
+      zip.addFile(name, Buffer.from(content, "utf-8"));
+    }
+    return zip.toBuffer();
+  }
+
+  function minimalPayload(fileMetaData?: unknown): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      accounts: [],
+      payees: [],
+      masterCategories: [],
+      transactions: [],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+    if (fileMetaData !== undefined) payload.fileMetaData = fileMetaData;
+    return payload;
+  }
+
+  it("rejects a backup with no fileMetaData instead of misparsing it", () => {
+    expect(() => extractYnab4DataFromZip(buildZip(minimalPayload()))).toThrow(
+      /missing fileMetaData\.budgetDataVersion/
+    );
+  });
+
+  it("rejects a backup with an unparseable budgetDataVersion", () => {
+    const payload = minimalPayload({ budgetDataVersion: "not-a-version" });
+    expect(() => extractYnab4DataFromZip(buildZip(payload))).toThrow(
+      /missing fileMetaData\.budgetDataVersion/
+    );
+  });
+
+  it("rejects a pre-2.6 backup with a clear minimum-version error", () => {
+    const payload = minimalPayload({ budgetDataVersion: "2.5" });
+    expect(() => extractYnab4DataFromZip(buildZip(payload))).toThrow(
+      /minimum supported version is 2\.6/
+    );
+  });
+
+  it("accepts the 2.6 floor with an older-version warning", () => {
+    const extracted = extractYnab4DataFromZip(buildZip(minimalPayload({ budgetDataVersion: "2.6" })));
+    expect(extracted.ynabData).toBeDefined();
+    expect(extracted.warnings).toHaveLength(1);
+    expect(extracted.warnings[0]).toMatch(/older than 4\.2\.0/);
+  });
+
+  it("warns (but imports) when the version is older than 4.2.0", async () => {
+    const payload = minimalPayload({ budgetDataVersion: "4.1.1" });
+    const extracted = extractYnab4DataFromZip(buildZip(payload));
+    expect(extracted.warnings).toHaveLength(1);
+    expect(extracted.warnings[0]).toMatch(/older than 4\.2\.0/);
+
+    const db = openMigratedDb();
+    const summary = await importYnab4(db, extracted.ynabData, undefined, {
+      warnings: extracted.warnings,
+    });
+    expect(summary.warnings).toHaveLength(1);
+    expect(summary.warnings![0]).toMatch(/older than 4\.2\.0/);
+  });
+
+  it("warns when the archive carries devices/ or Snapshots/ sync state", () => {
+    const payload = minimalPayload({ budgetDataVersion: "4.2.0" });
+    const extracted = extractYnab4DataFromZip(
+      buildZip(payload, {
+        "devices/A1234/device.knowledge": "knowledge-data",
+        "Snapshots/Budget.2026-01-01.ymeta": "snapshot-pointer",
+      })
+    );
+    expect(extracted.ynabData).toBeDefined();
+    expect(extracted.warnings).toHaveLength(2);
+    expect(extracted.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/devices\//),
+        expect.stringMatching(/Snapshots\//),
+      ])
+    );
+  });
+
+  it("rejects versioned pre-2.6 data in importYnab4 before wiping the ledger", async () => {
+    const db = openMigratedDb();
+    await db.insert(schema.accounts).values({
+      name: "Keep Me",
+      kind: "liquid",
+      groupLabel: "Budget Accounts",
+      balance: 123,
+    });
+
+    const payload = minimalPayload({ budgetDataVersion: "2.5" });
+    await expect(importYnab4(db, payload)).rejects.toThrow(/minimum supported version is 2\.6/);
+
+    const rows = await db.select().from(schema.accounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("Keep Me");
+  });
+
+  it("tolerates programmatic data without fileMetaData (zip boundary enforces it)", async () => {
+    const db = openMigratedDb();
+    const summary = await importYnab4(db, minimalPayload());
+    expect(summary.accounts).toBe(0);
+    expect(summary.warnings).toEqual([]);
+  });
+});
+
+describe("G-03: account notes survive import", () => {
+  it("maps acc.note into accounts.notes, including InvestmentAccount", async () => {
+    const payload = {
+      fileMetaData: { budgetDataVersion: "4.2.0" },
+      accounts: [
+        {
+          entityId: "acc-invest",
+          accountName: "Index Fund",
+          accountType: "InvestmentAccount",
+          onBudget: false,
+          sortableIndex: 0,
+          note: "Retirement stash — do not touch",
+        },
+        {
+          entityId: "acc-checking",
+          accountName: "Checking",
+          accountType: "Checking",
+          onBudget: true,
+          sortableIndex: 1000,
+        },
+      ],
+      payees: [],
+      masterCategories: [],
+      transactions: [],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+
+    const db = openMigratedDb();
+    const summary = await importYnab4(db, payload);
+    expect(summary.accounts).toBe(2);
+
+    const rows = await db.select().from(schema.accounts);
+    const byName = new Map(rows.map((a) => [a.name, a]));
+    expect(byName.get("Index Fund")!.notes).toBe("Retirement stash — do not touch");
+    expect(byName.get("Checking")!.notes).toBe("");
   });
 });

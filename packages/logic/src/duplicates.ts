@@ -108,6 +108,12 @@ export type ImportSummary = {
   transactions: number;
   duplicatesSkipped: ImportSkippedEntry[];
   settings?: unknown;
+  /**
+   * Non-fatal import notices (e.g. an older budgetDataVersion, or
+   * multi-device `devices/`/`Snapshots/` entries in the source archive
+   * that were not imported). Never blocks the import.
+   */
+  warnings?: string[];
 };
 
 /**

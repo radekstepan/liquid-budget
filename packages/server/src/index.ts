@@ -15,7 +15,7 @@ export * from "./queries/rename-suggest.js";
 export * from "./llm.js";
 export * from "./queries/duplicates.js";
 export { seedDatabase, resetDatabase, resetAndSeedDatabase, DEMO_MONTH } from "./seed.js";
-export { importYnab4, extractYnab4DataFromZip, parseYnab4SettingsXml, type ExtractedYnab4Data, type Ynab4Settings } from "./import-ynab4.js";
+export { importYnab4, extractYnab4DataFromZip, parseYnab4SettingsXml, parseBudgetDataVersion, assertYnab4BudgetDataVersion, collectYnab4VersionWarnings, collectYnab4PackageWarnings, CURRENT_BUDGET_DATA_VERSION, MIN_SUPPORTED_BUDGET_DATA_VERSION, type ExtractedYnab4Data, type Ynab4Settings, type ImportYnab4Options } from "./import-ynab4.js";
 export { exportYnab4, exportYnab4Zip, type ExportYnab4Options } from "./export-ynab4.js";
 export { importCsvTransactions, type ImportCsvInput } from "./import-csv.js";
 export * from "./invariants.js";

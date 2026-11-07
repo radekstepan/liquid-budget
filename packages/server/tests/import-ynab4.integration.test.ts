@@ -227,6 +227,7 @@ describe("importYnab4 full import", () => {
       categoryGroups: 3, // Everyday + "Hidden Categories" + "Credit Card Payments"
       categories: 1, // only mapped subcategories (sc1); CC-payment cats aren't in the map
       transactions: 6, // 1 regular + 1 transfer (de-duplicated from pair) + 1 income + 1 split parent + 2 split children
+      warnings: [], // unversioned fixture: no notices
       duplicatesSkipped: [
         {
           accountName: "Visa",

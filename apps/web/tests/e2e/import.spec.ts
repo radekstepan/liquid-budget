@@ -26,6 +26,7 @@ const IMPORTED_PAYEE = "Imported Payee";
 // prove the import replaced the demo data: one account, one OUTFLOW
 // group with a subcategory, one transaction, one scheduled entry.
 const ynabData = {
+  fileMetaData: { budgetDataVersion: "4.2.0" },
   accounts: [
     {
       entityId: "acc1",

@@ -2,6 +2,7 @@ import AdmZip from "adm-zip";
 import { asc } from "drizzle-orm";
 import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
+import { CURRENT_BUDGET_DATA_VERSION } from "./import-ynab4.js";
 import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
 import { getBudgetData } from "./queries/budget.js";
 
@@ -645,6 +646,12 @@ export async function exportYnab4(
   });
 
   const ynabData = {
+    // G-01: stamp the data version stock YNAB4 writes, so our own
+    // exports pass the import version gate (and real YNAB4 accepts them).
+    fileMetaData: {
+      budgetDataVersion: CURRENT_BUDGET_DATA_VERSION,
+      entityType: "fileMetaData",
+    },
     budgetMetaData,
     accounts: yAccounts,
     payees: Array.from(payeeMap.values()),
