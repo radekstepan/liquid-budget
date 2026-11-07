@@ -1747,6 +1747,28 @@ export async function importYnab4(
       }
     }
 
+    // 5d. G-10: `accountMappings` (OFX import config) are
+    // intentionally dropped. YNAB4's `AccountMappingVO` carries `fid,
+    // shortenedAccountId, hash, salt, targetYNABAccountId,
+    // dateSequence, shouldFlipPayeesMemos, shouldImportMemos (=true),
+    // skipImport` (`data/AccountMapping.as`,
+    // `AccountMappingManager.as`, `dataAccess/importing/` OFX/QIF
+    // readers). None of it feeds budget math and no OFX import is
+    // modeled here, so persisting it would be dead weight. Counted
+    // here so the loss is reported in warnings, never silent. If OFX
+    // import is ever built, revisit storing at least the three
+    // per-account booleans (`skipImport`, `shouldFlipPayeesMemos`,
+    // `shouldImportMemos`).
+    {
+      const mappings = Array.isArray(ynabData.accountMappings) ? ynabData.accountMappings : [];
+      const liveMappings = mappings.filter((m: any) => !m?.isTombstone).length;
+      if (liveMappings > 0) {
+        warnings.push(
+          `Dropped ${liveMappings} OFX account mapping(s) (fid/shortenedAccountId/targetYNABAccountId + import preferences); OFX import is not modeled`
+        );
+      }
+    }
+
     // 6. Compute real balances of accounts
     await recomputeAccountBalances(db);
 

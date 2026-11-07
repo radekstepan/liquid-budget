@@ -3,7 +3,7 @@ import { asc } from "drizzle-orm";
 import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
 import { CURRENT_BUDGET_DATA_VERSION } from "./import-ynab4.js";
-import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, transactions } from "./schema.js";
+import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { getAllSettings } from "./settings.js";
 import { getBudgetData } from "./queries/budget.js";
 
@@ -136,6 +136,7 @@ export async function exportYnab4(
     allRecurringSubs,
     allReconciliations,
     allPayees,
+    allRenameRules,
     budgetData,
   ] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort), asc(accounts.id)),
@@ -147,6 +148,7 @@ export async function exportYnab4(
     db.select().from(recurringSubTransactions).orderBy(asc(recurringSubTransactions.sort), asc(recurringSubTransactions.id)),
     db.select().from(reconciliations).orderBy(asc(reconciliations.id)),
     db.select().from(payees),
+    db.select().from(renameRules),
     getBudgetData(db),
   ]);
 
@@ -252,7 +254,24 @@ export async function exportYnab4(
   });
 
   // 3. Payees
-  const payeeMap = new Map<string, { entityId: string; name: string; targetAccountId?: string; entityType: string; enabled: boolean }>();
+  interface YPayee {
+    entityId: string;
+    name: string;
+    targetAccountId?: string;
+    entityType: string;
+    enabled: boolean;
+    autoFillCategoryId?: string | null;
+    renameConditions: unknown[];
+  }
+  const payeeMap = new Map<string, YPayee>();
+
+  // Category entityIds for the `autoFillCategoryId` write-back below
+  // (G-11): only genuinely stored entityIds qualify — unknown local
+  // categories export null rather than an invented `sc-<id>`.
+  const categoryEntityById = new Map<number, string>();
+  for (const c of allCategories) {
+    if (c.entityId) categoryEntityById.set(c.id, c.entityId);
+  }
 
   // Add transfer payees for every account
   for (const a of allAccounts) {
@@ -264,7 +283,27 @@ export async function exportYnab4(
       targetAccountId: accEntityId,
       entityType: "payee",
       enabled: true,
+      renameConditions: [],
     });
+  }
+
+  // G-11: export every known payee — not just ones referenced by
+  // rows — so `enabled`, `autoFillCategoryId`, and rename
+  // conditions survive a round-trip even for unused payees.
+  for (const p of allPayees) {
+    const entityId = p.entityId || `payee-${p.name.trim().toLowerCase()}`;
+    if (!payeeMap.has(entityId)) {
+      payeeMap.set(entityId, {
+        entityId,
+        name: p.name,
+        entityType: "payee",
+        // G-04: round-trip the archived flag YNAB4 calls `enabled`.
+        enabled: !p.archived,
+        autoFillCategoryId:
+          p.autoCategoryId != null ? categoryEntityById.get(p.autoCategoryId) ?? null : null,
+        renameConditions: [],
+      });
+    }
   }
 
   const getOrCreatePayeeId = (name: string | null | undefined): string | undefined => {
@@ -288,6 +327,11 @@ export async function exportYnab4(
         entityType: "payee",
         // G-04: round-trip the archived flag YNAB4 calls `enabled`.
         enabled: !(matchPayee?.archived ?? false),
+        autoFillCategoryId:
+          matchPayee?.autoCategoryId != null
+            ? categoryEntityById.get(matchPayee.autoCategoryId) ?? null
+            : null,
+        renameConditions: [],
       });
     }
     return entityId;
@@ -711,6 +755,40 @@ export async function exportYnab4(
     };
   });
 
+  // 8. Rename conditions (G-11): our `rename_rules` ride on the
+  // owning payee as YNAB4 `renameConditions` (`StringConditionVO`:
+  // operator/operand/parentPayeeId). Only `Is` maps faithfully —
+  // and it is also all our importer accepts — so in-app `[N]`/`[X]`
+  // wildcard patterns round-trip verbatim through our own import
+  // but would match literally in stock YNAB4. `entityType` /
+  // `entityVersion` here are our extension guesses (tolerated as
+  // unknown keys); the `accepted: true`, `isTombstone: false`, and
+  // `entityVersion` stubs elsewhere are likewise intentional — our
+  // match workflow differs from YNAB4's, so every row exports
+  // `accepted: true` while the importer reports rows that carried
+  // `accepted === false` or match links as warnings instead of
+  // modeling match state.
+  for (const rule of allRenameRules) {
+    const target = rule.targetPayee?.trim() || "";
+    if (!target) continue;
+    let entry = [...payeeMap.values()].find(
+      (e) => !e.targetAccountId && e.name.toLowerCase() === target.toLowerCase()
+    );
+    if (!entry) {
+      const mintedId = getOrCreatePayeeId(target);
+      entry = mintedId ? payeeMap.get(mintedId) : undefined;
+    }
+    entry?.renameConditions.push({
+      entityId: `renamecond-${rule.id}`,
+      parentPayeeId: entry.entityId,
+      operator: "Is",
+      operand: rule.sourcePattern,
+      isTombstone: false,
+      entityType: "payeeRenameCondition",
+      entityVersion: `rc-v-${rule.id}`,
+    });
+  }
+
   const ynabData = {
     // G-01: stamp the data version stock YNAB4 writes, so our own
     // exports pass the import version gate (and real YNAB4 accepts them).
@@ -719,6 +797,15 @@ export async function exportYnab4(
       entityType: "fileMetaData",
     },
     budgetMetaData,
+    // G-10/G-11: intentionally no `accountMappings` (OFX import
+    // config — see the importer) and no `payeeLocations` (no maps
+    // feature). Likewise unwritten by design, with the loss confined
+    // to local-only state: `duplicate_ignores`,
+    // `transactions.needs_review`, and `categories.goal_target` have
+    // no YNAB4 counterpart; `accounts.groupLabel` is recomputed from
+    // kind/onBudget on import; `payees.auto_category_id` re-derives
+    // from the exported `autoFillCategoryId` (verbatim when
+    // resolvable) or the history-majority fallback.
     accounts: yAccounts,
     payees: Array.from(payeeMap.values()),
     masterCategories: yMasterCategories,
