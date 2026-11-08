@@ -5,6 +5,7 @@ import {
   dollarsToCents,
   isTransferPayee,
   nextMonthKey,
+  repairSplitForImport,
   todayISO,
   TRANSACTION_DUPLICATE_FLAG,
   type ImportSkippedEntry,
@@ -931,6 +932,9 @@ export async function importYnab4(
 
     const processedTransferIds = new Set<string>();
     let totalImportedTxCount = 0;
+    // G-split: unbalanced splits repaired with an auto-balance filler leg
+    // (see repairSplitForImport). Aggregated into one warning below.
+    let splitRepairedCount = 0;
     // Fingerprints of already-encountered plain regular rows (used to flag
     // suspected duplicate entries within the backup). Split rows and
     // transfers are intentionally excluded.
@@ -995,7 +999,20 @@ export async function importYnab4(
           ? "r"
           : t.cleared === "Uncleared" ? "u" : "c";
 
-        const parentSplitAmount = liveSubs.reduce((sum: number, st: any) => sum + convertAmount(st.amount), 0);
+        // G-split: explicit import-time repair policy. YNAB4 renders an
+        // unbalanced split with an auto-filler leg instead of rejecting
+        // it, while our UI validator (`assertSplitsBalanced`) rejects such
+        // splits on write — so the import repairs instead of throwing. A
+        // filler leg preserves YNAB4's register total on the parent;
+        // single-leg splits are kept verbatim (rebased to the leg).
+        const splitRepair = repairSplitForImport(
+          convertAmount(t.amount),
+          liveSubs.map((st: any) => ({ amount: convertAmount(st.amount) }))
+        );
+        if (splitRepair.repaired) {
+          splitRepairedCount++;
+        }
+        const parentSplitAmount = splitRepair.parentAmount;
 
         const parentLineage = extractYnab4TxLineage(t);
         const [insertedT] = await db
@@ -1172,6 +1189,38 @@ export async function importYnab4(
               transferReconciliationId: effectiveChildDestStatus === "r" ? childDestRecId : null,
             });
             totalImportedTxCount++;
+          }
+
+          // G-split: append the repair filler leg (if any) YNAB4-style. It
+          // is synthetic, so it never claims reconciled precision — even
+          // under a reconciled parent it imports as merely cleared — and
+          // it opts out of the all-children-reconciled parent upgrade.
+          if (splitRepair.kind === "filler-added") {
+            const filler = splitRepair.children[splitRepair.children.length - 1]!;
+            const fillerOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
+            const fillerAccKind = accKindMap.get(t.accountId) ?? "liquid";
+            await db.insert(transactions).values({
+              accountId: accId,
+              categoryId: null,
+              date: t.date,
+              payee,
+              payeeId: parentPayeeId,
+              memo: typeof filler.memo === "string" ? filler.memo : "",
+              amount: filler.amount,
+              status: effectiveParentStatus === "r" ? "c" : effectiveParentStatus,
+              transferStatus: null,
+              flagColor: null,
+              transferAccountId: null,
+              parentId: insertedT.id,
+              isIncome: fillerOnBudget && fillerAccKind !== "credit" && filler.amount > 0,
+              incomeMonth: null,
+              reconciledAt: null,
+              reconciliationId: null,
+              transferReconciledAt: null,
+              transferReconciliationId: null,
+            });
+            totalImportedTxCount++;
+            allChildrenReconciled = false;
           }
 
           // If all children are reconciled and parent is not yet 'r', reconcile parent
@@ -2105,6 +2154,11 @@ export async function importYnab4(
     if (collapsedSingleChildSplits > 0) {
       warnings.push(
         `Collapsed ${collapsedSingleChildSplits} single-child scheduled split(s) to plain recurring rows (YNAB4 splits need 2+ children)`
+      );
+    }
+    if (splitRepairedCount > 0) {
+      warnings.push(
+        `Repaired ${splitRepairedCount} split transaction(s) whose legs did not sum to the parent amount; an auto-balance leg was added (YNAB4 renders these the same way)`
       );
     }
 

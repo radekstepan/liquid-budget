@@ -352,3 +352,106 @@ describe("G-09: no phantom precision for stock files", () => {
     expect(linked).toMatchObject({ status: "r", reconciliationId: recs[0]!.id });
   });
 });
+
+describe("G-split: unbalanced splits get an auto-balance filler leg", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openMigratedDb();
+  });
+
+  it("repairs a sum mismatch with a filler leg, warns once, and keeps balanced/single splits quiet", async () => {
+    const result = await importYnab4(db, {
+      accounts: [{ entityId: "acc1", accountName: "Checking", accountType: "Checking", onBudget: true }],
+      payees: [{ entityId: "p1", name: "Store" }],
+      masterCategories: [
+        {
+          entityId: "mc1",
+          name: "Everyday",
+          type: "OUTFLOW",
+          subCategories: [
+            { entityId: "sc1", name: "Groceries" },
+            { entityId: "sc2", name: "Household" },
+          ],
+        },
+      ],
+      transactions: [
+        {
+          // Legs (-60, -30) disagree with the parent (-100): YNAB4 would
+          // render an auto-filler for the missing -10.
+          entityId: "t_unbalanced",
+          accountId: "acc1",
+          date: "2026-06-01",
+          amount: -100,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            { entityId: "st1", categoryId: "sc1", amount: -60, memo: "Food" },
+            { entityId: "st2", categoryId: "sc2", amount: -30, memo: "Supplies" },
+          ],
+        },
+        {
+          // Balanced control: no filler, no warning.
+          entityId: "t_balanced",
+          accountId: "acc1",
+          date: "2026-06-02",
+          amount: -50,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "Category/__Split__",
+          subTransactions: [
+            { entityId: "st3", categoryId: "sc1", amount: -30, memo: "" },
+            { entityId: "st4", categoryId: "sc2", amount: -20, memo: "" },
+          ],
+        },
+        {
+          // Single-leg control: kept verbatim, no filler, no warning.
+          entityId: "t_single",
+          accountId: "acc1",
+          date: "2026-06-03",
+          amount: -25,
+          cleared: "Cleared",
+          payeeId: "p1",
+          categoryId: "Category/__Split__",
+          subTransactions: [{ entityId: "st5", categoryId: "sc1", amount: -25, memo: "" }],
+        },
+      ],
+      monthlyBudgets: [],
+      scheduledTransactions: [],
+    });
+
+    const txs = await db.select().from(schema.transactions);
+    // 3 parents + 2 + 2 + 1 live legs + 1 filler.
+    expect(txs).toHaveLength(9);
+
+    const repairedParent = txs.find((t) => t.entityId === "t_unbalanced");
+    expect(repairedParent).toBeDefined();
+    // YNAB4's register total is preserved on the parent ...
+    expect(Number(repairedParent!.amount)).toBe(-10000);
+    // ... and the legs now sum to it.
+    const repairedLegs = txs.filter((t) => t.parentId === repairedParent!.id);
+    expect(repairedLegs).toHaveLength(3);
+    expect(repairedLegs.reduce((s, t) => s + Number(t.amount), 0)).toBe(-10000);
+    const filler = repairedLegs.find((t) => (t.memo || "").includes("Auto-balance"));
+    expect(filler).toBeDefined();
+    expect(Number(filler!.amount)).toBe(-1000);
+    expect(filler).toMatchObject({ categoryId: null, transferAccountId: null });
+
+    const balancedParent = txs.find((t) => t.entityId === "t_balanced");
+    expect(txs.filter((t) => t.parentId === balancedParent!.id)).toHaveLength(2);
+
+    const singleParent = txs.find((t) => t.entityId === "t_single");
+    expect(Number(singleParent!.amount)).toBe(-2500);
+    expect(txs.filter((t) => t.parentId === singleParent!.id)).toHaveLength(1);
+
+    // Exactly one aggregated repair notice.
+    const repairWarnings = result.warnings.filter((w) => w.includes("auto-balance"));
+    expect(repairWarnings).toHaveLength(1);
+    expect(repairWarnings[0]).toContain("1 split transaction(s)");
+
+    // Balance math: parents are excluded, legs drive the balance
+    // (-60 -30 -10 -30 -20 -25 = -175).
+    const [acc] = await db.select().from(schema.accounts);
+    expect(Number(acc!.balance)).toBe(-17500);
+  });
+});

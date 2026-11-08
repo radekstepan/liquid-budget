@@ -16,6 +16,8 @@ import {
   isTransfer,
   splitChildrenTotal,
   assertSplitsBalanced,
+  repairSplitForImport,
+  SPLIT_IMPORT_FILLER_MEMO,
 } from "../src/split.js";
 import type { SubTransaction, Transaction } from "../src/types.js";
 
@@ -240,5 +242,102 @@ describe("assertSplitsBalanced (BUG-18.3 consolidated validator)", () => {
       const mutated = children.map((c, i) => (i === idx ? { ...c, amount: c.amount + delta } : c));
       expect(() => assertSplitsBalanced(parent, mutated)).toThrow(/do not sum to parent/);
     }
+  });
+});
+
+describe("repairSplitForImport (G-split import repair policy)", () => {
+  it("returns balanced splits verbatim in a new array", () => {
+    const children = [
+      { categoryId: 1, amount: -6000 },
+      { categoryId: 2, amount: -4000 },
+    ];
+    const result = repairSplitForImport(-10000, children);
+    expect(result).toMatchObject({
+      kind: "balanced",
+      repaired: false,
+      parentAmount: -10000,
+      difference: 0,
+    });
+    expect(result.children).toEqual(children);
+    expect(result.children).not.toBe(children);
+    expect(children).toEqual([
+      { categoryId: 1, amount: -6000 },
+      { categoryId: 2, amount: -4000 },
+    ]);
+  });
+
+  it("appends a filler leg for the difference, preserving the parent amount", () => {
+    const children = [
+      { categoryId: 1, amount: -6000 },
+      { categoryId: 2, amount: -3000 },
+    ];
+    const result = repairSplitForImport(-10000, children);
+    expect(result.kind).toBe("filler-added");
+    expect(result.repaired).toBe(true);
+    expect(result.parentAmount).toBe(-10000);
+    expect(result.difference).toBe(-1000);
+    expect(result.children).toHaveLength(3);
+    expect(result.children.slice(0, 2)).toEqual(children);
+    expect(result.children[2]).toMatchObject({ amount: -1000, memo: SPLIT_IMPORT_FILLER_MEMO });
+    expect(children).toHaveLength(2);
+  });
+
+  it("supports mixed-sign splits with a positive filler", () => {
+    const result = repairSplitForImport(400000, [
+      { categoryId: 1, amount: 500000 },
+      { categoryId: 2, amount: -100001 },
+    ]);
+    expect(result.kind).toBe("filler-added");
+    expect(result.difference).toBe(1);
+    expect(result.children[2]).toMatchObject({ amount: 1 });
+  });
+
+  it("honours a custom filler memo", () => {
+    const result = repairSplitForImport(-10000, [{ categoryId: 1, amount: -6000 }, { categoryId: 2, amount: -3000 }], "custom note");
+    expect(result.children[2]).toMatchObject({ amount: -1000, memo: "custom note" });
+  });
+
+  it("keeps single-child splits verbatim, rebased to the leg", () => {
+    const result = repairSplitForImport(-5000, [{ categoryId: 1, amount: -4500 }]);
+    expect(result.kind).toBe("single-child-kept");
+    expect(result.repaired).toBe(false);
+    expect(result.parentAmount).toBe(-4500);
+    expect(result.difference).toBe(-500);
+    expect(result.children).toHaveLength(1);
+  });
+
+  it("reports empty splits without throwing", () => {
+    const result = repairSplitForImport(-5000, []);
+    expect(result).toMatchObject({
+      kind: "empty",
+      repaired: false,
+      parentAmount: -5000,
+      difference: -5000,
+    });
+    expect(result.children).toEqual([]);
+  });
+
+  it("treats zero-sum splits as balanced and rounds floats to cents", () => {
+    expect(
+      repairSplitForImport(0, [
+        { categoryId: 1, amount: -2500 },
+        { categoryId: 2, amount: 2500 },
+      ]).kind
+    ).toBe("balanced");
+    expect(
+      repairSplitForImport(-10000.4, [
+        { categoryId: 1, amount: -6000.2 },
+        { categoryId: 2, amount: -4000.2 },
+      ]).kind
+    ).toBe("balanced");
+  });
+
+  it("never mutates frozen inputs", () => {
+    const children = Object.freeze([
+      Object.freeze({ categoryId: 1, amount: -6000 }),
+      Object.freeze({ categoryId: 2, amount: -3000 }),
+    ]);
+    expect(() => repairSplitForImport(-10000, children)).not.toThrow();
+    expect(children[0]).toEqual({ categoryId: 1, amount: -6000 });
   });
 });
