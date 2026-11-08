@@ -404,15 +404,20 @@ describe("format", () => {
       expect(nextDateFor("twiceamonth", "2026-09-25", 10)).toBe("2026-10-10");
     });
 
-    it("handles hand-set nextDate before d1 for twiceamonth (BUG-26)", () => {
-      // anchor 31: d1=16, d2=31. nextDate on day 10 should advance to 16, not skip to 31
-      expect(nextDateFor("twiceamonth", "2026-09-10", 31)).toBe("2026-09-16");
-      expect(nextDateFor("twiceamonth", "2026-09-01", 31)).toBe("2026-09-16");
-      expect(nextDateFor("twiceamonth", "2026-09-15", 31)).toBe("2026-09-16");
-      // anchor 20: d1=5, d2=20. nextDate on day 2 should advance to 5
-      expect(nextDateFor("twiceamonth", "2026-09-02", 20)).toBe("2026-09-05");
-      // anchor 5: d1=5, d2=20. nextDate on day 1 should advance to 5
-      expect(nextDateFor("twiceamonth", "2026-09-01", 5)).toBe("2026-09-05");
+    it("holds off-grid nextDate before d1 into next month for twiceamonth (BUG-26, YNAB4 phase)", () => {
+      // YNAB4 `ScheduledTransaction.getNextOccurrence` has no same-month
+      // snap: any date off the start-day leg advances to (next month, d1),
+      // so a clamped/imported off-grid leg holds its phase
+      // (see repro-twiceamonth.test.ts). The old same-month snap to d1
+      // encoded the bug fixed here.
+      // anchor 31: d1=16, d2=31. nextDate before d1 holds into next month.
+      expect(nextDateFor("twiceamonth", "2026-09-10", 31)).toBe("2026-10-16");
+      expect(nextDateFor("twiceamonth", "2026-09-01", 31)).toBe("2026-10-16");
+      expect(nextDateFor("twiceamonth", "2026-09-15", 31)).toBe("2026-10-16");
+      // anchor 20: d1=5, d2=20. nextDate on day 2 advances to next month's 5th
+      expect(nextDateFor("twiceamonth", "2026-09-02", 20)).toBe("2026-10-05");
+      // anchor 5: d1=5, d2=20. nextDate on day 1 advances to next month's 5th
+      expect(nextDateFor("twiceamonth", "2026-09-01", 5)).toBe("2026-10-05");
     });
 
     it("prevents semimonthly schedule drift across February (BUG-06)", () => {

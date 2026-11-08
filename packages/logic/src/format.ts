@@ -634,6 +634,20 @@ export function nextDateFor(
       break;
     case "twiceamonth":
     case "semimonthly": {
+      // YNAB4 `ScheduledTransaction.getNextOccurrence` for TwiceAMonth
+      // (:81-100): when the date sits on `twiceAMonthStartDay` (our d1),
+      // advance +15 days, clamped to end-of-month when that crosses into
+      // the next month; ANY other date — the second leg, a hand-set date,
+      // or a clamped/imported off-grid leg — advances to
+      // (next month, startDay). There is no "snap forward within the same
+      // month" branch, so an off-grid date before d1 holds its phase into
+      // the next month instead of collapsing onto d1.
+      //
+      // One deliberate retention: a hand-set date strictly BETWEEN the two
+      // legs still snaps to the second leg within the same month (BUG-13).
+      // YNAB4 would push it to next month (its date setter re-derives the
+      // start day instead), but that snap is covered, relied-upon behavior
+      // here and outside this fix's scope.
       const d1 = anchorDay <= 15 ? anchorDay : anchorDay - 15;
       const d2 = anchorDay <= 15 ? anchorDay + 15 : anchorDay;
       const currentDay = d.getUTCDate();
@@ -642,11 +656,14 @@ export function nextDateFor(
       ).getUTCDate();
       const clampedD2 = Math.min(d2, lastDay);
 
-      if (currentDay < d1) {
-        d.setUTCDate(d1);
-      } else if (currentDay < clampedD2) {
+      if (currentDay === d1) {
+        // First leg -> second leg (+15 days, clamped to end-of-month).
+        d.setUTCDate(Math.min(currentDay + 15, lastDay));
+      } else if (currentDay > d1 && currentDay < clampedD2) {
+        // Hand-set date between the legs (BUG-13): snap to second leg.
         d.setUTCDate(clampedD2);
       } else {
+        // Second leg or off-grid (YNAB4: no same-month snap): next month's d1.
         d.setUTCDate(1);
         d.setUTCMonth(d.getUTCMonth() + 1);
         d.setUTCDate(d1);
