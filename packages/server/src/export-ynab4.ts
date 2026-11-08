@@ -369,7 +369,7 @@ export async function exportYnab4(
           name: c.name,
           sortableIndex: (c.sort ?? 0) * 1000,
           type: "OUTFLOW",
-          overspendingHandling: c.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
+          overspendingHandling: c.overspendCarriesOver ? "Confined" : "AffectsBuffer",
           cachedBalance: Math.round((availableByCatId.get(c.id) ?? c.carryover ?? 0) * 10),
           carryover: Math.round((c.carryover ?? 0) * 10),
           accountId: linkedAccEntityId,
@@ -418,7 +418,7 @@ export async function exportYnab4(
           // G-07: per-category note round-trips; explicit-zero
           // assignments keep the month present on re-import.
           note: a.note || "",
-          overspendingHandling: cat?.overspendCarriesOver ? "OverspendCarriedForward" : "Confined",
+          overspendingHandling: cat?.overspendCarriesOver ? "Confined" : "AffectsBuffer",
           entityType: "monthlyCategoryBudget",
           entityVersion: `mcb-v-${month}-${a.categoryId}`,
         };

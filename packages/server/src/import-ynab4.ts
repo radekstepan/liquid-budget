@@ -638,6 +638,28 @@ export async function importYnab4(
     }
 
     // 3. Insert Category Groups and Categories
+    // YNAB4 persists overspend behavior per-month on
+    // MonthlySubCategoryBudgetVO.overspendingHandling ("Confined" = red-arrow
+    // carry vs "AffectsBuffer" = deduct from TBB), never on SubCategoryVO.
+    // Our model is a static per-category flag, so any "Confined" MSBVO for a
+    // category maps to overspendCarriesOver=true. "OverspendCarriedForward"
+    // is accepted too for backups written by our own pre-fix exporter.
+    const isConfinedHandling = (v: unknown): boolean =>
+      v === "Confined" || v === "OverspendCarriedForward";
+    const confinedByCategoryEntityId = new Map<string, boolean>();
+    for (const mb of yBudgets) {
+      if ((mb as any)?.isTombstone) continue;
+      for (const msb of (mb as any)?.monthlySubCategoryBudgets || []) {
+        if (msb?.isTombstone || msb?.categoryId == null) continue;
+        if (
+          isConfinedHandling(msb.overspendingHandling) ||
+          isConfinedHandling(msb.entityVersion?.overspendingHandling)
+        ) {
+          confinedByCategoryEntityId.set(msb.categoryId, true);
+        }
+      }
+    }
+
     const categoryIdMap = new Map<string, number>();
     let groupSort = 0;
 
@@ -681,8 +703,9 @@ export async function importYnab4(
 
       for (const sc of nonTombstoneSC) {
         const overspendCarriesOver =
-          sc.overspendingHandling === "OverspendCarriedForward" ||
-          sc.entityVersion?.overspendingHandling === "OverspendCarriedForward";
+          isConfinedHandling(sc.overspendingHandling) ||
+          isConfinedHandling(sc.entityVersion?.overspendingHandling) ||
+          confinedByCategoryEntityId.get(sc.entityId) === true;
         const [cRow] = await db
           .insert(categories)
           .values({
@@ -732,8 +755,10 @@ export async function importYnab4(
       );
 
       const overspendCarriesOver =
-        matchingSc?.overspendingHandling === "OverspendCarriedForward" ||
-        matchingSc?.entityVersion?.overspendingHandling === "OverspendCarriedForward" ||
+        isConfinedHandling(matchingSc?.overspendingHandling) ||
+        isConfinedHandling(matchingSc?.entityVersion?.overspendingHandling) ||
+        (matchingSc?.entityId != null &&
+          confinedByCategoryEntityId.get(matchingSc.entityId) === true) ||
         false;
       const initialCarryover =
         matchingSc?.carryover !== undefined
