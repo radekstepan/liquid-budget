@@ -3,10 +3,11 @@
  *
  * A template holds N legs, each with a share of the parent total in basis
  * points (8500 = 85%). Applying a template to a parent total yields
- * balanced sub-transaction amounts: every leg but the last is rounded to
- * the cent, and the last leg takes the remainder so the children always
- * sum to the parent exactly (the invariant `assertSplitsBalanced`
- * enforces).
+ * balanced sub-transaction amounts: every leg is rounded to the cent,
+ * and any penny remainder goes to the largest leg (ties keep the first,
+ * matching YNAB4 `RegisterGrid.distributeAmountsToSubTransactions`) so
+ * the children always sum to the parent exactly (the invariant
+ * `assertSplitsBalanced` enforces).
  *
  * All functions are pure — no DB access, no side-effects.
  */
@@ -133,7 +134,10 @@ export function validateSplitTemplate(
 /**
  * Apply a template's legs to a signed parent total (cents). Returns one
  * amount per leg, in order; the signed amounts sum to `totalCents`
- * exactly. Throws on an invalid template or a zero total.
+ * exactly. Every leg is rounded to the cent and any penny remainder
+ * goes to the largest leg (ties keep the first, matching YNAB4
+ * `RegisterGrid.distributeAmountsToSubTransactions`). Throws on an
+ * invalid template or a zero total.
  */
 export function applySplitTemplate(
   totalCents: number,
@@ -146,17 +150,23 @@ export function applySplitTemplate(
   if (error) throw new Error(error);
   const sign = Math.sign(totalCents);
   const magnitude = Math.abs(totalCents);
+  const magnitudes = legs.map((leg) =>
+    Math.round((magnitude * leg.shareBps) / TEMPLATE_TOTAL_BPS)
+  );
+  const leftover = magnitude - magnitudes.reduce((s, a) => s + a, 0);
+  if (leftover !== 0) {
+    let largest = 0;
+    for (let i = 1; i < magnitudes.length; i++) {
+      if (Math.abs(magnitudes[i]!) > Math.abs(magnitudes[largest]!)) {
+        largest = i;
+      }
+    }
+    magnitudes[largest]! += leftover;
+  }
   const out: AppliedTemplateLeg[] = [];
-  let assigned = 0;
   for (let i = 0; i < legs.length; i++) {
     const leg = legs[i]!;
-    let amount: number;
-    if (i === legs.length - 1) {
-      amount = magnitude - assigned;
-    } else {
-      amount = Math.round((magnitude * leg.shareBps) / TEMPLATE_TOTAL_BPS);
-      assigned += amount;
-    }
+    const amount = magnitudes[i]!;
     out.push({
       // A set boundary category on a transfer leg passes through; the
       // server nulls it for same-boundary transfers during classification.

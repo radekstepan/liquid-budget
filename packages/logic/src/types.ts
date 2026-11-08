@@ -146,8 +146,8 @@ export type SplitTemplateLeg = {
 /**
  * A named, reusable recipe for splitting a transaction. Applying a
  * template to a parent total yields balanced sub-transactions (see
- * `applySplitTemplate`); the last leg absorbs penny rounding so the
- * children always sum to the parent to the cent.
+ * `applySplitTemplate`); the penny remainder goes to the largest leg so
+ * the children always sum to the parent to the cent.
  */
 export type SplitTemplate = {
   id: number;
