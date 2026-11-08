@@ -70,6 +70,19 @@ export const categories = sqliteTable(
       onDelete: "set null",
     }),
     overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
+    /**
+     * YNAB4 hidden-category lineage (`MangledHiddenNameComponents.as`):
+     * a hidden sub-category stores its original home as a mangled name
+     * "OldMaster ` Sub ` OldMasterEntityId" (2-part without the id in
+     * older files). Import demangles the display `name` to the sub name
+     * and persists the components here so unhide can restore the
+     * original master (by entity id first, name fallback) and export
+     * can re-mangle. Null for never-hidden categories and for hidden
+     * rows whose wire name carried no backtick (e.g. our own pre-fix
+     * exports, which wrote the plain name).
+     */
+    oldMasterName: text("old_master_name"),
+    oldMasterEntityId: text("old_master_entity_id"),
   },
   (t) => ({
     groupNameUniq: uniqueIndex("categories_group_name_uniq").on(t.groupId, t.name),

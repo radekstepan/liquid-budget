@@ -232,6 +232,13 @@
       "when": 1794112687444,
       "tag": "0032_loud_paladin",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794113168396,
+      "tag": "0033_furry_maggott",
+      "breakpoints": true
     }
   ]
 }

@@ -117,6 +117,26 @@ function txDestLineage(t: {
   };
 }
 
+/**
+ * Re-mangle a hidden sub-category name for the wire
+ * (`MangledHiddenNameComponents.getMangledHiddenNameForComponents`):
+ * "OldMaster ` Sub ` OldMasterEntityId" (2-part without the id for
+ * pre-GUID lineage). Stored components win verbatim; when only the
+ * entity id survived, the live master name is used. Null lineage
+ * (never-hidden, or pre-fix imports that kept the plain name) exports
+ * the display name untouched.
+ */
+function hiddenExportName(
+  c: { name: string; oldMasterName: string | null; oldMasterEntityId: string | null },
+  allGroups: { entityId: string | null; name: string }[]
+): string {
+  const oldId = c.oldMasterEntityId ?? null;
+  const oldName =
+    c.oldMasterName ?? (oldId ? allGroups.find((g) => g.entityId === oldId)?.name ?? null : null);
+  if (!oldName) return c.name;
+  return oldId ? `${oldName} \` ${c.name} \` ${oldId}` : `${oldName} \` ${c.name}`;
+}
+
 function formatFrequency(freq: string | null | undefined): string {
   if (!freq) return "Monthly";
   const f = freq.toLowerCase().replace(/[\s_-]+/g, "");
@@ -418,7 +438,12 @@ export async function exportYnab4(
         return {
           entityId: c.entityId || `sc-${c.id}`,
           masterCategoryId: entityId,
-          name: c.name,
+          // Hidden lineage round-trips as the YNAB4 mangled name
+          // ("OldMaster ` Sub ` OldMasterEntityId"); the stored
+          // components win verbatim, falling back to the live master
+          // name when only the entity id survived. Rows without
+          // lineage (e.g. pre-fix imports) export their plain name.
+          name: isHidden ? hiddenExportName(c, allGroups) : c.name,
           sortableIndex: (c.sort ?? 0) * 1000,
           type: "OUTFLOW",
           overspendingHandling: c.overspendCarriesOver ? "Confined" : "AffectsBuffer",

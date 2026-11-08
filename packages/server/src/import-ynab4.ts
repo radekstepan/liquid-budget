@@ -384,6 +384,32 @@ function incomeSentinelOffset(categoryId: unknown): IncomeSentinelOffset | null 
   return null;
 }
 
+export interface MangledHiddenName {
+  oldMasterName: string;
+  subName: string;
+  oldMasterEntityId: string | null;
+}
+
+/**
+ * Parse a YNAB4 hidden-sub mangled name
+ * (`MangledHiddenNameComponents.createFromMangledSubCategoryName`,
+ * `CategoryNameUtilities.getMangledHiddenNameForComponents`):
+ * "OldMaster ` Sub" or "OldMaster ` Sub ` OldMasterEntityId"
+ * (separator `CategoryConstants.NAME_SEPERATOR_CHAR_HIDDEN`, components
+ * trimmed). Returns null when the name carries no backtick (never
+ * mangled) or has an unexpected shape — callers keep the verbatim
+ * name and null lineage rather than failing the import.
+ */
+export function parseMangledHiddenName(name: unknown): MangledHiddenName | null {
+  if (typeof name !== "string" || !name.includes("`")) return null;
+  const parts = name.split("`").map((p) => p.trim());
+  if (parts.length !== 2 && parts.length !== 3) return null;
+  const [oldMasterName, subName] = parts as [string, string];
+  if (!oldMasterName || !subName) return null;
+  const oldMasterEntityId = parts.length === 3 && parts[2] ? parts[2]! : null;
+  return { oldMasterName, subName, oldMasterEntityId };
+}
+
 /**
  * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
  */
@@ -739,16 +765,25 @@ export async function importYnab4(
           isConfinedHandling(sc.overspendingHandling) ||
           isConfinedHandling(sc.entityVersion?.overspendingHandling) ||
           confinedByCategoryEntityId.get(sc.entityId) === true;
+        // Hidden subs carry their original home as a mangled name
+        // ("OldMaster ` Sub ` OldMasterEntityId"); demangle the display
+        // name and persist the components so unhide/export can restore
+        // the linkage. Non-hidden names never contain a backtick (YNAB4
+        // rejects it in fresh names), so only parse under the hidden
+        // master; anything unparseable keeps its verbatim name.
+        const mangled = isHidden ? parseMangledHiddenName(sc.name) : null;
         const [cRow] = await db
           .insert(categories)
           .values({
             entityId: sc.entityId,
             groupId: gRow!.id,
-            name: sc.name,
+            name: mangled?.subName ?? sc.name,
             sort: catSort++,
             carryover: 0,
             goalTarget: null,
             overspendCarriesOver: overspendCarriesOver || false,
+            oldMasterName: mangled?.oldMasterName ?? null,
+            oldMasterEntityId: mangled?.oldMasterEntityId ?? null,
           })
           .returning();
 
