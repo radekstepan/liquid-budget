@@ -352,6 +352,39 @@ export function extractYnab4TxLineage(src: any): Ynab4TxLineage {
 }
 
 /**
+ * YNAB4 income sentinels. The in-memory ids are `__ImmediateIncome__`
+ * (CurrentMonth offset) / `__DeferredIncome__` (NextMonth offset)
+ * (`MasterCategoryList.as:72-73`); on the wire they serialize under the
+ * legacy names `__SupplementalIncome__` / `__PrimaryIncome__`
+ * (`CategoryConstants.as:16-18`, resolved by
+ * `OldVOToNewVOMarshaller.as:411-420`). Both spellings classify as
+ * income on import and the verbatim spelling round-trips through
+ * `income_category_raw`.
+ */
+const IMMEDIATE_INCOME_SENTINELS = new Set([
+  "Category/__ImmediateIncome__",
+  "Category/__SupplementalIncome__",
+]);
+const DEFERRED_INCOME_SENTINELS = new Set([
+  "Category/__DeferredIncome__",
+  "Category/__PrimaryIncome__",
+]);
+const LEGACY_INCOME_SENTINELS = new Set([
+  "Category/__SupplementalIncome__",
+  "Category/__PrimaryIncome__",
+]);
+
+type IncomeSentinelOffset = "immediate" | "deferred";
+
+/** Income offset for a YNAB4 category id, or null when not an income sentinel. */
+function incomeSentinelOffset(categoryId: unknown): IncomeSentinelOffset | null {
+  if (typeof categoryId !== "string") return null;
+  if (IMMEDIATE_INCOME_SENTINELS.has(categoryId)) return "immediate";
+  if (DEFERRED_INCOME_SENTINELS.has(categoryId)) return "deferred";
+  return null;
+}
+
+/**
  * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
  */
 export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): ExtractedYnab4Data {
@@ -957,6 +990,19 @@ export async function importYnab4(
 
     const processedTransferIds = new Set<string>();
     let totalImportedTxCount = 0;
+    // Count of transaction legs whose category used a legacy YNAB4 income
+    // serialization name (`__SupplementalIncome__` / `__PrimaryIncome__`).
+    // They classify exactly like their modern counterparts, but the
+    // spelling is surfaced once in warnings so the mapping is never
+    // silent.
+    let legacyIncomeSentinelCount = 0;
+    const legacyIncomeSentinelKinds = new Set<string>();
+    function noteIncomeSentinel(categoryId: unknown): void {
+      if (typeof categoryId === "string" && LEGACY_INCOME_SENTINELS.has(categoryId)) {
+        legacyIncomeSentinelCount++;
+        legacyIncomeSentinelKinds.add(categoryId);
+      }
+    }
     // G-split: unbalanced splits repaired with an auto-balance filler leg
     // (see repairSplitForImport). Aggregated into one warning below.
     let splitRepairedCount = 0;
@@ -999,8 +1045,11 @@ export async function importYnab4(
           continue;
         }
 
-        const isParentDeferred = t.categoryId === "Category/__DeferredIncome__";
-        const isParentIncome = (t.categoryId === "Category/__ImmediateIncome__" || isParentDeferred) && (t.amount || 0) > 0;
+        const parentSentinelOffset = incomeSentinelOffset(t.categoryId);
+        noteIncomeSentinel(t.categoryId);
+        const isParentDeferred = parentSentinelOffset === "deferred";
+        const isParentIncome = parentSentinelOffset !== null && (t.amount || 0) > 0;
+        const parentIncomeRaw = isParentIncome && typeof t.categoryId === "string" ? t.categoryId : null;
         const parentIncomeMonth = isParentIncome
           ? (t.incomeMonth || (isParentDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
           : null;
@@ -1062,6 +1111,7 @@ export async function importYnab4(
             parentId: null,
             isIncome: isParentIncome,
             incomeMonth: parentIncomeMonth,
+            incomeCategoryRaw: parentIncomeRaw,
             reconciledAt: effectiveParentStatus === "r" ? parentRecDate : null,
             reconciliationId: effectiveParentStatus === "r" ? parentRecId : null,
           })
@@ -1071,6 +1121,31 @@ export async function importYnab4(
 
         if (insertedT) {
           let allChildrenReconciled = liveSubs.length > 0;
+
+          // YNAB4 first-inflow-child-wins per offset: `MonthlyBudget`
+          // relevance (`isTransactionRelevantIncome`) consults only the
+          // first inflow child of a split, so siblings on the other
+          // offset never count as income. The winner is the offset of
+          // the first positive non-transfer child carrying an income
+          // sentinel; transfer legs (boundary-classified) and
+          // non-sentinel legs never vote.
+          let splitIncomeWinner: IncomeSentinelOffset | null = null;
+          for (const st of liveSubs) {
+            let votesAsTransfer = false;
+            if (st.payeeId && st.payeeId.startsWith("Payee/Transfer:")) {
+              const targetId = st.payeeId.split(":")[1];
+              votesAsTransfer = Boolean(targetId && accountIdMap.has(targetId));
+            } else if (st.targetAccountId) {
+              votesAsTransfer = accountIdMap.has(st.targetAccountId);
+            }
+            if (votesAsTransfer) continue;
+            if ((st.amount || 0) <= 0) continue;
+            const offset = incomeSentinelOffset(st.categoryId);
+            if (offset !== null) {
+              splitIncomeWinner = offset;
+              break;
+            }
+          }
 
           for (const st of liveSubs) {
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
@@ -1103,6 +1178,12 @@ export async function importYnab4(
             const childAmt = convertAmount(st.amount);
             let isChildIncome = false;
             let childIncomeMonth: string | null = null;
+            // Verbatim sentinel for export round-trip (kept for winners
+            // and first-wins losers alike, so a re-import classifies
+            // identically; consulted only when the row has no category).
+            const childSentinelOffset = incomeSentinelOffset(st.categoryId);
+            noteIncomeSentinel(st.categoryId);
+            const childIncomeRaw = childSentinelOffset !== null && typeof st.categoryId === "string" ? st.categoryId : null;
 
             if (subTransferAccountId != null) {
               const destAccEntity = st.targetAccountId || (st.payeeId?.startsWith("Payee/Transfer:") ? st.payeeId.split(":")[1] : "");
@@ -1121,15 +1202,26 @@ export async function importYnab4(
               subCatId = classification.categoryId;
               isChildIncome = classification.isIncome;
             } else {
-              const isChildDeferred = st.categoryId === "Category/__DeferredIncome__";
+              const childOffset = childSentinelOffset;
+              const isChildDeferred = childOffset === "deferred";
               const accKind = accKindMap.get(t.accountId) ?? "liquid";
               isChildIncome =
                 accIsOnBudget &&
                 accKind !== "credit" &&
-                (st.categoryId === "Category/__ImmediateIncome__" ||
-                  isChildDeferred ||
+                (childOffset !== null ||
                   (subCatId === null && subTransferAccountId === null)) &&
                 (st.amount || 0) > 0;
+              // First-inflow-child-wins: a sentinel child on the losing
+              // offset is not income (its verbatim category is still
+              // kept in incomeCategoryRaw so export/re-import agree).
+              if (
+                isChildIncome &&
+                childOffset !== null &&
+                splitIncomeWinner !== null &&
+                childOffset !== splitIncomeWinner
+              ) {
+                isChildIncome = false;
+              }
               childIncomeMonth = isChildIncome
                 ? (st.incomeMonth || (isChildDeferred && t.date ? nextMonthKey(t.date.slice(0, 7)) : null))
                 : null;
@@ -1154,10 +1246,12 @@ export async function importYnab4(
             let childDestRecId: number | null = null;
             let childDestRecDate: string | null = null;
             let childDestTxEntityId: string | null = null;
+            let childDestPartner: any = null;
             if (subTransferAccountId != null) {
               const destPartner = st.transferTransactionId ? txById.get(st.transferTransactionId) : null;
               childDestTxEntityId = destPartner?.entityId ?? st.transferTransactionId ?? null;
               if (destPartner) {
+                childDestPartner = destPartner;
                 const destAccEntId = destPartner.accountId;
                 const isDestReconciled = destPartner.cleared === "Reconciled" || Boolean(destPartner.reconciliationId);
                 const destRecEntityId = destPartner.reconciliationId;
@@ -1186,6 +1280,11 @@ export async function importYnab4(
             }
 
             const childLineage = extractYnab4TxLineage(st);
+            // Dest-leg lineage lives on the paired counterpart row; when
+            // it exists its memo + OFX fields persist verbatim for the
+            // exporter's fabricated dest leg (null otherwise, which reads
+            // as "no independent dest value" and falls back to the source).
+            const childDestLineage = childDestPartner ? extractYnab4TxLineage(childDestPartner) : null;
             await db.insert(transactions).values({
               entityId: st.entityId,
               transferEntityId: childDestTxEntityId,
@@ -1204,10 +1303,17 @@ export async function importYnab4(
               ynabId: childLineage.ynabId,
               importedPayee: childLineage.importedPayee,
               source: childLineage.source,
+              transferMemo: childDestPartner ? (childDestPartner.memo ?? "") : null,
+              transferCheckNumber: childDestLineage?.checkNumber ?? null,
+              transferFitid: childDestLineage?.fitid ?? null,
+              transferYnabId: childDestLineage?.ynabId ?? null,
+              transferImportedPayee: childDestLineage?.importedPayee ?? null,
+              transferSource: childDestLineage?.source ?? null,
               transferAccountId: subTransferAccountId,
               parentId: insertedT.id,
               isIncome: isChildIncome,
               incomeMonth: childIncomeMonth,
+              incomeCategoryRaw: childIncomeRaw,
               reconciledAt: effectiveChildStatus === "r" ? childRecDate : null,
               reconciliationId: effectiveChildStatus === "r" ? childRecId : null,
               transferReconciledAt: effectiveChildDestStatus === "r" ? childDestRecDate : null,
@@ -1368,9 +1474,9 @@ export async function importYnab4(
             }
             const netOnBudget = (sourceIsOnBudget ? rawCents : 0) + (destIsOnBudget ? -rawCents : 0);
             const catId = (catEntityId && categoryIdMap.get(catEntityId)) || null;
-            const isSpecialIncomeCat =
-              catEntityId === "Category/__ImmediateIncome__" ||
-              catEntityId === "Category/__DeferredIncome__";
+            const transferSentinelOffset = incomeSentinelOffset(catEntityId);
+            noteIncomeSentinel(catEntityId);
+            const isSpecialIncomeCat = transferSentinelOffset !== null;
             let effectiveCatId = isSpecialIncomeCat ? null : catId;
             if (isCrossBoundaryTransfer && netOnBudget < 0 && effectiveCatId === null) {
               effectiveCatId = await getOrCreateFallbackTransferCategory();
@@ -1420,6 +1526,9 @@ export async function importYnab4(
               : (destYTx?.cleared === "Uncleared" ? "u" : "c");
 
             const sourceLineage = extractYnab4TxLineage(sourceYTx);
+            // The dest leg's own memo + OFX lineage persist verbatim for
+            // the exporter's fabricated dest leg (never the source's).
+            const destLineage = extractYnab4TxLineage(destYTx);
             await db.insert(transactions).values({
               entityId: sourceYTx?.entityId ?? t.entityId,
               transferEntityId: destYTx?.entityId ?? (partner?.entityId || t.transferTransactionId || null),
@@ -1438,9 +1547,19 @@ export async function importYnab4(
               ynabId: sourceLineage.ynabId,
               importedPayee: sourceLineage.importedPayee,
               source: sourceLineage.source,
+              transferMemo: destYTx?.memo ?? "",
+              transferCheckNumber: destLineage.checkNumber,
+              transferFitid: destLineage.fitid,
+              transferYnabId: destLineage.ynabId,
+              transferImportedPayee: destLineage.importedPayee,
+              transferSource: destLineage.source,
               transferAccountId: destAccId,
               parentId: null,
               isIncome: isTransferIncome,
+              incomeCategoryRaw:
+                isTransferIncome && typeof catEntityId === "string" && transferSentinelOffset !== null
+                  ? catEntityId
+                  : null,
               reconciledAt: effectiveSrcStatus === "r" ? srcRecDate : null,
               reconciliationId: effectiveSrcStatus === "r" ? srcRecId : null,
               transferReconciledAt: effectiveDestStatus === "r" ? destRecDate : null,
@@ -1475,10 +1594,10 @@ export async function importYnab4(
 
             const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
             let catId = (accIsOnBudget && catEntityId && categoryIdMap.get(catEntityId)) || null;
-            const isTxDeferred = catEntityId === "Category/__DeferredIncome__";
-            const isSpecialIncomeCat =
-              catEntityId === "Category/__ImmediateIncome__" ||
-              isTxDeferred;
+            const fallbackSentinelOffset = incomeSentinelOffset(catEntityId);
+            noteIncomeSentinel(catEntityId);
+            const isTxDeferred = fallbackSentinelOffset === "deferred";
+            const isSpecialIncomeCat = fallbackSentinelOffset !== null;
             if (
               isSpecialIncomeCat ||
               catEntityId === "Category/__Split__"
@@ -1534,6 +1653,10 @@ export async function importYnab4(
               parentId: null,
               isIncome: isTxIncome,
               incomeMonth: txIncomeMonth,
+              incomeCategoryRaw:
+                isTxIncome && typeof catEntityId === "string" && fallbackSentinelOffset !== null
+                  ? catEntityId
+                  : null,
               reconciledAt: isTxReconciled ? txRecDate : null,
               reconciliationId: isTxReconciled ? txRecId : null,
             });
@@ -1567,10 +1690,10 @@ export async function importYnab4(
 
           const accIsOnBudget = accOnBudgetMap.get(t.accountId) ?? true;
           let catId = (accIsOnBudget && categoryIdMap.get(t.categoryId)) || null;
-          const isTxDeferred = t.categoryId === "Category/__DeferredIncome__";
-          const isSpecialIncomeCat =
-            t.categoryId === "Category/__ImmediateIncome__" ||
-            isTxDeferred;
+          const plainSentinelOffset = incomeSentinelOffset(t.categoryId);
+          noteIncomeSentinel(t.categoryId);
+          const isTxDeferred = plainSentinelOffset === "deferred";
+          const isSpecialIncomeCat = plainSentinelOffset !== null;
           if (
             isSpecialIncomeCat ||
             t.categoryId === "Category/__Split__"
@@ -1657,6 +1780,10 @@ export async function importYnab4(
             parentId: null,
             isIncome: isTxIncome,
             incomeMonth: txIncomeMonth,
+            incomeCategoryRaw:
+              isTxIncome && typeof t.categoryId === "string" && plainSentinelOffset !== null
+                ? t.categoryId
+                : null,
             reconciledAt: isTxReconciled ? txRecDate : null,
             reconciliationId: isTxReconciled ? txRecId : null,
           });
@@ -1677,6 +1804,8 @@ export async function importYnab4(
       const SPECIAL_AUTO_FILL = new Set([
         "Category/__ImmediateIncome__",
         "Category/__DeferredIncome__",
+        "Category/__SupplementalIncome__",
+        "Category/__PrimaryIncome__",
         "Category/__Split__",
       ]);
       const usage = await db
@@ -2226,6 +2355,14 @@ export async function importYnab4(
     if (splitRepairedCount > 0) {
       warnings.push(
         `Repaired ${splitRepairedCount} split transaction(s) whose legs did not sum to the parent amount; an auto-balance leg was added (YNAB4 renders these the same way)`
+      );
+    }
+    if (legacyIncomeSentinelCount > 0) {
+      const kinds = [...legacyIncomeSentinelKinds]
+        .map((k) => `${k} → ${incomeSentinelOffset(k) ?? "unknown"}`)
+        .join(", ");
+      warnings.push(
+        `Mapped ${legacyIncomeSentinelCount} transaction leg(s) with legacy YNAB4 income categories (${kinds}); treated as that offset's income and preserved verbatim for export`
       );
     }
 

@@ -947,6 +947,14 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.transferStatus = null;
       p.transferReconciledAt = null;
       p.transferReconciliationId = null;
+      // The row is no longer a transfer: drop the dest leg's independent
+      // memo + lineage with the rest of the transfer state.
+      p.transferMemo = null;
+      p.transferCheckNumber = null;
+      p.transferFitid = null;
+      p.transferYnabId = null;
+      p.transferImportedPayee = null;
+      p.transferSource = null;
     }
 
     const srcAccount = await getAccountInfo(db, newAccountId);
@@ -1005,20 +1013,28 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       p.categoryId = classification.categoryId;
       p.isIncome = classification.isIncome;
       p.incomeMonth = classification.incomeMonth;
+      if (!classification.isIncome) {
+        // G-income-lineage: the verbatim YNAB4 sentinel survives only
+        // while the row stays the same income.
+        p.incomeCategoryRaw = null;
+      }
     } else if (isSplitParent) {
       p.categoryId = null;
       p.isIncome = false;
       p.incomeMonth = null;
+      p.incomeCategoryRaw = null;
     } else if (!srcOnBudget) {
       p.categoryId = null;
       p.incomeMonth = null;
       p.isIncome = false;
+      p.incomeCategoryRaw = null;
     } else if (srcKind === "credit") {
       if ("categoryId" in p) {
         p.categoryId = p.categoryId;
       }
       p.incomeMonth = null;
       p.isIncome = false;
+      p.incomeCategoryRaw = null;
     } else {
       if (current.transferAccountId != null && !("categoryId" in p)) {
         p.categoryId = null;
@@ -1046,12 +1062,18 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
         p.isIncome = isIncome;
         if (!isIncome) {
           p.incomeMonth = null;
+          p.incomeCategoryRaw = null;
+        } else if (categoryChanged || incomeMonthChanged) {
+          // Same income, re-specified category/month: the old verbatim
+          // sentinel no longer describes it; export derives the label.
+          p.incomeCategoryRaw = null;
         }
       } else if (!isEligibleForIncome && current.isIncome) {
         // Safety: a categorized row (or non-positive amount) must never
         // stay flagged as income.
         p.isIncome = false;
         p.incomeMonth = null;
+        p.incomeCategoryRaw = null;
       }
     }
 
@@ -1266,9 +1288,16 @@ export async function updateSplit(
       pf.transferStatus = null;
       pf.transferReconciledAt = null;
       pf.transferReconciliationId = null;
+      pf.transferMemo = null;
+      pf.transferCheckNumber = null;
+      pf.transferFitid = null;
+      pf.transferYnabId = null;
+      pf.transferImportedPayee = null;
+      pf.transferSource = null;
       pf.categoryId = null;
       pf.isIncome = false;
       pf.incomeMonth = null;
+      pf.incomeCategoryRaw = null;
     }
     if (Object.keys(pf).length > 0) {
       await db.update(transactions).set(pf).where(eq(transactions.id, parentId));
@@ -1368,11 +1397,23 @@ export async function updateSplit(
         transferAccountId,
         parentId,
         isIncome,
+        // A rewrite re-authors every child in-app terms: YNAB4-only
+        // columns (verbatim sentinel, dest-leg memo/lineage) reset so
+        // export derives from the edited state instead of echoing a
+        // label the user never chose.
+        incomeCategoryRaw: null,
+        transferMemo: null,
+        transferCheckNumber: null,
+        transferFitid: null,
+        transferYnabId: null,
+        transferImportedPayee: null,
+        transferSource: null,
       };
       if (matchedOldChild != null) {
         // Identity-preserving update: the same values a fresh insert would
         // carry, written onto the existing row. Columns the rewrite never
-        // sets (entity ids, flags, income month, created-at) survive.
+        // sets (entity ids, flags, income month, created-at) survive; the
+        // YNAB4-only columns above reset even on matched rows.
         await db
           .update(transactions)
           .set({ ...values, needsReview: false })
@@ -1812,6 +1853,9 @@ export async function mergeTransactions(
       destAccount: finalDest ? { onBudget: finalDest.onBudget } : null,
       destAccountName: finalDest?.name ?? null,
     });
+    // DB row behind the winning mergeable: carries the YNAB4-only
+    // columns the logic-layer mergeable does not model.
+    const primaryRow = primary.id === first.id ? first : second;
 
     await applyBalance(db, first.accountId, -Number(first.amount));
     if (first.transferAccountId != null) {
@@ -1845,6 +1889,18 @@ export async function mergeTransactions(
         needsReview: merged.needsReview,
         entityId: merged.entityId,
         transferEntityId: merged.transferEntityId,
+        // YNAB4-only columns ride on the surviving row: the verbatim
+        // sentinel only while the merged row stays income, the dest-leg
+        // memo/lineage only while it stays a transfer.
+        incomeCategoryRaw: merged.isIncome ? (primaryRow.incomeCategoryRaw ?? null) : null,
+        transferMemo: merged.transferAccountId != null ? (primaryRow.transferMemo ?? null) : null,
+        transferCheckNumber:
+          merged.transferAccountId != null ? (primaryRow.transferCheckNumber ?? null) : null,
+        transferFitid: merged.transferAccountId != null ? (primaryRow.transferFitid ?? null) : null,
+        transferYnabId: merged.transferAccountId != null ? (primaryRow.transferYnabId ?? null) : null,
+        transferImportedPayee:
+          merged.transferAccountId != null ? (primaryRow.transferImportedPayee ?? null) : null,
+        transferSource: merged.transferAccountId != null ? (primaryRow.transferSource ?? null) : null,
       })
       .where(eq(transactions.id, primary.id))
       .returning();
@@ -2070,6 +2126,20 @@ export async function bulkUpdateTransactions(
         if (!isEligibleForIncome && "incomeMonth" in setFields) {
           setFields.incomeMonth = null;
         }
+      }
+
+      // G-income-lineage: keep the verbatim sentinel only while the row
+      // stays the same income. Un-flagging income, or explicitly
+      // re-specifying the category/income month, clears it so export
+      // derives the fresh label. (Bulk transfer rewrites always touch
+      // categoryId/incomeMonth via classification, so only an explicit
+      // patch clears on a still-income row.)
+      const finalBulkIsIncome =
+        "isIncome" in setFields ? Boolean(setFields.isIncome) : Boolean(existing.isIncome);
+      if (!finalBulkIsIncome) {
+        setFields.incomeCategoryRaw = null;
+      } else if (patch.categoryId !== undefined || patch.incomeMonth !== undefined) {
+        setFields.incomeCategoryRaw = null;
       }
 
       if (Object.keys(setFields).length > 0) {

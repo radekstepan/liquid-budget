@@ -166,6 +166,33 @@ export const transactions = sqliteTable(
     ynabId: text("ynab_id"),
     importedPayee: text("imported_payee"),
     source: text("source"),
+    /**
+     * Verbatim YNAB4 income sentinel (`Category/__ImmediateIncome__`,
+     * `Category/__DeferredIncome__`, or the legacy serialization names
+     * `Category/__SupplementalIncome__` → Immediate,
+     * `Category/__PrimaryIncome__` → Deferred) for rows imported as
+     * income from one of those sentinels. Lets export restore the exact
+     * wire name (including the losers of first-inflow-child-wins, so a
+     * re-import classifies identically). Null for in-app rows and
+     * categorized rows; cleared whenever an edit un-flags income or
+     * re-specifies the category/income month.
+     */
+    incomeCategoryRaw: text("income_category_raw"),
+    /**
+     * Destination-leg memo + OFX lineage for single-row transfers
+     * (mirrors `memo` / `checkNumber` / `fitid` / `ynabId` /
+     * `importedPayee` / `source`). YNAB4 pairs carry independent per-leg
+     * values; the import persists the dest side here and export prefers
+     * it for the fabricated dest leg (falling back to the source value
+     * when null, which is exactly the in-app/legacy state). Cleared when
+     * the transfer is removed.
+     */
+    transferMemo: text("transfer_memo"),
+    transferCheckNumber: text("transfer_check_number"),
+    transferFitid: text("transfer_fitid"),
+    transferYnabId: text("transfer_ynab_id"),
+    transferImportedPayee: text("transfer_imported_payee"),
+    transferSource: text("transfer_source"),
     flagColor: text("flag_color"),
     createdAt: text("created_at").notNull().default(""),
     parentId: integer("parent_id").references((): AnySQLiteColumn => transactions.id, { onDelete: "cascade" }),

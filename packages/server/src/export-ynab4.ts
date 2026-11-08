@@ -65,6 +65,58 @@ function txLineage(t: {
   };
 }
 
+/**
+ * Verbatim YNAB4 income sentinels recognized on the wire, including the
+ * legacy serialization names (`OldVOToNewVOMarshaller.as:411-420`).
+ */
+const INCOME_SENTINELS = new Set([
+  "Category/__ImmediateIncome__",
+  "Category/__DeferredIncome__",
+  "Category/__SupplementalIncome__",
+  "Category/__PrimaryIncome__",
+]);
+
+/**
+ * Income wire label: the verbatim sentinel preserved at import wins
+ * (including first-inflow-child-wins losers, so a re-import classifies
+ * identically); otherwise the label derives from the deferred flag.
+ * Consulted only for rows with no real category.
+ */
+function incomeSentinelOrDerived(
+  raw: string | null | undefined,
+  isDeferred: boolean
+): string {
+  if (raw && INCOME_SENTINELS.has(raw)) return raw;
+  return isDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
+}
+
+/**
+ * Destination-leg lineage for fabricated transfer legs. Independent
+ * dest-side values (persisted at import) win; null reads as "no
+ * independent dest value" (in-app and legacy rows) and falls back to
+ * the source side, preserving the longstanding single-row export.
+ */
+function txDestLineage(t: {
+  checkNumber: string | null | undefined;
+  fitid: string | null | undefined;
+  ynabId: string | null | undefined;
+  importedPayee: string | null | undefined;
+  source: string | null | undefined;
+  transferCheckNumber: string | null | undefined;
+  transferFitid: string | null | undefined;
+  transferYnabId: string | null | undefined;
+  transferImportedPayee: string | null | undefined;
+  transferSource: string | null | undefined;
+}) {
+  return {
+    checkNumber: t.transferCheckNumber ?? t.checkNumber ?? null,
+    FITID: t.transferFitid ?? t.fitid ?? null,
+    YNABID: t.transferYnabId ?? t.ynabId ?? null,
+    importedPayee: t.transferImportedPayee ?? t.importedPayee ?? null,
+    source: t.transferSource ?? t.source ?? null,
+  };
+}
+
 function formatFrequency(freq: string | null | undefined): string {
   if (!freq) return "Monthly";
   const f = freq.toLowerCase().replace(/[\s_-]+/g, "");
@@ -458,9 +510,7 @@ export async function exportYnab4(
       const payeeId = getOrCreatePayeeId(t.payee);
       const isParentDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
       const parentCatId = t.isIncome
-        ? isParentDeferred
-          ? "Category/__DeferredIncome__"
-          : "Category/__ImmediateIncome__"
+        ? incomeSentinelOrDerived(t.incomeCategoryRaw, isParentDeferred)
         : "Category/__Split__";
 
       const subTransactions = children.map((ch) => {
@@ -472,6 +522,8 @@ export async function exportYnab4(
 
         if (ch.categoryId != null) {
           subCatId = getCategoryEntityId(ch.categoryId);
+        } else if (ch.incomeCategoryRaw && INCOME_SENTINELS.has(ch.incomeCategoryRaw)) {
+          subCatId = ch.incomeCategoryRaw;
         } else if (ch.isIncome) {
           const isChildDeferred = ch.incomeMonth && t.date ? ch.incomeMonth > t.date.slice(0, 7) : false;
           subCatId = isChildDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
@@ -500,8 +552,8 @@ export async function exportYnab4(
             amount: Math.round(-ch.amount * 10),
             cleared: statusToCleared(destClearedStatus),
             flag: flagToName(ch.flagColor),
-            memo: ch.memo || "",
-            ...txLineage(ch),
+            memo: (ch.transferMemo ?? ch.memo) || "",
+            ...txDestLineage(ch),
             payeeId: `Payee/Transfer:${parentAccEntityId}`,
             transferTransactionId: childTxEntityId,
             categoryId: null,
@@ -568,7 +620,7 @@ export async function exportYnab4(
         transferCatId = getCategoryEntityId(t.categoryId);
       } else if (t.isIncome) {
         const isTxDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
-        transferCatId = isTxDeferred ? "Category/__DeferredIncome__" : "Category/__ImmediateIncome__";
+        transferCatId = incomeSentinelOrDerived(t.incomeCategoryRaw, isTxDeferred);
       }
 
       // For cross-boundary transfers, assign the category to the on-budget leg
@@ -608,8 +660,8 @@ export async function exportYnab4(
         amount: Math.round(-t.amount * 10),
         cleared: statusToCleared(t.transferStatus ?? t.status),
         flag: flagToName(t.flagColor),
-        memo: t.memo || "",
-        ...txLineage(t),
+        memo: (t.transferMemo ?? t.memo) || "",
+        ...txDestLineage(t),
         payeeId: `Payee/Transfer:${sourceAccEntityId}`,
         transferTransactionId: srcTxEntityId,
         categoryId: destCatId,
@@ -625,9 +677,7 @@ export async function exportYnab4(
       const payeeId = getOrCreatePayeeId(t.payee);
       const isTxDeferred = t.incomeMonth && t.date ? t.incomeMonth > t.date.slice(0, 7) : false;
       const catId = t.isIncome
-        ? isTxDeferred
-          ? "Category/__DeferredIncome__"
-          : "Category/__ImmediateIncome__"
+        ? incomeSentinelOrDerived(t.incomeCategoryRaw, isTxDeferred)
         : t.categoryId != null
         ? getCategoryEntityId(t.categoryId)
         : null;
