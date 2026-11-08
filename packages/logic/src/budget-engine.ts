@@ -103,17 +103,27 @@ export function isIncomeTransaction(
     return true;
   }
 
-  // Fallback when accountMap is not provided
-  if (t.transferAccountId != null) {
-    if (t.isIncome !== undefined) {
-      return t.isIncome === true;
-    }
-    return false;
-  }
-  if (num(t.amount) <= 0) return false;
+  // Fallback when accountMap is not provided: no account info is available,
+  // so the on-budget check above cannot run. Callers that have access to
+  // accounts/budget data must always pass accountMap (all production
+  // callers do — verified by grep); only test-only calls omit it. Unknown
+  // accounts default to on-budget (same best-effort default as the map
+  // path), and an explicit `isIncome` flag always wins in this path.
   if (t.isIncome !== undefined) {
     return t.isIncome === true;
   }
+  if (t.transferAccountId != null) {
+    const classification = classifyBoundaryTransfer({
+      srcOnBudget: true,
+      destOnBudget: true,
+      amount: num(t.amount),
+      categoryId: t.categoryId,
+      incomeMonth: t.incomeMonth,
+      allowMissingOutflowCategory: true,
+    });
+    return classification.isIncome;
+  }
+  if (num(t.amount) <= 0) return false;
   return true;
 }
 

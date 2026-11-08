@@ -39,3 +39,4 @@
 - `/api/reset` returns 403 unless `RESET_ENABLED=true`.
 - `DATABASE_URL` overrides the DB path; unit tests use `:memory:`.
 - Optional AI rename suggestions need both `LLM_API_KEY` and `LLM_MODEL` (see `apps/web/.env.example`).
+- Server tests need a `better-sqlite3` binding built for the active Node version (`.nvmrc`); after switching Node, run `npm rebuild better-sqlite3` or the `@ynab/server` suite fails with `Module did not self-register`.

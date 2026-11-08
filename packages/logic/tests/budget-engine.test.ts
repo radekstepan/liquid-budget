@@ -3000,6 +3000,62 @@ describe("computeBudget", () => {
       expect(isIncomeTransaction(splitChildExplicitFalse)).toBe(false);
     });
 
+    it("G06: income fallback respects on-budget semantics and explicit flags", () => {
+      const onBudgetAccount = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "1000", onBudget: true, sort: 0 };
+      const offBudgetAccount = { id: 2, name: "Brokerage", kind: "offbudget" as const, groupLabel: "Tracking", balance: "1000", onBudget: false, sort: 1 };
+      const accountMap = [onBudgetAccount, offBudgetAccount];
+
+      // Off-budget positive uncategorized row is not income when the map is known.
+      const offBudgetInflow = {
+        id: 11,
+        accountId: 2,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Dividend",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+      };
+      expect(isIncomeTransaction(offBudgetInflow, accountMap)).toBe(false);
+
+      // Fallback transfer without a map assumes both legs on-budget
+      // (internal transfer) so it is not income — same verdict as the
+      // blanket-false path, but routed through classifyBoundaryTransfer.
+      const fallbackTransfer = {
+        id: 12,
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Transfer",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+      };
+      expect(isIncomeTransaction(fallbackTransfer)).toBe(false);
+      const fallbackCategorizedTransfer = { ...fallbackTransfer, categoryId: 7 };
+      expect(isIncomeTransaction(fallbackCategorizedTransfer)).toBe(false);
+
+      // Explicit isIncome flag wins in the fallback path for transfers.
+      expect(isIncomeTransaction({ ...fallbackTransfer, isIncome: true })).toBe(true);
+      expect(isIncomeTransaction({ ...fallbackTransfer, isIncome: false })).toBe(false);
+
+      // Explicit isIncome flag wins in the fallback path for regular rows.
+      const fallbackInflow = {
+        id: 13,
+        accountId: 1,
+        categoryId: null,
+        date: "2026-07-01",
+        payee: "Paycheck",
+        memo: "",
+        amount: "5000",
+        status: "c" as const,
+      };
+      expect(isIncomeTransaction(fallbackInflow)).toBe(true);
+      expect(isIncomeTransaction({ ...fallbackInflow, isIncome: false })).toBe(false);
+      expect(isIncomeTransaction({ ...fallbackInflow, amount: "-5000", isIncome: true })).toBe(true);
+    });
+
     it("BUG-01: paycheck split with unflagged net-income child counts toward TBB", () => {
       const checking = { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "0", onBudget: true, sort: 0 };
       const group = makeGroup({ id: 1, name: "Everyday" });
