@@ -98,7 +98,15 @@ export function assertSplitsBalanced(
   };
 
   const toCents = (value: unknown): number => {
-    const n = Number(value);
+    let n: number;
+    try {
+      // Number() itself throws on objects that shadow toString/valueOf
+      // with a non-function (reachable from parsed JSON) — route that
+      // through the error factory like any other invalid amount.
+      n = Number(value);
+    } catch {
+      return fail("Amount must be a valid number");
+    }
     if (!Number.isFinite(n)) {
       return fail("Amount must be a valid number");
     }
@@ -191,7 +199,15 @@ export function repairSplitForImport(
   fillerMemo: string = SPLIT_IMPORT_FILLER_MEMO
 ): SplitRepairResult {
   const toCents = (value: unknown): number => {
-    const n = Math.round(Number(value));
+    let n: number;
+    try {
+      // Number() itself throws on objects that shadow toString/valueOf
+      // with a non-function (reachable from parsed JSON) — those map to
+      // 0 like any other non-numeric amount so repair never throws.
+      n = Math.round(Number(value));
+    } catch {
+      return 0;
+    }
     return Number.isFinite(n) ? n : 0;
   };
 
