@@ -45,6 +45,8 @@ export type TransactionFormData = {
   amount: number | string;
   status?: ClearedStatus;
   cleared?: boolean;
+  /** Dest-leg cleared state for transfers; defaults from source status. */
+  transferStatus?: ClearedStatus;
   flagColor?: TransactionFlagState;
   transferAccountId?: number | "" | null;
   incomeMonth?: string | null;
@@ -56,6 +58,7 @@ export type TransactionBuilderOptions = {
   initial?: {
     id?: number;
     status?: ClearedStatus;
+    transferStatus?: ClearedStatus | null;
     transferAccountId?: number | null;
     payee?: string;
   };
@@ -208,6 +211,12 @@ export function toTransactionPayload(
       memo: (formData.memo ?? "").trim(),
       amount: amountCents,
       status: finalStatus,
+      // Preserve the dest leg's independent cleared state. A new leg (or a
+      // row gaining one) defaults from the source status, mirroring the
+      // server default (`transferStatus ?? status`); an existing transfer
+      // keeps its dest status so the edit modal can show/submit it. The
+      // server still rejects "r" here — only the reconcile flow sets it.
+      transferStatus: formData.transferStatus ?? initial?.transferStatus ?? finalStatus,
       flagColor: savedFlagColor,
       incomeMonth: incMonth,
       subTransactions: undefined,

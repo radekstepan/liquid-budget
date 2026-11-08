@@ -239,6 +239,7 @@ describe("toTransactionPayload", () => {
         memo: "",
         amount: -20000,
         status: "c",
+        transferStatus: "c",
         flagColor: undefined,
         incomeMonth: null,
         subTransactions: undefined,

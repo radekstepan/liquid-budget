@@ -459,9 +459,20 @@ export function matchesFilter(tx: Transaction, f: Filter, ctx: SearchCtx): boole
       const cents = Number(tx.amount) || 0;
       switch (f.value) {
         case "cleared":
-          return tx.status === "c" || tx.status === "r";
+          // Account-scoped: each transfer leg clears against its own
+          // statement (`status` = source, `transferStatus` = dest). Either
+          // leg cleared/reconciled counts the row as cleared globally.
+          return (
+            tx.status === "c" ||
+            tx.status === "r" ||
+            tx.transferStatus === "c" ||
+            tx.transferStatus === "r"
+          );
         case "uncleared":
-          return tx.status === "u";
+          // Mirror image: a row is uncleared only when neither leg has
+          // cleared. A NULL dest status is a legacy row (pre-migration
+          // 0020): fall back to the source status, same as reconcile.ts.
+          return tx.status === "u" && (tx.transferStatus == null || tx.transferStatus === "u");
         case "flagged":
           return tx.flagColor != null && tx.flagColor !== "duplicate";
         case "inflow":
