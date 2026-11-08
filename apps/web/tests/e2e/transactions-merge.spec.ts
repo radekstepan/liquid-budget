@@ -121,11 +121,13 @@ test("POST /api/transactions?action=merge keeps the imported row and preserves m
   expect(merged.id).toBe(imported.id);
   expect(deletedId).toBe(manual.id);
 
-  // Imported bank data wins...
-  expect(merged.date).toBe("2026-08-21");
+  // YNAB4 `match()`: the merged date comes from the user-entered row,
+  // not the bank posting date; cleared status is max(bank, user).
+  expect(merged.date).toBe("2026-08-02");
+  expect(merged.status).toBe("c");
+  // Imported bank data wins shape and identity...
   expect(Number(merged.amount)).toBe(-5000);
   expect(merged.payee).toBe("WHOLE FOODS #24");
-  expect(merged.status).toBe("u");
   expect(merged.needsReview).toBe(true);
   // ...while manual curation fills the gaps the import left empty.
   expect(merged.categoryId).toBe(groceriesId);
@@ -370,7 +372,8 @@ test("a manual + imported pair previews with the import winning", async ({
   const merged = after.transactions.find((t: Tx) => t.payee === importedPayee) as Tx;
   expect(merged).toBeTruthy();
   expect(merged.amount).toBe("-5000");
-  expect(merged.date).toBe("2026-08-21");
+  // YNAB4 `match()`: user-entered date wins over the bank posting date.
+  expect(merged.date).toBe("2026-08-02");
   expect(merged.memo).toBe("curated memo");
   expect(merged.categoryId).toBe(groceriesId);
   expect(after.transactions.filter((t: Tx) => t.payee === manualPayee)).toHaveLength(0);
