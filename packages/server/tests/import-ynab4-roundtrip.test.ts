@@ -13,9 +13,10 @@
  *   `lastEnteredCheckNumber` drop warns once (stock only — exports
  *   write the -1 default).
  * - G-04: disabled payees (`enabled`), `autoFillCategoryId` defaults,
- *   and rename conditions (`Is` exact + `Contains`/`StartsWith`/
- *   `EndsWith` substring flavours) round-trip; location/autofill/
- *   transfer-payee drops warn on the stock import only.
+ *   `autoFillMemo`/`autoFillAmount` defaults, and rename conditions
+ *   (`Is` exact + `Contains`/`StartsWith`/`EndsWith` substring flavours)
+ *   round-trip; location/transfer-payee drops warn on the stock import
+ *   only.
  * - G-05: `checkNumber` + OFX lineage round-trip; `accepted: false`
  *   / match-link / schedule-link drops warn once (exports hardcode
  *   `accepted: true` — intentional, see below).
@@ -26,7 +27,8 @@
  *   unknown frequencies warn once (exports write them normalized).
  * - G-09: a stock-shaped file (no `reconciliations[]`) creates no
  *   reconciliation rows in either ledger.
- * - G-10: `accountMappings` warn once (exports omit them by design).
+ * - G-10: `accountMappings` warn (aggregate + per-account detail;
+ *   exports omit them by design).
  * - G-11: in-app `[N]`-style rename rules ride as `Is` operands and
  *   restore verbatim; `accepted: true` / `isTombstone: false` /
  *   `entityVersion` stubs are asserted as intentionally emitted.
@@ -250,7 +252,6 @@ describe("G-11 import → export → import round-trip", () => {
       /account mapping/,
       /month-level budget notes/,
       /payee location/,
-      /autofill/,
       /transfer payee/,
       /accepted === false/,
       /import-match links/,
@@ -340,7 +341,7 @@ describe("G-11 import → export → import round-trip", () => {
       });
     }
 
-    // Payees: disabled flag + default category (G-04).
+    // Payees: disabled flag + defaults (G-04).
     const payees1 = await db1.select().from(schema.payees);
     const payees2 = await db2.select().from(schema.payees);
     for (const p1 of payees1) {
@@ -350,8 +351,13 @@ describe("G-11 import → export → import round-trip", () => {
       const catName = async (db: Db, id: number | null) =>
         id == null ? null : (await db.select().from(schema.categories).where(eq(schema.categories.id, id)))[0]?.name ?? null;
       expect(await catName(db2, p2.autoCategoryId)).toBe(await catName(db1, p1.autoCategoryId));
+      // G-04: the memo/amount autofill defaults survive the round-trip.
+      expect(p2.autoMemo).toBe(p1.autoMemo);
+      expect(p2.autoAmount).toBe(p1.autoAmount);
     }
     expect(payees2.find((p) => p.name === "Old Shop")?.archived).toBe(true);
+    expect(payees2.find((p) => p.name === "Memo Cafe")?.autoMemo).toBe("Large latte");
+    expect(payees2.find((p) => p.name === "Memo Cafe")?.autoAmount).not.toBeNull();
 
     // Rename rules: the YNAB4 `Is` condition, the `Contains`
     // condition, and the in-app `[N]` pattern all restore verbatim

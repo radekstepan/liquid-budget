@@ -52,14 +52,14 @@ function setup(overrides?: {
 }
 
 describe("MergePreviewModal", () => {
-  it("prepopulates the editable result with imported data winning", () => {
+  it("prepopulates the editable result with the user date and max cleared status (YNAB4 parity)", () => {
     const { categoryName } = setup();
     const result = screen.getByTestId("merge-result");
-    // Imported bank data wins in the result...
+    // YNAB4 `match()`: date from the user-entered row, cleared = max(bank, user).
     expect(within(result).getByDisplayValue("WHOLE FOODS #24")).toBeInTheDocument();
-    expect(within(result).getByDisplayValue("2026-08-01")).toBeInTheDocument();
+    expect(within(result).getByDisplayValue("2026-08-02")).toBeInTheDocument();
     expect(within(result).getByDisplayValue("-50.00")).toBeInTheDocument();
-    expect(within(result).getByRole("button", { name: "Uncleared" })).toHaveTextContent("U");
+    expect(within(result).getByRole("button", { name: "Cleared" })).toHaveTextContent("C");
     // ...while manual curation fills the gaps the import left empty.
     expect(within(result).getByText(categoryName)).toBeInTheDocument();
     expect(within(result).getByDisplayValue("weekly shop")).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("MergePreviewModal", () => {
     fireEvent.change(within(result).getByDisplayValue("weekly shop"), {
       target: { value: "edited memo" },
     });
-    fireEvent.change(within(result).getByDisplayValue("2026-08-01"), {
+    fireEvent.change(within(result).getByDisplayValue("2026-08-02"), {
       target: { value: "2026-08-03" },
     });
     fireEvent.change(within(result).getByDisplayValue("-50.00"), {
@@ -121,10 +121,10 @@ describe("MergePreviewModal", () => {
     setup({ onConfirm });
     const result = screen.getByTestId("merge-result");
 
-    fireEvent.click(within(result).getByRole("button", { name: "Uncleared" }));
+    fireEvent.click(within(result).getByRole("button", { name: "Cleared" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Merge transactions" }));
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith([101, 102], { status: "c" }));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith([101, 102], { status: "u" }));
   });
 
   it("sends a flag override when the flag is changed", async () => {
@@ -189,7 +189,7 @@ describe("MergePreviewModal", () => {
     fireEvent.change(within(result).getByDisplayValue("0"), { target: { value: "-50.00" } });
     expect(mergeBtn).not.toBeDisabled();
 
-    fireEvent.change(within(result).getByDisplayValue("2026-08-01"), {
+    fireEvent.change(within(result).getByDisplayValue("2026-08-02"), {
       target: { value: "not-a-date" },
     });
     expect(mergeBtn).toBeDisabled();

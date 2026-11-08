@@ -13,10 +13,12 @@ import type { Transaction } from "./types.js";
  * gating on a blank row via `applyRulesToNew` in
  * `PayeeManager.as:612-632` / `AutoFillData.applyToNew` `:133-164`).
  *
- * We keep no per-payee amount/memo columns (the `Payee` row carries only
- * `autoCategoryId`): the proposal is derived from history on demand.
- * `suggestAutofillForPayee` generalises the server's `lastCategoryForPayee`
- * (most-recent categorized row wins) to amount + memo with the same
+ * The payee row carries the entity-level defaults (`autoCategoryId` plus
+ * the imported `autoMemo`/`autoAmount`): history always wins once rows
+ * exist (last-write-wins), and the stored defaults seed the proposal
+ * for a payee with no history yet. `suggestAutofillForPayee`
+ * generalises the server's `lastCategoryForPayee` (most-recent
+ * categorized row wins) to amount + memo with the same
  * last-write-wins ordering.
  *
  * Matching is an exact trimmed-name comparison — the same `eq` the server
@@ -41,10 +43,14 @@ export type PayeeAutofillSuggestion = {
   categoryId: number | null;
   /**
    * Cents string from the most recent history row with this payee, or
-   * null when the payee has no history (category-only proposal).
+   * the payee-entity `defaultAmount` when the payee has no history.
+   * Null when neither exists (category-only proposal).
    */
   amount: string | null;
-  /** Memo from the most recent history row, or `""` when none. */
+  /**
+   * Memo from the most recent history row, or the payee-entity
+   * `defaultMemo` when the payee has no history, else `""`.
+   */
   memo: string;
 };
 
@@ -59,6 +65,18 @@ export type SuggestAutofillOptions = {
    * `lastCategoryForPayee`'s prefer-the-entity-default rule.
    */
   defaultCategoryId?: number | null;
+  /**
+   * The payee entity's `autoMemo` (YNAB4 `autoFillMemo`). Seeds the
+   * memo proposal when the payee has no transaction history; history
+   * always wins once rows exist (YNAB4 last-write-wins).
+   */
+  defaultMemo?: string | null;
+  /**
+   * The payee entity's `autoAmount` in integer cents (YNAB4
+   * `autoFillAmount`). Seeds the amount proposal when the payee has no
+   * transaction history; history always wins once rows exist.
+   */
+  defaultAmount?: string | number | null;
 };
 
 /**
@@ -70,7 +88,10 @@ export type SuggestAutofillOptions = {
  * last-write-wins: `getSettingsFromTransaction` overwrites both
  * unconditionally); the category is the entity default when given, else
  * the most recent non-null history category (YNAB4 only overwrites the
- * stored category when the saved transaction has one).
+ * stored category when the saved transaction has one). With no history
+ * the stored entity defaults (`defaultMemo`/`defaultAmount`/
+ * `defaultCategoryId`) seed the proposal instead, so a payee whose only
+ * autofill signal is its YNAB4 entity default still proposes something.
  *
  * Returns null when the payee name is blank, or when there is no history
  * and no entity default.
@@ -96,8 +117,14 @@ export function suggestAutofillForPayee(
   const latest = matches[0];
   const fallbackCategory = opts?.defaultCategoryId ?? null;
   if (!latest) {
-    if (fallbackCategory == null) return null;
-    return { categoryId: fallbackCategory, amount: null, memo: "" };
+    const fallbackMemo = opts?.defaultMemo ?? null;
+    const fallbackAmount = opts?.defaultAmount ?? null;
+    if (fallbackCategory == null && fallbackMemo == null && fallbackAmount == null) return null;
+    return {
+      categoryId: fallbackCategory,
+      amount: typeof fallbackAmount === "number" ? String(Math.round(fallbackAmount)) : fallbackAmount,
+      memo: fallbackMemo ?? "",
+    };
   }
   let categoryId = fallbackCategory;
   if (categoryId == null) {

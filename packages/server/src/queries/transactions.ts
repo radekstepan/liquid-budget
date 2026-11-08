@@ -1216,7 +1216,7 @@ export async function updateSplit(
     if (!parent) {
       throw new TransactionError("split parent not found", 404);
     }
-    if (parent.status === "r") {
+    if (parent.status === "r" || parent.transferStatus === "r") {
       throw new TransactionError("Reconciled split transaction cannot be modified.", 422);
     }
     if (parent.parentId != null) {

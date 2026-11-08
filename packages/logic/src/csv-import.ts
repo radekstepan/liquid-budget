@@ -317,7 +317,10 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
 
 export function parseAmount(input: string): number | null {
   if (typeof input !== "string") return null;
-  let s = input.trim();
+  // Normalize unicode grouping spaces (NBSP U+00A0, narrow NBSP U+202F,
+  // and other unicode spaces banks emit) to plain ASCII space so the
+  // grouping patterns below match them like regular spaces.
+  let s = input.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, " ").trim();
   if (!s) return null;
 
   // Currency symbols ($ € £ ¥)

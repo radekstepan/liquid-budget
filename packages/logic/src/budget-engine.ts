@@ -539,7 +539,15 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData, overs
         }
         if (ccGroupIds.has(c.groupId)) {
           const avail = Math.round(prev + assigned + rawFlow + ccBuffer);
-          nextBal.set(c.id, avail);
+          // YNAB4-style: a negative CC-payment available is a cash overspend
+          // like any category (clamped next month; deducted from TBB via
+          // overspentByMonth in the fresh walk). Honour red-arrow inheritance.
+          const carriesOver = effectiveOverspendHandling(c, m, overrides, inheritedHandling);
+          if (avail >= 0 || carriesOver) {
+            nextBal.set(c.id, avail);
+          } else {
+            nextBal.set(c.id, 0);
+          }
         } else {
           const paydown = paydownMap.get(c.id) ?? 0;
           const avail = Math.round(prev + assigned + rawFlow - paydown);
@@ -606,7 +614,11 @@ function buildRawIndexData(
   const categoryTransactionsByMonth = new Map<string, Map<number, CategoryTxEntry[]>>();
 
   for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
+    // Split parents carry the split total (and may carry isIncome/incomeMonth)
+    // while children carry the categorized legs. Skip the parent for outflow
+    // and card-payment flow so the total is not double-counted with the
+    // children, but still attribute parent income (see income walk below).
+    const isSplitParent = splitParentIds.has(t.id);
     const mk = t.date.slice(0, 7);
     const amt = num(t.amount);
     const accA = accountMap.get(t.accountId);
@@ -631,7 +643,7 @@ function buildRawIndexData(
       netOnBudgetDelta = onA ? amt : 0;
     }
 
-    if (t.categoryId != null && !isInternalTransfer && netOnBudgetDelta !== 0) {
+    if (!isSplitParent && t.categoryId != null && !isInternalTransfer && netOnBudgetDelta !== 0) {
       let m = outflowByMonth.get(mk);
       if (!m) {
         m = new Map();
@@ -686,8 +698,9 @@ function buildRawIndexData(
       }
     }
 
-    // Transfers involving credit cards
-    if (t.transferAccountId != null && isInternalTransfer) {
+    // Transfers involving credit cards (split parents excluded: their legs
+    // live on the children, so counting the parent here would double-count)
+    if (!isSplitParent && t.transferAccountId != null && isInternalTransfer) {
       const sending = amt < 0 ? t.accountId : t.transferAccountId;
       const receiving = amt < 0 ? t.transferAccountId : t.accountId;
       const transferAmount = Math.abs(amt);
@@ -987,7 +1000,20 @@ function computeAllMonths(
       }
 
       const next = Math.round(prev + assigned + rawFlow + ccBuffer);
-      nextBalance.set(c.id, next);
+      // YNAB4-style: overspend inside the CC Payment category itself is cash
+      // overspending like a regular category — deduct the deficit from TBB
+      // and clamp carryover to 0 (unless red-arrow handling carries it).
+      if (next >= 0) {
+        nextBalance.set(c.id, next);
+      } else {
+        const carriesOver = effectiveOverspendHandling(c, month, overrides, inheritedHandling);
+        if (carriesOver) {
+          nextBalance.set(c.id, next);
+        } else {
+          nextBalance.set(c.id, 0);
+          monthCashOverspent += -next;
+        }
+      }
     }
 
     endingBalanceByMonth.set(month, new Map(nextBalance));

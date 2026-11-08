@@ -234,6 +234,8 @@ describe("getRenameSuggestStatus", () => {
     await createRenameRule(db, { sourcePattern: "BCF[N]", targetPayee: "BC Ferries" });
     await createRenameRule(db, { sourcePattern: "AMZN Mktp", targetPayee: "Amazon" });
     await seedTransaction(db, accountId, { payee: "BCF1" });
+    // Whitespace is significant (YNAB4 parity): the triple-space variant is
+    // NOT covered by "AMZN Mktp" and stays a candidate alongside WONKY 123.
     await seedTransaction(db, accountId, { payee: "amzn   mktp" });
     await seedTransaction(db, accountId, { payee: "WONKY 123" });
     await seedTransaction(db, accountId, { payee: "wonky 123" });
@@ -243,8 +245,9 @@ describe("getRenameSuggestStatus", () => {
     expect(status.enabled).toBe(true);
     expect(status.candidates).toEqual([
       { payee: "WONKY 123", count: 2, transactionIds: expect.any(Array), memos: [] },
+      { payee: "amzn   mktp", count: 1, transactionIds: expect.any(Array), memos: [] },
     ]);
-    expect(status.totalUnique).toBe(1);
+    expect(status.totalUnique).toBe(2);
   });
 });
 

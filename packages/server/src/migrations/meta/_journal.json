@@ -239,6 +239,13 @@
       "when": 1794113168396,
       "tag": "0033_furry_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794120426856,
+      "tag": "0034_moaning_cardiac",
+      "breakpoints": true
     }
   ]
 }

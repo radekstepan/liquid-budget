@@ -648,9 +648,11 @@ function normalizeDayOfMonth(value: number | string | null | undefined): number 
  * they have no next occurrence (BUG-18.4); callers that advance one-off
  * schedules should deactivate the rule instead of relying on this function.
  *
- * Monthly and yearly advances clamp the day to the last valid day of the
- * target month — e.g. Jan 31 + 1 month → Feb 28, mirroring how YNAB handles
- * "31st of every month" recurring entries in short months.
+ * Monthly advances clamp the day to the last valid day of the target
+ * month — e.g. Jan 31 + 1 month → Feb 28, mirroring how YNAB handles
+ * "31st of every month" recurring entries in short months. Yearly
+ * advances instead roll overflow forward like YNAB4's `addYear` — Feb 29
+ * + 1 year → Mar 1.
  *
  * When `anchor` is provided (day of month 1..31 or ISO date string), month-based
  * advances clamp against the anchor day rather than the previous output string,
@@ -789,22 +791,22 @@ export function nextDateFor(
     }
     case "every2years":
     case "everyotheryear": {
-      d.setUTCDate(1);
-      d.setUTCFullYear(d.getUTCFullYear() + 2);
-      const lastDay = new Date(
-        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
-      ).getUTCDate();
-      d.setUTCDate(Math.min(anchorDay, lastDay));
+      // YNAB4 `addYear` bumps the year field and lets the underlying Date
+      // normalize the overflow — Feb 29 + 2 years rolls forward to Mar 1
+      // (and stays there on subsequent steps). No anchor clamp.
+      const rolled = new Date(
+        Date.UTC(d.getUTCFullYear() + 2, d.getUTCMonth(), d.getUTCDate())
+      );
+      d.setTime(rolled.getTime());
       break;
     }
     case "yearly":
     case "annually": {
-      d.setUTCDate(1);
-      d.setUTCFullYear(d.getUTCFullYear() + 1);
-      const lastDay = new Date(
-        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
-      ).getUTCDate();
-      d.setUTCDate(Math.min(anchorDay, lastDay));
+      // YNAB4 `addYear`: Feb 29 + 1 year rolls forward to Mar 1.
+      const rolled = new Date(
+        Date.UTC(d.getUTCFullYear() + 1, d.getUTCMonth(), d.getUTCDate())
+      );
+      d.setTime(rolled.getTime());
       break;
     }
     case "never":

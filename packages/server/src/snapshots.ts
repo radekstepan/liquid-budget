@@ -1,7 +1,10 @@
 import { desc } from "drizzle-orm";
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDbMutex, getDbPath, getDefaultDb, resetDefaultDb, type Db } from "./client.js";
 import { transactions } from "./schema.js";
 
@@ -188,11 +191,88 @@ export function deleteSnapshot(id: string, snapshotsDir?: string): void {
   }
 }
 
+function getMigrationsFolder(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "migrations");
+}
+
+function readCurrentMigrationHashes(): { hashes: string[]; head: string } {
+  const folder = getMigrationsFolder();
+  const journal = JSON.parse(
+    fs.readFileSync(path.join(folder, "meta/_journal.json"), "utf8")
+  ) as { entries: Array<{ tag: string; idx: number }> };
+  const entries = [...journal.entries].sort((a, b) => a.idx - b.idx);
+  const hashes = entries.map((entry) => {
+    const sqlText = fs.readFileSync(path.join(folder, `${entry.tag}.sql`), "utf8");
+    return createHash("sha256").update(sqlText).digest("hex");
+  });
+  return { hashes, head: hashes[hashes.length - 1]! };
+}
+
+function readSnapshotMigrationHashes(snapshotPath: string, id: string): Set<string> {
+  let raw: Database.Database;
+  try {
+    raw = new Database(snapshotPath, { readonly: true });
+  } catch {
+    throw new SnapshotError(`Cannot restore snapshot "${id}": snapshot file is not a readable database`, 422);
+  }
+  try {
+    let rows: Array<{ hash: string }>;
+    try {
+      rows = raw.prepare("SELECT hash FROM __drizzle_migrations").all() as Array<{ hash: string }>;
+    } catch {
+      throw new SnapshotError(
+        `Cannot restore snapshot "${id}": snapshot was taken before the current migration history (missing migration journal)`,
+        422
+      );
+    }
+    return new Set(rows.map((r) => r.hash));
+  } finally {
+    try {
+      raw.close();
+    } catch {
+      // Best-effort close of the read-only handle.
+    }
+  }
+}
+
+/**
+ * Pre-flight version check for `restoreSnapshot`. Compares the snapshot
+ * file's applied-migration hashes against the running app's journal
+ * without touching the live database. Rejects snapshots that are behind
+ * (missing the current head) or ahead (containing unknown migrations).
+ */
+function assertSnapshotMatchesCurrentMigrations(snapshotPath: string, id: string): void {
+  const { hashes: currentHashes, head } = readCurrentMigrationHashes();
+  const current = new Set(currentHashes);
+  const snapshot = readSnapshotMigrationHashes(snapshotPath, id);
+  if (!snapshot.has(head)) {
+    throw new SnapshotError(
+      `Cannot restore snapshot "${id}": snapshot was taken before the current migration head and cannot be restored safely`,
+      422
+    );
+  }
+  for (const hash of snapshot) {
+    if (!current.has(hash)) {
+      throw new SnapshotError(
+        `Cannot restore snapshot "${id}": snapshot was taken with a newer app version and cannot be restored safely`,
+        422
+      );
+    }
+  }
+}
+
 /**
  * Replace the live database with a snapshot. Closes the shared connection,
  * copies the snapshot file over the database path, drops stale WAL sidecars,
  * and reopens (running migrations as a sanity check). Serialized on the
  * connection mutex so no write can interleave the swap.
+ *
+ * A pre-flight migration-lineage check runs BEFORE the live database is
+ * touched: the snapshot's `__drizzle_migrations` hashes must match the
+ * running app's journal head. A snapshot taken before (or after) the
+ * current head is rejected with a clear `SnapshotError` without replacing
+ * the live database.
  */
 export async function restoreSnapshot(
   id: string,
@@ -212,6 +292,9 @@ export async function restoreSnapshot(
     throw new SnapshotError("Snapshot not found", 404);
   }
   if (!stat.isFile()) throw new SnapshotError("Snapshot not found", 404);
+
+  // Pre-flight migration-lineage check — before the live DB is touched.
+  assertSnapshotMatchesCurrentMigrations(src, id);
 
   const meta =
     listSnapshots(dir).find((s) => s.id === id) ??

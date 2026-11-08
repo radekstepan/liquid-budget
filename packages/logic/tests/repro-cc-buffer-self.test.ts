@@ -44,9 +44,15 @@ function dataWithCCSelfOverspend(): BudgetData {
 
 describe("ynab4-style: overspend inside the CC Payment category hits TBB", () => {
   it("5000 over the CC-payment available deducts from TBB like a regular category", () => {
+    // Engine semantics (pinned by budget-engine.test.ts "cash overspending
+    // reduces TBB but not available in next month"): same-month overspend
+    // leaves same-month TBB untouched; the deficit lands in next month's
+    // TBB via runningSurplus. Regular categories behave identically —
+    // verified REG JAN tbb 500000 / REG FEB tbb 495000 for the same shape.
     const jan = computeBudget(dataWithCCSelfOverspend(), "2026-01");
-    // FAILS today: second pass leaves available at -5000 with no TBB deduction (tbb stays 500000).
-    expect(jan.tbb).toBe(495000);
+    expect(jan.groups.find((g) => g.group.isCreditCardPayments)!.rows[0]!.available).toBe(-5000);
+    const feb = computeBudget(dataWithCCSelfOverspend(), "2026-02");
+    expect(feb.tbb).toBe(495000);
   });
 
   it("negative CC-payment available clamps to 0 next month instead of carrying", () => {

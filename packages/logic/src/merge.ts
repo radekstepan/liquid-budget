@@ -9,10 +9,11 @@ import { isTransferPayee } from "./rename-rules.js";
  *
  * When a manually entered transaction duplicates an imported one (same
  * purchase, entered by hand and later confirmed by a bank statement), the
- * user selects both rows and merges them. The imported row is the
- * authority: its bank-supplied data (date, amount, payee, cleared status)
- * wins every field it actually carries, while manual curation (category,
- * memo, flag) fills the gaps the import left empty.
+ * user selects both rows and merges them. YNAB4 `match()` takes the merged
+ * date from the user-entered row and the cleared status as
+ * `max(bank, user)` (Uncleared < Cleared < Reconciled); the amount comes
+ * from the bank record. Manual curation (category, memo, flag) fills the
+ * gaps the import left empty.
  */
 
 // Local copy of the YNAB4 palette (see TRANSACTION_FLAG_COLORS in
@@ -121,11 +122,29 @@ function validFlagColor(value: unknown): TransactionFlagColor | null {
   return FLAG_COLORS.has(value) ? (value as TransactionFlagColor) : null;
 }
 
+/** YNAB4 `ClearedStatus` order: Uncleared(0) < Cleared(1) < Reconciled(2). */
+const CLEARED_RANK: Record<ClearedStatus, number> = { u: 0, c: 1, r: 2 };
+
+/**
+ * YNAB4 `ClearedStatus.compare` semantics for merges: the stronger status
+ * wins, so reconciled beats cleared beats uncleared regardless of which
+ * row (bank or user) carries it.
+ */
+function maxClearedStatus(a: ClearedStatus, b: ClearedStatus): ClearedStatus {
+  return CLEARED_RANK[a] >= CLEARED_RANK[b] ? a : b;
+}
+
 /**
  * Resolve the merged row's fields from a [primary, secondary] pair (see
  * {@link pickMergePrimary}).
  *
- *   - Shape (account, transfer leg, amount, date, cleared status) always
+ *   - Date always comes from the user-entered row (the non-imported one;
+ *     YNAB4 `match()` keeps the user date, not the bank posting date).
+ *     When both rows share import status there is no bank/user split, so
+ *     the primary date is kept.
+ *   - Cleared status is `max(bank, user)`: reconciled beats cleared beats
+ *     uncleared (YNAB4 `ClearedStatus.compare`).
+ *   - Shape (account, transfer leg, amount) always
  *     comes from the primary — the imported bank record.
  *   - Payee, memo, category, flag and income month fall back to the
  *     secondary when the primary left them empty, so manual curation is
@@ -146,8 +165,15 @@ export function resolveMergedTransaction(args: {
 }): MergedTransactionFields {
   const { primary: p, secondary: s, sourceAccount, destAccount } = args;
   const transferAccountId = p.transferAccountId ?? null;
-  const isTransfer = transferAccountId != null;
   const amount = p.amount;
+
+  // YNAB4 `match()`: the merged date is the user-entered date (the
+  // non-imported row; imported rows carry needsReview/entityId). With no
+  // bank/user split (both rows imported or both manual) keep primary.
+  const pImported = isImportedTransaction(p);
+  const sImported = isImportedTransaction(s);
+  const userRow = pImported !== sImported ? (pImported ? s : p) : p;
+  const isTransfer = transferAccountId != null;
 
   let payee: string;
   let payeeId: number | null;
@@ -207,12 +233,12 @@ export function resolveMergedTransaction(args: {
     accountId: p.accountId,
     transferAccountId,
     categoryId,
-    date: p.date,
+    date: userRow.date,
     payee,
     payeeId,
     memo,
     amount,
-    status: p.status,
+    status: maxClearedStatus(p.status, s.status),
     transferStatus: isTransfer ? (p.transferStatus ?? p.status) : null,
     flagColor: validFlagColor(p.flagColor) ?? validFlagColor(s.flagColor) ?? null,
     isIncome,

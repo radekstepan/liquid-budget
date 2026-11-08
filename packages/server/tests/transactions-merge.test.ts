@@ -108,11 +108,12 @@ describe("mergeTransactions", () => {
     expect(merged.id).toBe(imported.id);
     expect(deletedId).toBe(manual.id);
 
-    // Imported bank data wins...
-    expect(merged.date).toBe("2026-08-01");
+    // YNAB4 `match()`: merged date comes from the user-entered row and
+    // cleared status is max(bank, user) — max(c,u) is c.
+    expect(merged.date).toBe("2026-08-02");
     expect(merged.amount).toBe(-5000);
     expect(merged.payee).toBe("WHOLE FOODS #24");
-    expect(merged.status).toBe("u");
+    expect(merged.status).toBe("c");
     expect(merged.needsReview).toBe(true);
     // ...while manual curation fills gaps the import left empty.
     expect(merged.categoryId).toBe(groceriesId);

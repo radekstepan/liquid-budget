@@ -25,6 +25,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { eq } from "drizzle-orm";
 import path from "path";
 import { fileURLToPath } from "url";
 import { importYnab4 } from "../src/import-ynab4.js";
@@ -84,9 +85,27 @@ describe("G-04 repro: autoFillMemo/autoFillAmount seed autofill", () => {
     db = openMigratedDb();
   });
 
+  /**
+   * Integrated path: the import persists the YNAB4 entity defaults on
+   * the payee row, and the caller hands them to the pure helper (which
+   * has no DB access of its own). History always wins once rows exist;
+   * with zero history the stored defaults seed the proposal.
+   */
+  async function suggestionFor(payeeName: string) {
+    const payeeRow = db
+      .select()
+      .from(schema.payees)
+      .where(eq(schema.payees.name, payeeName))
+      .get();
+    return suggestAutofillForPayee(await historyFor(db, payeeName), payeeName, {
+      defaultMemo: payeeRow?.autoMemo ?? null,
+      defaultAmount: payeeRow?.autoAmount ?? null,
+    });
+  }
+
   it("entity autoFillMemo seeds the memo proposal with no history", async () => {
     await importYnab4(db, backupWithAutofillOnlyPayee());
-    const suggestion = suggestAutofillForPayee(await historyFor(db, "Corner Store"), "Corner Store");
+    const suggestion = await suggestionFor("Corner Store");
     // FAILS today: history is empty and the entity default was dropped,
     // so the payee proposes nothing instead of "weekly groceries".
     expect(suggestion).not.toBeNull();
@@ -95,7 +114,7 @@ describe("G-04 repro: autoFillMemo/autoFillAmount seed autofill", () => {
 
   it("entity autoFillAmount seeds the amount proposal with no history", async () => {
     await importYnab4(db, backupWithAutofillOnlyPayee());
-    const suggestion = suggestAutofillForPayee(await historyFor(db, "Corner Store"), "Corner Store");
+    const suggestion = await suggestionFor("Corner Store");
     // FAILS today: same root cause — the amount default never reaches the
     // payee-autofill path or any stored column.
     expect(suggestion).not.toBeNull();

@@ -218,6 +218,13 @@ export function findDuplicateGroups(rows: DuplicateEntry[]): DuplicateGroup[] {
 export class ExistingImportFingerprints {
   private keyToTxIndices = new Map<string, number[]>();
   private consumedTx = new Set<number>();
+  /**
+   * Per-transaction FITID records for the YNAB4 OFX near-miss branch
+   * (same FITID + same amount within ±4 days, regardless of payee/memo).
+   * Only rows that were actually fingerprinted (non-split-children on
+   * this account, or transfer destinations) are recorded here.
+   */
+  private fitIdEntries: Array<{ txIndex: number; fitId: string; amount: number; time: number }> = [];
 
   add(txIndex: number, keys: string[]): void {
     for (const k of keys) {
@@ -246,6 +253,43 @@ export class ExistingImportFingerprints {
             return true;
           }
         }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Record a row's FITID identity for OFX near-miss matching. `amount` is
+   * the fingerprinted (possibly transfer-negated) amount in cents.
+   */
+  addFitId(txIndex: number, fitId: string, amount: number, date: string): void {
+    const id = fitId.trim();
+    if (!id) return;
+    const time = Date.parse(`${date}T00:00:00Z`);
+    if (Number.isNaN(time)) return;
+    this.fitIdEntries.push({ txIndex, fitId: id, amount: Math.round(amount), time });
+  }
+
+  /**
+   * YNAB4 OFX near-miss branch (`getTransactionByFITID` + same amount +
+   * `areDatesWithinDays(4, ...)`): an incoming row duplicates an existing
+   * row when FITIDs match exactly, amounts match, and the dates are within
+   * 4 days inclusive — regardless of payee/memo text. Consumes the matched
+   * row so batch rows still match existing occurrences 1-to-1.
+   */
+  matchFitIdAndConsume(fitId: string, amount: number, date: string): boolean {
+    const id = fitId.trim();
+    if (!id) return false;
+    const time = Date.parse(`${date}T00:00:00Z`);
+    if (Number.isNaN(time)) return false;
+    const amt = Math.round(amount);
+    for (const e of this.fitIdEntries) {
+      if (this.consumedTx.has(e.txIndex)) continue;
+      if (e.fitId !== id) continue;
+      if (e.amount !== amt) continue;
+      if (Math.abs(e.time - time) / 86400000 <= 4 + 1e-9) {
+        this.consumedTx.add(e.txIndex);
+        return true;
       }
     }
     return false;
@@ -283,6 +327,10 @@ export function buildExistingImportFingerprints(
     const t = existing[i]!;
     const amt = typeof t.amount === "number" ? Math.round(t.amount) : Math.round(Number(t.amount));
     const keys: string[] = [];
+    // Fingerprinted amount for the FITID near-miss record: the direct
+    // amount on this account, or the negated amount when this account is
+    // the transfer destination. Null when the row is excluded (split child).
+    let fitAmount: number | null = null;
 
     if (t.accountId === accountId) {
       // Direct transaction on this account:
@@ -299,6 +347,7 @@ export function buildExistingImportFingerprints(
           fitId: t.fitId,
         })
       );
+      fitAmount = amt;
       if (renameRules && renameRules.length > 0) {
         const renamed = applyRenameRules(renameRules, t.payee);
         if (renamed !== t.payee) {
@@ -318,6 +367,7 @@ export function buildExistingImportFingerprints(
       // Transfer where this account is the destination:
       // The incoming amount is opposite in sign to the stored transfer row.
       const destAmount = -amt;
+      fitAmount = destAmount;
       keys.push(
         duplicateFingerprint({
           accountId,
@@ -376,6 +426,9 @@ export function buildExistingImportFingerprints(
 
     if (keys.length > 0) {
       tracker.add(i, keys);
+      if (fitAmount != null && t.fitId != null && t.fitId.trim() !== "") {
+        tracker.addFitId(i, t.fitId, fitAmount, t.date);
+      }
     }
   }
 
@@ -422,12 +475,28 @@ export function identifyImportDuplicates<
       fitId: row.fitId,
     });
 
-    const isMatch =
+    const isExactMatch =
       "matchAndConsume" in existingFingerprints && typeof existingFingerprints.matchAndConsume === "function"
         ? existingFingerprints.matchAndConsume([fp])
         : existingFingerprints.has(fp);
 
-    if (isMatch) {
+    // YNAB4 OFX FITID near-miss: same FITID + same amount within ±4 days
+    // (inclusive), regardless of payee/memo. Only the tracker carries
+    // FITID records; a bare fingerprint Set has no dates to compare.
+    const isFitIdMatch =
+      !isExactMatch &&
+      row.fitId != null &&
+      row.fitId.trim() !== "" &&
+      "matchFitIdAndConsume" in existingFingerprints &&
+      typeof (existingFingerprints as ExistingImportFingerprints).matchFitIdAndConsume === "function"
+        ? (existingFingerprints as ExistingImportFingerprints).matchFitIdAndConsume(
+            row.fitId,
+            amount,
+            row.date
+          )
+        : false;
+
+    if (isExactMatch || isFitIdMatch) {
       duplicateRowNumbers.add(row.rowNumber);
       duplicates.push({
         rowNumber: row.rowNumber,

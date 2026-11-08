@@ -30,12 +30,18 @@ describe("selectRenameCandidates", () => {
     const rules = [rule("AMZN Mktp US*RT3ABCD12", "Amazon")];
     const rows = [
       row({ id: 1, payee: "AMZN Mktp US*RT3ABCD12" }),
+      // Operator/exact matching is punctuation-significant (YNAB4 parity):
+      // a space where the rule has `*` is a different payee and stays a
+      // rename candidate.
       row({ id: 2, payee: "AMZN MKTP US RT3ABCD12" }),
       row({ id: 3, payee: "WHOLE FOODS #24" }),
     ];
     const { candidates, totalUnique, truncated } = selectRenameCandidates(rows, rules);
-    expect(candidates.map((c) => c.payee)).toEqual(["WHOLE FOODS #24"]);
-    expect(totalUnique).toBe(1);
+    expect(candidates.map((c) => c.payee)).toEqual([
+      "AMZN MKTP US RT3ABCD12",
+      "WHOLE FOODS #24",
+    ]);
+    expect(totalUnique).toBe(2);
     expect(truncated).toBe(false);
   });
 

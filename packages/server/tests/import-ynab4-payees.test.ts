@@ -11,12 +11,14 @@
  *     substring rules with the matching `operator` flavour. Unknown
  *     operators — plus blank/unparseable conditions — land in
  *     `ImportSummary.warnings`, never silently dropped.
- *   - `autoFillMemo`/`autoFillAmount` (no payee-autofill target here)
- *     and `locations`/`payeeLocations` (no maps feature) are dropped
- *     with aggregated warnings.
+ *   - `autoFillMemo`/`autoFillAmount` persist on the payee row
+ *     (`autoMemo`/`autoAmount`, amount in cents) so history-less payees
+ *     still propose them; `locations`/`payeeLocations` (no maps
+ *     feature) are dropped with an aggregated warning.
  *   - `targetAccountId` transfer payees stay skipped by design with one
  *     aggregated notice.
- *   - Export writes the flag back as YNAB4 `enabled`.
+ *   - Export writes the flag back as YNAB4 `enabled` and the autofill
+ *     defaults back as `autoFillMemo`/`autoFillAmount`.
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
@@ -27,7 +29,7 @@ import { fileURLToPath } from "url";
 import { exportYnab4 } from "../src/export-ynab4.js";
 import { importYnab4 } from "../src/import-ynab4.js";
 import { getRenameRules } from "../src/queries/rename-rules.js";
-import { applyRenameRules } from "@ynab/logic";
+import { applyRenameRules, dollarsToCents } from "@ynab/logic";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -154,7 +156,13 @@ describe("G-04 payee import", () => {
     // Aggregated notices for the deliberate drops.
     expect(warnings.some((w) => w.includes("transfer payee"))).toBe(true);
     expect(warnings.some((w) => w.includes("2 payee location"))).toBe(true);
-    expect(warnings.some((w) => w.includes("memo/amount autofill"))).toBe(true);
+    // G-04: the memo/amount autofill defaults are persisted, not
+    // dropped (this fixture is decimal-dollar-detected, so the wire
+    // -4500 converts via dollarsToCents like every other amount).
+    const cafe = byName.get("Memo Autofill Cafe");
+    expect(cafe?.autoMemo).toBe("Large latte");
+    expect(cafe?.autoAmount).toBe(dollarsToCents(-4500));
+    expect(warnings.some((w) => w.includes("memo/amount autofill"))).toBe(false);
   });
 
   it("round-trips the archived flag through export as enabled", async () => {
@@ -164,6 +172,11 @@ describe("G-04 payee import", () => {
     expect(byName.get("Old Shop")?.enabled).toBe(false);
     expect(byName.get("Grocery Store")?.enabled).toBe(true);
     expect(byName.get("Default Enabled Shop")?.enabled).toBe(true);
+    // G-04: the autofill defaults ride back out on the wire (amount
+    // scaled back to milliunits, the import conversion in reverse).
+    const cafe = byName.get("Memo Autofill Cafe") as any;
+    expect(cafe?.autoFillMemo).toBe("Large latte");
+    expect(cafe?.autoFillAmount).toBe(dollarsToCents(-4500) * 10);
   });
 
   it("parses operators case-insensitively and the Contains rule renames through the engine", async () => {

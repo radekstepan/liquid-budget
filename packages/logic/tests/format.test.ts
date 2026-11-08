@@ -374,23 +374,26 @@ describe("format", () => {
       expect(nextDateFor("yearly", "2026-07-01")).toBe("2027-07-01");
     });
 
-    it("restores leap year Feb 29 for yearly and every2years without drift (BUG-06)", () => {
+    it("rolls leap-day Feb 29 forward to Mar 1 for yearly and every2years (YNAB4 addYear overflow)", () => {
+      // YNAB4 `addYear` bumps the year field and lets the Date normalize
+      // the overflow: Feb 29 rolls to Mar 1 and stays in March on later
+      // steps (no clamp back to Feb, no Feb-29 restoration).
       let d = "2024-02-29";
       d = nextDateFor("yearly", d, 29);
-      expect(d).toBe("2025-02-28");
+      expect(d).toBe("2025-03-01");
       d = nextDateFor("yearly", d, 29);
-      expect(d).toBe("2026-02-28");
+      expect(d).toBe("2026-03-01");
       d = nextDateFor("yearly", d, 29);
-      expect(d).toBe("2027-02-28");
+      expect(d).toBe("2027-03-01");
       d = nextDateFor("yearly", d, 29);
-      expect(d).toBe("2028-02-29");
+      expect(d).toBe("2028-03-01");
 
       // every2years with anchor 29
       let d2 = "2024-02-29";
       d2 = nextDateFor("every2years", d2, 29);
-      expect(d2).toBe("2026-02-28");
+      expect(d2).toBe("2026-03-01");
       d2 = nextDateFor("every2years", d2, 29);
-      expect(d2).toBe("2028-02-29");
+      expect(d2).toBe("2028-03-01");
     });
 
     it("advances twiceamonth correctly (alternating between two anchors 15 days apart)", () => {

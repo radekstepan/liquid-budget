@@ -333,6 +333,8 @@ export async function exportYnab4(
     entityType: string;
     enabled: boolean;
     autoFillCategoryId?: string | null;
+    autoFillMemo?: string | null;
+    autoFillAmount?: number | null;
     renameConditions: unknown[];
   }
   const payeeMap = new Map<string, YPayee>();
@@ -360,8 +362,9 @@ export async function exportYnab4(
   }
 
   // G-11: export every known payee — not just ones referenced by
-  // rows — so `enabled`, `autoFillCategoryId`, and rename
-  // conditions survive a round-trip even for unused payees.
+  // rows — so `enabled`, `autoFillCategoryId`, the G-04
+  // `autoFillMemo`/`autoFillAmount` defaults, and rename conditions
+  // survive a round-trip even for unused payees.
   for (const p of allPayees) {
     const entityId = p.entityId || `payee-${p.name.trim().toLowerCase()}`;
     if (!payeeMap.has(entityId)) {
@@ -373,6 +376,10 @@ export async function exportYnab4(
         enabled: !p.archived,
         autoFillCategoryId:
           p.autoCategoryId != null ? categoryEntityById.get(p.autoCategoryId) ?? null : null,
+        // G-04: cents back to wire milliunits (the import's
+        // convertAmount in reverse); null when the payee has no default.
+        autoFillMemo: p.autoMemo ?? null,
+        autoFillAmount: p.autoAmount != null ? Math.round(p.autoAmount * 10) : null,
         renameConditions: [],
       });
     }
@@ -403,6 +410,8 @@ export async function exportYnab4(
           matchPayee?.autoCategoryId != null
             ? categoryEntityById.get(matchPayee.autoCategoryId) ?? null
             : null,
+        autoFillMemo: matchPayee?.autoMemo ?? null,
+        autoFillAmount: matchPayee?.autoAmount != null ? Math.round(matchPayee.autoAmount * 10) : null,
         renameConditions: [],
       });
     }

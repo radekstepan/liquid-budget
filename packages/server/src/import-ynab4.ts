@@ -1827,14 +1827,18 @@ export async function importYnab4(
       }
     }
 
-    // 5b. Carry over per-payee default categories (Payees Manager "Default
-    // Category"). YNAB4 stores it as payee.autoFillCategoryId, which the
+    // 5b. Carry over per-payee defaults (Payees Manager "Default
+    // Category" + autofill). YNAB4 stores them as
+    // payee.autoFillCategoryId/autoFillMemo/autoFillAmount, which the
     // payee-creation pass above ignored, leaving every default empty.
     // Primary source is the YNAB4 auto-fill id resolved through the category
     // map; payees without a resolvable auto-fill fall back to the category
     // they use most often across regular (non-transfer, non-split-child)
-    // transactions. Special income/split markers map to no default. Skipped
-    // entirely when no payee rows were created (nothing to backfill).
+    // transactions. Special income/split markers map to no default. The
+    // memo/amount wire defaults persist verbatim (amount converted to
+    // cents like every other amount) so blank rows for a payee with no
+    // history still propose them. Skipped entirely when no payee rows
+    // were created (nothing to backfill).
     if (payeeDbIdMap.size > 0) {
       const SPECIAL_AUTO_FILL = new Set([
         "Category/__ImmediateIncome__",
@@ -1899,6 +1903,21 @@ export async function importYnab4(
             .where(eq(payees.id, localPayeeId))
             .run();
         }
+        // G-04: persist the entity-level autofill defaults so blank
+        // rows for a history-less payee still propose memo + amount.
+        // Stored in cents via the same wire-unit conversion as every
+        // other amount; null when the backup carried no default.
+        const autoMemoRaw = typeof p.autoFillMemo === "string" ? p.autoFillMemo.trim() : "";
+        const autoAmountRaw = Number(p.autoFillAmount);
+        const autoMemo = autoMemoRaw !== "" ? autoMemoRaw : null;
+        const autoAmount =
+          Number.isFinite(autoAmountRaw) && autoAmountRaw !== 0 ? convertAmount(autoAmountRaw) : null;
+        if (autoMemo !== null || autoAmount !== null) {
+          db.update(payees)
+            .set({ autoMemo, autoAmount })
+            .where(eq(payees.id, localPayeeId))
+            .run();
+        }
       }
     }
 
@@ -1916,15 +1935,14 @@ export async function importYnab4(
     // `AMZN*MKTP` matches operand `AMZN MKTP` here where stock YNAB4
     // would not). Only genuinely unknown operator strings land in
     // warnings. `locations` (plus top-level `payeeLocations`) have no
-    // counterpart (no maps feature) and `autoFillMemo`/`autoFillAmount`
-    // have no payee-autofill target — both deliberately dropped (counts
-    // in warnings, details in the changeset). `targetAccountId` transfer
-    // payees stay skipped by design (modeled via transferAccountId),
-    // reported as one aggregated notice.
+    // counterpart (no maps feature). `autoFillMemo`/`autoFillAmount`
+    // persist on the payee row in 5b above, so blank rows for a
+    // history-less payee still propose them. `targetAccountId`
+    // transfer payees stay skipped by design (modeled via
+    // transferAccountId), reported as one aggregated notice.
     {
       let transferPayeeCount = 0;
       let droppedLocationCount = (ynabData.payeeLocations || []).filter((l: any) => !l?.isTombstone).length;
-      let droppedAutoFillCount = 0;
       const importedAt = new Date().toISOString();
       for (const p of yPayees) {
         if (p.isTombstone) continue;
@@ -1935,11 +1953,6 @@ export async function importYnab4(
         }
         if (Array.isArray(p.locations)) {
           droppedLocationCount += p.locations.filter((l: any) => !l?.isTombstone).length;
-        }
-        const autoFillMemo = typeof p.autoFillMemo === "string" ? p.autoFillMemo.trim() : "";
-        const autoFillAmount = Number(p.autoFillAmount ?? 0);
-        if (autoFillMemo !== "" || (Number.isFinite(autoFillAmount) && autoFillAmount !== 0)) {
-          droppedAutoFillCount++;
         }
         const conditions = Array.isArray(p.renameConditions) ? p.renameConditions : [];
         for (const c of conditions) {
@@ -1991,11 +2004,6 @@ export async function importYnab4(
           `Dropped ${droppedLocationCount} payee location(s) (YNAB4 map pins); there is no maps feature to hold them`
         );
       }
-      if (droppedAutoFillCount > 0) {
-        warnings.push(
-          `Dropped default memo/amount autofill on ${droppedAutoFillCount} payee(s); only default categories are imported`
-        );
-      }
     }
 
     // 5d. G-10: `accountMappings` (OFX import config) are
@@ -2005,18 +2013,33 @@ export async function importYnab4(
     // skipImport` (`data/AccountMapping.as`,
     // `AccountMappingManager.as`, `dataAccess/importing/` OFX/QIF
     // readers). None of it feeds budget math and no OFX import is
-    // modeled here, so persisting it would be dead weight. Counted
-    // here so the loss is reported in warnings, never silent. If OFX
-    // import is ever built, revisit storing at least the three
-    // per-account booleans (`skipImport`, `shouldFlipPayeesMemos`,
-    // `shouldImportMemos`).
+    // modeled here, so persisting it would be dead weight. The
+    // aggregate count plus one line per mapped account (naming the
+    // account and the three per-account import booleans) keep the
+    // loss visible in warnings, never silent. If OFX import is ever
+    // built, revisit storing at least the three per-account booleans
+    // (`skipImport`, `shouldFlipPayeesMemos`, `shouldImportMemos`).
     {
       const mappings = Array.isArray(ynabData.accountMappings) ? ynabData.accountMappings : [];
-      const liveMappings = mappings.filter((m: any) => !m?.isTombstone).length;
-      if (liveMappings > 0) {
+      const liveMappings = mappings.filter((m: any) => !m?.isTombstone);
+      if (liveMappings.length > 0) {
         warnings.push(
-          `Dropped ${liveMappings} OFX account mapping(s) (fid/shortenedAccountId/targetYNABAccountId + import preferences); OFX import is not modeled`
+          `Dropped ${liveMappings.length} OFX account mapping(s) (fid/shortenedAccountId/targetYNABAccountId + import preferences); OFX import is not modeled`
         );
+        const accountNameByEntity = new Map<string, string>();
+        for (const a of yAccounts) {
+          if (!a?.isTombstone && typeof a?.entityId === "string" && typeof a?.accountName === "string") {
+            accountNameByEntity.set(a.entityId, a.accountName);
+          }
+        }
+        for (const m of liveMappings) {
+          const target = typeof m?.targetYNABAccountId === "string" ? m.targetYNABAccountId : "";
+          const name = accountNameByEntity.get(target);
+          const label = name ? `"${name}" (targetYNABAccountId ${target})` : `targetYNABAccountId ${target || "unknown"}`;
+          warnings.push(
+            `OFX account mapping for ${label}: dropped import preferences skipImport=${m?.skipImport ?? false}, shouldFlipPayeesMemos=${m?.shouldFlipPayeesMemos ?? false}, shouldImportMemos=${m?.shouldImportMemos ?? true}; OFX import is not modeled`
+          );
+        }
       }
     }
 
@@ -2119,9 +2142,12 @@ export async function importYnab4(
 
     // 7. Insert Scheduled (Recurring) Transactions
     // G-08: unknown frequencies warn instead of silently becoming
-    // monthly; single-child scheduled splits collapse to plain rows
-    // with a warning. Both aggregate so one exotic backup can't flood
-    // the summary.
+    // monthly; single-child scheduled splits (exactly one live leg)
+    // collapse to plain rows with a warning. Both aggregate so one
+    // exotic backup can't flood the summary.
+    // G-06: like register splits, every live leg imports verbatim —
+    // including 0-amount legs. Only a parent with literally no live
+    // children falls through to a plain row.
     const unknownFrequencies = new Map<string, number>();
     let collapsedSingleChildSplits = 0;
     for (const st of yScheduled) {
@@ -2158,8 +2184,11 @@ export async function importYnab4(
       }
 
       const rawSubs = (st.subTransactions || []).filter((sub: any) => !sub.isTombstone);
-      const nonZeroSubs = rawSubs.filter((sub: any) => convertAmount(sub.amount) !== 0);
-      const hasSubs = nonZeroSubs.length >= 2;
+      // G-06: import every live leg verbatim, including 0-amount legs
+      // (they are valid YNAB4 rows) — mirroring register splits. The
+      // split structure survives whenever 2+ live children exist; only
+      // exactly one live child collapses to a plain recurring row.
+      const hasSubs = rawSubs.length >= 2;
 
       let parentAmount = convertAmount(st.amount);
       // G-split: an unbalanced scheduled split keeps the file parent and
@@ -2173,16 +2202,16 @@ export async function importYnab4(
         transferAccountId = null;
         const repair = repairSplitForImport(
           parentAmount,
-          nonZeroSubs.map((sub: any) => ({ amount: convertAmount(sub.amount) }))
+          rawSubs.map((sub: any) => ({ amount: convertAmount(sub.amount) }))
         );
         parentAmount = repair.parentAmount;
         if (repair.repaired) {
           scheduledFiller = repair.children[repair.children.length - 1]!;
         }
-      } else if (nonZeroSubs.length === 1) {
+      } else if (rawSubs.length === 1) {
         // A single child is not a valid split; collapse to a regular recurring transaction
         collapsedSingleChildSplits++;
-        const single = nonZeroSubs[0]!;
+        const single = rawSubs[0]!;
         parentAmount = convertAmount(single.amount);
         catId = (accIsOnBudget && categoryIdMap.get(single.categoryId)) || null;
         if (
@@ -2312,7 +2341,7 @@ export async function importYnab4(
 
       if (hasSubs && insertedR) {
         let sort = 0;
-        for (const sub of nonZeroSubs) {
+        for (const sub of rawSubs) {
           let subCatId = (accIsOnBudget && categoryIdMap.get(sub.categoryId)) || null;
           if (
             sub.categoryId === "Category/__ImmediateIncome__" ||

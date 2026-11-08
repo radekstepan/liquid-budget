@@ -164,11 +164,13 @@ export async function completeChatJson(
   }
   const fetchImpl: LlmFetch = opts?.fetchImpl ?? (fetch as unknown as LlmFetch);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), opts?.timeoutMs ?? config.timeoutMs);
+  const timeoutMs = opts?.timeoutMs ?? config.timeoutMs;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutError = new LlmError("The AI request timed out. Try again.", 504);
   try {
     let res;
     try {
-      res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+      const request = fetchImpl(`${config.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -182,7 +184,21 @@ export async function completeChatJson(
         }),
         signal: controller.signal,
       });
+      const deadline = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          try {
+            controller.abort();
+          } catch {
+            // Abort is best-effort; the deadline rejection below bounds
+            // the call even when the transport ignores the signal.
+          }
+          reject(timeoutError);
+        }, timeoutMs);
+      });
+      res = await Promise.race([request, deadline]);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     } catch (e) {
+      if (e instanceof LlmError) throw e;
       if (controller.signal.aborted) {
         throw new LlmError("The AI request timed out. Try again.", 504);
       }
@@ -194,6 +210,19 @@ export async function completeChatJson(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const detail = body.trim().slice(0, 300);
+      const suffix = detail ? `: ${detail}` : "";
+      if (res.status === 401) {
+        throw new LlmError(
+          `Invalid API key — the AI service rejected the request (HTTP 401)${suffix}. Check LLM_API_KEY and try again.`,
+          502
+        );
+      }
+      if (res.status === 403) {
+        throw new LlmError(
+          `Access forbidden — the API key lacks permission or quota (HTTP 403)${suffix}. Check the key's access and quota.`,
+          502
+        );
+      }
       throw new LlmError(
         `The AI service returned an error (HTTP ${res.status})${detail ? `: ${detail}` : ""}.`,
         502
@@ -210,6 +239,6 @@ export async function completeChatJson(
     }
     return { content, model: servedModel };
   } finally {
-    clearTimeout(timeout);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }

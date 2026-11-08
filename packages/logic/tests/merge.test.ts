@@ -77,7 +77,7 @@ describe("pickMergePrimary", () => {
 });
 
 describe("resolveMergedTransaction", () => {
-  it("gives imported data priority and fills gaps from the manual row", () => {
+  it("takes the user date and max cleared status, filling other gaps from the manual row", () => {
     const manual = tx({
       id: 1,
       categoryId: 11,
@@ -107,11 +107,12 @@ describe("resolveMergedTransaction", () => {
       destAccount: null,
     });
 
-    // Imported bank data wins.
-    expect(merged.date).toBe("2026-08-01");
+    // YNAB4 `match()`: merged date comes from the user-entered row and
+    // cleared status is max(bank, user) — max(c, u) is c.
+    expect(merged.date).toBe("2026-08-02");
     expect(merged.amount).toBe(-5000);
     expect(merged.payee).toBe("WHOLE FOODS #24");
-    expect(merged.status).toBe("u");
+    expect(merged.status).toBe("c");
     expect(merged.needsReview).toBe(true);
     // Manual curation fills gaps the import left empty.
     expect(merged.categoryId).toBe(11);

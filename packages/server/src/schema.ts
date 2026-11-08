@@ -140,6 +140,18 @@ export const payees = sqliteTable(
      * Mirrors `accounts.archived`; written back as `enabled` on export.
      */
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    /**
+     * YNAB4 entity-level autofill defaults (`PayeeVO.autoFillMemo` /
+     * `autoFillAmount`, G-04): what typing this payee on a blank row
+     * proposes when the payee has no transaction history yet
+     * (`suggestAutofillForPayee` falls back to these; history always
+     * wins once rows exist, mirroring YNAB4's last-write-wins
+     * `AutoFillData`). `autoAmount` is stored in integer cents like all
+     * amounts; both are null when the backup carried no default.
+     * Round-tripped verbatim on export (scaled back to milliunits).
+     */
+    autoMemo: text("auto_memo"),
+    autoAmount: integer("auto_amount"),
     createdAt: text("created_at").notNull().default(""),
   },
   (t) => ({
@@ -327,7 +339,10 @@ export const recurringSubTransactions = sqliteTable(
   },
   (t) => ({
     recurringIdIdx: index("recurring_sub_transactions_recurring_id_idx").on(t.recurringId),
-    amountCheck: check("recurring_sub_amount_check", sql`${t.amount} != 0`),
+    // No amount != 0 CHECK (G-06): YNAB4 split legs import verbatim
+    // with amount 0, on schedules as well as the register. User-facing
+    // creation still rejects zero via assertValidAmount; zero legs
+    // contribute 0 to balance math.
   })
 );
 

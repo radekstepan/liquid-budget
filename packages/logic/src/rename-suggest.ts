@@ -122,7 +122,7 @@ export function selectRenameCandidates(
     if (!payee) continue;
     if (isTransferPayee(payee)) continue;
     const key = normalizeRenameText(payee);
-    if (compiled.some((c) => matchesCompiledRule(c, key))) continue;
+    if (compiled.some((c) => matchesCompiledRule(c, payee))) continue;
     if (targets.has(key)) continue;
     const memo = row.memo?.trim() ? row.memo.trim() : "";
     const existing = grouped.get(key);

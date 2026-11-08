@@ -133,9 +133,10 @@ describe("applyRenameRules", () => {
     expect(applyRenameRules(rules, "BCF1")).toBe("New");
   });
 
-  it("is case/whitespace-insensitive in both rule and payee", () => {
+  it("is case-insensitive but keeps whitespace/punctuation significant (YNAB4 parity)", () => {
     const rules = [rule(1, "  BC FERRIES ", "BC Ferries")];
-    expect(applyRenameRules(rules, "BC  FERRIES")).toBe("BC Ferries");
+    expect(applyRenameRules(rules, "bc ferries")).toBe("BC Ferries");
+    expect(applyRenameRules(rules, "BC  FERRIES")).toBe("BC  FERRIES");
   });
 });
 
@@ -532,7 +533,7 @@ describe("compiled rule matching", () => {
       const c = compiled.find((x) => x.rule.id === r.id)!;
       for (const payee of payees) {
         const expected = payee.trim() ? matchesRenameRule(r, payee) : false;
-        expect(matchesCompiledRule(c, normalizeRenameText(payee))).toBe(expected);
+        expect(matchesCompiledRule(c, payee)).toBe(expected);
       }
     }
   });
@@ -607,10 +608,11 @@ describe("matchesRenameRule substring operators", () => {
     expect(matchesRenameRule(end, "123 SAFEWAY")).toBe(false);
   });
 
-  it("is case- and separator-insensitive via the shared folding", () => {
+  it("is case-insensitive but keeps separator punctuation significant (YNAB4 parity)", () => {
     const r = substringRule(1, "AMZN MKTP", "Amazon", "contains");
-    expect(matchesRenameRule(r, "amzn*mktp us*12")).toBe(true);
-    expect(matchesRenameRule(r, "AMZN-MKTP US")).toBe(true);
+    expect(matchesRenameRule(r, "amzn mktp us 12")).toBe(true);
+    expect(matchesRenameRule(r, "AMZN-MKTP US")).toBe(false);
+    expect(matchesRenameRule(r, "amzn*mktp us*12")).toBe(false);
   });
 
   it("never matches an empty operand (YNAB4 parity)", () => {
@@ -665,7 +667,7 @@ describe("compiled substring rule matching", () => {
       const c = compiled.find((x) => x.rule.id === r.id)!;
       for (const payee of payees) {
         const expected = payee.trim() ? matchesRenameRule(r, payee) : false;
-        expect(matchesCompiledRule(c, normalizeRenameText(payee))).toBe(expected);
+        expect(matchesCompiledRule(c, payee)).toBe(expected);
       }
     }
   });

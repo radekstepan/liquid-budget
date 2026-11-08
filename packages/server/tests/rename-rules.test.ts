@@ -179,17 +179,22 @@ describe("CSV import applies rename rules", () => {
     expect(second.skipped[0]!.reason).toBe("Matches an existing transaction");
   });
 
-  it("applies separator folding on import without any pattern", async () => {
+  it("is punctuation-significant on import (YNAB4 parity: no separator folding)", async () => {
     const accountId = await seedAccount();
     await createRenameRule(db, { sourcePattern: "AMZN*MKTP", targetPayee: "Amazon" });
 
     await importCsvTransactions(db, {
       accountId,
-      rows: [row({ payee: "AMZN-MKTP", amountCents: -1000 })],
+      rows: [
+        row({ rowNumber: 2, payee: "AMZN*MKTP", amountCents: -1000 }),
+        row({ rowNumber: 3, payee: "AMZN-MKTP", amountCents: -1000 }),
+      ],
     });
 
     const data = await getBudgetData(db);
-    expect(data.transactions.map((t) => t.payee)).toEqual(["Amazon"]);
+    // Exact (case-insensitive) hit renames; the dash variant is punctuation-
+    // distinct in YNAB4 and stays untouched.
+    expect(data.transactions.map((t) => t.payee).sort()).toEqual(["AMZN-MKTP", "Amazon"]);
   });
 
   it("applies a learned [X] pattern to the next import", async () => {

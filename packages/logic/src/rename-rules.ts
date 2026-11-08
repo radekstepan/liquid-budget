@@ -6,13 +6,13 @@ export type { RenameRuleOperator };
  * Substring/exact match flavour of a rename rule. Stored rules pre-dating
  * the operator column carry no value and behave as `"is"`.
  *
- * Matching for every operator folds both the operand and the payee with
- * {@link normalizeRenameText} (lowercase, whitespace collapse, bank
- * separator punctuation folding). That folding is a superset of YNAB4's
- * `toLocaleLowerCase`-only comparison: `AMZN*MKTP` matches operand
- * `AMZN MKTP` here, where stock YNAB4 would not. The superset is
- * deliberate — it keeps one consistent matcher for exact, `[N]`/`[X]`
- * pattern, and substring rules instead of three folding regimes.
+ * Operator matching mirrors YNAB4's `StringCondition.evaluate`: operands
+ * compare case-insensitively ONLY (`toLocaleLowerCase` on both sides), so
+ * separator punctuation is significant — `AMZN*MKTP` does NOT match
+ * operand `AMZN MKTP`. Only `[N]`/`[X]` pattern rules keep the forgiving
+ * folded comparison (lowercase + whitespace collapse + bank separator
+ * folding) via {@link normalizeRenameText}; patterns are our own
+ * generalisation with no YNAB4 `StringCondition` counterpart.
  *
  * Priority is unchanged from the exact/pattern fork: exact (`"is"`,
  * non-`[N]`/`[X]`) rules win over everything, then every other rule —
@@ -43,11 +43,12 @@ export type { RenameRuleOperator };
  * number-like prefixes (`123 Main St` → `[N] Main St`), and several
  * varying runs at once (`CHK 12 REF 34` → `CHK [N] REF [N]`).
  *
- * Matching is case-insensitive and forgiving about whitespace and bank
- * separator punctuation (`AMZN*MKTP`, `AMZN MKTP` and `Amzn-Mktp` all
- * compare equal; `#` stays significant so `#24` never equals `24`). Exact
- * rules always win over patterns so a user can pin one payee to a
- * different target while the pattern handles the rest of the family.
+ * Operator matching (`is`/`contains`/`startsWith`/`endsWith`) is
+ * case-insensitive only — punctuation stays significant. `[N]`/`[X]`
+ * pattern rules keep the forgiving folded comparison so one payee family
+ * still matches across bank separator drift. Exact rules always win over
+ * patterns so a user can pin one payee to a different target while the
+ * pattern handles the rest of the family.
  */
 
 /** Shape accepted by the settings UI / API when adding or editing a rule. */
@@ -125,11 +126,24 @@ export function isTransferPayee(value: string): boolean {
 }
 
 /**
+ * YNAB4 `StringCondition` comparison: trim + `toLocaleLowerCase` ONLY.
+ * Separator punctuation (`*`, `-`, `.`, `/`, …) and inner whitespace stay
+ * significant — only exact case drift matches.
+ */
+function localeLower(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+/**
  * Lowercase + collapse repeated whitespace + fold bank separator
  * punctuation (`*`, `.`, `-`, `/`, …) to spaces so matching is forgiving:
  * `AMZN*MKTP`, `AMZN MKTP` and `Amzn-Mktp` compare equal. `[`, `]` and `#`
  * stay significant so `[N]`/`[X]` wildcards survive normalisation and
  * `#24` never equals `24`.
+ *
+ * Used for `[N]`/`[X]` pattern matching, rename learning/generalisation,
+ * and suggestion grouping — but NOT for operator matching, which mirrors
+ * YNAB4's `toLocaleLowerCase`-only comparison (see {@link localeLower}).
  */
 export function normalizeRenameText(value: string): string {
   return value
@@ -177,16 +191,19 @@ export function renamePatternToRegExp(sourcePattern: string): RegExp | null {
   return new RegExp(`^${body}$`, "i");
 }
 
-/**
- * A rename rule compiled for bulk matching: the target is normalized once
+/** A rename rule compiled for bulk matching: the target is normalized once
  * and each pattern regex is built once instead of once per payee.
+ *
+ * Operator operands/sources are stored locale-lowered only (YNAB4
+ * `StringCondition` parity — punctuation significant); pattern regexes
+ * keep the folded comparison.
  */
 export type CompiledRenameRule = {
   rule: RenameRule;
   normalizedTarget: string;
-  /** Set for exact rules: normalized source text for O(1) comparison. */
+  /** Set for exact rules: locale-lowered source text for O(1) comparison. */
   normalizedSource?: string;
-  /** Set for substring rules: normalized operand for inclusion tests. */
+  /** Set for substring rules: locale-lowered operand for inclusion tests. */
   normalizedOperand?: string;
   /** Set for pattern rules with a valid regex; absent means "never matches". */
   regex?: RegExp;
@@ -197,52 +214,54 @@ export function compileRenameRules(rules: RenameRule[]): CompiledRenameRule[] {
     const pattern = rule.sourcePattern.trim();
     const normalizedTarget = normalizeRenameText(rule.targetPayee);
     if (isSubstringRule(rule)) {
-      return { rule, normalizedTarget, normalizedOperand: normalizeRenameText(pattern) };
+      return { rule, normalizedTarget, normalizedOperand: localeLower(pattern) };
     }
     if (isPatternRule(pattern)) {
       const regex = renamePatternToRegExp(pattern);
       return regex ? { rule, normalizedTarget, regex } : { rule, normalizedTarget };
     }
-    return { rule, normalizedTarget, normalizedSource: normalizeRenameText(pattern) };
+    return { rule, normalizedTarget, normalizedSource: localeLower(pattern) };
   });
 }
 
 /**
- * Match an already-normalized payee against a compiled rule. Mirrors
+ * Match a raw payee against a compiled rule. Mirrors
  * {@link matchesRenameRule}, including its empty-payee behaviour.
  *
- * Substring operands compare after the same normalization as the payee;
- * an operand normalizing to empty never matches (mirroring YNAB4, where
- * a blank operand matches nothing), and transfer-shaped payees never
- * match substring rules (YNAB4 rename conditions are children of a
- * payee; transfers live outside the rename-rule domain).
+ * Operator operands compare locale-lowered only (punctuation
+ * significant); an operand lowering to empty never matches (mirroring
+ * YNAB4, where a blank operand matches nothing), and transfer-shaped
+ * payees never match substring rules (YNAB4 rename conditions are children
+ * of a payee; transfers live outside the rename-rule domain). Pattern
+ * rules keep the folded comparison (normalised internally).
  */
 export function matchesCompiledRule(
   compiled: CompiledRenameRule,
-  normalizedPayee: string
+  payee: string
 ): boolean {
-  if (!normalizedPayee) return false;
+  const raw = payee.trim();
+  if (!raw) return false;
   if (compiled.normalizedOperand !== undefined) {
     const operand = compiled.normalizedOperand;
     if (!operand) return false;
-    // Normalized text folds ":" to a space, so `isTransferPayee` (which
-    // needs the colon) cannot fire here; test the folded shape instead:
-    // "Transfer : X" normalizes to "transfer x".
-    if (/^transfer(?:\s|$)/.test(normalizedPayee)) return false;
+    if (isTransferPayee(raw)) return false;
+    const lowered = raw.toLocaleLowerCase();
+    // Colon-less transfer shapes ("Transfer savings") are still transfers.
+    if (/^transfer(?:\s|:|$)/.test(lowered)) return false;
     switch (getRenameRuleOperator(compiled.rule)) {
       case "contains":
-        return normalizedPayee.includes(operand);
+        return lowered.includes(operand);
       case "startsWith":
-        return normalizedPayee.startsWith(operand);
+        return lowered.startsWith(operand);
       case "endsWith":
-        return normalizedPayee.endsWith(operand);
+        return lowered.endsWith(operand);
       default:
         return false;
     }
   }
-  if (compiled.regex) return compiled.regex.test(normalizedPayee);
+  if (compiled.regex) return compiled.regex.test(normalizeRenameText(raw));
   if (compiled.normalizedSource !== undefined) {
-    return compiled.normalizedSource === normalizedPayee;
+    return localeLower(raw) === compiled.normalizedSource;
   }
   return false;
 }
@@ -274,7 +293,7 @@ export function countRenameRuleMatches(
     let n = 0;
     for (const [raw, count] of byRaw) {
       if (raw === compiled.rule.targetPayee.trim()) continue;
-      if (matchesCompiledRule(compiled, normalizeRenameText(raw))) n += count;
+      if (matchesCompiledRule(compiled, raw)) n += count;
     }
     counts.set(compiled.rule.id, n);
   }
@@ -314,29 +333,29 @@ export function renameRulePayeeFilterForRule(rule: Pick<RenameRule, "sourcePatte
 }
 
 /**
- * Does a raw payee match this rule? Exact rules compare normalized text;
- * substring rules test inclusion/prefix/suffix of the normalized operand
- * (empty operands never match, transfer-shaped payees never match).
+ * Does a raw payee match this rule? Substring and exact operators compare
+ * locale-lowered text only (YNAB4 `StringCondition` parity — punctuation
+ * significant, empty operands never match, transfer-shaped payees never
+ * match substring rules); `[N]`/`[X]` patterns keep the folded comparison.
  */
 export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
   const raw = payee.trim();
   if (!raw) return false;
   if (isSubstringRule(rule)) {
-    const operand = normalizeRenameText(rule.sourcePattern);
+    const operand = localeLower(rule.sourcePattern);
     if (!operand) return false;
     if (isTransferPayee(raw)) return false;
-    const normalized = normalizeRenameText(raw);
-    // Re-check the folded shape: normalization turns "Transfer : X"
-    // into "transfer x", which the raw colon test above already rejects,
-    // but a colon-less "Transfer savings" is still transfer-shaped.
-    if (/^transfer(?:\s|$)/.test(normalized)) return false;
+    const lowered = raw.toLocaleLowerCase();
+    // Re-check the lowered shape: a colon-less "Transfer savings" is still
+    // transfer-shaped and lives outside the rename-rule domain.
+    if (/^transfer(?:\s|:|$)/.test(lowered)) return false;
     switch (getRenameRuleOperator(rule)) {
       case "contains":
-        return normalized.includes(operand);
+        return lowered.includes(operand);
       case "startsWith":
-        return normalized.startsWith(operand);
+        return lowered.startsWith(operand);
       case "endsWith":
-        return normalized.endsWith(operand);
+        return lowered.endsWith(operand);
       default:
         return false;
     }
@@ -346,7 +365,7 @@ export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
     const re = renamePatternToRegExp(pattern);
     return re != null && re.test(normalizeRenameText(raw));
   }
-  return normalizeRenameText(pattern) === normalizeRenameText(raw);
+  return localeLower(raw) === localeLower(pattern);
 }
 
 /**
