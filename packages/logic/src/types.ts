@@ -40,6 +40,13 @@ export type Category = {
    * YNAB4 "Red Arrow to the Right": when true, negative available balance
    * carries over into the next month as a negative starting balance, rather
    * than deducting from next month's TBB.
+   *
+   * This is the STATIC default. A per-month override in
+   * {@link BudgetData.overspendOverrides} (or the `overspendOverrides`
+   * parameter of `computeBudget`/`buildBudgetIndex`) takes precedence for
+   * its month and is inherited by later months until overridden again,
+   * matching YNAB4's `overspendingHandling` getter (null inherits the
+   * previous month; only explicit non-null values serialize).
    */
   overspendCarriesOver?: boolean | null;
 };
@@ -273,6 +280,19 @@ export type SerializedBudgetIndex = {
   unfundedPaydownByMonth?: Record<string, Record<string | number, number>>;
 };
 
+/**
+ * Per-month "Red Arrow" overrides: outer key is the category id, inner key
+ * is the month key ("YYYY-MM"), value is the effective handling for that
+ * month (true = Confined/red-arrow: negative carries forward; false =
+ * AffectsBuffer: negative clamps to zero and deducts from next month's TBB).
+ *
+ * Months without an entry inherit the previous walked month's effective
+ * handling (YNAB4 `overspendingHandling` semantics); the static
+ * {@link Category.overspendCarriesOver} flag seeds months before the first
+ * override. An absent/empty map behaves exactly like the legacy static flag.
+ */
+export type OverspendOverrides = Record<string, Record<string, boolean>>;
+
 export type BudgetData = {
   accounts: Account[];
   groups: CategoryGroup[];
@@ -281,6 +301,16 @@ export type BudgetData = {
   transactions: Transaction[];
   recurring: (Recurring & { subTransactions: RecurringSubTransaction[] })[];
   budgetIndex?: SerializedBudgetIndex;
+  /**
+   * Optional per-month overspend-handling overrides (see
+   * {@link OverspendOverrides}). Pure-engine input only: no migration or
+   * persistence writes this yet — storing monthly flags in the database
+   * and exposing them in the UI is follow-up work. Callers may also pass
+   * overrides directly via the `overspendOverrides` parameter of
+   * `computeBudget`/`buildBudgetIndex`, which takes precedence over this
+   * field.
+   */
+  overspendOverrides?: OverspendOverrides;
   /**
    * Automatic payee rename rules applied to future CSV imports. Empty when
    * no rules have been learned or added.

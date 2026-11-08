@@ -4394,3 +4394,117 @@ describe("computeBudget", () => {
 
 
 
+
+describe("G-redarrow: Per-month overspend handling (YNAB4 inheritance)", () => {
+  // Jan: $500 income, $50 assigned, $200 cash spent -> -$150 available.
+  // Feb/Mar/Apr carry zero assignments so every month is walked.
+  function redarrowFixture(staticFlag: boolean | null): BudgetData {
+    const accounts = [
+      { id: 1, name: "Checking", kind: "liquid" as const, groupLabel: "Budget", balance: "100000", onBudget: true, sort: 0 },
+    ];
+    const groups = [makeGroup({ id: 1, name: "Living" })];
+    const categories = [
+      makeCategory({ id: 10, groupId: 1, name: "Dining", overspendCarriesOver: staticFlag }),
+    ];
+    return {
+      accounts,
+      groups,
+      categories,
+      assignments: [
+        { id: 1, categoryId: 10, month: "2026-01", amount: "5000" },
+        { id: 2, categoryId: 10, month: "2026-02", amount: "0" },
+        { id: 3, categoryId: 10, month: "2026-03", amount: "0" },
+        { id: 4, categoryId: 10, month: "2026-04", amount: "0" },
+      ],
+      transactions: [
+        { id: 1, accountId: 1, categoryId: null, date: "2026-01-01", payee: "Income", memo: "", amount: "50000", status: "c" as const, isIncome: true },
+        { id: 2, accountId: 1, categoryId: 10, date: "2026-01-15", payee: "Restaurant", memo: "", amount: "-20000", status: "c" as const },
+      ],
+      recurring: [],
+    };
+  }
+
+  function diningRow(result: ReturnType<typeof computeBudget>) {
+    return result.groups[0]?.rows[0];
+  }
+
+  it("Jan Confined override carries, Feb inherits Confined, Mar explicit AffectsBuffer clamps", () => {
+    const data = redarrowFixture(false);
+    const overrides = { 10: { "2026-01": true, "2026-03": false } };
+
+    const jan = computeBudget(data, "2026-01", overrides);
+    expect(diningRow(jan)?.available).toBe(-15000);
+    expect(jan.tbb).toBe(45000);
+
+    // Feb: no override -> inherits Jan's Confined handling (negative carries, no TBB hit)
+    const feb = computeBudget(data, "2026-02", overrides);
+    expect(diningRow(feb)?.carryoverIn).toBe(-15000);
+    expect(diningRow(feb)?.available).toBe(-15000);
+    expect(feb.tbb).toBe(45000);
+    expect(feb.overspentPrevious).toBe(0);
+
+    // Mar: explicit AffectsBuffer -> still shows -$150, but clamps for carryover
+    const mar = computeBudget(data, "2026-03", overrides);
+    expect(diningRow(mar)?.carryoverIn).toBe(-15000);
+    expect(diningRow(mar)?.available).toBe(-15000);
+    expect(mar.tbb).toBe(45000);
+
+    // Apr: inherits Mar's AffectsBuffer -> starts at 0, TBB takes the $150 hit
+    const apr = computeBudget(data, "2026-04", overrides);
+    expect(diningRow(apr)?.carryoverIn).toBe(0);
+    expect(diningRow(apr)?.available).toBe(0);
+    expect(apr.overspentPrevious).toBe(15000);
+    expect(apr.tbb).toBe(30000);
+  });
+
+  it("no overrides falls back to the static flag (backwards compatible)", () => {
+    // Static AffectsBuffer: Jan overspend clamps and hits Feb TBB
+    const clamped = computeBudget(redarrowFixture(false), "2026-02");
+    expect(diningRow(clamped)?.carryoverIn).toBe(0);
+    expect(clamped.tbb).toBe(30000);
+
+    // Static Confined: negative propagates forever, TBB untouched
+    const carried = redarrowFixture(true);
+    const mar = computeBudget(carried, "2026-03");
+    expect(diningRow(mar)?.carryoverIn).toBe(-15000);
+    expect(computeBudget(carried, "2026-04").tbb).toBe(45000);
+  });
+
+  it("overrides passed via BudgetData.overspendOverrides behave identically", () => {
+    const data: BudgetData = {
+      ...redarrowFixture(false),
+      overspendOverrides: { 10: { "2026-01": true, "2026-03": false } },
+    };
+    const feb = computeBudget(data, "2026-02");
+    expect(diningRow(feb)?.carryoverIn).toBe(-15000);
+    expect(feb.tbb).toBe(45000);
+    const apr = computeBudget(data, "2026-04");
+    expect(diningRow(apr)?.carryoverIn).toBe(0);
+    expect(apr.tbb).toBe(30000);
+  });
+
+  it("Map-shaped overrides thread through buildBudgetIndex into hydrated results", () => {
+    const data = redarrowFixture(false);
+    const overrides = new Map([[10, new Map([["2026-01", true], ["2026-03", false]])]]);
+    const index = buildBudgetIndex(data, overrides);
+    const indexed: BudgetData = { ...data, budgetIndex: index };
+
+    const feb = computeBudget(indexed, "2026-02");
+    expect(diningRow(feb)?.carryoverIn).toBe(-15000);
+    expect(feb.tbb).toBe(45000);
+    const apr = computeBudget(indexed, "2026-04");
+    expect(diningRow(apr)?.carryoverIn).toBe(0);
+    expect(apr.tbb).toBe(30000);
+  });
+
+  it("explicit parameter wins over the BudgetData field", () => {
+    const data: BudgetData = {
+      ...redarrowFixture(false),
+      overspendOverrides: { 10: { "2026-01": true } },
+    };
+    // Explicit param says AffectsBuffer for Jan -> Feb clamps despite the field
+    const feb = computeBudget(data, "2026-02", { 10: { "2026-01": false } });
+    expect(diningRow(feb)?.carryoverIn).toBe(0);
+    expect(feb.tbb).toBe(30000);
+  });
+});

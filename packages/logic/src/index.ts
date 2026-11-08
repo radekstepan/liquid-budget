@@ -19,6 +19,7 @@ export {
   getMonthsWithData,
   BUDGET_INDEX_VERSION,
 } from "./budget-engine.js";
+export type { OverspendOverridesInput } from "./budget-engine.js";
 // Register (per-row running balance)
 export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";

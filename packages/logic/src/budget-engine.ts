@@ -22,6 +22,11 @@
  *    Cash overspending: negative available in non-CC categories is clamped to
  *    zero during carryover, and the overspent amount is deducted from the next
  *    month's TBB (matching YNAB4 Rule 3: "Roll with the Punches").
+ *    Which months clamp vs. carry is decided per category+month by the
+ *    effective overspend handling (see `OverspendOverrides`): an explicit
+ *    override for the month wins, otherwise the previous walked month's
+ *    handling is inherited (YNAB4 `overspendingHandling` getter), seeded by
+ *    the static `Category.overspendCarriesOver` flag (default false).
  *
  * DELIBERATE EXTENSION — credit-card buffer (NOT YNAB4):
  *
@@ -53,8 +58,10 @@ import type {
   Account,
   BudgetData,
   BudgetResult,
+  Category,
   CatRow,
   GroupRow,
+  OverspendOverrides,
   SerializedBudgetIndex,
   Transaction,
 } from "./types.js";
@@ -341,7 +348,84 @@ function getCCAccountIds(data: BudgetData): Set<number> {
   return ccAccountIds;
 }
 
-function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): IndexedBudgetData {
+/**
+ * Accepted shapes for per-month overspend-handling overrides.
+ *
+ * - `Record<categoryId, Record<monthKey, boolean>>` (e.g. from JSON), or
+ * - `Map<categoryId, Map<monthKey, boolean>>` (mixed Map/Record nests also work).
+ *
+ * Pure-engine input only: persisting monthly flags in the database and
+ * exposing them in the UI is follow-up work.
+ */
+export type OverspendOverridesInput =
+  | OverspendOverrides
+  | ReadonlyMap<string | number, ReadonlyMap<string, boolean> | Record<string, boolean>>;
+
+/**
+ * Normalize override input to a nested Map, or undefined when absent/empty
+ * (empty behaves exactly like the legacy static flag).
+ */
+function normalizeOverspendOverrides(
+  input?: OverspendOverridesInput | null
+): Map<number, Map<string, boolean>> | undefined {
+  if (!input) return undefined;
+  const out = new Map<number, Map<string, boolean>>();
+  const entries: Iterable<[string | number, ReadonlyMap<string, boolean> | Record<string, boolean>]> =
+    input instanceof Map ? input.entries() : Object.entries(input);
+  for (const [catKey, monthMap] of entries) {
+    const catId = Number(catKey);
+    if (!Number.isFinite(catId) || !monthMap) continue;
+    const inner = new Map<string, boolean>();
+    const monthEntries: Iterable<[string, boolean]> =
+      monthMap instanceof Map ? monthMap.entries() : Object.entries(monthMap);
+    for (const [month, value] of monthEntries) {
+      if (typeof value === "boolean") inner.set(month, value);
+    }
+    if (inner.size > 0) out.set(catId, inner);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
+/**
+ * Resolve the effective overrides for a computation: an explicit non-empty
+ * parameter wins, otherwise `data.overspendOverrides` is used.
+ */
+function resolveOverspendOverrides(
+  data: BudgetData,
+  explicit?: OverspendOverridesInput | null
+): Map<number, Map<string, boolean>> | undefined {
+  return (
+    normalizeOverspendOverrides(explicit) ??
+    normalizeOverspendOverrides(data.overspendOverrides)
+  );
+}
+
+/**
+ * YNAB4 `overspendingHandling` inheritance for one category+month in walk
+ * order: an explicit override for the month wins; otherwise the previous
+ * walked month's effective handling is inherited; otherwise the static
+ * `Category.overspendCarriesOver` flag seeds the chain (default false =
+ * AffectsBuffer). Records the result in `inherited` and returns it.
+ */
+function effectiveOverspendHandling(
+  category: Category,
+  month: string,
+  overrides: Map<number, Map<string, boolean>> | undefined,
+  inherited: Map<number, boolean>
+): boolean {
+  const explicit = overrides?.get(category.id)?.get(month);
+  if (explicit !== undefined) {
+    inherited.set(category.id, explicit);
+    return explicit;
+  }
+  const prev = inherited.get(category.id);
+  if (prev !== undefined) return prev;
+  const seed = category.overspendCarriesOver ?? false;
+  inherited.set(category.id, seed);
+  return seed;
+}
+
+function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData, overspendOverrides?: OverspendOverridesInput | null): IndexedBudgetData {
   const assignedByMonth = new Map<string, Map<number, number>>();
   for (const [m, catMap] of Object.entries(idx.assignedByMonth)) {
     const inner = new Map<number, number>();
@@ -421,6 +505,8 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
     }
   } else if (data) {
     const normData = normalizeBudgetData(data);
+    const overrides = normalizeOverspendOverrides(overspendOverrides);
+    const inheritedHandling = new Map<number, boolean>();
     const ccGroupIds = new Set(
       normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
     );
@@ -457,7 +543,8 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData): Inde
         } else {
           const paydown = paydownMap.get(c.id) ?? 0;
           const avail = Math.round(prev + assigned + rawFlow - paydown);
-          if (avail >= 0 || c.overspendCarriesOver) {
+          const carriesOver = effectiveOverspendHandling(c, m, overrides, inheritedHandling);
+          if (avail >= 0 || carriesOver) {
             nextBal.set(c.id, avail);
           } else {
             nextBal.set(c.id, 0);
@@ -639,7 +726,8 @@ function computeAllMonths(
   data: BudgetData,
   rawData: RawIndexData,
   orderedMonths: string[],
-  ccGroupIds: Set<number>
+  ccGroupIds: Set<number>,
+  overspendOverrides?: OverspendOverridesInput | null
 ): IndexedBudgetData {
   const carryoverByMonth = new Map<string, Map<number, number>>();
   const endingBalanceByMonth = new Map<string, Map<number, number>>();
@@ -647,6 +735,9 @@ function computeAllMonths(
   const overspentByMonth = new Map<string, number>();
   const surplusByMonth = new Map<string, number>();
   const unfundedPaydownByMonth = new Map<string, Map<number, number>>();
+  const overrides = normalizeOverspendOverrides(overspendOverrides);
+  // Effective per-month handling per category (YNAB4 inheritance across the walk).
+  const inheritedHandling = new Map<number, boolean>();
 
   let currentBalance = new Map<number, number>(
     data.categories.map((c) => [c.id, num(c.carryover)])
@@ -692,6 +783,7 @@ function computeAllMonths(
       const assigned = aMap.get(c.id) ?? 0;
       const rawFlow = oMap.get(c.id) ?? 0;
       const txs = categoryTxMap.get(c.id) ?? [];
+      const carriesOver = effectiveOverspendHandling(c, month, overrides, inheritedHandling);
 
       const catFundedCCByAccount = new Map<number, number>();
       const cardCreditByAccount = new Map<number, number>();
@@ -792,7 +884,7 @@ function computeAllMonths(
               Math.max(0, (catDebtMap.get(tx.accountId) ?? 0) - priorPaydown)
             );
             refund -= priorPaydown;
-            if (!c.overspendCarriesOver || prev >= 0) {
+            if (!carriesOver || prev >= 0) {
               catPriorUnfundedPaydown += priorPaydown;
             }
           }
@@ -862,7 +954,7 @@ function computeAllMonths(
       if (endAvailable >= 0) {
         nextBalance.set(c.id, endAvailable);
       } else {
-        if (c.overspendCarriesOver) {
+        if (carriesOver) {
           nextBalance.set(c.id, endAvailable);
         } else {
           nextBalance.set(c.id, 0);
@@ -929,7 +1021,7 @@ function computeAllMonths(
   };
 }
 
-export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
+export function buildBudgetIndex(data: BudgetData, overspendOverrides?: OverspendOverridesInput | null): SerializedBudgetIndex {
   const normData = normalizeBudgetData(data);
   const splitParentIds = new Set<number>();
   for (const t of normData.transactions) {
@@ -944,10 +1036,15 @@ export function buildBudgetIndex(data: BudgetData): SerializedBudgetIndex {
     normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
 
-  const index = computeAllMonths(normData, rawData, months, ccGroupIds);
-  budgetDataIndexCache.set(data, index);
-  if (normData !== data) {
-    budgetDataIndexCache.set(normData, index);
+  const resolvedOverrides = resolveOverspendOverrides(data, overspendOverrides);
+  const index = computeAllMonths(normData, rawData, months, ccGroupIds, resolvedOverrides);
+  // An index built with per-month overrides is specific to those overrides,
+  // so it is not shared through the object-identity cache.
+  if (resolvedOverrides === undefined) {
+    budgetDataIndexCache.set(data, index);
+    if (normData !== data) {
+      budgetDataIndexCache.set(normData, index);
+    }
   }
 
   const serializedAssigned: Record<string, Record<string | number, number>> = {};
@@ -1006,27 +1103,33 @@ function getOrBuildIndex(
   splitParentIds: Set<number>,
   accountMap: Map<number, Account>,
   ccAccountIds: Set<number>,
-  targetMonth?: string
+  targetMonth?: string,
+  overspendOverrides?: OverspendOverridesInput | null
 ): IndexedBudgetData {
-  let cached = budgetDataIndexCache.get(data);
-  if (cached) return cached;
+  const overrides = normalizeOverspendOverrides(overspendOverrides);
+  // Override-specific walks bypass the shared caches: they are only valid
+  // for one override set and must never poison the default index.
+  if (overrides === undefined) {
+    let cached = budgetDataIndexCache.get(data);
+    if (cached) return cached;
 
-  if (data.budgetIndex) {
-    const indexEpoch = serializedIndexEpochs.get(data.budgetIndex);
-    const isValidEpoch = indexEpoch === undefined || indexEpoch === globalCacheEpoch;
-    const isValidVersion =
-      data.budgetIndex.version === undefined ||
-      data.budgetIndex.version === BUDGET_INDEX_VERSION;
+    if (data.budgetIndex) {
+      const indexEpoch = serializedIndexEpochs.get(data.budgetIndex);
+      const isValidEpoch = indexEpoch === undefined || indexEpoch === globalCacheEpoch;
+      const isValidVersion =
+        data.budgetIndex.version === undefined ||
+        data.budgetIndex.version === BUDGET_INDEX_VERSION;
 
-    if (isValidEpoch && isValidVersion) {
-      if (indexEpoch === undefined) {
-        serializedIndexEpochs.set(data.budgetIndex, globalCacheEpoch);
+      if (isValidEpoch && isValidVersion) {
+        if (indexEpoch === undefined) {
+          serializedIndexEpochs.set(data.budgetIndex, globalCacheEpoch);
+        }
+        cached = hydrateBudgetIndex(data.budgetIndex, data, overspendOverrides);
+        budgetDataIndexCache.set(data, cached);
+        return cached;
+      } else {
+        data.budgetIndex = undefined;
       }
-      cached = hydrateBudgetIndex(data.budgetIndex, data);
-      budgetDataIndexCache.set(data, cached);
-      return cached;
-    } else {
-      data.budgetIndex = undefined;
     }
   }
 
@@ -1040,9 +1143,11 @@ function getOrBuildIndex(
     data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
   );
 
-  cached = computeAllMonths(data, rawData, orderedMonths, ccGroupIds);
-  budgetDataIndexCache.set(data, cached);
-  return cached;
+  const fresh = computeAllMonths(data, rawData, orderedMonths, ccGroupIds, overrides);
+  if (overrides === undefined) {
+    budgetDataIndexCache.set(data, fresh);
+  }
+  return fresh;
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,9 +1159,12 @@ function getOrBuildIndex(
  *
  * @param data   Full budget dataset (all months of history).
  * @param month  ISO month key, e.g. "2025-07".
+ * @param overspendOverrides Optional per-month red-arrow overrides
+ *   (YNAB4 inheritance; see `OverspendOverrides`). Defaults to
+ *   `data.overspendOverrides`, then to the static category flag.
  * @returns      BudgetResult with groups, TBB, and meta-data.
  */
-export function computeBudget(data: BudgetData, month: string): BudgetResult {
+export function computeBudget(data: BudgetData, month: string, overspendOverrides?: OverspendOverridesInput | null): BudgetResult {
   const normData = normalizeBudgetData(data);
 
   // Build split parent ID set so parent rows are skipped in all aggregations
@@ -1067,8 +1175,9 @@ export function computeBudget(data: BudgetData, month: string): BudgetResult {
 
   const accountMap = new Map<number, Account>(normData.accounts.map((a) => [a.id, a]));
   const ccAccountIds = getCCAccountIds(normData);
-  const index = getOrBuildIndex(normData, splitParentIds, accountMap, ccAccountIds, month);
-  if (normData !== data) {
+  const resolvedOverrides = resolveOverspendOverrides(data, overspendOverrides);
+  const index = getOrBuildIndex(normData, splitParentIds, accountMap, ccAccountIds, month, resolvedOverrides);
+  if (normData !== data && resolvedOverrides === undefined) {
     budgetDataIndexCache.set(data, index);
   }
 
