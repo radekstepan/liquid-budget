@@ -20,9 +20,15 @@ export {
   BUDGET_INDEX_VERSION,
 } from "./budget-engine.js";
 export type { OverspendOverridesInput } from "./budget-engine.js";
-// Register (per-row running balance)
+// Register (per-row running balance + payee autofill recall)
 export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";
+export { suggestAutofillForPayee } from "./payee-autofill.js";
+export type {
+  PayeeAutofillHistoryRow,
+  PayeeAutofillSuggestion,
+  SuggestAutofillOptions,
+} from "./payee-autofill.js";
 export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
 export * from "./sankey.js";

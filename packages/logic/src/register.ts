@@ -63,6 +63,16 @@
 import { num } from "./format.js";
 import type { Transaction } from "./types.js";
 
+// Re-exported here so blank-row callers in the register domain find the
+// payee-memory helper next to the running-balance walk; the
+// implementation lives in ./payee-autofill.js.
+export { suggestAutofillForPayee } from "./payee-autofill.js";
+export type {
+  PayeeAutofillHistoryRow,
+  PayeeAutofillSuggestion,
+  SuggestAutofillOptions,
+} from "./payee-autofill.js";
+
 export type RegisterRow = Omit<Transaction, "amount"> & {
   amount: number;
   /**
