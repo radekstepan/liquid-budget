@@ -14,6 +14,8 @@ import { describe, expect, it, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
@@ -169,6 +171,63 @@ describe("Drizzle migrations", () => {
         "INSERT INTO transactions (account_id, date, payee, memo, amount, status, transfer_status) VALUES (1, '2026-06-01', 'P', '', 100, 'c', 'x')"
       ).run();
     }).toThrow(/CHECK constraint failed/i);
+  });
+
+  it("keeps journal `when` timestamps strictly increasing in journal order", () => {
+    // drizzle-orm's sqlite migrator decides what to apply with
+    // `MAX(created_at) < entry.when` — it never compares per-migration
+    // hashes. A single out-of-order (e.g. future-dated) `when` therefore
+    // silently blocks every later migration on existing databases:
+    // 0034 was skipped on dev DBs because 0029 carried a `when` two days
+    // in the future, so /api/budget 500'd on the missing `auto_memo`
+    // column while fresh databases worked fine.
+    const journalRaw = readFileSync(path.resolve(MIGRATIONS_FOLDER, "meta/_journal.json"), "utf-8");
+    const journal = JSON.parse(journalRaw) as {
+      entries: Array<{ idx: number; tag: string; when: number }>;
+    };
+    expect(journal.entries.length).toBeGreaterThan(0);
+    for (let i = 1; i < journal.entries.length; i++) {
+      const prev = journal.entries[i - 1];
+      const curr = journal.entries[i];
+      expect(
+        curr.when,
+        `journal entry ${curr.tag} (idx ${curr.idx}) has when=${curr.when}, ` +
+          `not greater than ${prev.tag} when=${prev.when}`
+      ).toBeGreaterThan(prev.when);
+    }
+  });
+
+  it("applies a newly generated migration on top of a fully migrated DB", () => {
+    // End-to-end pin for the skip above: migrate a DB to HEAD, then add
+    // a migration the way `drizzle-kit generate` would (with `when` set
+    // to the real current time) and check it is picked up. Requires a
+    // sane wall clock (now later than every committed journal `when`).
+    migrate(ctx.db, { migrationsFolder: MIGRATIONS_FOLDER });
+    const probeDir = mkdtempSync(path.join(os.tmpdir(), "ynab-migrate-probe-"));
+    try {
+      writeFileSync(
+        path.join(probeDir, "0035_probe.sql"),
+        "CREATE TABLE __migration_probe (id integer);"
+      );
+      mkdirSync(path.join(probeDir, "meta"));
+      writeFileSync(
+        path.join(probeDir, "meta", "_journal.json"),
+        JSON.stringify({
+          version: "6",
+          dialect: "sqlite",
+          entries: [
+            { idx: 0, version: "6", when: Date.now(), tag: "0035_probe", breakpoints: true },
+          ],
+        })
+      );
+      migrate(ctx.db, { migrationsFolder: probeDir });
+      const tables = ctx.raw
+        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+        .all() as Array<{ name: string }>;
+      expect(tables.map((t) => t.name)).toContain("__migration_probe");
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
   });
 
   it("enforces unique constraints on category groups and categories (UNI-30 / BUG-13)", () => {
