@@ -63,6 +63,13 @@ export async function getReconcileState(
     throw new TransactionError(`Account ${accountId} not found`, 404);
   }
 
+  // YNAB4 divergence: YNAB4 keeps independent `cleared` per transfer side
+  // (each side reconciles against its own statement). Our single row stores
+  // both sides (`status` = source, `transferStatus` = dest). The
+  // `coalesce(transfer_status, status, 'c')` fallback below attributes legacy
+  // NULL legs (pre-migration 0020, see also migration 0025 split-leg repair)
+  // to the source status so old rows stay counted; it is mirrored in
+  // `computeReconcileState` in `packages/logic/src/reconcile.ts`.
   const [agg] = await db
     .select({
       unclearedSum: sql<number>`coalesce(sum(case when (case when account_id = ${accountId} then status else coalesce(transfer_status, status, 'c') end) = 'u' and date <= ${statementDate} then (case when account_id = ${accountId} then amount else -amount end) else 0 end), 0)`,

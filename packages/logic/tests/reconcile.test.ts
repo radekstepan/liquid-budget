@@ -204,6 +204,63 @@ describe("computeReconcileState", () => {
     expect(destState.workingBalance).toBe(0);
   });
 
+  it("G-status: legacy NULL transferStatus falls back to source status (source 'r' counts as reconciled on dest)", () => {
+    const srcAcct = makeAccount({ id: 1, name: "Checking" });
+    const destAcct = makeAccount({ id: 2, name: "Savings" });
+
+    const txns: Transaction[] = [
+      makeTx({
+        id: 1,
+        accountId: 1,
+        transferAccountId: 2,
+        amount: "-50000",
+        status: "r", // Source reconciled
+        transferStatus: null, // Legacy row: pre-migration 0020, no per-side dest status
+        date: "2026-06-01",
+      }),
+    ];
+
+    const srcState = computeReconcileState(srcAcct, txns, "2026-06-30");
+    expect(srcState.reconciledCount).toBe(1);
+    expect(srcState.workingBalance).toBe(-50000);
+
+    // Pinned legacy behavior: the NULL dest leg inherits the source 'r',
+    // so it counts as reconciled on dest without independent dest review.
+    const destState = computeReconcileState(destAcct, txns, "2026-06-30");
+    expect(destState.reconciledCount).toBe(1);
+    expect(destState.clearedCount).toBe(0);
+    expect(destState.unclearedCount).toBe(0);
+    expect(destState.workingBalance).toBe(50000);
+  });
+
+  it("G-status: source 'c' + dest 'r' counts cleared on source, reconciled on dest", () => {
+    const srcAcct = makeAccount({ id: 1, name: "Checking" });
+    const destAcct = makeAccount({ id: 2, name: "Savings" });
+
+    const txns: Transaction[] = [
+      makeTx({
+        id: 1,
+        accountId: 1,
+        transferAccountId: 2,
+        amount: "-50000",
+        status: "c", // Source cleared, not reconciled
+        transferStatus: "r", // Dest independently reconciled
+        date: "2026-06-01",
+      }),
+    ];
+
+    const srcState = computeReconcileState(srcAcct, txns, "2026-06-30");
+    expect(srcState.clearedCount).toBe(1);
+    expect(srcState.reconciledCount).toBe(0);
+    expect(srcState.workingBalance).toBe(-50000);
+
+    const destState = computeReconcileState(destAcct, txns, "2026-06-30");
+    expect(destState.reconciledCount).toBe(1);
+    expect(destState.clearedCount).toBe(0);
+    expect(destState.unclearedCount).toBe(0);
+    expect(destState.workingBalance).toBe(50000);
+  });
+
   it("includes inbound split child transfers on the destination account", () => {
     const destAcct = makeAccount({ id: 2, name: "Savings" });
     const txns: Transaction[] = [

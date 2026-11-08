@@ -109,6 +109,14 @@ export function computeReconcileState(
 
     const amt = typeof t.amount === "number" ? Math.round(t.amount) : num(t.amount);
     const delta = isSource ? amt : -amt;
+    // YNAB4 divergence: YNAB4 keeps independent `cleared` per transfer side
+    // (each side reconciles against its own statement). Our single row stores
+    // both sides (`status` = source, `transferStatus` = dest). A NULL
+    // `transferStatus` is a legacy row (pre-migration 0020): fall back to the
+    // source `status` so old rows stay counted instead of dropping to 'c'.
+    // See migration 0025 (split-leg repair) and the mirrored SQL fallback
+    // `coalesce(transfer_status, status, 'c')` in
+    // `server/src/queries/reconcile.ts` getReconcileState.
     const effStatus = isSource
       ? (parent?.status ?? t.status)
       : (t.transferStatus ?? parent?.transferStatus ?? t.status ?? "c");

@@ -784,6 +784,68 @@ describe("reconcile queries", () => {
       expect(stateB4.clearedCount).toBe(0);
     });
 
+    it("G-status: legacy NULL transferStatus falls back to source status (source 'r' counts as reconciled on dest)", async () => {
+      const acctA = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const acctB = await createAccount(db, { name: "Savings", kind: "liquid" });
+
+      // Legacy row: pre-migration 0020 single status, dest side never set.
+      // Insert directly so transfer_status stays NULL.
+      const [legacy] = await db
+        .insert(schema.transactions)
+        .values({
+          accountId: acctA.id,
+          transferAccountId: acctB.id,
+          date: "2026-06-01",
+          payee: "Legacy transfer",
+          amount: -50000,
+          status: "r",
+          transferStatus: null,
+        })
+        .returning();
+      expect(legacy?.transferStatus).toBeNull();
+
+      const stateA = await getReconcileState(db, acctA.id, "2026-06-30");
+      expect(stateA.reconciledCount).toBe(1);
+      expect(stateA.workingBalance).toBe(-50000);
+
+      // Pinned legacy behavior: NULL dest leg inherits source 'r' via
+      // coalesce(transfer_status, status, 'c') — counts as reconciled on
+      // dest without independent dest review (diverges from YNAB4 per-side).
+      const stateB = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB.reconciledCount).toBe(1);
+      expect(stateB.clearedCount).toBe(0);
+      expect(stateB.unclearedCount).toBe(0);
+      expect(stateB.workingBalance).toBe(50000);
+    });
+
+    it("G-status: source 'c' + dest 'r' counts cleared on source, reconciled on dest", async () => {
+      const acctA = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const acctB = await createAccount(db, { name: "Savings", kind: "liquid" });
+
+      // 'r' cannot be set via createTransfer (reconcile-flow only), so insert
+      // directly like the legacy test above.
+      await db.insert(schema.transactions).values({
+        accountId: acctA.id,
+        transferAccountId: acctB.id,
+        date: "2026-06-01",
+        payee: "Transfer",
+        amount: -50000,
+        status: "c",
+        transferStatus: "r",
+      });
+
+      const stateA = await getReconcileState(db, acctA.id, "2026-06-30");
+      expect(stateA.clearedCount).toBe(1);
+      expect(stateA.reconciledCount).toBe(0);
+      expect(stateA.workingBalance).toBe(-50000);
+
+      const stateB = await getReconcileState(db, acctB.id, "2026-06-30");
+      expect(stateB.reconciledCount).toBe(1);
+      expect(stateB.clearedCount).toBe(0);
+      expect(stateB.unclearedCount).toBe(0);
+      expect(stateB.workingBalance).toBe(50000);
+    });
+
     it("BUG-13: excludes split parents from status flips and reconciles split children with consistent counts", async () => {
       const acct = await createAccount(db, { name: "Chequing", kind: "liquid" });
       const [group] = await db.insert(schema.categoryGroups).values({ name: "General", sort: 0 }).returning();
