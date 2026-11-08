@@ -60,6 +60,25 @@ describe("format", () => {
     expect(num("+ $1,000")).toBe(1000);
   });
 
+  it("num parses locale-aware separators with last-separator-wins (G-money-parse)", () => {
+    // en-US: comma thousands, dot decimal
+    expect(num("1,234")).toBe(1234);
+    expect(num("1,234.56")).toBe(1235);
+    expect(num("1,234,567.89")).toBe(1234568);
+    // de-DE: dot thousands, comma decimal
+    expect(num("1.234,56")).toBe(1235);
+    expect(num("1.234.567,89")).toBe(1234568);
+    expect(num("-1.234,56")).toBe(-1235);
+    expect(num("(1.234,56)")).toBe(-1235);
+    expect(num("€1.234,56")).toBe(1235);
+    // Comma-only: trailing ,\d{1,2} is a decimal comma, else thousands
+    expect(num("12,34")).toBe(12);
+    expect(num("1,234")).toBe(1234);
+    expect(num("1,234,567")).toBe(1234567);
+    // Dot-only keeps current behavior (dot = decimal)
+    expect(num("1.234")).toBe(1);
+  });
+
   it("num handles fractional numbers and fractional strings with consistent rounding", () => {
     expect(num(100.5)).toBe(101);
     expect(num("100.5")).toBe(101);
@@ -200,6 +219,20 @@ describe("format", () => {
     expect(dollarsToCents(-1e-7)).toBe(0);
     expect(dollarsToCents("1e-7")).toBe(0);
     expect(Object.is(dollarsToCents(-1e-7), -0)).toBe(false);
+  });
+
+  it("dollarsToCents parses locale-aware string separators with last-separator-wins (G-money-parse)", () => {
+    // en-US: comma thousands, dot decimal
+    expect(dollarsToCents("1,234.56")).toBe(123456);
+    expect(dollarsToCents("1,234")).toBe(123400);
+    expect(dollarsToCents("1,234,567.89")).toBe(123456789);
+    // de-DE: dot thousands, comma decimal
+    expect(dollarsToCents("1.234,56")).toBe(123456);
+    expect(dollarsToCents("1.234.567,89")).toBe(123456789);
+    expect(dollarsToCents("-1.234,56")).toBe(-123456);
+    // Comma-only: trailing ,\d{1,2} is a decimal comma, else thousands
+    expect(dollarsToCents("12,34")).toBe(1234);
+    expect(dollarsToCents("1,234")).toBe(123400);
   });
 
   it("dollarsToCents matches exact decimal rounding on randomized inputs (BUG-04)", () => {
@@ -584,6 +617,20 @@ describe("format", () => {
       expect(evalAmount("1,000")).toBe(1000);
       expect(evalAmount("1,250.00")).toBe(1250);
       expect(evalAmount("12,500")).toBe(12500);
+    });
+
+    it("handles grouped thousands with either locale when both separators are present (G-money-parse)", () => {
+      // en-US: comma thousands, dot decimal
+      expect(evalAmount("1,234.56")).toBeCloseTo(1234.56);
+      expect(evalAmount("1,234,567.89")).toBeCloseTo(1234567.89);
+      // de-DE: dot thousands, comma decimal (last separator wins)
+      expect(evalAmount("1.234,56")).toBeCloseTo(1234.56);
+      expect(evalAmount("1.234.567,89")).toBeCloseTo(1234567.89);
+      expect(evalAmount("-1.234,56")).toBeCloseTo(-1234.56);
+      expect(evalAmount("€1.234,56")).toBeCloseTo(1234.56);
+      // Same grouping works inside arithmetic
+      expect(evalAmount("1.000 + 2,5")).toBeCloseTo(1002.5);
+      expect(evalAmount("1,000 + 2.5")).toBeCloseTo(1002.5);
     });
 
     it("accepts leading and trailing dots", () => {

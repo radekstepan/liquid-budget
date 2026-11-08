@@ -44,6 +44,31 @@ export function fmtSigned(cents: number): string {
   return fmt(cents);
 }
 
+/**
+ * YNAB4-style unknown-separator fallback
+ * (`parseCurrencyStringWithUnknownDecimalSeparator` in YNAB4's `CurrencyUtilities`):
+ * normalize `.`/`,` grouping/decimal separators without knowing the locale.
+ * Must run AFTER stripping currency symbols/spaces (which are never
+ * separators) but BEFORE stripping any commas or dots.
+ *
+ * - Both present: the LAST occurring separator is the decimal; all others
+ *   are thousands separators and are stripped. E.g. "1,234.56" → "1234.56"
+ *   (en-US) and "1.234,56" → "1234.56" (de-DE).
+ * - Only `,`: a trailing `,\d{1,2}` is a decimal comma ("12,34" → "12.34");
+ *   otherwise commas are thousands separators ("1,234" → "1234"). This is the
+ *   same per-occurrence rule `evalAmount` has always used.
+ * - Only `.`: dot is the decimal (unchanged).
+ */
+function normalizeSeparators(s: string): string {
+  if (s.includes(".") && s.includes(",")) {
+    if (s.lastIndexOf(".") > s.lastIndexOf(",")) {
+      return s.replace(/,/g, "");
+    }
+    return s.replace(/\./g, "").replace(/,/g, ".");
+  }
+  return s.replace(/,(\d{1,2})(?!\d)/g, ".$1").replace(/,/g, "");
+}
+
 export function num(
   s: string | number | null | undefined,
   options?: { strict?: boolean }
@@ -84,8 +109,10 @@ export function num(
     str = str.slice(1).trim();
   }
 
-  // Strip currency symbols, commas, spaces, underscores
-  str = str.replace(/[$€£¥,_ \t]/g, "");
+  // Strip currency symbols, spaces, underscores (commas/dots are handled
+  // by normalizeSeparators below so de-DE decimals survive).
+  str = str.replace(/[$€£¥_ \t]/g, "");
+  str = normalizeSeparators(str);
 
   // Handle minus sign after currency symbol e.g. "$-500"
   if (str.startsWith("-")) {
@@ -216,7 +243,8 @@ export function numCents(
  */
 export function dollarsToCents(d: number | string | null | undefined): number {
   if (d == null) return 0;
-  const n = typeof d === "number" ? d : Number(d);
+  const n =
+    typeof d === "number" ? d : Number(typeof d === "string" ? normalizeSeparators(d) : d);
   if (Number.isNaN(n) || n === 0 || !Number.isFinite(n)) return 0;
 
   const sign = n < 0 ? -1 : 1;
@@ -292,10 +320,7 @@ export function evalAmount(
 ): number | null {
   if (s == null) return null;
   const raw = typeof s === "number" ? String(s) : s;
-  const stripped = raw
-    .replace(/[$€£¥_]/g, "")
-    .replace(/,(\d{1,2})(?!\d)/g, ".$1")
-    .replace(/,/g, "");
+  const stripped = normalizeSeparators(raw.replace(/[$€£¥_]/g, ""));
   if (stripped.replace(/\s+/g, "") === "") return null;
   if (!_VALID.test(stripped)) return null;
 
