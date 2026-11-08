@@ -36,12 +36,20 @@ describe("format", () => {
     expect(fmtSigned(-500)).toBe("-$5.00");
   });
 
-  it("num parses integer strings and handles nullish/NaN", () => {
+  it("num parses integer strings and handles nullish as 0", () => {
     expect(num("314")).toBe(314);
     expect(num(700)).toBe(700);
     expect(num(null)).toBe(0);
     expect(num(undefined)).toBe(0);
-    expect(num("not a number")).toBe(0);
+  });
+
+  it("num throws TypeError on NaN, empty, and unparseable input (G-money-strict, YNAB4 parity)", () => {
+    expect(() => num("not a number")).toThrow(TypeError);
+    expect(() => num("abc")).toThrow(TypeError);
+    expect(() => num(NaN)).toThrow(TypeError);
+    expect(() => num("")).toThrow(TypeError);
+    expect(() => num("   ")).toThrow(TypeError);
+    expect(() => num("$")).toThrow(TypeError);
   });
 
   it("num handles negative integer strings", () => {
@@ -199,6 +207,14 @@ describe("format", () => {
     expect(() => dollarsToCents(-1e21)).toThrow(RangeError);
     expect(() => dollarsToCents(90071992547409.92)).toThrow(RangeError);
     expect(() => dollarsToCents("90071992547409.92")).toThrow(RangeError);
+  });
+
+  it("dollarsToCents throws TypeError on NaN/unparseable input instead of silently returning 0 (G-money-strict)", () => {
+    expect(() => dollarsToCents(NaN)).toThrow(TypeError);
+    expect(() => dollarsToCents("abc")).toThrow(TypeError);
+    expect(() => dollarsToCents("not a number")).toThrow(TypeError);
+    expect(dollarsToCents(null)).toBe(0);
+    expect(dollarsToCents(undefined)).toBe(0);
   });
 
   it("dollarsToCents handles fractional-cent edge cases exactly (BUG-04)", () => {

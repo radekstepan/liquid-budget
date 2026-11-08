@@ -69,6 +69,17 @@ function normalizeSeparators(s: string): string {
   return s.replace(/,(\d{1,2})(?!\d)/g, ".$1").replace(/,/g, "");
 }
 
+/**
+ * Coerce an integer-cents amount (YNAB4-style: the whole app stores money
+ * as integer cents). `null`/`undefined` (missing value) coerce to 0, but
+ * corrupt input — NaN, empty/whitespace-only strings, and strings with no
+ * parseable number — throws `TypeError` instead of silently becoming 0,
+ * matching YNAB4 (`MonthlySubCategoryBudget.as:202-256` throws
+ * `ArgumentError("NaN passed in")` on corrupt money). Non-finite and
+ * overflowing inputs clamp to `sign * MAX_SAFE_INTEGER` unless `strict`
+ * is set (which throws `RangeError`). Locale separators follow the
+ * YNAB4-style last-separator-wins fallback (`normalizeSeparators`).
+ */
 export function num(
   s: string | number | null | undefined,
   options?: { strict?: boolean }
@@ -76,7 +87,10 @@ export function num(
   const strict = options?.strict ?? false;
   if (s == null) return 0;
   if (typeof s === "number") {
-    if (Number.isNaN(s) || s === 0) return 0;
+    if (Number.isNaN(s)) {
+      throw new TypeError(`Invalid amount: ${s}`);
+    }
+    if (s === 0) return 0;
     const sign = s < 0 ? -1 : 1;
     if (!Number.isFinite(s)) {
       if (strict) {
@@ -96,7 +110,9 @@ export function num(
     return rounded === 0 ? 0 : rounded;
   }
   let str = String(s).trim();
-  if (!str) return 0;
+  if (!str) {
+    throw new TypeError(`Invalid amount: ${s}`);
+  }
 
   let sign = 1;
   if (str.startsWith("(") && str.endsWith(")")) {
@@ -120,8 +136,15 @@ export function num(
     str = str.slice(1).trim();
   }
 
+  if (!str) {
+    throw new TypeError(`Invalid amount: ${s}`);
+  }
+
   const rawNum = Number(str);
-  if (Number.isNaN(rawNum) || rawNum === 0) return 0;
+  if (Number.isNaN(rawNum)) {
+    throw new TypeError(`Invalid amount: ${s}`);
+  }
+  if (rawNum === 0) return 0;
   if (!Number.isFinite(rawNum)) {
     if (strict) {
       throw new RangeError(`Amount ${s} exceeds safe integer range`);
@@ -240,12 +263,20 @@ export function numCents(
  * a cent. Prefer string input (raw CSV/YNAB4 fields, or values from
  * `parseAmount`/`evalAmount`) over pre-computed floats: strings with more
  * than ~17 significant digits lose precision when coerced through `Number`.
+ *
+ * Missing input (`null`/`undefined`) coerces to 0, but NaN — whether
+ * passed as a number or produced by an unparseable string — throws
+ * `TypeError` instead of silently becoming 0 (YNAB4 parity: corrupt money
+ * throws rather than masking as zero on ingest).
  */
 export function dollarsToCents(d: number | string | null | undefined): number {
   if (d == null) return 0;
   const n =
     typeof d === "number" ? d : Number(typeof d === "string" ? normalizeSeparators(d) : d);
-  if (Number.isNaN(n) || n === 0 || !Number.isFinite(n)) return 0;
+  if (Number.isNaN(n)) {
+    throw new TypeError(`Invalid dollar amount: ${d}`);
+  }
+  if (n === 0 || !Number.isFinite(n)) return 0;
 
   const sign = n < 0 ? -1 : 1;
   const absStr = String(Math.abs(n));
