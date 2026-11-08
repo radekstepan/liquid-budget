@@ -13,8 +13,9 @@
  *   `lastEnteredCheckNumber` drop warns once (stock only — exports
  *   write the -1 default).
  * - G-04: disabled payees (`enabled`), `autoFillCategoryId` defaults,
- *   and `Is` rename conditions round-trip; Contains/location/
- *   autofill/transfer-payee drops warn on the stock import only.
+ *   and rename conditions (`Is` exact + `Contains`/`StartsWith`/
+ *   `EndsWith` substring flavours) round-trip; location/autofill/
+ *   transfer-payee drops warn on the stock import only.
  * - G-05: `checkNumber` + OFX lineage round-trip; `accepted: false`
  *   / match-link / schedule-link drops warn once (exports hardcode
  *   `accepted: true` — intentional, see below).
@@ -248,7 +249,6 @@ describe("G-11 import → export → import round-trip", () => {
       /lastEnteredCheckNumber/,
       /account mapping/,
       /month-level budget notes/,
-      /operator "Contains"/,
       /payee location/,
       /autofill/,
       /transfer payee/,
@@ -353,11 +353,18 @@ describe("G-11 import → export → import round-trip", () => {
     }
     expect(payees2.find((p) => p.name === "Old Shop")?.archived).toBe(true);
 
-    // Rename rules: the YNAB4 `Is` condition and the in-app `[N]`
-    // pattern both restore verbatim (G-04/G-11).
+    // Rename rules: the YNAB4 `Is` condition, the `Contains`
+    // condition, and the in-app `[N]` pattern all restore verbatim
+    // (G-04/G-11) — substring rules re-export under their own
+    // operator, patterns ride as literal `Is` operands.
     const rules2 = await db2.select().from(schema.renameRules);
     const pairs2 = rules2.map((r) => `${r.sourcePattern} -> ${r.targetPayee}`).sort();
-    expect(pairs2).toEqual(["AMZN [N] -> Grocery Store", "SAFEWAY #123 -> Grocery Store"].sort());
+    expect(pairs2).toEqual(
+      ["AMZN [N] -> Grocery Store", "SAFEWAY -> Grocery Store", "SAFEWAY #123 -> Grocery Store"].sort()
+    );
+    expect(
+      rules2.find((r) => r.sourcePattern === "SAFEWAY" && r.targetPayee === "Grocery Store")?.operator
+    ).toBe("contains");
 
     // Assignments: explicit zeros + per-category notes (G-07).
     const assigns = async (db: Db) => {

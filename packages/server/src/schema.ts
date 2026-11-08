@@ -302,11 +302,17 @@ export const renameRules = sqliteTable(
     sourcePattern: text("source_pattern").notNull(),
     /** Payee to substitute when the source pattern matches. */
     targetPayee: text("target_payee").notNull(),
+    /**
+     * Match flavour: `is` (exact, default), `contains`, `startsWith`,
+     * `endsWith`. The substring flavours hold YNAB4 rename-condition
+     * operators natively (see `@ynab/logic` rename-rules).
+     */
+    operator: text("operator").notNull().default("is"),
     createdAt: text("created_at").notNull().default(""),
     updatedAt: text("updated_at"),
   },
   (t) => ({
-    uniq: uniqueIndex("rename_rules_source_target_uniq").on(t.sourcePattern, t.targetPayee),
+    uniq: uniqueIndex("rename_rules_source_target_uniq").on(t.sourcePattern, t.targetPayee, t.operator),
   })
 );
 

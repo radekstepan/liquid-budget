@@ -1,6 +1,7 @@
 import { and, eq, asc, isNull } from "drizzle-orm";
-import type { RenameRule as RenameRuleView } from "@ynab/logic";
+import type { RenameRule as RenameRuleView, RenameRuleOperator } from "@ynab/logic";
 import {
+  getRenameRuleOperator,
   isTransferPayee,
   learnRenameRule as pureLearn,
   matchesRenameRule,
@@ -14,6 +15,7 @@ export type RenameRuleRow = typeof renameRules.$inferSelect;
 export type RenameRuleInput = {
   sourcePattern: string;
   targetPayee: string;
+  operator?: RenameRuleOperator;
 };
 
 export class RenameRuleError extends Error {
@@ -38,6 +40,7 @@ function toView(row: RenameRuleRow): RenameRuleView {
     id: row.id,
     sourcePattern: row.sourcePattern,
     targetPayee: row.targetPayee,
+    operator: getRenameRuleOperator({ operator: (row.operator as RenameRuleOperator | undefined) ?? undefined }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -67,6 +70,7 @@ export async function createRenameRule(db: Db, input: RenameRuleInput): Promise<
     .values({
       sourcePattern,
       targetPayee,
+      operator: input.operator ?? "is",
       createdAt: now,
     })
     .returning();
@@ -86,6 +90,9 @@ export async function updateRenameRule(
   }
   if (patch.targetPayee !== undefined) {
     values.targetPayee = patch.targetPayee.trim();
+  }
+  if (patch.operator !== undefined) {
+    values.operator = patch.operator;
   }
   if (Object.keys(values).length === 0) return current;
   assertNotTransferRule(

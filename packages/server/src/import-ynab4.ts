@@ -1713,21 +1713,23 @@ export async function importYnab4(
       }
     }
 
-    // 5c. Import YNAB4 payee rename conditions into rename_rules (G-04).
+    // 5c. Import YNAB4 payee rename conditions into rename_rules.
     //
     // Operator audit (`data/StringCondition.as`,
     // `data/StringOperator.as`, `com/ynab/enums/EnumBase.as`): exactly
     // four operators exist — Contains, Is, StartsWith, EndsWith
     // (serialized under the static property names, parsed
-    // case-insensitively). Only `Is` maps faithfully onto our rule
-    // engine (an exact, case-insensitive source_pattern → target
-    // payee). Prefix/substring operators have no equivalent in our
-    // full-match `[N]`/`[X]` patterns, so those conditions land in
-    // warnings instead of being silently dropped. `locations` (plus
-    // top-level `payeeLocations`) have no counterpart (no maps
-    // feature) and `autoFillMemo`/`autoFillAmount` have no
-    // payee-autofill target — both deliberately dropped (counts in
-    // warnings, details in the changeset). `targetAccountId` transfer
+    // case-insensitively). All four map natively onto our rule engine:
+    // `Is` becomes an exact rule; the three substring operators become
+    // rules with the matching `operator` flavour (same
+    // `normalizeRenameText` folding on both sides — a documented
+    // superset of YNAB4's `toLocaleLowerCase`-only comparison, so
+    // `AMZN*MKTP` matches operand `AMZN MKTP` here where stock YNAB4
+    // would not). Only genuinely unknown operator strings land in
+    // warnings. `locations` (plus top-level `payeeLocations`) have no
+    // counterpart (no maps feature) and `autoFillMemo`/`autoFillAmount`
+    // have no payee-autofill target — both deliberately dropped (counts
+    // in warnings, details in the changeset). `targetAccountId` transfer
     // payees stay skipped by design (modeled via transferAccountId),
     // reported as one aggregated notice.
     {
@@ -1761,9 +1763,20 @@ export async function importYnab4(
             );
             continue;
           }
-          if (operator.toLowerCase() !== "is") {
+          const lowered = operator.toLowerCase();
+          const ruleOperator =
+            lowered === "is"
+              ? "is"
+              : lowered === "contains"
+                ? "contains"
+                : lowered === "startswith"
+                  ? "startsWith"
+                  : lowered === "endswith"
+                    ? "endsWith"
+                    : null;
+          if (!ruleOperator) {
             warnings.push(
-              `Payee "${p.name.trim()}": skipped rename condition with operator "${operator}" (operand "${operand}"); only "Is" maps to an exact rename rule`
+              `Payee "${p.name.trim()}": skipped rename condition with unknown operator "${operator}" (operand "${operand}"); expected one of Is, Contains, StartsWith, EndsWith`
             );
             continue;
           }
@@ -1775,7 +1788,7 @@ export async function importYnab4(
           }
           await db
             .insert(renameRules)
-            .values({ sourcePattern: operand, targetPayee: p.name.trim(), createdAt: importedAt })
+            .values({ sourcePattern: operand, targetPayee: p.name.trim(), operator: ruleOperator, createdAt: importedAt })
             .onConflictDoNothing();
         }
       }

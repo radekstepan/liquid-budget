@@ -93,10 +93,19 @@ export type TransactionDuplicateFlag = "duplicate";
 /** The full set of flag states a row can carry (read-side). */
 export type TransactionFlagState = TransactionFlagColor | TransactionDuplicateFlag | null;
 
+/** Substring/exact match flavour of a rename rule's source pattern. */
+export type RenameRuleOperator = "is" | "contains" | "startsWith" | "endsWith";
+
 export type RenameRule = {
   id: number;
   sourcePattern: string;
   targetPayee: string;
+  /**
+   * Optional match flavour; absent means `"is"` (exact, case-insensitive).
+   * `"contains"`/`"startsWith"`/`"endsWith"` hold the YNAB4 substring
+   * operators natively so `.y4backup` imports lose no behaviour.
+   */
+  operator?: RenameRuleOperator;
   createdAt: string;
   updatedAt?: string | null;
 };

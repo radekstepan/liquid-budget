@@ -364,6 +364,13 @@ export const AssignmentUpsertSchema = z
 const TRANSFER_PAYEE_RE = /^transfer\s*:/i;
 const notTransferPayee = (val: string) => !TRANSFER_PAYEE_RE.test(val.trim());
 
+/**
+ * Match flavour of a rename rule's source pattern. Absent means `"is"`.
+ * `"contains"`/`"startsWith"`/`"endsWith"` carry the YNAB4 substring
+ * operators natively (see `rename-rules.ts` for folding/priority notes).
+ */
+export const RenameRuleOperatorSchema = z.enum(["is", "contains", "startsWith", "endsWith"]);
+
 export const RenameRuleCreateSchema = z
   .object({
     sourcePattern: z.string().min(1).max(255).refine(notTransferPayee, {
@@ -372,6 +379,7 @@ export const RenameRuleCreateSchema = z
     targetPayee: z.string().min(1).max(255).refine(notTransferPayee, {
       message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
     }),
+    operator: RenameRuleOperatorSchema.optional(),
   })
   .strict();
 
@@ -384,6 +392,7 @@ export const RenameRulePatchSchema = z
     targetPayee: z.string().min(1).max(255).refine(notTransferPayee, {
       message: 'Rename rules do not apply to transfers (payees like "Transfer : <account>")',
     }).optional(),
+    operator: RenameRuleOperatorSchema.optional(),
   })
   .strict();
 
@@ -964,6 +973,7 @@ export const RenameRuleResponseSchema = z.looseObject({
   ...LooseIdEntity,
   sourcePattern: z.string(),
   targetPayee: z.string(),
+  operator: RenameRuleOperatorSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string().nullable().optional(),
 });

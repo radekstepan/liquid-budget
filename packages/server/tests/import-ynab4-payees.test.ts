@@ -1,15 +1,15 @@
 /**
- * import-ynab4-payees.test.ts (G-04)
+ * import-ynab4-payees.test.ts
  *
  * YNAB4 payee fidelity on import:
  *
  *   - `enabled === false` payees import as `payees.archived` (missing
  *     `enabled` defaults to enabled, mirroring YNAB4's `= true`).
- *   - `renameConditions` with operator `Is` become exact `rename_rules`
- *     rows (source = operand, target = payee name). The other three
- *     YNAB4 operators (Contains, StartsWith, EndsWith) have no
- *     equivalent in our full-match `[N]`/`[X]` engine, so those
- *     conditions — plus blank/unparseable ones — land in
+ *   - `renameConditions` become `rename_rules` rows (source = operand,
+ *     target = payee name): `Is` becomes an exact rule and the other
+ *     three YNAB4 operators (Contains, StartsWith, EndsWith) become
+ *     substring rules with the matching `operator` flavour. Unknown
+ *     operators — plus blank/unparseable conditions — land in
  *     `ImportSummary.warnings`, never silently dropped.
  *   - `autoFillMemo`/`autoFillAmount` (no payee-autofill target here)
  *     and `locations`/`payeeLocations` (no maps feature) are dropped
@@ -27,6 +27,7 @@ import { fileURLToPath } from "url";
 import { exportYnab4 } from "../src/export-ynab4.js";
 import { importYnab4 } from "../src/import-ynab4.js";
 import { getRenameRules } from "../src/queries/rename-rules.js";
+import { applyRenameRules } from "@ynab/logic";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
 
@@ -123,7 +124,7 @@ describe("G-04 payee import", () => {
     db = openMigratedDb();
   });
 
-  it("persists enabled as archived, imports Is conditions, and warns on the rest", async () => {
+  it("persists enabled as archived, imports all four operators natively, and warns on the rest", async () => {
     const summary = await importYnab4(db, structuredClone(ynabData));
 
     const payees = db.select().from(schema.payees).all();
@@ -135,17 +136,20 @@ describe("G-04 payee import", () => {
     expect(byName.has("Transfer : Chequing")).toBe(false);
 
     const rules = getRenameRules(db);
-    expect(rules).toHaveLength(1);
-    expect(rules[0]).toMatchObject({
-      sourcePattern: "SAFEWAY #123",
-      targetPayee: "Grocery Store",
-    });
+    expect(rules).toHaveLength(4);
+    expect(rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourcePattern: "SAFEWAY #123", targetPayee: "Grocery Store", operator: "is" }),
+        expect.objectContaining({ sourcePattern: "SAFEWAY", targetPayee: "Grocery Store", operator: "contains" }),
+        expect.objectContaining({ sourcePattern: "SAFE", targetPayee: "Grocery Store", operator: "startsWith" }),
+        expect.objectContaining({ sourcePattern: "123", targetPayee: "Grocery Store", operator: "endsWith" }),
+      ])
+    );
 
     const warnings = summary.warnings ?? [];
-    // One notice per unmapped condition (Contains/StartsWith/EndsWith/
-    // unknown operator/blank operand; tombstoned stays silent).
-    expect(warnings.filter((w) => w.includes("rename condition")).length).toBe(5);
-    expect(warnings.some((w) => w.includes('"Contains"'))).toBe(true);
+    // One notice per unmapped condition (unknown operator/blank
+    // operand; tombstoned stays silent).
+    expect(warnings.filter((w) => w.includes("rename condition")).length).toBe(2);
     expect(warnings.some((w) => w.includes('"Bogus"'))).toBe(true);
     // Aggregated notices for the deliberate drops.
     expect(warnings.some((w) => w.includes("transfer payee"))).toBe(true);
@@ -160,6 +164,21 @@ describe("G-04 payee import", () => {
     expect(byName.get("Old Shop")?.enabled).toBe(false);
     expect(byName.get("Grocery Store")?.enabled).toBe(true);
     expect(byName.get("Default Enabled Shop")?.enabled).toBe(true);
+  });
+
+  it("parses operators case-insensitively and the Contains rule renames through the engine", async () => {
+    const doc = structuredClone(ynabData);
+    const grocery = doc.payees.find((p: any) => p.entityId === "p1")!;
+    grocery.renameConditions = [
+      { entityId: "rcx", operator: "cOnTaInS", operand: "SAFEWAY", parentPayeeId: "p1" },
+    ];
+    const summary = await importYnab4(db, doc);
+    expect((summary.warnings ?? []).filter((w) => w.includes("rename condition"))).toHaveLength(0);
+    const rules = getRenameRules(db);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ sourcePattern: "SAFEWAY", operator: "contains" });
+    expect(applyRenameRules(rules, "SAFEWAY #123")).toBe("Grocery Store");
+    expect(applyRenameRules(rules, "WHOLE FOODS")).toBe("WHOLE FOODS");
   });
 
   it("rejects a transfer-like rename operand instead of learning it", async () => {

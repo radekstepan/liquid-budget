@@ -755,12 +755,14 @@ export async function exportYnab4(
     };
   });
 
-  // 8. Rename conditions (G-11): our `rename_rules` ride on the
-  // owning payee as YNAB4 `renameConditions` (`StringConditionVO`:
-  // operator/operand/parentPayeeId). Only `Is` maps faithfully —
-  // and it is also all our importer accepts — so in-app `[N]`/`[X]`
-  // wildcard patterns round-trip verbatim through our own import
-  // but would match literally in stock YNAB4. `entityType` /
+  // 8. Rename conditions: our `rename_rules` ride on the owning payee
+  // as YNAB4 `renameConditions` (`StringConditionVO`:
+  // operator/operand/parentPayeeId). Exact rules export as `Is`;
+  // substring rules export under their own operator (`Contains`,
+  // `StartsWith`, `EndsWith`) so a re-import restores them verbatim;
+  // in-app `[N]`/`[X]` wildcard patterns have no YNAB4 counterpart and
+  // ride as `Is` operands verbatim (matching literally in stock YNAB4,
+  // restoring exactly through our own importer). `entityType` /
   // `entityVersion` here are our extension guesses (tolerated as
   // unknown keys); the `accepted: true`, `isTombstone: false`, and
   // `entityVersion` stubs elsewhere are likewise intentional — our
@@ -781,7 +783,14 @@ export async function exportYnab4(
     entry?.renameConditions.push({
       entityId: `renamecond-${rule.id}`,
       parentPayeeId: entry.entityId,
-      operator: "Is",
+      operator:
+        rule.operator === "contains"
+          ? "Contains"
+          : rule.operator === "startsWith"
+            ? "StartsWith"
+            : rule.operator === "endsWith"
+              ? "EndsWith"
+              : "Is",
       operand: rule.sourcePattern,
       isTombstone: false,
       entityType: "payeeRenameCondition",

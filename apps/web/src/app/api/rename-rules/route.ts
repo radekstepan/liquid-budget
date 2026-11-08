@@ -39,6 +39,7 @@ export async function POST(req: Request) {
     const row = await createRenameRule(getDefaultDb(), {
       sourcePattern: body.sourcePattern,
       targetPayee: body.targetPayee,
+      operator: body.operator,
     });
     return Response.json(row);
   } catch (e) {
@@ -62,6 +63,7 @@ export async function PATCH(req: Request) {
     const row = await updateRenameRule(getDefaultDb(), body.id, {
       sourcePattern: body.sourcePattern,
       targetPayee: body.targetPayee,
+      operator: body.operator,
     });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);

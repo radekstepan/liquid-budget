@@ -3,8 +3,11 @@ import {
   applyRenameRules,
   compileRenameRules,
   countRenameRuleMatches,
+  getRenameRuleOperator,
   inferRenameRule,
+  isExactRule,
   isPatternRule,
+  isSubstringRule,
   isTransferPayee,
   learnRenameRule,
   matchesCompiledRule,
@@ -12,8 +15,10 @@ import {
   normalizeRenameText,
   renamePatternToRegExp,
   renameRulePayeeFilter,
+  renameRulePayeeFilterForRule,
   type RenameRule,
 } from "../src/rename-rules.js";
+import type { RenameRuleOperator } from "../src/types.js";
 
 const rule = (id: number, sourcePattern: string, targetPayee: string): RenameRule => ({
   id,
@@ -21,6 +26,14 @@ const rule = (id: number, sourcePattern: string, targetPayee: string): RenameRul
   targetPayee,
   createdAt: "2026-01-01T00:00:00.000Z",
 });
+
+const substringRule = (
+  id: number,
+  sourcePattern: string,
+  targetPayee: string,
+  operator: RenameRuleOperator,
+  createdAt = "2026-01-01T00:00:00.000Z"
+): RenameRule => ({ id, sourcePattern, targetPayee, operator, createdAt });
 
 describe("normalizeRenameText", () => {
   it("trims, lowercases, and collapses repeated whitespace", () => {
@@ -551,6 +564,189 @@ describe("countRenameRuleMatches", () => {
     expect(counts.get(1)).toBe(0);
     expect(counts.get(2)).toBe(0);
     expect(counts.get(3)).toBe(0);
+  });
+});
+
+describe("getRenameRuleOperator", () => {
+  it("defaults missing/unknown operators to exact", () => {
+    expect(getRenameRuleOperator(rule(1, "A", "B"))).toBe("is");
+    expect(getRenameRuleOperator({ ...rule(1, "A", "B"), operator: undefined })).toBe("is");
+    expect(getRenameRuleOperator({ ...rule(1, "A", "B"), operator: null })).toBe("is");
+    expect(
+      getRenameRuleOperator({ ...rule(1, "A", "B"), operator: "Bogus" as unknown as RenameRuleOperator })
+    ).toBe("is");
+    expect(getRenameRuleOperator(substringRule(1, "A", "B", "contains"))).toBe("contains");
+  });
+
+  it("classifies exact vs substring rules", () => {
+    expect(isExactRule(rule(1, "BCF1", "X"))).toBe(true);
+    expect(isExactRule(rule(1, "BCF[N]", "X"))).toBe(false);
+    expect(isExactRule(substringRule(1, "BCF1", "X", "is"))).toBe(true);
+    expect(isExactRule(substringRule(1, "BCF", "X", "contains"))).toBe(false);
+    expect(isSubstringRule(rule(1, "BCF1", "X"))).toBe(false);
+    expect(isSubstringRule(substringRule(1, "BCF", "X", "startsWith"))).toBe(true);
+  });
+});
+
+describe("matchesRenameRule substring operators", () => {
+  it("matches contains anywhere in the payee", () => {
+    const r = substringRule(1, "SAFEWAY", "Grocery", "contains");
+    expect(matchesRenameRule(r, "Safeway #123")).toBe(true);
+    expect(matchesRenameRule(r, "THE SAFEWAY STORE")).toBe(true);
+    expect(matchesRenameRule(r, "SAFEWAY")).toBe(true);
+    expect(matchesRenameRule(r, "SAFE WAY")).toBe(false);
+    expect(matchesRenameRule(r, "WHOLE FOODS")).toBe(false);
+  });
+
+  it("matches startsWith/endsWith anchors", () => {
+    const start = substringRule(1, "SAFE", "Grocery", "startsWith");
+    expect(matchesRenameRule(start, "Safeway #123")).toBe(true);
+    expect(matchesRenameRule(start, "THE SAFEWAY")).toBe(false);
+    const end = substringRule(2, "123", "Grocery", "endsWith");
+    expect(matchesRenameRule(end, "SAFEWAY #123")).toBe(true);
+    expect(matchesRenameRule(end, "123 SAFEWAY")).toBe(false);
+  });
+
+  it("is case- and separator-insensitive via the shared folding", () => {
+    const r = substringRule(1, "AMZN MKTP", "Amazon", "contains");
+    expect(matchesRenameRule(r, "amzn*mktp us*12")).toBe(true);
+    expect(matchesRenameRule(r, "AMZN-MKTP US")).toBe(true);
+  });
+
+  it("never matches an empty operand (YNAB4 parity)", () => {
+    for (const operator of ["contains", "startsWith", "endsWith"] as const) {
+      expect(matchesRenameRule(substringRule(1, "   ", "Grocery", operator), "SAFEWAY")).toBe(false);
+    }
+  });
+
+  it("never matches transfer-shaped payees", () => {
+    for (const operator of ["contains", "startsWith", "endsWith"] as const) {
+      const r = substringRule(1, "Transfer", "Grocery", operator);
+      expect(matchesRenameRule(r, "Transfer : Savings")).toBe(false);
+    }
+    // Even an operand that would otherwise hit.
+    const r = substringRule(1, "savings", "Grocery", "contains");
+    expect(matchesRenameRule(r, "Transfer : Savings")).toBe(false);
+  });
+
+  it("still returns false for empty payees", () => {
+    const r = substringRule(1, "SAFEWAY", "Grocery", "contains");
+    expect(matchesRenameRule(r, "   ")).toBe(false);
+  });
+
+  it("exact rows without an operator keep their exact semantics", () => {
+    expect(matchesRenameRule(rule(1, "SAFEWAY", "Grocery"), "SAFEWAY #123")).toBe(false);
+    expect(matchesRenameRule(rule(1, "SAFEWAY", "Grocery"), "safeway")).toBe(true);
+  });
+});
+
+describe("compiled substring rule matching", () => {
+  it("mirrors matchesRenameRule across operators and payees", () => {
+    const rules = [
+      substringRule(1, "SAFEWAY", "Grocery", "contains"),
+      substringRule(2, "SAFE", "Grocery", "startsWith"),
+      substringRule(3, "123", "Grocery", "endsWith"),
+      rule(4, "BCF1", "BC Ferries"),
+    ];
+    const compiled = compileRenameRules(rules);
+    const payees = [
+      "SAFEWAY #123",
+      "safeway",
+      "THE SAFEWAY STORE",
+      "SAFE",
+      "123",
+      "Transfer : Savings",
+      "BCF1",
+      "Whole Foods",
+      "",
+      "   ",
+    ];
+    for (const r of rules) {
+      const c = compiled.find((x) => x.rule.id === r.id)!;
+      for (const payee of payees) {
+        const expected = payee.trim() ? matchesRenameRule(r, payee) : false;
+        expect(matchesCompiledRule(c, normalizeRenameText(payee))).toBe(expected);
+      }
+    }
+  });
+});
+
+describe("applyRenameRules with substring operators", () => {
+  it("gives exact rules precedence over contains", () => {
+    const rules = [
+      substringRule(1, "SAFEWAY", "Grocery", "contains", "2026-01-02T00:00:00.000Z"),
+      rule(2, "SAFEWAY #123", "Downtown Grocery"),
+    ];
+    expect(applyRenameRules(rules, "SAFEWAY #123")).toBe("Downtown Grocery");
+    expect(applyRenameRules(rules, "SAFEWAY #999")).toBe("Grocery");
+  });
+
+  it("resolves newer-beats-older within the substring/pattern tier", () => {
+    const rules = [
+      substringRule(1, "SAFE", "Old", "startsWith", "2026-01-01T00:00:00.000Z"),
+      substringRule(2, "SAFEWAY", "New", "contains", "2026-01-02T00:00:00.000Z"),
+    ];
+    expect(applyRenameRules(rules, "SAFEWAY #1")).toBe("New");
+  });
+
+  it("treats [N] patterns and substring rules as one tier (newer wins)", () => {
+    const rules = [
+      { ...rule(1, "AMZN [N]", "Digits"), createdAt: "2026-01-01T00:00:00.000Z" },
+      { ...substringRule(2, "AMZN", "Sub", "contains"), createdAt: "2026-01-02T00:00:00.000Z" },
+    ];
+    expect(applyRenameRules(rules, "AMZN 123")).toBe("Sub");
+  });
+});
+
+describe("countRenameRuleMatches with substring operators", () => {
+  it("counts substring hits excluding rows already at the target", () => {
+    const rules = [substringRule(1, "SAFEWAY", "Grocery", "contains")];
+    const counts = countRenameRuleMatches(rules, [
+      "SAFEWAY #123",
+      "the safeway store",
+      "Grocery",
+      "Whole Foods",
+    ]);
+    expect(counts.get(1)).toBe(2);
+  });
+});
+
+describe("renameRulePayeeFilterForRule", () => {
+  it("returns the operand for substring rules", () => {
+    expect(renameRulePayeeFilterForRule(substringRule(1, "SAFEWAY", "G", "contains"))).toBe("SAFEWAY");
+    expect(renameRulePayeeFilterForRule(substringRule(1, "  SAFE  ", "G", "startsWith"))).toBe("SAFE");
+  });
+
+  it("returns null for blank substring operands", () => {
+    expect(renameRulePayeeFilterForRule(substringRule(1, "   ", "G", "contains"))).toBeNull();
+  });
+
+  it("delegates exact/pattern rules to the string filter", () => {
+    expect(renameRulePayeeFilterForRule(rule(1, "BCF[N]", "X"))).toBe(
+      renameRulePayeeFilter("BCF[N]")
+    );
+    expect(renameRulePayeeFilterForRule(rule(1, "BCF1", "X"))).toBe("BCF1");
+  });
+});
+
+describe("learnRenameRule with substring rules present", () => {
+  it("keeps a covering substring rule and skips the redundant exact", () => {
+    const existing = [substringRule(1, "SAFEWAY", "Grocery", "contains")];
+    const { rules, generalised } = learnRenameRule(existing, "SAFEWAY #123", "Grocery");
+    expect(generalised).toBe(false);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ sourcePattern: "SAFEWAY", operator: "contains" });
+  });
+
+  it("never strips or generalises a substring rule", () => {
+    const existing = [
+      substringRule(1, "SAFEWAY", "Grocery", "contains"),
+      rule(2, "SAFEWAY #123", "Grocery"),
+    ];
+    const { rules } = learnRenameRule(existing, "SAFEWAY #123", "Other");
+    expect(rules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sourcePattern: "SAFEWAY", operator: "contains" })])
+    );
   });
 });
 

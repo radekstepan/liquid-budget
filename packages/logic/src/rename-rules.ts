@@ -1,4 +1,24 @@
-import type { RenameRule } from "./types.js";
+import type { RenameRule, RenameRuleOperator } from "./types.js";
+
+export type { RenameRuleOperator };
+
+/**
+ * Substring/exact match flavour of a rename rule. Stored rules pre-dating
+ * the operator column carry no value and behave as `"is"`.
+ *
+ * Matching for every operator folds both the operand and the payee with
+ * {@link normalizeRenameText} (lowercase, whitespace collapse, bank
+ * separator punctuation folding). That folding is a superset of YNAB4's
+ * `toLocaleLowerCase`-only comparison: `AMZN*MKTP` matches operand
+ * `AMZN MKTP` here, where stock YNAB4 would not. The superset is
+ * deliberate — it keeps one consistent matcher for exact, `[N]`/`[X]`
+ * pattern, and substring rules instead of three folding regimes.
+ *
+ * Priority is unchanged from the exact/pattern fork: exact (`"is"`,
+ * non-`[N]`/`[X]`) rules win over everything, then every other rule —
+ * `[N]`/`[X]` patterns and all three substring operators in one tier —
+ * resolves newer-beats-older.
+ */
 
 /**
  * Automatic payee rename rules.
@@ -34,6 +54,7 @@ import type { RenameRule } from "./types.js";
 export type RenameRuleInput = {
   sourcePattern: string;
   targetPayee: string;
+  operator?: RenameRuleOperator;
 };
 
 /**
@@ -50,6 +71,37 @@ export const RENAME_WILDCARD = "[N]";
 export const RENAME_REF_WILDCARD = "[X]";
 /** Hard cap on wildcards per inferred pattern; keeps rules readable. */
 const MAX_PATTERN_SLOTS = 4;
+
+/** Every match flavour a stored rule can carry. */
+export const RENAME_OPERATORS: readonly RenameRuleOperator[] = [
+  "is",
+  "contains",
+  "startsWith",
+  "endsWith",
+];
+
+/**
+ * Normalised match flavour of a rule; missing/unknown values behave as
+ * `"is"` so pre-operator rows keep their exact semantics.
+ */
+export function getRenameRuleOperator(rule: Pick<RenameRule, "operator">): RenameRuleOperator {
+  const op = typeof rule.operator === "string" ? rule.operator.trim() : "";
+  return (RENAME_OPERATORS as readonly string[]).includes(op) ? (op as RenameRuleOperator) : "is";
+}
+
+/** True when a rule uses a YNAB4-style substring operator. */
+export function isSubstringRule(rule: Pick<RenameRule, "operator">): boolean {
+  return getRenameRuleOperator(rule) !== "is";
+}
+
+/**
+ * True when a rule is an exact rule: `"is"` (or absent) operator and no
+ * `[N]`/`[X]` wildcard. Exact rules outrank every other rule in
+ * {@link applyRenameRules}.
+ */
+export function isExactRule(rule: Pick<RenameRule, "sourcePattern" | "operator">): boolean {
+  return getRenameRuleOperator(rule) === "is" && !isPatternRule(rule.sourcePattern);
+}
 
 /**
  * System-generated transfer payees look like `Transfer : <account>`.
@@ -127,6 +179,8 @@ export type CompiledRenameRule = {
   normalizedTarget: string;
   /** Set for exact rules: normalized source text for O(1) comparison. */
   normalizedSource?: string;
+  /** Set for substring rules: normalized operand for inclusion tests. */
+  normalizedOperand?: string;
   /** Set for pattern rules with a valid regex; absent means "never matches". */
   regex?: RegExp;
 };
@@ -135,6 +189,9 @@ export function compileRenameRules(rules: RenameRule[]): CompiledRenameRule[] {
   return rules.map((rule) => {
     const pattern = rule.sourcePattern.trim();
     const normalizedTarget = normalizeRenameText(rule.targetPayee);
+    if (isSubstringRule(rule)) {
+      return { rule, normalizedTarget, normalizedOperand: normalizeRenameText(pattern) };
+    }
     if (isPatternRule(pattern)) {
       const regex = renamePatternToRegExp(pattern);
       return regex ? { rule, normalizedTarget, regex } : { rule, normalizedTarget };
@@ -146,12 +203,36 @@ export function compileRenameRules(rules: RenameRule[]): CompiledRenameRule[] {
 /**
  * Match an already-normalized payee against a compiled rule. Mirrors
  * {@link matchesRenameRule}, including its empty-payee behaviour.
+ *
+ * Substring operands compare after the same normalization as the payee;
+ * an operand normalizing to empty never matches (mirroring YNAB4, where
+ * a blank operand matches nothing), and transfer-shaped payees never
+ * match substring rules (YNAB4 rename conditions are children of a
+ * payee; transfers live outside the rename-rule domain).
  */
 export function matchesCompiledRule(
   compiled: CompiledRenameRule,
   normalizedPayee: string
 ): boolean {
   if (!normalizedPayee) return false;
+  if (compiled.normalizedOperand !== undefined) {
+    const operand = compiled.normalizedOperand;
+    if (!operand) return false;
+    // Normalized text folds ":" to a space, so `isTransferPayee` (which
+    // needs the colon) cannot fire here; test the folded shape instead:
+    // "Transfer : X" normalizes to "transfer x".
+    if (/^transfer(?:\s|$)/.test(normalizedPayee)) return false;
+    switch (getRenameRuleOperator(compiled.rule)) {
+      case "contains":
+        return normalizedPayee.includes(operand);
+      case "startsWith":
+        return normalizedPayee.startsWith(operand);
+      case "endsWith":
+        return normalizedPayee.endsWith(operand);
+      default:
+        return false;
+    }
+  }
   if (compiled.regex) return compiled.regex.test(normalizedPayee);
   if (compiled.normalizedSource !== undefined) {
     return compiled.normalizedSource === normalizedPayee;
@@ -192,8 +273,9 @@ export function countRenameRuleMatches(
 /**
  * Substring for filtering the transaction register down to rows a rule
  * likely matches. Exact rules filter on the source text itself; pattern
- * rules filter on the longest literal fragment (`BCF[N]` → `BCF`).
- * Returns null when a pattern has no literal text to filter on.
+ * rules filter on the longest literal fragment (`BCF[N]` → `BCF`);
+ * substring rules filter on the operand itself. Returns null when a
+ * pattern has no literal text to filter on.
  */
 export function renameRulePayeeFilter(sourcePattern: string): string | null {
   const trimmed = sourcePattern.trim();
@@ -211,10 +293,43 @@ export function renameRulePayeeFilter(sourcePattern: string): string | null {
   return longest;
 }
 
-/** Does a raw payee match this rule? Exact rules compare normalized text. */
+/** Overload accepting a full rule so substring operands filter on themselves. */
+export function renameRulePayeeFilterForRule(rule: Pick<RenameRule, "sourcePattern" | "operator">): string | null {
+  if (isSubstringRule(rule)) {
+    const trimmed = rule.sourcePattern.trim();
+    return trimmed ? trimmed : null;
+  }
+  return renameRulePayeeFilter(rule.sourcePattern);
+}
+
+/**
+ * Does a raw payee match this rule? Exact rules compare normalized text;
+ * substring rules test inclusion/prefix/suffix of the normalized operand
+ * (empty operands never match, transfer-shaped payees never match).
+ */
 export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
   const raw = payee.trim();
   if (!raw) return false;
+  if (isSubstringRule(rule)) {
+    const operand = normalizeRenameText(rule.sourcePattern);
+    if (!operand) return false;
+    if (isTransferPayee(raw)) return false;
+    const normalized = normalizeRenameText(raw);
+    // Re-check the folded shape: normalization turns "Transfer : X"
+    // into "transfer x", which the raw colon test above already rejects,
+    // but a colon-less "Transfer savings" is still transfer-shaped.
+    if (/^transfer(?:\s|$)/.test(normalized)) return false;
+    switch (getRenameRuleOperator(rule)) {
+      case "contains":
+        return normalized.includes(operand);
+      case "startsWith":
+        return normalized.startsWith(operand);
+      case "endsWith":
+        return normalized.endsWith(operand);
+      default:
+        return false;
+    }
+  }
   const pattern = rule.sourcePattern.trim();
   if (isPatternRule(pattern)) {
     const re = renamePatternToRegExp(pattern);
@@ -223,12 +338,16 @@ export function matchesRenameRule(rule: RenameRule, payee: string): boolean {
   return normalizeRenameText(pattern) === normalizeRenameText(raw);
 }
 
-/** Apply rules to a raw payee. Exact rules take precedence over patterns; newer rules take precedence over older rules. */
+/**
+ * Apply rules to a raw payee. Exact rules take precedence over patterns
+ * and substring rules; newer rules take precedence over older rules
+ * within the same tier.
+ */
 export function applyRenameRules(rules: RenameRule[], payee: string): string {
   if (rules.length === 0) return payee;
   const sorted = [...rules].sort((a, b) => {
-    const aExact = !isPatternRule(a.sourcePattern) ? 1 : 0;
-    const bExact = !isPatternRule(b.sourcePattern) ? 1 : 0;
+    const aExact = isExactRule(a) ? 1 : 0;
+    const bExact = isExactRule(b) ? 1 : 0;
     if (bExact !== aExact) return bExact - aExact;
     if (a.createdAt && b.createdAt && a.createdAt !== b.createdAt) {
       return b.createdAt.localeCompare(a.createdAt);
@@ -464,8 +583,10 @@ export function learnRenameRule(
 
   // Strip conflicting exact rules matching this normalized source payee
   // so the latest explicit rename replaces any older exact mapping.
+  // Pattern and substring rules are never stripped: they cover families
+  // of payees, not this one source.
   const cleanRules = rules.filter(
-    (r) => isPatternRule(r.sourcePattern) || normalizeRenameText(r.sourcePattern) !== normalizeRenameText(source)
+    (r) => !isExactRule(r) || normalizeRenameText(r.sourcePattern) !== normalizeRenameText(source)
   );
 
   const sameTarget = cleanRules.filter(
@@ -481,8 +602,12 @@ export function learnRenameRule(
   }
 
   // Try to generalise: do all existing sources for this target plus the new
-  // one collapse into a single trailing-number pattern?
-  const existingSources = sameTarget.map((r) => r.sourcePattern);
+  // one collapse into a single trailing-number pattern? Only exact
+  // sources participate — pattern and substring rules cover families
+  // already and must never seed a generalisation.
+  const existingSources = sameTarget
+    .filter((r) => isExactRule(r))
+    .map((r) => r.sourcePattern);
   const inferred = inferRenameRule(existingSources, source);
   if (inferred) {
     const kept = cleanRules.filter((r) => {
@@ -490,7 +615,7 @@ export function learnRenameRule(
         return true;
       }
       return !matchesRenameRule(
-        { ...r, sourcePattern: inferred.sourcePattern },
+        { ...r, operator: "is", sourcePattern: inferred.sourcePattern },
         r.sourcePattern
       );
     });
