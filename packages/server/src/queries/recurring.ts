@@ -11,7 +11,7 @@ import {
 } from "@ynab/logic";
 import type { Database } from "../client.js";
 import { withTransaction } from "../transaction.js";
-import { recurring, recurringSubTransactions } from "../schema.js";
+import { recurring, recurringSubTransactions, scheduledPostings, transactions } from "../schema.js";
 import {
   createSplitWithChildren,
   createTransaction,
@@ -508,7 +508,53 @@ export async function deleteRecurring(db: Database, id: number): Promise<boolean
  * Materialize a recurring transaction into a real transaction row with full
  * split and transfer integrity, using the scheduled nextDate (or specified postDate),
  * and advance the scheduled nextDate according to its frequency.
+ *
+ * Posted identity is deterministic (YNAB4 `ScheduledTransaction.addToRegister`
+ * + `YNABGuidCreator.createTransactionIdForEnteredScheduledTransaction`):
+ * the same (schedule, date) occurrence always yields the same entity id
+ * (`<schedule>_<yyyy-MM-dd>_<count>`, bumping `count` while taken), and a
+ * deleted-then-re-posted occurrence restores the SAME integer row id via the
+ * `scheduled_postings` lineage table, which outlives the posted row.
  */
+async function isScheduledEntityIdTaken(db: Database, candidate: string): Promise<boolean> {
+  const [txHit] = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.entityId, candidate))
+    .limit(1);
+  if (txHit) return true;
+  const [ruleHit] = await db
+    .select({ id: recurring.id })
+    .from(recurring)
+    .where(eq(recurring.entityId, candidate))
+    .limit(1);
+  return Boolean(ruleHit);
+}
+
+/**
+ * Mint the deterministic posted entity id for a (schedule, date)
+ * occurrence: `<scheduleEntityId>_<yyyy-MM-dd>_<count>`, bumping `count`
+ * while the id is taken — the integer-PK analogue of YNAB4's
+ * `createTransactionIdForEnteredScheduledTransaction`. When re-posting a
+ * deleted occurrence, the recorded lineage entity id is preferred so the
+ * restored row is byte-identical to the deleted one.
+ */
+async function claimScheduledEntityId(
+  db: Database,
+  base: string,
+  reusePreferred?: string | null
+): Promise<string> {
+  if (reusePreferred && !(await isScheduledEntityIdTaken(db, reusePreferred))) {
+    return reusePreferred;
+  }
+  let count = 0;
+  for (;;) {
+    const candidate = `${base}_${count}`;
+    if (!(await isScheduledEntityIdTaken(db, candidate))) return candidate;
+    count++;
+  }
+}
+
 export async function postRecurringTransaction(
   db: Database,
   recurringId: number,
@@ -530,12 +576,46 @@ export async function postRecurringTransaction(
       .where(eq(recurringSubTransactions.recurringId, r.id))
       .orderBy(recurringSubTransactions.sort);
 
+    // Deterministic posted identity for this (schedule, date) occurrence.
+    // A re-post after delete restores the recorded row id + entity id;
+    // a re-post while the row still lives bumps the count suffix, exactly
+    // like YNAB4's conflict loop.
+    const [lineage] = await db
+      .select()
+      .from(scheduledPostings)
+      .where(
+        and(
+          eq(scheduledPostings.recurringId, r.id),
+          eq(scheduledPostings.occurrenceDate, dateToUse)
+        )
+      );
+    const entityBase = `${r.entityId || `sched-${r.id}`}_${dateToUse}`;
+    let reuseId: number | null = null;
+    let scheduledEntityId: string;
+    if (lineage) {
+      const [stillPosted] = await db
+        .select({ id: transactions.id })
+        .from(transactions)
+        .where(eq(transactions.id, lineage.transactionId));
+      if (!stillPosted) {
+        reuseId = lineage.transactionId;
+        scheduledEntityId = await claimScheduledEntityId(db, entityBase, lineage.entityId);
+      } else {
+        scheduledEntityId = await claimScheduledEntityId(db, entityBase);
+      }
+    } else {
+      scheduledEntityId = await claimScheduledEntityId(db, entityBase);
+    }
+
     let postedTxn;
+    let postedParentId: number;
     // Scheduled occurrences enter as Uncleared + needsReview so they
     // stand out in the register (bold, counted as "new") exactly like
     // freshly imported rows, until the user reviews them.
     if (r.transferAccountId != null) {
       postedTxn = await createTransaction(db, {
+        id: reuseId,
+        entityId: scheduledEntityId,
         accountId: r.accountId,
         categoryId: r.categoryId,
         date: dateToUse,
@@ -547,10 +627,13 @@ export async function postRecurringTransaction(
         transferAccountId: r.transferAccountId,
         flagColor: sanitizeFlagColor(r.flagColor),
       });
+      postedParentId = (postedTxn as { id: number }).id;
     } else if (children.length > 0) {
-      postedTxn = await createSplitWithChildren(
+      const splitResult = await createSplitWithChildren(
         db,
         {
+          id: reuseId,
+          entityId: scheduledEntityId,
           accountId: r.accountId,
           date: dateToUse,
           payee: r.payee,
@@ -567,8 +650,12 @@ export async function postRecurringTransaction(
           transferAccountId: c.transferAccountId,
         }))
       );
+      postedTxn = splitResult;
+      postedParentId = splitResult.parent!.id;
     } else {
       postedTxn = await createTransaction(db, {
+        id: reuseId,
+        entityId: scheduledEntityId,
         accountId: r.accountId,
         categoryId: r.categoryId,
         date: dateToUse,
@@ -580,6 +667,7 @@ export async function postRecurringTransaction(
         transferAccountId: null,
         flagColor: sanitizeFlagColor(r.flagColor),
       });
+      postedParentId = (postedTxn as { id: number }).id;
     }
 
     const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
@@ -607,6 +695,15 @@ export async function postRecurringTransaction(
 
     if (!updated) {
       throw new RecurringError("Recurring transaction schedule mismatch or inactive", 409);
+    }
+
+    if (!lineage) {
+      await db.insert(scheduledPostings).values({
+        recurringId: r.id,
+        occurrenceDate: dateToUse,
+        transactionId: postedParentId,
+        entityId: scheduledEntityId,
+      });
     }
 
     return { transaction: postedTxn, nextDate: next, active: isOneOff ? false : r.active };

@@ -291,6 +291,41 @@ export const recurringSubTransactions = sqliteTable(
   })
 );
 
+/**
+ * Lineage of scheduled-posting occurrences: (schedule, occurrence date) ->
+ * posted transaction row. Survives deletion of the posted row so that
+ * re-posting the same occurrence restores the SAME row id and entity id,
+ * mirroring YNAB4's deterministic
+ * `idCreator.createTransactionIdForEnteredScheduledTransaction(
+ *   scheduleEntityId, date)` (`ScheduledTransaction.as:184`).
+ * Deleting the schedule cascades and drops its lineage.
+ */
+export const scheduledPostings = sqliteTable(
+  "scheduled_postings",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recurringId: integer("recurring_id")
+      .notNull()
+      .references(() => recurring.id, { onDelete: "cascade" }),
+    occurrenceDate: text("occurrence_date").notNull(),
+    /**
+     * Id of the posted parent transaction row. Plain integer, deliberately
+     * NOT a foreign key: the lineage must outlive the posted row so a
+     * re-post can explicitly reuse the freed id.
+     */
+    transactionId: integer("transaction_id").notNull(),
+    /** Deterministic posted entity id (`<sched>_<date>_<count>`). */
+    entityId: text("entity_id").notNull(),
+  },
+  (t) => ({
+    ruleDateUniq: uniqueIndex("scheduled_postings_rule_date_uniq").on(
+      t.recurringId,
+      t.occurrenceDate
+    ),
+    ruleIdx: index("scheduled_postings_rule_idx").on(t.recurringId),
+  })
+);
+
 export const renameRules = sqliteTable(
   "rename_rules",
   {
@@ -333,5 +368,6 @@ export type Transaction = typeof transactions.$inferSelect;
 export type Reconciliation = typeof reconciliations.$inferSelect;
 export type Recurring = typeof recurring.$inferSelect;
 export type RecurringSubTransaction = typeof recurringSubTransactions.$inferSelect;
+export type ScheduledPosting = typeof scheduledPostings.$inferSelect;
 export type RenameRule = typeof renameRules.$inferSelect;
 export type Setting = typeof settings.$inferSelect;

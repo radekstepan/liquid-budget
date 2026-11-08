@@ -69,6 +69,20 @@ export type CreateTransactionInput = {
    * Set by scheduled posting and CSV import; manual entry leaves it false.
    */
   needsReview?: boolean;
+  /**
+   * Explicit row id. Only the scheduled-posting re-post path sets this:
+   * when a previously posted occurrence was deleted, its freed id is
+   * reused so the re-post restores the same row (YNAB4's deterministic
+   * `scheduleId_date_count` id is stable across delete/re-post).
+   */
+  id?: number | null;
+  /**
+   * Explicit entity id. The scheduled-posting path stamps deterministic
+   * `<schedule>_<date>_<count>` ids (YNAB4 `YNABGuidCreator`
+   * `createTransactionIdForEnteredScheduledTransaction`); everything else
+   * leaves this null.
+   */
+  entityId?: string | null;
 };
 
 export type UpdateTransactionInput = {
@@ -434,6 +448,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
     const [row] = await db
       .insert(transactions)
       .values({
+        ...(input.id != null ? { id: input.id } : {}),
         accountId: input.accountId,
         categoryId,
         date: input.date,
@@ -448,6 +463,7 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
         isIncome,
         incomeMonth,
         needsReview: input.needsReview ?? false,
+        entityId: input.entityId ?? null,
       })
       .returning();
 
@@ -527,6 +543,7 @@ export async function createTransfer(
     const [row] = await db
       .insert(transactions)
       .values({
+        ...(baseInput.id != null ? { id: baseInput.id } : {}),
         accountId: baseInput.accountId,
         categoryId,
         date: baseInput.date,
@@ -541,6 +558,7 @@ export async function createTransfer(
         isIncome,
         incomeMonth,
         needsReview: baseInput.needsReview ?? false,
+        entityId: baseInput.entityId ?? null,
       })
       .returning();
 
@@ -567,6 +585,10 @@ export async function createSplitWithChildren(
     status?: ClearedStatus;
     flagColor?: TransactionFlagColor | null;
     needsReview?: boolean;
+    /** Explicit parent row id — scheduled-posting re-post reuse only. */
+    id?: number | null;
+    /** Deterministic entity id — scheduled-posting path only. */
+    entityId?: string | null;
   },
   children: SubTransactionInput[]
 ) {
@@ -608,6 +630,7 @@ export async function createSplitWithChildren(
     const [parentRow] = await db
       .insert(transactions)
       .values({
+        ...(parent.id != null ? { id: parent.id } : {}),
         accountId: parent.accountId,
         categoryId: null,
         date: parent.date,
@@ -620,6 +643,7 @@ export async function createSplitWithChildren(
         parentId: null,
         isIncome: false,
         needsReview: parent.needsReview ?? false,
+        entityId: parent.entityId ?? null,
       })
       .returning();
 
