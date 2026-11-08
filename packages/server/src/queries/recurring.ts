@@ -48,6 +48,16 @@ export type CreateRecurringInput = {
   frequency: string;
   nextDate: string;
   anchorDay?: number | null;
+  /**
+   * Frozen YNAB4 `twiceAMonthStartDay` for twice-a-month schedules
+   * (`ScheduledTransactionVO`, G-08). Pins the first leg while posting
+   * (YNAB4 freezes it via `updateTwiceAMonthStartDay = false`); the
+   * importer writes it verbatim and the exporter reads it back. When
+   * omitted on a twice-a-month create it is derived from `nextDate`
+   * (`day <= 15 ? day : day - 15`, mirroring
+   * `resetTwiceAMonthStartDay`); ignored for other frequencies.
+   */
+  secondAnchorDay?: number | null;
   active?: boolean;
   flagColor?: TransactionFlagColor | null;
   /**
@@ -76,6 +86,15 @@ export type UpdateRecurringInput = {
   frequency?: string;
   nextDate?: string;
   anchorDay?: number | null;
+  /**
+   * Explicit override of the frozen twice-a-month start day (see
+   * `CreateRecurringInput.secondAnchorDay`). Omit to leave it alone,
+   * except that hand-editing `nextDate` on a twice-a-month rule
+   * re-derives it from the new date and switching frequency away from
+   * twice-a-month clears it — both mirroring YNAB4's
+   * `resetTwiceAMonthStartDay`.
+   */
+  secondAnchorDay?: number | null;
   active?: boolean;
   flagColor?: TransactionFlagColor | null;
   transferAccountId?: number | null;
@@ -110,6 +129,32 @@ function assertSplitsBalancedOr4xx(
   children: TxnSubTransactionInput[]
 ): void {
   assertSplitsBalanced(parentAmount, children, (message) => new RecurringError(message, 400));
+}
+
+function normaliseFrequency(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function isTwiceAMonthFrequency(value: unknown): boolean {
+  const norm = normaliseFrequency(value);
+  return norm === "twiceamonth" || norm === "semimonthly";
+}
+
+/**
+ * YNAB4 `ScheduledTransaction.resetTwiceAMonthStartDay`: derive the frozen
+ * twice-a-month start day from a date (`day <= 15 ? day : day - 15`).
+ */
+function deriveTwiceAMonthStartDay(dateISO: string): number {
+  const day = parseInt(dateISO.slice(8, 10), 10);
+  return day <= 15 ? day : day - 15;
+}
+
+function assertValidSecondAnchorDay(value: unknown): number {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < 1 || n > 31) {
+    throw new RecurringError("secondAnchorDay must be an integer between 1 and 31", 422);
+  }
+  return n;
 }
 
 function normaliseInput(input: CreateRecurringInput | UpdateRecurringInput): {
@@ -217,6 +262,18 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         ? Number(input.anchorDay)
         : parseInt(validatedNextDate.slice(8, 10), 10);
 
+    // Freeze the twice-a-month start day at create time (YNAB4 derives it
+    // from the date and then pins it while posting). An explicit value is
+    // validated; otherwise it derives from `nextDate`. Other frequencies
+    // never carry one.
+    let secondAnchorDay: number | null = null;
+    if (isTwiceAMonthFrequency(validatedFrequency)) {
+      secondAnchorDay =
+        input.secondAnchorDay !== undefined && input.secondAnchorDay !== null
+          ? assertValidSecondAnchorDay(input.secondAnchorDay)
+          : deriveTwiceAMonthStartDay(validatedNextDate);
+    }
+
     const [parent] = await db
       .insert(recurring)
       .values({
@@ -228,6 +285,7 @@ export async function createRecurring(db: Database, input: CreateRecurringInput)
         frequency: validatedFrequency,
         nextDate: validatedNextDate,
         anchorDay,
+        secondAnchorDay,
         active: input.active ?? true,
         flagColor: sanitizeFlagColor(input.flagColor),
         transferAccountId: norm.effectiveTransferAccountId ?? null,
@@ -385,6 +443,20 @@ export async function updateRecurring(db: Database, id: number, patch: UpdateRec
       p.anchorDay = parseInt(dateForAnchor.slice(8, 10), 10);
     }
   }
+  if (patch.secondAnchorDay !== undefined) {
+    p.secondAnchorDay =
+      patch.secondAnchorDay === null ? null : assertValidSecondAnchorDay(patch.secondAnchorDay);
+  } else if (isTwiceAMonthFrequency(effectiveFreq)) {
+    if (
+      patch.nextDate !== undefined ||
+      (patch.frequency !== undefined && existing.secondAnchorDay == null)
+    ) {
+      const dateForDerive = (p.nextDate as string | undefined) ?? existing.nextDate;
+      p.secondAnchorDay = deriveTwiceAMonthStartDay(dateForDerive);
+    }
+  } else if (patch.frequency !== undefined) {
+    p.secondAnchorDay = null;
+  }
   if (patch.active !== undefined && patch.active != null) p.active = !!patch.active;
   if (patch.flagColor !== undefined) p.flagColor = sanitizeFlagColor(patch.flagColor);
   if (patch.transferAccountId !== undefined) p.transferAccountId = norm.effectiveTransferAccountId ?? null;
@@ -517,18 +589,17 @@ export async function deleteRecurring(db: Database, id: number): Promise<boolean
  * `scheduled_postings` lineage table, which outlives the posted row.
  */
 async function isScheduledEntityIdTaken(db: Database, candidate: string): Promise<boolean> {
+  // Only the transactions namespace is probed. A posted id
+  // (`<schedule>_<date>_<count>`) can never collide with a rule entity id
+  // by construction (rule ids come from imports/app state, never from the
+  // posted-id mint), so probing `recurring` here would cost an extra query
+  // per candidate with no production benefit.
   const [txHit] = await db
     .select({ id: transactions.id })
     .from(transactions)
     .where(eq(transactions.entityId, candidate))
     .limit(1);
-  if (txHit) return true;
-  const [ruleHit] = await db
-    .select({ id: recurring.id })
-    .from(recurring)
-    .where(eq(recurring.entityId, candidate))
-    .limit(1);
-  return Boolean(ruleHit);
+  return Boolean(txHit);
 }
 
 /**
@@ -670,10 +741,10 @@ export async function postRecurringTransaction(
       postedParentId = (postedTxn as { id: number }).id;
     }
 
-    const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+    const normFreq = normaliseFrequency(r.frequency);
     const isOneOff = normFreq === "never" || normFreq === "once";
     const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
-    const next = nextDateFor(r.frequency, r.nextDate, anchor);
+    const next = nextDateFor(r.frequency, r.nextDate, anchor, r.secondAnchorDay ?? undefined);
     const updatePayload: { nextDate: string; active?: boolean; anchorDay?: number } = { nextDate: next };
     if (isOneOff) {
       updatePayload.active = false;
@@ -733,8 +804,9 @@ export type AutoPostResult = {
  * Each due rule is isolated so that a single corrupted or un-postable rule
  * does not block or roll back valid due rules. Failing rules are recorded in
  * failures and marked inactive (active = false).
- * Catch-up occurrences are capped per rule (default maxOccurrencesPerRule: 5) to prevent
- * runaway mass materialization when databases are opened after long gaps.
+ * Like YNAB4's `enterDueOccurrences`, every due occurrence posts (unbounded
+ * by default); pass `maxOccurrencesPerRule` to opt into a per-rule
+ * anti-runaway cap, with the parked remainder reported in `capped`.
  */
 export async function autoPostDueRecurringTransactions(
   db: Database,
@@ -750,7 +822,7 @@ export async function autoPostDueRecurringTransactions(
   const posted: any[] = [];
   const failures: AutoPostFailure[] = [];
   const capped: AutoPostCapped[] = [];
-  const maxPerRule = options?.maxOccurrencesPerRule !== undefined ? options.maxOccurrencesPerRule : 5;
+  const maxPerRule = options?.maxOccurrencesPerRule;
   // In-process idempotency guard: prevents re-attempting the same (ruleId, nextDate)
   // within a single call, which can happen when concurrent callers race and
   // the loser receives a 409 and should re-read rather than retry.
@@ -764,16 +836,16 @@ export async function autoPostDueRecurringTransactions(
       if (attemptedKeys.has(key)) break;
       attemptedKeys.add(key);
 
-      if (maxPerRule > 0 && occurrencesForThisRule >= maxPerRule) {
+      if (maxPerRule != null && maxPerRule > 0 && occurrencesForThisRule >= maxPerRule) {
         let remainingDue = 0;
         let tempDate = currentNextDate;
         const anchor = r.anchorDay ?? parseInt(r.nextDate.slice(8, 10), 10);
-        const normFreq = (r.frequency || "").toLowerCase().replace(/[\s_-]+/g, "");
+        const normFreq = normaliseFrequency(r.frequency);
         const isOneOff = normFreq === "never" || normFreq === "once";
         while (tempDate <= validatedAsOfDate) {
           remainingDue++;
           if (isOneOff) break;
-          const nextTemp = nextDateFor(r.frequency, tempDate, anchor);
+          const nextTemp = nextDateFor(r.frequency, tempDate, anchor, r.secondAnchorDay ?? undefined);
           if (nextTemp <= tempDate) break;
           tempDate = nextTemp;
         }

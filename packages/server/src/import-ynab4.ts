@@ -1998,11 +1998,23 @@ export async function importYnab4(
       const hasSubs = nonZeroSubs.length >= 2;
 
       let parentAmount = convertAmount(st.amount);
+      // G-split: an unbalanced scheduled split keeps the file parent and
+      // gains an auto-balance filler leg (the same repair register splits
+      // use above) instead of silently rebasing the parent to the children
+      // sum. The repair only counts once the row actually imports — a
+      // zero-amount parent is still skipped below.
+      let scheduledFiller: { amount: number; memo?: string | null } | null = null;
       if (hasSubs) {
         catId = null;
         transferAccountId = null;
-        // Rebalance parent amount to match the sum of sub-transactions to guarantee split balance invariant
-        parentAmount = nonZeroSubs.reduce((sum: number, sub: any) => sum + convertAmount(sub.amount), 0);
+        const repair = repairSplitForImport(
+          parentAmount,
+          nonZeroSubs.map((sub: any) => ({ amount: convertAmount(sub.amount) }))
+        );
+        parentAmount = repair.parentAmount;
+        if (repair.repaired) {
+          scheduledFiller = repair.children[repair.children.length - 1]!;
+        }
       } else if (nonZeroSubs.length === 1) {
         // A single child is not a valid split; collapse to a regular recurring transaction
         collapsedSingleChildSplits++;
@@ -2037,6 +2049,9 @@ export async function importYnab4(
           reason: "Zero-amount scheduled transaction",
         });
         continue;
+      }
+      if (scheduledFiller) {
+        splitRepairedCount++;
       }
 
       if (transferAccountId != null) {
@@ -2180,6 +2195,20 @@ export async function importYnab4(
             memo: sub.memo || "",
             sort: sort++,
             transferAccountId: subTransferAccountId,
+          });
+        }
+        // G-split: append the repair filler leg (if any) YNAB4-style. It
+        // is synthetic, so it never claims reconciled precision — scheduled
+        // children carry no cleared state at all — and it opts out of
+        // nothing here (scheduled rows have no reconciliation upgrade).
+        if (scheduledFiller) {
+          await db.insert(recurringSubTransactions).values({
+            recurringId: insertedR.id,
+            categoryId: null,
+            amount: scheduledFiller.amount,
+            memo: typeof scheduledFiller.memo === "string" ? scheduledFiller.memo : "",
+            sort: sort++,
+            transferAccountId: null,
           });
         }
       }

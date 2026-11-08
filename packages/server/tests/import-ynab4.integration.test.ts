@@ -1216,8 +1216,10 @@ describe("importYnab4 full import", () => {
       transactions: [],
       monthlyBudgets: [],
       scheduledTransactions: [
-        // Scheduled split with parent amount = -100, but subtransactions sum = -60 + -40 = -100
-        // and child 2 transfers to off-budget without category
+        // Scheduled split with parent amount = -999, but subtransactions sum = -60 + -40 = -100
+        // and child 2 transfers to off-budget without category. The file parent
+        // is preserved and the legs gain an auto-balance filler YNAB4-style
+        // (G-split repair) instead of rebasing the parent to the children sum.
         {
           entityId: "s_split",
           accountId: "acc1",
@@ -1240,9 +1242,10 @@ describe("importYnab4 full import", () => {
     expect(budget.recurring).toHaveLength(1);
     const rec = budget.recurring[0]!;
 
-    // Parent amount rebalanced to sum of children: -6000 + -4000 = -10000 cents
-    expect(Number(rec.amount)).toBe(-10000);
-    expect(rec.subTransactions).toHaveLength(2);
+    // Parent amount preserved from the file (-99900c); the unbalanced legs
+    // gain an auto-balance filler leg (-89900c) YNAB4-style.
+    expect(Number(rec.amount)).toBe(-99900);
+    expect(rec.subTransactions).toHaveLength(3);
     // Boundary transfer child assigned fallback category
     const transferSub = rec.subTransactions.find((s) => s.transferAccountId != null);
     expect(transferSub).toBeDefined();

@@ -1779,7 +1779,7 @@ describe("recurring queries", () => {
       });
     });
 
-    it("BUG-11: autoPostDueRecurringTransactions caps catch-up at default maxPerRule (5) and reports remainingDue=25 for 30-day backlog", async () => {
+    it("BUG-11: autoPostDueRecurringTransactions caps catch-up only with an explicit maxOccurrencesPerRule (default is unbounded, YNAB4 enterDueOccurrences)", async () => {
       const dailyRow = {
         id: 106,
         accountId: 1,
@@ -1796,7 +1796,8 @@ describe("recurring queries", () => {
       // 1. Initial select:recurring
       mock.respondWithNth("select:recurring", 1, [dailyRow]);
 
-      // Default maxOccurrencesPerRule = 5.
+      // Explicit maxOccurrencesPerRule = 5 (opt-in anti-runaway cap; the
+      // default is unbounded per YNAB4 `enterDueOccurrences`).
       // 30 days overdue: 2026-06-01 to 2026-06-30
       // 5 transactions posted (June 1 to June 5)
       for (let i = 1; i <= 5; i++) {
@@ -1810,7 +1811,9 @@ describe("recurring queries", () => {
         mock.respondWith("update:recurring", [{ ...dailyRow, nextDate }]);
       }
 
-      const { posted, capped } = await autoPostDueRecurringTransactions(mock.db, "2026-06-30");
+      const { posted, capped } = await autoPostDueRecurringTransactions(mock.db, "2026-06-30", {
+        maxOccurrencesPerRule: 5,
+      });
 
       expect(posted).toHaveLength(5);
       expect(capped).toHaveLength(1);

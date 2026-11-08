@@ -615,6 +615,31 @@ export function isValidISOMonth(str: unknown): str is string {
 }
 
 /**
+ * Normalize a day-of-month override (1..31) from a number, a numeric
+ * string, or an ISO date string. Returns undefined when absent/invalid so
+ * callers fall back to their default derivation.
+ */
+function normalizeDayOfMonth(value: number | string | null | undefined): number | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return undefined;
+    const day = Math.floor(value);
+    return day >= 1 && day <= 31 ? day : undefined;
+  }
+  if (typeof value === "string") {
+    // Numeric strings first; the ISO-date type guard below narrows `value`
+    // to `never` in its false branch, so it must come last.
+    const trimmed: string = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const day = parseInt(trimmed, 10);
+      return day >= 1 && day <= 31 ? day : undefined;
+    }
+    if (isValidISODate(value)) return parseInt(value.slice(8, 10), 10);
+  }
+  return undefined;
+}
+
+/**
  * Advance an ISO date (YYYY-MM-DD) by one step of the given frequency.
  * Supported frequencies: "daily", "weekly", "biweekly", "twiceamonth",
  * "every4weeks", "monthly", "everyothermonth", "every3months", "every4months",
@@ -630,11 +655,16 @@ export function isValidISOMonth(str: unknown): str is string {
  * When `anchor` is provided (day of month 1..31 or ISO date string), month-based
  * advances clamp against the anchor day rather than the previous output string,
  * preventing permanent schedule drift after February or shorter months (BUG-06).
+ *
+ * `secondAnchor` is only read for twice-a-month schedules: a valid day pins
+ * the first leg to YNAB4's frozen `twiceAMonthStartDay` (the server persists
+ * it as `recurring.second_anchor_day`); other frequencies ignore it.
  */
 export function nextDateFor(
   frequency: string,
   iso: string,
-  anchor?: number | string
+  anchor?: number | string,
+  secondAnchor?: number | string | null
 ): string {
   if (!isValidISODate(iso)) return iso;
   const d = new Date(iso + "T00:00:00Z");
@@ -679,8 +709,22 @@ export function nextDateFor(
       // YNAB4 would push it to next month (its date setter re-derives the
       // start day instead), but that snap is covered, relied-upon behavior
       // here and outside this fix's scope.
-      const d1 = anchorDay <= 15 ? anchorDay : anchorDay - 15;
-      const d2 = anchorDay <= 15 ? anchorDay + 15 : anchorDay;
+      // When `secondAnchor` carries a persisted YNAB4 `twiceAMonthStartDay`
+      // (`recurring.second_anchor_day`, written by the importer and frozen
+      // while posting like YNAB4's `updateTwiceAMonthStartDay = false` in
+      // `addToRegister`), it pins d1 directly instead of deriving the legs
+      // from `anchor`. Without it the legs derive from the single anchor
+      // exactly as YNAB4's `resetTwiceAMonthStartDay` does.
+      let d1: number;
+      let d2: number;
+      const frozen = normalizeDayOfMonth(secondAnchor);
+      if (frozen != null) {
+        d1 = frozen;
+        d2 = frozen + 15;
+      } else {
+        d1 = anchorDay <= 15 ? anchorDay : anchorDay - 15;
+        d2 = anchorDay <= 15 ? anchorDay + 15 : anchorDay;
+      }
       const currentDay = d.getUTCDate();
       const lastDay = new Date(
         Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)
