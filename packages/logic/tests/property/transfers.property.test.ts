@@ -365,7 +365,8 @@ const eligibilityInputArb: fc.Arbitrary<TransferEligibilityInput> = fc.record({
   categoryId: fc.option(idArb, { nil: null }),
   payee: fc.option(fc.oneof(transferPayeeArb, plainPayeeArb), { nil: null }),
   parentId: fc.option(idArb, { nil: null }),
-  isSplitParent: fc.option(fc.boolean()),
+  // Explicit nil: fast-check v4 defaults bare option() to null (out of type here).
+  isSplitParent: fc.option(fc.boolean(), { nil: undefined }),
   srcOnBudget: fc.option(fc.boolean(), { nil: null }),
   destOnBudget: fc.option(fc.boolean(), { nil: null }),
 });
