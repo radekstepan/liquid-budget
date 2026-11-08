@@ -251,8 +251,12 @@ export function matchesCompiledRule(
  * Per-rule counts of stored payees the rule would rewrite: matching rows
  * not already at the target (mirrors the server's apply semantics).
  *
- * Stored payees are normalized once and grouped by distinct text, so this
- * is O(distinct payees × rules) with each pattern regex compiled once —
+ * Stored payees are grouped by distinct trimmed text (not by normalized
+ * text) and the already-at-target skip is a raw comparison, so
+ * case/punctuation-drift rows still count: a `"starbucks"` ->
+ * `"Starbucks"` rule reports the `"starbucks"` rows it would converge.
+ * Matching itself still compares normalized text, so this stays
+ * O(distinct payees × rules) with each pattern regex compiled once —
  * the naive per-row loop is O(rows × rules) with a regex build per cell.
  */
 export function countRenameRuleMatches(
@@ -260,17 +264,17 @@ export function countRenameRuleMatches(
   payees: string[]
 ): Map<number, number> {
   const counts = new Map<number, number>();
-  const byNormalized = new Map<string, number>();
+  const byRaw = new Map<string, number>();
   for (const payee of payees) {
-    if (!payee.trim()) continue;
-    const key = normalizeRenameText(payee);
-    byNormalized.set(key, (byNormalized.get(key) ?? 0) + 1);
+    const trimmed = payee.trim();
+    if (!trimmed) continue;
+    byRaw.set(trimmed, (byRaw.get(trimmed) ?? 0) + 1);
   }
   for (const compiled of compileRenameRules(rules)) {
     let n = 0;
-    for (const [normalized, count] of byNormalized) {
-      if (normalized === compiled.normalizedTarget) continue;
-      if (matchesCompiledRule(compiled, normalized)) n += count;
+    for (const [raw, count] of byRaw) {
+      if (raw === compiled.rule.targetPayee.trim()) continue;
+      if (matchesCompiledRule(compiled, normalizeRenameText(raw))) n += count;
     }
     counts.set(compiled.rule.id, n);
   }
@@ -570,6 +574,16 @@ export function inferRenameRule(
  *
  * Returns the full, deduplicated rule list for the target plus an optional
  * `generalised` indicator. Pure — the caller persists the result.
+ *
+ * Case/punctuation-only drift (`"starbucks"` -> `"Starbucks"`) also learns
+ * an exact rule (unless a surviving rule already covers the spelling, so a
+ * `[N]`/`[X]` family is never shadowed by an exact hijack): transaction
+ * rows carry free text with no payee-entity convergence listener, so the
+ * learned rule is what converges future imports on the curated casing.
+ * (YNAB4 converges the same renames through the payee entity —
+ * `PayeeManager.updateListsWithPayee` renames on case mismatch — and its
+ * affected-transactions scan is case-sensitive, so drift rows count as
+ * affected there too.)
  */
 export function learnRenameRule(
   rules: RenameRule[],
@@ -578,7 +592,7 @@ export function learnRenameRule(
 ): { rules: RenameRuleDraft[]; generalised: boolean } {
   const target = newPayee.trim();
   const source = oldPayee.trim();
-  if (!source || !target || normalizeRenameText(source) === normalizeRenameText(target)) {
+  if (!source || !target || source === target) {
     return { rules, generalised: false };
   }
   // Transfers live outside the rename-rule domain: their payees are
@@ -606,6 +620,28 @@ export function learnRenameRule(
     if (matchesRenameRule(r, source)) {
       return { rules: cleanRules, generalised: false };
     }
+  }
+
+  // Case/punctuation-only drift (`"starbucks"` -> `"Starbucks"`):
+  // normalisation erases the difference, so the rename carries no
+  // generalisable signal — record a plain exact rule for the drifted
+  // spelling so future imports converge on the curated casing. A
+  // pattern-shaped source can never become an exact rule, and when a
+  // surviving rule already matches this spelling (a `[N]`/`[X]` family
+  // or substring rule already handles it) the family wins over an
+  // exact hijack. The stripped `cleanRules` are kept (latest rename
+  // still replaces an older exact mapping) even when nothing is added.
+  if (normalizeRenameText(source) === normalizeRenameText(target)) {
+    if (isPatternRule(source)) {
+      return { rules: cleanRules, generalised: false };
+    }
+    if (cleanRules.some((r) => matchesRenameRule(r, source))) {
+      return { rules: cleanRules, generalised: false };
+    }
+    return {
+      rules: [...cleanRules, { sourcePattern: source, targetPayee: target }],
+      generalised: false,
+    };
   }
 
   // Try to generalise: do all existing sources for this target plus the new

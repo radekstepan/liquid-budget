@@ -1741,7 +1741,14 @@ export async function mergeTransactions(
     throw new TransactionError("cannot set status to 'r'; only the reconcile flow may set 'r'");
   }
 
-  return withTransaction(db, async () => {
+  // Rename-rule seeding runs after the commit (match-approval learning,
+  // YNAB4 `PayeeManager.renamePayee` parity): every original spelling
+  // that differs from the surviving name maps to it, so future imports
+  // arrive with the merged name. A rule-learning failure never rolls
+  // back (or blocks) the merge itself.
+  const learnedPairs: Array<{ from: string; to: string }> = [];
+
+  const result = await withTransaction(db, async () => {
     const [first] = await db.select().from(transactions).where(eq(transactions.id, firstId));
     const [second] = await db.select().from(transactions).where(eq(transactions.id, secondId));
     const missingId = first == null ? firstId : second == null ? secondId : null;
@@ -1906,8 +1913,25 @@ export async function mergeTransactions(
       .returning();
     await db.delete(transactions).where(eq(transactions.id, secondary.id));
 
+    const finalPayee = merged.payee.trim();
+    for (const original of [first.payee, second.payee]) {
+      if (original.trim() !== "" && original.trim() !== finalPayee) {
+        learnedPairs.push({ from: original, to: merged.payee });
+      }
+    }
+
     return { merged: updated!, deletedId: secondary.id };
   });
+
+  for (const pair of learnedPairs) {
+    try {
+      await learnRenameRuleFromPayees(db, pair.from, pair.to);
+    } catch {
+      // Best-effort only (see above). Swallowed silently.
+    }
+  }
+
+  return result;
 }
 
 /**

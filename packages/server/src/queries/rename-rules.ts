@@ -5,7 +5,6 @@ import {
   isTransferPayee,
   learnRenameRule as pureLearn,
   matchesRenameRule,
-  normalizeRenameText,
 } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { withTransaction } from "../transaction.js";
@@ -201,10 +200,14 @@ export async function applyRenameRuleToExisting(
     )
     .all();
 
+  // Already-at-target is a raw (case-sensitive) comparison — matching
+  // YNAB4's case-sensitive affected-transactions scan — so drift rules
+  // (`"starbucks"` -> `"Starbucks"`) converge stored casings instead of
+  // skipping every row whose normalized text already equals the target.
   const hits = rows.filter(
     (r) =>
       matchesRenameRule(rule, r.payee) &&
-      normalizeRenameText(r.payee) !== normalizeRenameText(target)
+      r.payee.trim() !== target
   );
   if (hits.length === 0) return { rule, updated: 0, skippedLocked: 0 };
 
