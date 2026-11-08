@@ -1,9 +1,9 @@
 /**
  * budget-engine.ts
  *
- * Full YNAB4-faithful budget computation.
+ * Budget computation: cumulative carryover + To Be Budgeted (TBB).
  *
- * Core rules (matching original YNAB4 behaviour):
+ * YNAB4-FAITHFUL core (matches original YNAB4 behaviour):
  *
  * 1. CARRYOVER IS CUMULATIVE
  *    Each category accumulates its "available" balance month-by-month.
@@ -23,23 +23,30 @@
  *    zero during carryover, and the overspent amount is deducted from the next
  *    month's TBB (matching YNAB4 Rule 3: "Roll with the Punches").
  *
- * 3. CREDIT CARD BUFFER & OVERSPENDING (YNAB4's signature feature)
- *    When you charge spending to a credit card, YNAB4 automatically transfers
- *    the funded portion of the spent amount from the budget category into the
- *    linked CC Payment category. This means the CC Payment category accumulates
- *    a "buffer" backed by cash set aside to pay the bill. When you pay the card
- *    (transfer to the card), the buffer draws down accordingly.
+ * DELIBERATE EXTENSION — credit-card buffer (NOT YNAB4):
  *
- *    Unfunded credit card spending adds to the credit card debt on the card,
- *    does not move phantom cash to the CC payment category, and is NOT
- *    deducted from next month's cash TBB.
- *
- *    Cash overspending (from checking/liquid accounts) is deducted from next
- *    month's TBB (unless Red Arrow is enabled).
+ * 3. CREDIT CARD BUFFER (no YNAB4 counterpart — new-budget-style)
+ *    When you charge spending to a credit card, the funded portion of the
+ *    spent amount automatically moves from the budget category into the
+ *    linked CC Payment category, which accumulates a "buffer" of cash set
+ *    aside to pay the bill. Paying the card (transfer to the card) draws
+ *    the buffer down. Unfunded CC spending adds to card debt, moves no
+ *    phantom cash, and is NOT deducted from next month's cash TBB.
+ *    YNAB4 instead confines pre-existing card debt to per-account
+ *    "Pre-YNAB Debt" categories (see `WalkthroughStep.as`,
+ *    `CCBasics`/`CCFirstPayment` walkthroughs in the YNAB4 sources) and
+ *    has no automatic buffer machine. The synthetic "Credit Card Payments"
+ *    group (`normalizeBudgetData`, below) is likewise ours, not YNAB4's.
+ *    Do not "fix" this back toward Pre-YNAB-Debt cats.
  *
  * 4. OUTFLOW DISPLAY COLUMN
  *    The display outflow for a category is clamped to min(0, rawFlow) —
  *    refunds/credits in a category don't show as positive outflow.
+ *
+ * Further deliberate YNAB4 forks (rename priority, reconcile adjustment,
+ * single-row transfers, exact-only matching, incomeMonth superset, case
+ * folding, integer-cents money) are documented in
+ * `.planning/codebase/INTEGRATIONS.md` ("YNAB4 fidelity vs deliberate forks").
  */
 
 import type {
