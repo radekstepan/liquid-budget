@@ -614,10 +614,13 @@ function buildRawIndexData(
   const categoryTransactionsByMonth = new Map<string, Map<number, CategoryTxEntry[]>>();
 
   for (const t of data.transactions) {
-    // Split parents carry the split total (and may carry isIncome/incomeMonth)
-    // while children carry the categorized legs. Skip the parent for outflow
-    // and card-payment flow so the total is not double-counted with the
-    // children, but still attribute parent income (see income walk below).
+    // Split parents carry the split total while children carry the
+    // categorized legs. Skip the parent for outflow and card-payment flow
+    // so the total is not double-counted with the children (Issue #5).
+    // Income is skipped too unless the parent is EXPLICITLY flagged
+    // isIncome (YNAB4 sentinel imports — see repro-income-multijump):
+    // the uncategorized-positive fallback must not claim an unflagged
+    // parent, or its total double-counts against the children's legs.
     const isSplitParent = splitParentIds.has(t.id);
     const mk = t.date.slice(0, 7);
     const amt = num(t.amount);
@@ -670,7 +673,10 @@ function buildRawIndexData(
       });
     }
 
-    if (isIncomeTransaction(t, accountMap)) {
+    if (
+      isIncomeTransaction(t, accountMap) &&
+      (!isSplitParent || t.isIncome === true)
+    ) {
       const incMonth = t.incomeMonth || mk;
       const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
       incomeByMonth.set(incMonth, Math.round((incomeByMonth.get(incMonth) ?? 0) + incomeAmt));

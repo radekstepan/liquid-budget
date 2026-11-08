@@ -323,8 +323,13 @@ describe("transfer row classifier properties", () => {
         (a, b, cents, list, shape, categoryId) => {
           const t = tx({ accountId: a, transferAccountId: b, amount: String(cents) });
           const u = asUniverse(list, shape);
+          // Mirror the universe the subject actually sees: with shape
+          // "undefined" the list is dropped and missing accounts default
+          // to on-budget (see "defaults missing accounts to on-budget").
           const side = (id: number): boolean =>
-            list.find((x) => x.id === id)?.onBudget ?? true;
+            shape === "undefined"
+              ? true
+              : (list.find((x) => x.id === id)?.onBudget ?? true);
           const classified = classifyBoundaryTransfer({
             srcOnBudget: side(a),
             destOnBudget: side(b),

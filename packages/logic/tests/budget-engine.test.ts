@@ -1656,6 +1656,33 @@ describe("computeBudget", () => {
     expect(result.totalIncome).toBe(0);
   });
 
+  it("split parent without an explicit isIncome flag is not income even when positive (Issue #5)", () => {
+    const data: BudgetData = {
+      accounts: [
+        { id: 1, name: "Checking", kind: "liquid", groupLabel: "Liquid", balance: "500000", onBudget: true, sort: 0 },
+      ],
+      groups: [makeGroup()],
+      categories: [
+        makeCategory({ id: 1, name: "Groceries" }),
+      ],
+      assignments: [],
+      transactions: [
+        // Unflagged split parent with a positive total: the uncategorized
+        // fallback must not claim it (only an explicit isIncome: true
+        // parent counts — see repro-income-multijump).
+        { id: 1, accountId: 1, categoryId: null, date: "2025-07-05", payee: "Store", memo: "Split", amount: "799", status: "c" },
+        { id: 2, accountId: 1, categoryId: 1, parentId: 1, date: "2025-07-05", payee: "Store", memo: "Food", amount: "-100", status: "c" },
+        { id: 3, accountId: 1, categoryId: 1, parentId: 1, date: "2025-07-05", payee: "Store", memo: "More food", amount: "-100", status: "c" },
+      ],
+      recurring: [],
+    };
+    const result = computeBudget(data, "2025-07");
+    expect(result.totalIncome).toBe(0);
+    expect(result.tbb).toBe(0);
+    const groc = result.groups[0]!.rows.find((r) => r.category.name === "Groceries")!;
+    expect(groc.outflow).toBe(-200);
+  });
+
   // -------------------------------------------------------------------------
   // Off-budget and transfer inflows (Issues #3, #4)
   // -------------------------------------------------------------------------
