@@ -6,6 +6,7 @@
 
 import type { Account, Transaction } from "./types.js";
 import { num } from "./format.js";
+import { isTransferPayee } from "./rename-rules.js";
 
 /**
  * Thrown to signal a domain/transaction validation failure that should surface
@@ -196,6 +197,150 @@ export function isInternalTransfer(
   const onA = findAccount(accountMap, t.accountId)?.onBudget ?? true;
   const onB = findAccount(accountMap, t.transferAccountId)?.onBudget ?? true;
   return onA && onB;
+}
+
+/**
+ * Transfer eligibility guards, ported from YNAB4
+ * (TransactionList.as:266-273, BaseTransaction.as:144-163,
+ * TransferUtilities.as:22-52, BaseTransaction.as:304-329).
+ *
+ * Strict write-path validation. This is intentionally separate from
+ * {@link classifyBoundaryTransfer}, which stays lenient for read paths:
+ * classify sees only boundary booleans (no account ids, so it cannot
+ * detect self-transfers) and runs over already-stored rows in
+ * `budget-engine`/`merge`, where throwing would turn legacy data into
+ * runtime errors. Callers creating or editing rows must run
+ * {@link validateTransferEligibility} first, then classify.
+ *
+ * YNAB4 also forbids transfers for ScheduledTransaction,
+ * MatchedTransaction, and their SubTransactions. Those states have no
+ * representable check here: `Transaction` carries no scheduled/matched
+ * markers (scheduled entries live in the separate `recurring` table, whose
+ * "transfer" flavour is intentionally retained for import/seed
+ * compatibility; import "matched" state is not persisted), so there is no
+ * field to key the ban on. The structurally representable guards —
+ * self-transfer, split-parent-as-transfer, same-boundary category, and
+ * payee/leg consistency — are enforced below. Persistence-level mirrors
+ * already exist (the `transactions_transfer_not_self_check` DB CHECK and
+ * the server's `assertEntityInvariants`); these pure helpers let
+ * logic-level callers check first without I/O.
+ *
+ * `isTransferPayee` (defined in `rename-rules.js`) is reused here, not
+ * duplicated. It is imported for internal use only and deliberately not
+ * re-exported: `index.ts` barrels both this module and `rename-rules.js`
+ * via `export *`, so a second export of the same name would make the
+ * barrel name ambiguous and drop it.
+ */
+
+/**
+ * Input shape for {@link validateTransferEligibility}. A subset of
+ * `Transaction` plus resolved context the row alone cannot carry:
+ *
+ *   - `isSplitParent`: whether other rows reference this row as `parentId`
+ *     (see `isSplitParent` in `split.js`). A split parent carrying its own
+ *     transfer leg is never valid — a split's transfer legs live on its
+ *     children.
+ *   - `srcOnBudget` / `destOnBudget`: budget-boundary sides of the source
+ *     and destination accounts. Needed only for the same-boundary category
+ *     check; omit them when the caller has no account data and that check
+ *     is skipped.
+ */
+export interface TransferEligibilityInput {
+  accountId: number;
+  transferAccountId?: number | null;
+  categoryId?: number | null;
+  payee?: string | null;
+  parentId?: number | null;
+  isSplitParent?: boolean;
+  srcOnBudget?: boolean | null;
+  destOnBudget?: boolean | null;
+}
+
+/**
+ * Payee/leg consistency: YNAB4 derives a transfer's payee from its target
+ * account (`Transfer : <account>`), so a transfer-styled payee with no
+ * transfer leg is orphaned metadata and always a caller bug.
+ *
+ * The reverse direction is allowed: a transfer leg may carry free-text
+ * payee (the server derives `Transfer : <name>` only when the payee is
+ * empty), so this function does not constrain transfer-row payees.
+ *
+ * Throws via `errorFactory` (default: `TransactionError`, an HTTP 4xx).
+ */
+export function validateTransferPayeeConsistency(
+  payee: string | null | undefined,
+  transferAccountId: number | null | undefined,
+  errorFactory: (message: string) => Error = (msg) => new TransactionError(msg, 400)
+): void {
+  if (transferAccountId == null && payee != null && isTransferPayee(payee)) {
+    throw errorFactory("transfer payee requires a transferAccountId");
+  }
+}
+
+/**
+ * Throw unless the input is an eligible transfer (or a non-transfer row
+ * with consistent payee/leg fields).
+ *
+ * Rules, in order:
+ *   1. Payee/leg consistency (see {@link validateTransferPayeeConsistency}).
+ *   2. Non-transfer rows (`transferAccountId == null`) pass after rule 1.
+ *   3. Self-transfer (`accountId === transferAccountId`) throws — YNAB4's
+ *      `checkAccountDoesntConflictWithTransferAccount`.
+ *   4. Split-parent-as-transfer (`isSplitParent === true`) throws — a split
+ *      parent cannot itself be a transfer; transfer legs live on children.
+ *      Split *children* that are transfer legs (`parentId != null` with a
+ *      leg set) are legitimate and pass.
+ *   5. Same-boundary transfer carrying a category throws — YNAB4's
+ *      BaseTransaction NeedsCategory/Error invariants: on-budget↔on-budget
+ *      (and off↔off) moves carry no category; the spending is captured by
+ *      the terminal categorized rows. Enforced only when both boundary
+ *      sides are provided.
+ *
+ * Boundary direction rules (outflow requires a category, inflow without
+ * one is income) are NOT duplicated here — {@link classifyBoundaryTransfer}
+ * already enforces them. Compose the two: validate eligibility, then
+ * classify.
+ *
+ * Throws via `errorFactory` (default: `TransactionError`, an HTTP 4xx).
+ */
+export function validateTransferEligibility(
+  input: TransferEligibilityInput,
+  errorFactory: (message: string) => Error = (msg) => new TransactionError(msg, 400)
+): void {
+  validateTransferPayeeConsistency(input.payee, input.transferAccountId, errorFactory);
+
+  const transferAccountId = input.transferAccountId ?? null;
+  if (transferAccountId == null) return;
+
+  if (transferAccountId === input.accountId) {
+    throw errorFactory("transfer account must differ from source account");
+  }
+
+  if (input.isSplitParent === true) {
+    throw errorFactory("Split transaction cannot be a transfer");
+  }
+
+  if (
+    input.srcOnBudget != null &&
+    input.destOnBudget != null &&
+    input.srcOnBudget === input.destOnBudget &&
+    input.categoryId != null
+  ) {
+    throw errorFactory("internal transfer cannot have a category");
+  }
+}
+
+/**
+ * Boolean counterpart to {@link validateTransferEligibility}: true when
+ * the input passes all eligibility rules, false otherwise. Never throws.
+ */
+export function isTransferEligible(input: TransferEligibilityInput): boolean {
+  try {
+    validateTransferEligibility(input);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

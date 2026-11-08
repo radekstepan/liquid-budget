@@ -4,8 +4,11 @@ import {
   isCreditPayoffTransfer,
   isInternalTransfer,
   isOffBudgetTransfer,
+  isTransferEligible,
   TransactionError,
   transferNetOnBudgetDelta,
+  validateTransferEligibility,
+  validateTransferPayeeConsistency,
 } from "../src/transfers.js";
 import type { Account, Transaction } from "../src/types.js";
 
@@ -277,6 +280,215 @@ describe("isInternalTransfer", () => {
     expect(isInternalTransfer(transferRow(1, 999, "-5000"), ALL_ACCOUNTS)).toBe(true);
     // No accounts at all: everything reads as on-budget (internal).
     expect(isInternalTransfer(transferRow(1, 2, "-5000"))).toBe(true);
+  });
+});
+
+describe("validateTransferPayeeConsistency", () => {
+  it("rejects a transfer-styled payee with no transfer leg", () => {
+    expect(() => validateTransferPayeeConsistency("Transfer : Savings", null)).toThrow(
+      TransactionError
+    );
+    expect(() => validateTransferPayeeConsistency("  transfer : savings ", undefined)).toThrow(
+      /requires a transferAccountId/
+    );
+  });
+
+  it("allows a transfer leg with any payee text", () => {
+    // YNAB4 derives the default leg payee from the target account, but a
+    // free-text payee on a leg is legitimate (the server only fills the
+    // default in when the payee is empty).
+    expect(() => validateTransferPayeeConsistency("Transfer : Savings", 2)).not.toThrow();
+    expect(() => validateTransferPayeeConsistency("Starbucks", 2)).not.toThrow();
+    expect(() => validateTransferPayeeConsistency("", 2)).not.toThrow();
+  });
+
+  it("allows plain payees and empty payees with no transfer leg", () => {
+    expect(() => validateTransferPayeeConsistency("Starbucks", null)).not.toThrow();
+    expect(() => validateTransferPayeeConsistency("", null)).not.toThrow();
+    expect(() => validateTransferPayeeConsistency(null, null)).not.toThrow();
+    expect(() => validateTransferPayeeConsistency(undefined, undefined)).not.toThrow();
+  });
+
+  it("honours a custom errorFactory", () => {
+    class CustomError extends Error {
+      constructor(msg: string) {
+        super(msg);
+        this.name = "CustomError";
+      }
+    }
+    expect(() =>
+      validateTransferPayeeConsistency("Transfer : X", null, (msg) => new CustomError(msg))
+    ).toThrow(CustomError);
+  });
+});
+
+describe("validateTransferEligibility / isTransferEligible", () => {
+  it("rejects self-transfers", () => {
+    expect(() => validateTransferEligibility({ accountId: 1, transferAccountId: 1 })).toThrow(
+      TransactionError
+    );
+    expect(() => validateTransferEligibility({ accountId: 1, transferAccountId: 1 })).toThrow(
+      /must differ from source/
+    );
+    expect(isTransferEligible({ accountId: 1, transferAccountId: 1 })).toBe(false);
+  });
+
+  it("accepts transfers to a different account", () => {
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, transferAccountId: 2 })
+    ).not.toThrow();
+    expect(isTransferEligible({ accountId: 1, transferAccountId: 2 })).toBe(true);
+  });
+
+  it("rejects a split parent that is also a transfer", () => {
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, transferAccountId: 2, isSplitParent: true })
+    ).toThrow(/cannot be a transfer/);
+    expect(
+      isTransferEligible({ accountId: 1, transferAccountId: 2, isSplitParent: true })
+    ).toBe(false);
+  });
+
+  it("allows split-child transfer legs", () => {
+    // Transfer legs of a split live on the children — only the parent
+    // itself may not be a transfer.
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, transferAccountId: 2, parentId: 10 })
+    ).not.toThrow();
+    expect(
+      isTransferEligible({ accountId: 1, transferAccountId: 2, parentId: 10 })
+    ).toBe(true);
+  });
+
+  it("rejects a same-boundary transfer carrying a category", () => {
+    // YNAB4 BaseTransaction Error invariant: on↔on moves carry no category.
+    expect(() =>
+      validateTransferEligibility({
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: 42,
+        srcOnBudget: true,
+        destOnBudget: true,
+      })
+    ).toThrow(/cannot have a category/);
+    // Off↔off is the same boundary too.
+    expect(
+      isTransferEligible({
+        accountId: 4,
+        transferAccountId: 5,
+        categoryId: 42,
+        srcOnBudget: false,
+        destOnBudget: false,
+      })
+    ).toBe(false);
+  });
+
+  it("accepts same-boundary transfers without a category", () => {
+    expect(() =>
+      validateTransferEligibility({
+        accountId: 1,
+        transferAccountId: 2,
+        categoryId: null,
+        srcOnBudget: true,
+        destOnBudget: true,
+      })
+    ).not.toThrow();
+    expect(
+      isTransferEligible({
+        accountId: 1,
+        transferAccountId: 2,
+        srcOnBudget: true,
+        destOnBudget: true,
+      })
+    ).toBe(true);
+  });
+
+  it("accepts boundary transfers with a category and inflows without one", () => {
+    // Outflow with category (the category is required here — classification
+    // enforces it) and inflow without category (income path) are both valid.
+    expect(() =>
+      validateTransferEligibility({
+        accountId: 1,
+        transferAccountId: 5,
+        categoryId: 42,
+        srcOnBudget: true,
+        destOnBudget: false,
+      })
+    ).not.toThrow();
+    expect(() =>
+      validateTransferEligibility({
+        accountId: 5,
+        transferAccountId: 1,
+        categoryId: null,
+        srcOnBudget: false,
+        destOnBudget: true,
+      })
+    ).not.toThrow();
+  });
+
+  it("skips the boundary-category check when account sides are unknown", () => {
+    // Pure row-level input with no account data cannot judge the boundary,
+    // so a category must not throw here (classification decides later).
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, transferAccountId: 2, categoryId: 42 })
+    ).not.toThrow();
+    expect(
+      isTransferEligible({ accountId: 1, transferAccountId: 2, categoryId: 42 })
+    ).toBe(true);
+  });
+
+  it("passes non-transfer rows with consistent payee/leg fields", () => {
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, categoryId: 5, payee: "Groceries" })
+    ).not.toThrow();
+    expect(isTransferEligible({ accountId: 1, payee: "Groceries" })).toBe(true);
+    // ...but a transfer-styled payee with no leg is rejected even for
+    // non-transfers.
+    expect(() =>
+      validateTransferEligibility({ accountId: 1, payee: "Transfer : Savings" })
+    ).toThrow(TransactionError);
+    expect(isTransferEligible({ accountId: 1, payee: "Transfer : Savings" })).toBe(false);
+  });
+
+  it("composes with classifyBoundaryTransfer: eligible then classifiable", () => {
+    // A boundary outflow with a category validates and classifies as a
+    // categorized outflow.
+    const input = {
+      accountId: 1,
+      transferAccountId: 5,
+      categoryId: 42,
+      srcOnBudget: true,
+      destOnBudget: false,
+    };
+    expect(() => validateTransferEligibility(input)).not.toThrow();
+    const classification = classifyBoundaryTransfer({
+      srcOnBudget: true,
+      destOnBudget: false,
+      amount: -5000,
+      categoryId: 42,
+    });
+    expect(classification).toEqual({
+      isBoundaryCrossing: true,
+      netOnBudgetDelta: -5000,
+      categoryId: 42,
+      isIncome: false,
+      incomeMonth: null,
+    });
+  });
+
+  it("honours a custom errorFactory", () => {
+    class CustomError extends Error {
+      constructor(msg: string) {
+        super(msg);
+        this.name = "CustomError";
+      }
+    }
+    expect(() =>
+      validateTransferEligibility(
+        { accountId: 1, transferAccountId: 1 },
+        (msg) => new CustomError(msg)
+      )
+    ).toThrow(CustomError);
   });
 });
 
