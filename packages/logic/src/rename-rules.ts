@@ -110,11 +110,18 @@ export function isExactRule(rule: Pick<RenameRule, "sourcePattern" | "operator">
  * derived from the linked account), so a transfer-looking string must
  * never become a rule source or target.
  */
-const TRANSFER_PAYEE_RE = /^transfer\s*:/i;
+const TRANSFER_PAYEE_RE = /^transfer:/i;
 
-/** True when a payee or rule pattern is a system transfer string. */
+/**
+ * True when a payee or rule pattern is a system transfer string.
+ *
+ * Mirrors YNAB4's `TransferUtilities.isTransferPayee`: strip ALL literal
+ * spaces (`split(" ").join("")` — spaces only, not tabs or other
+ * whitespace) then case-insensitive `Transfer:` prefix match. So
+ * `Trans fer : X` is a transfer while `Transfer\t: X` is not.
+ */
 export function isTransferPayee(value: string): boolean {
-  return TRANSFER_PAYEE_RE.test(value.trim());
+  return TRANSFER_PAYEE_RE.test(value.split(" ").join(""));
 }
 
 /**
