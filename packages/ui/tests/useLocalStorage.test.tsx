@@ -47,10 +47,9 @@ describe("useLocalStorage", () => {
     const { result } = renderHook(() => useLocalStorage("test-key", "fallback"));
     expect(result.current[0]).toBe("fallback");
     expect(window.localStorage.getItem("test-key")).toBeNull();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Error reading localStorage key "test-key":',
-      expect.any(SyntaxError)
-    );
+    // Corrupt values fall back silently — no console output allowed
+    // (every Vitest config throws on it via onConsoleLog).
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -64,9 +63,7 @@ describe("useLocalStorage", () => {
     );
     expect(result.current[0]).toEqual({ default: true });
     expect(window.localStorage.getItem("test-key")).toBeNull();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Invalid value for localStorage key "test-key", removing stored entry'
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -93,13 +90,11 @@ describe("useLocalStorage", () => {
     });
     expect(result.current[0]).toBe(10);
     expect(window.localStorage.getItem("test-key")).toBeNull();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Attempted to set invalid value for localStorage key "test-key"'
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
-  it("updates internal React state without throwing and logs a console warning when localStorage.setItem throws QuotaExceededError", () => {
+  it("updates internal React state without throwing and stays silent when localStorage.setItem throws QuotaExceededError", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const setItemSpy = vi
       .spyOn(Storage.prototype, "setItem")
@@ -116,17 +111,13 @@ describe("useLocalStorage", () => {
     }).not.toThrow();
 
     expect(result.current[0]).toBe("new-val");
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Error setting localStorage key "test-key":',
-      expect.any(DOMException)
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
 
     setItemSpy.mockRestore();
     warnSpy.mockRestore();
   });
 
   it("supports functional update when localStorage.setItem throws QuotaExceededError", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const setItemSpy = vi
       .spyOn(Storage.prototype, "setItem")
       .mockImplementation(() => {
@@ -144,6 +135,5 @@ describe("useLocalStorage", () => {
     expect(result.current[0]).toBe(15);
 
     setItemSpy.mockRestore();
-    warnSpy.mockRestore();
   });
 });

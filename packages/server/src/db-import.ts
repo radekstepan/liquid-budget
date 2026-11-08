@@ -25,17 +25,20 @@ async function main() {
     throw new Error(`Backup file not found in any candidate path: ${candidatePaths.join(", ")}`);
   }
 
-  console.log(`Reading backup file from ${backupPath}...`);
+  // Note: CLI entry point — output goes through process.stdout/stderr
+  // directly. `console.*` is banned in code under test (every Vitest config
+  // throws on it via onConsoleLog), so these scripts never use it.
+  process.stdout.write(`Reading backup file from ${backupPath}...\n`);
   const fileBuffer = fs.readFileSync(backupPath);
   const { ynabData, settingsXml, warnings, budgetMetaData } = extractYnab4DataFromZip(fileBuffer);
   const db = getDefaultDb();
 
-  console.log("Starting YNAB4 import...");
+  process.stdout.write("Starting YNAB4 import...\n");
   const summary = await importYnab4(db, ynabData, settingsXml, { warnings, budgetMetaData });
-  console.log("Import complete:", summary);
+  process.stdout.write(`Import complete: ${JSON.stringify(summary)}\n`);
 }
 
 main().catch((err) => {
-  console.error("Import failed:", err);
+  process.stderr.write(`Import failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
   process.exit(1);
 });

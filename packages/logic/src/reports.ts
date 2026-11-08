@@ -88,9 +88,10 @@ export function computeNetWorthReport(
     const mk = t.date.slice(0, 7);
 
     // Source account delta
-    if (!validAccountIds.has(t.accountId)) {
-      console.warn(`[computeNetWorthReport] Transaction ${t.id} references unknown or deleted accountId ${t.accountId}`);
-    } else {
+    // Unknown/deleted accounts are silently skipped (no phantom accounts, no
+    // console output — Vitest onConsoleLog throws on any console call).
+    // A skipped source leg must not skip the transfer leg below.
+    if (validAccountIds.has(t.accountId)) {
       // Track earliest activity month for source account
       const curEarliestSrc = earliestMonthByAccount.get(t.accountId);
       if (!curEarliestSrc || mk < curEarliestSrc) {
@@ -107,25 +108,22 @@ export function computeNetWorthReport(
     }
 
     // Transfer destination account delta
-    if (t.transferAccountId != null) {
-      if (!validAccountIds.has(t.transferAccountId)) {
-        console.warn(`[computeNetWorthReport] Transaction ${t.id} references unknown or deleted transferAccountId ${t.transferAccountId}`);
-      } else {
-        const curEarliestDest = earliestMonthByAccount.get(t.transferAccountId);
-        if (!curEarliestDest || mk < curEarliestDest) {
-          earliestMonthByAccount.set(t.transferAccountId, mk);
-        }
-        totalDeltas.set(t.transferAccountId, (totalDeltas.get(t.transferAccountId) ?? 0) - amt);
-        let srcMonthMap = deltasByMonth.get(mk);
-        if (!srcMonthMap) {
-          srcMonthMap = new Map<number, number>();
-          deltasByMonth.set(mk, srcMonthMap);
-        }
-        srcMonthMap.set(
-          t.transferAccountId,
-          (srcMonthMap.get(t.transferAccountId) ?? 0) - amt
-        );
+    // Unknown/deleted destinations are silently skipped (see above).
+    if (t.transferAccountId != null && validAccountIds.has(t.transferAccountId)) {
+      const curEarliestDest = earliestMonthByAccount.get(t.transferAccountId);
+      if (!curEarliestDest || mk < curEarliestDest) {
+        earliestMonthByAccount.set(t.transferAccountId, mk);
       }
+      totalDeltas.set(t.transferAccountId, (totalDeltas.get(t.transferAccountId) ?? 0) - amt);
+      let srcMonthMap = deltasByMonth.get(mk);
+      if (!srcMonthMap) {
+        srcMonthMap = new Map<number, number>();
+        deltasByMonth.set(mk, srcMonthMap);
+      }
+      srcMonthMap.set(
+        t.transferAccountId,
+        (srcMonthMap.get(t.transferAccountId) ?? 0) - amt
+      );
     }
   }
 

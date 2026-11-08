@@ -39,6 +39,7 @@ Base config (`tsconfig.base.json`): `strict: true`, plus:
 ### Test hygiene
 
 - Every Vitest config sets `onConsoleLog` to throw: any `console.*` output from code under test fails the suite. Keep tests and sources silent (or spy on console explicitly).
+- Importable library/hook/component code must never call `console.*`. Standalone CLI entry scripts that genuinely need terminal output (`packages/server/src/db-*.ts`, `migrate.ts`) use `process.stdout/stderr.write` instead.
 - Shared UI-test helpers live in `packages/ui/tests/` (`dropdown.ts`); web route tests live in `apps/web/tests/` with `DATABASE_URL=:memory:`.
 
 ### Lint / format configs

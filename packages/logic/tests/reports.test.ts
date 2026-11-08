@@ -186,13 +186,7 @@ describe("computeNetWorthReport", () => {
     // 2026-03: Chequing = 100000, no phantom account 888
     expect(pts[2]).toEqual({ month: "2026-03", assets: 100000, debts: 0, net: 100000 });
 
-    expect(warnSpy).toHaveBeenCalledTimes(2);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[computeNetWorthReport] Transaction 2 references unknown or deleted accountId 999"
-    );
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[computeNetWorthReport] Transaction 3 references unknown or deleted transferAccountId 888"
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 

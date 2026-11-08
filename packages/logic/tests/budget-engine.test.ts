@@ -3598,7 +3598,9 @@ describe("computeBudget", () => {
       expect(() => computeBudget(data, "2026-01")).not.toThrow();
       const res = computeBudget(data, "2026-01");
       expect(res).toBeDefined();
-      expect(warnSpy).toHaveBeenCalled();
+      // Out-of-range amounts clamp silently — no console output allowed
+      // (every Vitest config throws on it via onConsoleLog).
+      expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
   });

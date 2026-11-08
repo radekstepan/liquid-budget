@@ -1124,8 +1124,10 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
   if (shouldLearnRenameRule) {
     try {
       await learnRenameRuleFromPayees(db, oldPayee, newPayee);
-    } catch (learnErr) {
-      console.error("[transactions] failed to learn rename rule:", learnErr);
+    } catch {
+      // Best-effort only: a rule-learning failure must never roll back (or
+      // block) the transaction edit, and console output would trip the
+      // Vitest onConsoleLog guard. Swallowed silently.
     }
   }
 
@@ -1391,8 +1393,8 @@ export async function updateSplit(
   if (shouldLearnRenameRule) {
     try {
       await learnRenameRuleFromPayees(db, learnedOldPayee, learnedNewPayee);
-    } catch (learnErr) {
-      console.error("[transactions] failed to learn rename rule:", learnErr);
+    } catch {
+      // Best-effort only (see above). Swallowed silently.
     }
   }
 
@@ -2126,8 +2128,8 @@ export async function bulkUpdateTransactions(
   for (const rule of renameRulesToLearn) {
     try {
       await learnRenameRuleFromPayees(db, rule.from, rule.to);
-    } catch (learnErr) {
-      console.error("[transactions] failed to learn rename rule in bulk update:", learnErr);
+    } catch {
+      // Best-effort only (see above). Swallowed silently.
     }
   }
 

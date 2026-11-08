@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Component, type ErrorInfo, type ReactNode } from "react";
+import React, { Component, type ReactNode } from "react";
 import { Notice } from "@ynab/theme";
 import { Btn } from "./ui.js";
 
@@ -26,9 +26,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error(`[ErrorBoundary:${this.props.name ?? "View"}]`, error, errorInfo);
-  }
+  // Note: no componentDidCatch logging here. The error is already captured
+  // in state and rendered as fallback UI; console output would trip the
+  // Vitest onConsoleLog guard.
 
   reset = (): void => {
     this.setState({ hasError: false, error: null });

@@ -770,20 +770,17 @@ describe("ReportsView", () => {
     // Falls back to Spending Trends
     expect(findPanel("Spending Trends")).toBeTruthy();
     expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Invalid value for localStorage key "ynab:reports:subTab", removing stored entry'
-    );
+    // Invalid stored values fall back silently — no console output allowed.
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
   it("migrates a stored legacy Overview tab to Spending Trends", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     window.localStorage.setItem("ynab:reports:subTab", JSON.stringify("overview"));
     renderView();
     expect(findPanel("Spending Trends")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:reports:subTab")).toBeNull();
-    warnSpy.mockRestore();
   });
 
   it("BUG-04: Spending by Category nets refunds against category outflows", () => {

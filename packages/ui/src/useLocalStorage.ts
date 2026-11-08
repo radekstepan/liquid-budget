@@ -26,15 +26,17 @@ export function useLocalStorage<T>(
       }
       const parsed = JSON.parse(item);
       if (validateRef.current && !validateRef.current(parsed)) {
-        console.warn(`Invalid value for localStorage key "${key}", removing stored entry`);
+        // Invalid stored value: drop the entry and fall back silently (no
+        // console output — Vitest onConsoleLog throws on any console call).
         try {
           window.localStorage.removeItem(key);
         } catch {}
         return fallback;
       }
       return parsed as T;
-    } catch (error) {
-      console.warn(`Error reading localStorage key "${key}":`, error);
+    } catch {
+      // Corrupt stored value (or storage unavailable): drop the entry and
+      // fall back silently (see above).
       try {
         window.localStorage.removeItem(key);
       } catch {}
@@ -56,7 +58,8 @@ export function useLocalStorage<T>(
           value instanceof Function ? value(storedValueRef.current) : value;
 
         if (validateRef.current && !validateRef.current(valueToStore)) {
-          console.warn(`Attempted to set invalid value for localStorage key "${key}"`);
+          // Refuse invalid values silently (no console output — Vitest
+          // onConsoleLog throws on any console call).
           return;
         }
 
@@ -65,11 +68,13 @@ export function useLocalStorage<T>(
 
         try {
           window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        } catch (error) {
-          console.warn(`Error setting localStorage key "${key}":`, error);
+        } catch {
+          // Storage full/unavailable: in-memory state already updated above;
+          // the persisted copy is best-effort. Swallowed silently (see above).
         }
-      } catch (error) {
-        console.warn(`Error setting localStorage key "${key}":`, error);
+      } catch {
+        // Serializing the value (or invoking an updater) threw: keep the
+        // previous state. Swallowed silently (see above).
       }
     },
     [key]

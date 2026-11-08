@@ -71,16 +71,27 @@ describe("format", () => {
     expect(num("+100.5")).toBe(101);
   });
 
-  it("num clamps and logs warning on integer overflow beyond MAX_SAFE_INTEGER and large scientific notation (BUG-35)", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(num("9007199254740992")).toBe(Number.MAX_SAFE_INTEGER);
-    expect(num("1e21")).toBe(Number.MAX_SAFE_INTEGER);
-    expect(num(Number.MAX_SAFE_INTEGER + 100)).toBe(Number.MAX_SAFE_INTEGER);
-    expect(num(1e21)).toBe(Number.MAX_SAFE_INTEGER);
-    expect(num("1e999")).toBe(Number.MAX_SAFE_INTEGER);
-    expect(num("-1e999")).toBe(-Number.MAX_SAFE_INTEGER);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+  it("num clamps non-finite and overflow amounts silently without console output (G-format)", () => {
+    const spies = (["warn", "error", "log"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {})
+    );
+    try {
+      // Non-finite inputs clamp to the signed safe-integer bound.
+      expect(num(Infinity)).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num(-Infinity)).toBe(-Number.MAX_SAFE_INTEGER);
+      expect(num("Infinity")).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num("-Infinity")).toBe(-Number.MAX_SAFE_INTEGER);
+      expect(num("1e999")).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num("-1e999")).toBe(-Number.MAX_SAFE_INTEGER);
+      // Overflow inputs clamp to the signed safe-integer bound.
+      expect(num("9007199254740992")).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num("1e21")).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num(Number.MAX_SAFE_INTEGER + 100)).toBe(Number.MAX_SAFE_INTEGER);
+      expect(num(1e21)).toBe(Number.MAX_SAFE_INTEGER);
+      for (const s of spies) expect(s).not.toHaveBeenCalled();
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
   });
 
   it("num with strict: true throws RangeError on integer overflow (BUG-35)", () => {

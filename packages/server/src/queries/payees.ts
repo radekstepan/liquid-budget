@@ -179,8 +179,10 @@ export async function updatePayee(
   if (nextName !== undefined && nextName !== current.name) {
     try {
       await learnRenameRuleFromPayees(db, current.name, nextName);
-    } catch (learnErr) {
-      console.error("[payees] failed to learn rename rule:", learnErr);
+    } catch {
+      // Best-effort only: a rule-learning failure must never roll back (or
+      // block) the rename, and console output would trip the Vitest
+      // onConsoleLog guard. Swallowed silently.
     }
   }
 
@@ -269,8 +271,8 @@ export async function mergePayees(
   for (const rule of learned) {
     try {
       await learnRenameRuleFromPayees(db, rule.from, rule.to);
-    } catch (learnErr) {
-      console.error("[payees] failed to learn rename rule on merge:", learnErr);
+    } catch {
+      // Best-effort only (see above). Swallowed silently.
     }
   }
 

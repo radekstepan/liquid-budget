@@ -853,7 +853,8 @@ describe("BudgetApp", () => {
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(window.localStorage.getItem("ynab:transactions:sort")).toBeNull();
 
-    expect(warnSpy).toHaveBeenCalled();
+    // Corrupt stored values fall back silently — no console output allowed.
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 

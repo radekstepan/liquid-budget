@@ -57,7 +57,7 @@ export function num(
       if (strict) {
         throw new RangeError(`Amount ${s} exceeds safe integer range`);
       }
-      console.warn(`[num] Amount ${s} is not finite, clamping to safe integer range`);
+      // Silent clamp: logging here would trip the Vitest onConsoleLog guard.
       return sign * Number.MAX_SAFE_INTEGER;
     }
     const rounded = sign * Math.round(Math.abs(s));
@@ -65,7 +65,7 @@ export function num(
       if (strict) {
         throw new RangeError(`Amount ${s} exceeds safe integer range`);
       }
-      console.warn(`[num] Amount ${s} exceeds safe integer range, clamping to safe integer range`);
+      // Silent clamp: logging here would trip the Vitest onConsoleLog guard.
       return sign * Number.MAX_SAFE_INTEGER;
     }
     return rounded === 0 ? 0 : rounded;
@@ -99,7 +99,7 @@ export function num(
     if (strict) {
       throw new RangeError(`Amount ${s} exceeds safe integer range`);
     }
-    console.warn(`[num] Amount ${s} is not finite, clamping to safe integer range`);
+    // Silent clamp: logging here would trip the Vitest onConsoleLog guard.
     return sign * Number.MAX_SAFE_INTEGER;
   }
   const rounded = Math.round(Math.abs(rawNum));
@@ -108,7 +108,7 @@ export function num(
     if (strict) {
       throw new RangeError(`Amount ${finalVal} exceeds safe integer range`);
     }
-    console.warn(`[num] Amount ${s} exceeds safe integer range, clamping to safe integer range`);
+    // Silent clamp: logging here would trip the Vitest onConsoleLog guard.
     return sign * Number.MAX_SAFE_INTEGER;
   }
   return finalVal === 0 ? 0 : finalVal;

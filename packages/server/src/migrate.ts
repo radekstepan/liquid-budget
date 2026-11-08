@@ -29,27 +29,30 @@ const DB_PATH = process.env.DATABASE_URL ?? path.resolve(__dirname, "../../..", 
 const MIGRATIONS_FOLDER = path.resolve(__dirname, "migrations");
 
 try {
-  console.log("⟳  Opening database…");
+  // Note: CLI entry point — output goes through process.stdout/stderr
+  // directly. `console.*` is banned in code under test (every Vitest config
+  // throws on it via onConsoleLog), so these scripts never use it.
+  process.stdout.write("⟳  Opening database…\n");
   const db = openDb(DB_PATH);
-  console.log(`✓  Opened ${DB_PATH}`);
+  process.stdout.write(`✓  Opened ${DB_PATH}\n`);
 
-  console.log("⟳  Bootstrapping migration journal (if needed)…");
+  process.stdout.write("⟳  Bootstrapping migration journal (if needed)…\n");
   const result = bootstrapMigrationJournal(db);
   if (result === "bootstrapped") {
-    console.log("✓  Existing schema marked as migration 0000.");
+    process.stdout.write("✓  Existing schema marked as migration 0000.\n");
   } else {
-    console.log("✓  No bootstrap needed.");
+    process.stdout.write("✓  No bootstrap needed.\n");
   }
 
-  console.log("⟳  Applying migrations from " + MIGRATIONS_FOLDER + " …");
+  process.stdout.write("⟳  Applying migrations from " + MIGRATIONS_FOLDER + " …\n");
   db.$client.pragma("foreign_keys = OFF");
   try {
     migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   } finally {
     db.$client.pragma("foreign_keys = ON");
   }
-  console.log("✓  Migrations complete.");
+  process.stdout.write("✓  Migrations complete.\n");
 } catch (err) {
-  console.error("✗  Migration failed:", err);
+  process.stderr.write(`✗  Migration failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
   process.exit(1);
 }

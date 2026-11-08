@@ -14,10 +14,13 @@ const DB_PATH = process.env.DATABASE_URL ?? "../../budget.db";
 const db = openDb(DB_PATH);
 
 try {
-  console.log("⟳  Resetting and re-seeding database…");
+  // Note: CLI entry point — output goes through process.stdout/stderr
+  // directly. `console.*` is banned in code under test (every Vitest config
+  // throws on it via onConsoleLog), so these scripts never use it.
+  process.stdout.write("⟳  Resetting and re-seeding database…\n");
   await resetAndSeedDatabase(db);
-  console.log("✓  Seed complete. Ready to go.");
+  process.stdout.write("✓  Seed complete. Ready to go.\n");
 } catch (err) {
-  console.error("✗  Reset failed:", err);
+  process.stderr.write(`✗  Reset failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
   process.exit(1);
 }
