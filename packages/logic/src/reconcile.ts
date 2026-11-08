@@ -1,8 +1,19 @@
 /**
  * Pure reconcile state calculations.
  *
- * Used by both client and server to compute an account's working balance,
- * uncleared balance, and transaction status counts bounded by a statement date.
+ * Used by both client and server to compute an account's statement-comparator
+ * balance, uncleared balance, and transaction status counts bounded by a
+ * statement date.
+ *
+ * Naming note — YNAB4 collision: this module's `workingBalance` field is
+ * the sum of Cleared + Reconciled rows ONLY (uncleared excluded). It is the
+ * figure the user compares against their bank statement, i.e. the analog of
+ * YNAB4's `clearedBalance` (`Account.as:810-814` comparator), NOT YNAB4's
+ * `workingBalance` (cleared + uncleared projection). Our stored
+ * `accounts.balance` — every non-parent row applied regardless of status
+ * (see `applyBalance` in `server/src/queries/transactions.ts`) — is the
+ * analog of YNAB4's `workingBalance`. Do NOT add uncleared rows to this
+ * field and do NOT compare it against `accounts.balance`.
  */
 
 import { num, todayISO } from "./format.js";
@@ -20,8 +31,13 @@ export type ReconcileState = {
   accountId: number;
   accountName: string;
   /**
-   * Sum of every Cleared + Reconciled transaction in the account up to statement date.
-   * This is the figure the user compares against their bank's statement.
+   * Sum of every Cleared + Reconciled transaction in the account up to
+   * statement date. UNCLEARED ROWS ARE EXCLUDED. This is the figure the
+   * user compares against their bank statement — the YNAB4
+   * `clearedBalance` analog, despite the `workingBalance` name (kept for
+   * API/UI backwards compatibility; renaming would break the reconcile
+   * response contract, `ReconcileModal`, and stored
+   * `expectedWorkingBalance` round-trips).
    */
   workingBalance: number;
   /** Sum of every Uncleared transaction in the account up to statement date. */
@@ -43,7 +59,9 @@ export type ReconcileState = {
  *      transfers / split transfer legs (`t.transferAccountId === account.id`).
  *   3. Invert the sign of inbound transfer amounts (`-amount`).
  *   4. Filter transactions up to `statementDate` (`t.date <= statementDate`).
- *   5. Derive `workingBalance = clearedSum + reconciledSum` and counts.
+ *   5. Derive `workingBalance = clearedSum + reconciledSum` (uncleared
+ *      excluded — statement comparator, YNAB4 `clearedBalance` analog)
+ *      and counts.
  */
 export function computeReconcileState(
   account: Pick<Account, "id" | "name"> & {

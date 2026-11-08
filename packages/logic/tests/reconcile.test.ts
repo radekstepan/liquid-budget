@@ -55,6 +55,38 @@ describe("computeReconcileState", () => {
     });
   });
 
+  it("G01: workingBalance is the statement comparator — cleared+reconciled only, uncleared excluded (YNAB4 clearedBalance analog)", () => {
+    const acct = makeAccount({ id: 1, name: "Chequing" });
+    const txns: Transaction[] = [
+      makeTx({ id: 1, accountId: 1, amount: "30000", status: "c", date: "2026-06-01" }),
+      makeTx({ id: 2, accountId: 1, amount: "20000", status: "r", date: "2026-06-02" }),
+      // Large uncleared amounts must NOT leak into the statement comparator…
+      makeTx({ id: 3, accountId: 1, amount: "9999999", status: "u", date: "2026-06-03" }),
+      makeTx({ id: 4, accountId: 1, amount: "-8888888", status: "u", date: "2026-06-04" }),
+    ];
+
+    const state = computeReconcileState(acct, txns, "2026-06-30");
+    // …but are still reported separately, and the stored-balance analog
+    // (YNAB4 workingBalance) is recoverable as the sum of the two.
+    expect(state.workingBalance).toBe(50000);
+    expect(state.unclearedTotal).toBe(9999999 - 8888888);
+    expect(state.unclearedCount).toBe(2);
+    expect(state.workingBalance + state.unclearedTotal).toBe(50000 + 9999999 - 8888888);
+  });
+
+  it("G01: workingBalance is zero when only uncleared rows exist", () => {
+    const acct = makeAccount({ id: 1, name: "Chequing" });
+    const txns: Transaction[] = [
+      makeTx({ id: 1, accountId: 1, amount: "12345", status: "u", date: "2026-06-01" }),
+    ];
+
+    const state = computeReconcileState(acct, txns, "2026-06-30");
+    expect(state.workingBalance).toBe(0);
+    expect(state.unclearedTotal).toBe(12345);
+    expect(state.clearedCount).toBe(0);
+    expect(state.reconciledCount).toBe(0);
+  });
+
   it("excludes split parent transactions to avoid double-counting child amounts", () => {
     const acct = makeAccount({ id: 1, name: "Chequing" });
     const txns: Transaction[] = [

@@ -86,6 +86,9 @@ export async function getReconcileState(
   const unclearedTotal = Number(agg?.unclearedSum ?? 0);
   const clearedSum = Number(agg?.clearedSum ?? 0);
   const reconciledSum = Number(agg?.reconciledSum ?? 0);
+  // Statement comparator: cleared + reconciled ONLY, uncleared excluded.
+  // YNAB4 `clearedBalance` analog — see `computeReconcileState` in
+  // `@ynab/logic` (`packages/logic/src/reconcile.ts`) for the naming note.
   const workingBalance = clearedSum + reconciledSum;
 
   return {

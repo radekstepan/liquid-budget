@@ -3,10 +3,29 @@
  *
  * For a transaction row in a single account, the running balance at that
  * row is the account's balance *immediately after* the row is applied —
- * the same value the YNAB4 register shows in its rightmost "Balance"
- * column. This is the "will it bounce" projection: it includes uncleared
- * and split-child transactions so a forecasted overdraft surfaces before
- * payday.
+ * the same reading the YNAB4 register shows in its rightmost "Balance"
+ * column. Because the walk starts from the stored `accounts.balance`
+ * (which `applyBalance` maintains over rows of *every* status), the
+ * column is a "will it bounce" projection: it includes uncleared and
+ * split-child rows so a forecasted overdraft surfaces before payday.
+ *
+ * Anchor vs YNAB4: YNAB4 accumulates *forward* from a zero/opening balance
+ * in date-ascending order (ties broken by amount, check number, then
+ * payee). We instead walk *backward* from the stored `accounts.balance`,
+ * which the caller passes in via `accountBalances`. The two agree when
+ * the stored balance equals the true sum of all rows, but ours is only
+ * as correct as its anchor.
+ *
+ * Ordering caveat: callers pass rows newest-first (date-descending, ties
+ * by id-descending), and same-date ties therefore resolve differently
+ * than YNAB4's amount/check/payee tiebreak. Row order only shifts which
+ * intermediate balance a same-date row displays, never the final anchor.
+ *
+ * Drift risk: if the stored `accounts.balance` ever drifts from the true
+ * sum of rows (missed `applyBalance` call, manual DB edit, legacy import
+ * quirk), EVERY row in the walk inherits the offset. Suspect the anchor
+ * — not the walk — when all running balances are off by a constant; the
+ * integrity check (`verifyBalances`) recomputes from rows and will flag it.
  *
  * Algorithm:
  *   1. Identify split parents: rows that have at least one child row in
