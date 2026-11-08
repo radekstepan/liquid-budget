@@ -514,7 +514,28 @@ function analyzeHeaderless(
   let categoryIdx = -1;
 
   if (remaining.length === 1) {
-    amountIdx = remaining[0]!;
+    const other = remaining[0]!;
+    amountIdx = other;
+    // Amount-before-payee layout: the positional guess puts payee on the
+    // lower column, but when that column parses as amounts in every
+    // non-empty row while the other column holds non-amount text, the
+    // guesses are backwards. Swap them (both indices move).
+    let payeeLooksAmount = true;
+    let otherHasText = false;
+    let seenPayee = false;
+    for (const row of allRows) {
+      const p = (row[payeeIdx] ?? "").trim();
+      const o = (row[other] ?? "").trim();
+      if (p !== "") {
+        seenPayee = true;
+        if (parseAmount(p) == null) payeeLooksAmount = false;
+      }
+      if (o !== "" && parseAmount(o) == null) otherHasText = true;
+    }
+    if (seenPayee && payeeLooksAmount && otherHasText) {
+      amountIdx = payeeIdx;
+      payeeIdx = other;
+    }
   } else if (remaining.length === 2) {
     const [c1, c2] = remaining;
     let c1HasAmount = false;
@@ -554,7 +575,9 @@ function analyzeHeaderless(
       outflowIdx = last1;
       inflowIdx = last2;
       memoIdx = remaining[0]!;
-      if (remaining.length >= 3) {
+      // remaining[1] IS the outflow column when only three columns remain,
+      // so a category needs a fourth spare column here.
+      if (remaining.length >= 4) {
         categoryIdx = remaining[1]!;
       }
     } else {
