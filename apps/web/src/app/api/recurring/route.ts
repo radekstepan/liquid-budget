@@ -7,6 +7,7 @@ import {
   updateRecurring,
 } from "@ynab/server";
 import { z } from "zod";
+import { readRouteAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
@@ -24,10 +25,10 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
+  const queryAction = readRouteAction(req);
   const db = getDefaultDb();
 
-  if (action === "post") {
+  if (queryAction.queryMatches("post")) {
     const PostQuerySchema = z.object({
       id: z.coerce.number().int().positive(),
       date: ISODateSchema.optional(),
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (action === "autopost") {
+  if (queryAction.queryMatches("autopost")) {
     const AutoPostQuerySchema = z.object({
       asOfDate: ISODateSchema.optional(),
     });
@@ -77,7 +78,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  if (typeof json === "object" && json !== null && (json as any).action === "post") {
+  const actions = readRouteAction(req, json);
+
+  if (actions.bodyMatches("post")) {
     const parsed = RecurringPostActionSchema.safeParse(json);
     if (!parsed.success) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -90,7 +93,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (typeof json === "object" && json !== null && (json as any).action === "bulk-post") {
+  if (actions.bodyMatches("bulk-post")) {
     const parsed = RecurringBulkPostActionSchema.safeParse(json);
     if (!parsed.success) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -120,7 +123,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (typeof json === "object" && json !== null && (json as any).action === "autopost") {
+  if (actions.bodyMatches("autopost")) {
     const parsed = RecurringAutoPostActionSchema.safeParse(json);
     if (!parsed.success) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -178,7 +181,9 @@ export async function PATCH(req: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  if (typeof json === "object" && json !== null && (json as any).action === "bulk-update") {
+  const actions = readRouteAction(req, json);
+
+  if (actions.bodyMatches("bulk-update")) {
     const parseResult = RecurringBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });

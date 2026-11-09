@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist .tsbuildinfo",
-    "lint": "echo \"(no lint configured)\" && exit 0",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "peerDependencies": {

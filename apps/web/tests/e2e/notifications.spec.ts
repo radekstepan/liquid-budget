@@ -15,8 +15,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fillSearchlist, filterRegisterByText, selectModalOption } from "./helpers";
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
-
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
   // Wait for the initial data fetch to complete (the sidebar renders once

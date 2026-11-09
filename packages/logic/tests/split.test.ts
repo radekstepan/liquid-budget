@@ -19,7 +19,7 @@ import {
   repairSplitForImport,
   SPLIT_IMPORT_FILLER_MEMO,
 } from "../src/split.js";
-import type { SubTransaction, Transaction } from "../src/types.js";
+import type { Transaction } from "../src/types.js";
 
 function tx(overrides: Partial<Transaction>): Transaction {
   return {

@@ -194,10 +194,33 @@ export interface ExportYnab4Options {
   strictBudget?: string;
 }
 
+/** Loose YNAB4 wire-format row (untyped JSON by design). */
+export type Ynab4ExportRow = Record<string, unknown>;
+
+export interface Ynab4ExportCategoryGroup extends Ynab4ExportRow {
+  subCategories: Ynab4ExportRow[];
+}
+
+export interface Ynab4ExportMonthlyBudget extends Ynab4ExportRow {
+  monthlySubCategoryBudgets: Ynab4ExportRow[];
+}
+
+export interface Ynab4ExportDocument extends Ynab4ExportRow {
+  fileMetaData: Ynab4ExportRow;
+  budgetMetaData: Ynab4ExportRow;
+  accounts: Ynab4ExportRow[];
+  payees: Ynab4ExportRow[];
+  masterCategories: Ynab4ExportCategoryGroup[];
+  monthlyBudgets: Ynab4ExportMonthlyBudget[];
+  transactions: Ynab4ExportRow[];
+  scheduledTransactions: Ynab4ExportRow[];
+  reconciliations: Ynab4ExportRow[];
+}
+
 export async function exportYnab4(
   db: Db,
   options?: ExportYnab4Options
-): Promise<{ ynabData: any; settingsXml: string }> {
+): Promise<{ ynabData: Ynab4ExportDocument; settingsXml: string }> {
   const [
     allAccounts,
     allGroups,
@@ -531,7 +554,7 @@ export async function exportYnab4(
     }
   }
 
-  const yTransactions: any[] = [];
+  const yTransactions: Ynab4ExportRow[] = [];
 
   for (const t of parentTransactions) {
     const children = childrenByParent.get(t.id);
@@ -926,7 +949,7 @@ export async function exportYnab4(
 </com.ynab.dataAccess.settings.MachineBudgetSettingsVO>
 `;
 
-  return { ynabData, settingsXml };
+  return { ynabData: ynabData as unknown as Ynab4ExportDocument, settingsXml };
 }
 
 export async function exportYnab4Zip(

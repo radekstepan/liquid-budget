@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import type { BudgetData, BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, Query, RenameRule, RenameSuggestResponse, RenameSuggestStatusResponse, Transaction } from "@ynab/logic";
+import type { BudgetData, Query, RenameRule, Transaction } from "@ynab/logic";
 import {
   buildPageTitle,
   computeBudget,
@@ -11,10 +11,8 @@ import {
   num,
   parseMonthKey,
   monthKey,
-  previousMonthKey,
   renameRulePayeeFilter,
   resolveSplitTemplatePresets,
-  round2,
   SPLIT_TEMPLATE_PRESETS,
   todayISO,
   countDuplicatesByAccount,
@@ -22,14 +20,14 @@ import {
   isValidISOMonth,
   DEMO_MONTH,
   type TransactionFlagColor,
-  createPrivacyMask,
-  maskBudgetData,
-  isPrivacyFactor,
 } from "@ynab/logic";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
-import { guardApiForPrivacy, randomPrivacyFactor } from "./privacyApi.js";
 import { Sidebar, type View } from "./Sidebar.js";
+import { usePrivacyBudget } from "./usePrivacyBudget.js";
+import { useBudgetUrlSync } from "./useBudgetUrlSync.js";
+import { useQuickBudget } from "./useQuickBudget.js";
+import { useRenameSuggestStatus, useSnapshots } from "./useSettingsData.js";
 import type { SearchListOption, ThemeId } from "@ynab/theme";
 import {
   Icon,
@@ -43,14 +41,14 @@ import {
 import type { GlobalSearchJump } from "./GlobalSearch.js";
 import { GlobalSearchModal } from "./GlobalSearchModal.js";
 import { Inspector } from "./Inspector.js";
-import { BudgetView, isInternalGroup } from "./BudgetView.js";
+import { BudgetView } from "./BudgetView.js";
 import { TransactionsView } from "./TransactionsView.js";
 import { ReportsView } from "./ReportsView.js";
 import { SettingsView } from "./SettingsView.js";
 import { MenuSettingsView } from "./MenuSettingsView.js";
 import { ThemesView } from "./ThemesView.js";
 import { PayeesView } from "./PayeesView.js";
-import { SnapshotsView, type SnapshotSummary } from "./SnapshotsView.js";
+import { SnapshotsView } from "./SnapshotsView.js";
 import {
   DEFAULT_NAV_VISIBILITY,
   NAV_VISIBILITY_STORAGE_KEY,
@@ -65,8 +63,6 @@ import {
   GroupModal,
   RecurringModal,
   AccountModal,
-  type TransactionSavePayload,
-  type RecurringSavePayload,
 } from "./Modals.js";
 import { CsvImportModal } from "./CsvImportModal.js";
 import { ReconcileModal } from "./ReconcileModal.js";
@@ -88,249 +84,9 @@ export type ModalState =
   | { kind: "reconcile"; accountId: number }
   | { kind: "csvImport"; file: File };
 
-export type BudgetAppApi = {
-  reload: () => Promise<void>;
-  assign: (categoryId: number, amount: number, month: string) => Promise<void>;
-  batchAssign?: (assignments: { categoryId: number; amount: number; month: string }[]) => Promise<void>;
-  addTransaction: (t: TransactionSavePayload | {
-    accountId: number;
-    categoryId?: number | null;
-    date: string;
-    payee: string;
-    amount: number;
-    memo?: string;
-    status?: "u" | "c" | "r";
-    transferStatus?: "u" | "c" | "r";
-    flagColor?: TransactionFlagColor | null;
-    transferAccountId?: number | null;
-    incomeMonth?: string | null;
-    isIncome?: boolean;
-    subTransactions?: {
-      categoryId: number | null;
-      amount: number;
-      memo?: string;
-      transferAccountId?: number | null;
-      transferStatus?: "u" | "c" | "r";
-    }[];
-  }) => Promise<void>;
-  updateTransaction: (
-    id: number,
-    t: Partial<TransactionSavePayload> | {
-      accountId?: number;
-      categoryId?: number | null;
-      date?: string;
-      payee?: string;
-      amount?: number;
-      memo?: string;
-      status?: "u" | "c" | "r";
-      transferStatus?: "u" | "c" | "r";
-      flagColor?: TransactionFlagColor | null;
-      transferAccountId?: number | null;
-      incomeMonth?: string | null;
-      isIncome?: boolean;
-      subTransactions?: {
-        categoryId: number | null;
-        amount: number;
-        memo?: string;
-        transferAccountId?: number | null;
-        transferStatus?: "u" | "c" | "r";
-      }[];
-    }
-  ) => Promise<void>;
-  deleteTransaction: (id: number) => Promise<void>;
-  bulkDeleteTransactions?: (ids: number[]) => Promise<void>;
-  bulkUpdateTransactions?: (
-    ids: number[],
-    patch: BulkUpdateTransactionPatch
-  ) => Promise<void>;
-  mergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void>;
-  addRecurring: (v: RecurringSavePayload | {
-    accountId: number;
-    categoryId?: number | null;
-    payee: string;
-    memo?: string;
-    amount: number;
-    frequency: string;
-    nextDate: string;
-    anchorDay?: number | null;
-    active?: boolean;
-    flagColor?: TransactionFlagColor | null;
-    transferAccountId?: number | null;
-    subTransactions?: {
-      categoryId: number | null;
-      amount: number;
-      memo?: string;
-      transferAccountId?: number | null;
-    }[];
-  }) => Promise<void>;
-  updateRecurring: (
-    id: number,
-    v: Partial<RecurringSavePayload> | {
-      accountId?: number;
-      categoryId?: number | null;
-      payee?: string;
-      memo?: string;
-      amount?: number;
-      frequency?: string;
-      nextDate?: string;
-      anchorDay?: number | null;
-      active?: boolean;
-      flagColor?: TransactionFlagColor | null;
-      transferAccountId?: number | null;
-      subTransactions?: {
-        id?: number;
-        categoryId: number | null;
-        amount: number;
-        memo?: string;
-        transferAccountId?: number | null;
-      }[];
-    }
-  ) => Promise<void>;
-  deleteRecurring: (id: number) => Promise<void>;
-  postRecurring: (id: number, date?: string) => Promise<void>;
-  bulkPostRecurring?: (ids: number[], date?: string) => Promise<void>;
-  bulkUpdateRecurring?: (
-    ids: number[],
-    patch: { flagColor?: TransactionFlagColor | null; active?: boolean }
-  ) => Promise<void>;
-  bulkDeleteRecurring?: (ids: number[]) => Promise<void>;
-  saveCategory: (
-    groupId: number | null,
-    categoryId: number | null,
-    v: {
-      name: string;
-      groupId?: number;
-      goalTarget: number | null;
-      carryover?: number | null;
-      overspendCarriesOver?: boolean;
-    }
-  ) => Promise<void>;
-  deleteCategory: (
-    id: number,
-    opts?: { moveToCategoryId?: number | null }
-  ) => Promise<void>;
-  reorderCategory: (id: number, sort: number) => Promise<void>;
-  reorderGroup: (id: number, sort: number) => Promise<void>;
-  saveGroup: (groupId: number | null, name: string) => Promise<void>;
-  deleteGroup: (id: number) => Promise<void>;
-  addAccount: (v: {
-    name: string;
-    kind: "liquid" | "credit" | "offbudget";
-    groupLabel: string;
-    startingBalance?: number;
-    balance?: number;
-    notes?: string;
-  }) => Promise<void>;
-  deleteAccount: (id: number) => Promise<void>;
-  updateAccount: (
-    id: number,
-    patch: {
-      name?: string;
-      kind?: "liquid" | "credit" | "offbudget";
-      onBudget?: boolean;
-      archived?: boolean;
-      notes?: string;
-    },
-    opts?: { undo?: boolean }
-  ) => Promise<void>;
-  reorderAccount: (id: number, sort: number) => Promise<void>;
-  reconcileAccount: (input: {
-    accountId: number;
-    statementBalance: number;
-    statementDate: string;
-    adjustmentCategoryId: number | null;
-    expectedWorkingBalance?: number | null;
-  }) => Promise<void>;
-  getReconcileState?: (accountId: number, statementDate?: string) => Promise<any>;
-  unreconcileAccount: (accountId: number) => Promise<void>;
-  importYnab4?: (file: File) => Promise<ImportSummary | void>;
-  importCsv?: (input: { accountId: number; swap: boolean; dateFormat?: "auto" | "dmy" | "mdy"; csv: string }) => Promise<any>;
-  analyzeDuplicates?: () => Promise<DuplicateAnalysisResult | void>;
-  dismissDuplicateGroup?: (fingerprint: string) => Promise<void>;
-  addRenameRule?: (sourcePattern: string, targetPayee: string) => Promise<void>;
-  updateRenameRule?: (id: number, sourcePattern: string, targetPayee: string) => Promise<void>;
-  deleteRenameRule?: (id: number) => Promise<void>;
-  applyRenameRule?: (id: number) => Promise<{ updated: number; skippedLocked: number }>;
-  getRenameSuggestStatus?: () => Promise<RenameSuggestStatusResponse>;
-  suggestRenameRules?: (offset: number, limit: number) => Promise<RenameSuggestResponse>;
-  acceptRenameSuggestions?: (
-    suggestions: { sourcePattern: string; targetPayee: string }[],
-    applyToExisting: boolean
-  ) => Promise<{ updated: number; skippedLocked: number; generalised: boolean }>;
-  ensurePayee?: (name: string) => Promise<number>;
-  renamePayee?: (id: number, name: string) => Promise<void>;
-  setPayeeDefaultCategory?: (id: number, categoryId: number | null) => Promise<void>;
-  mergePayees?: (targetId: number, sourceIds: number[]) => Promise<void>;
-  deletePayee?: (id: number) => Promise<void>;
-  listSnapshots?: () => Promise<{ snapshots: SnapshotSummary[]; suggestedName: string }>;
-  createSnapshot?: (name: string) => Promise<void>;
-  restoreSnapshot?: (id: string) => Promise<void>;
-  deleteSnapshot?: (id: string) => Promise<void>;
-};
-
-export type QuickBudgetType = "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear";
-
-function lastMonthMapFor(
-  assignments: BudgetData["assignments"],
-  targetMonth: string
-): Map<number, number> {
-  const prevMonth = previousMonthKey(targetMonth);
-  const map = new Map<number, number>();
-  for (const a of assignments) {
-    if (a.month === prevMonth) {
-      map.set(a.categoryId, num(a.amount));
-    }
-  }
-  return map;
-}
-
-function spentLastMonthMapFor(
-  transactions: BudgetData["transactions"],
-  targetMonth: string
-): Map<number, number> {
-  const prevMonth = previousMonthKey(targetMonth);
-  const map = new Map<number, number>();
-  const parentSet = new Set<number>();
-  for (const t of transactions) {
-    if (t.parentId != null) parentSet.add(t.parentId);
-  }
-  for (const t of transactions) {
-    if (t.date.slice(0, 7) !== prevMonth) continue;
-    if (t.categoryId == null) continue;
-    if (parentSet.has(t.id)) continue;
-    const amt = num(t.amount);
-    if (amt < 0) {
-      map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
-    }
-  }
-  return map;
-}
-
-function avgBudgetedMapFor(
-  assignments: BudgetData["assignments"],
-  targetMonth: string
-): Map<number, number> {
-  const { year: y, month0 } = parseMonthKey(targetMonth);
-  const map = new Map<number, { sum: number; count: number }>();
-  for (let i = 1; i <= 3; i++) {
-    const mm = ((month0 - i) % 12 + 12) % 12;
-    const yy = y + Math.floor((month0 - i) / 12);
-    const key = monthKey(yy, mm);
-    for (const a of assignments) {
-      if (a.month !== key) continue;
-      const amt = num(a.amount);
-      const entry = map.get(a.categoryId) ?? { sum: 0, count: 0 };
-      entry.sum += amt;
-      entry.count++;
-      map.set(a.categoryId, entry);
-    }
-  }
-  const result = new Map<number, number>();
-  for (const [catId, { sum, count }] of map) {
-    if (count > 0) result.set(catId, Math.round(sum / count));
-  }
-  return result;
-}
+export type { BudgetAppApi } from "./BudgetAppApi.js";
+import type { BudgetAppApi } from "./BudgetAppApi.js";
+export type { QuickBudgetType } from "./useQuickBudget.js";
 
 export const ACCOUNT_FILTER_STORAGE_KEY = "ynab:transactions:accountFilter";
 
@@ -351,22 +107,7 @@ export function resolveAccountFilter(
   return accounts.some((a) => a.id === stored) ? stored : null;
 }
 
-export const PRIVACY_STORAGE_KEY = "ynab:privacy";
-
-export type PrivacySettings = {
-  enabled: boolean;
-  /** Disguise factor; 0 means "none drawn yet". */
-  factor: number;
-};
-
-export function isPrivacySettings(v: unknown): v is PrivacySettings {
-  if (typeof v !== "object" || v === null) return false;
-  const o = v as Record<string, unknown>;
-  return (
-    typeof o.enabled === "boolean" &&
-    (o.factor === 0 || isPrivacyFactor(o.factor))
-  );
-}
+export { PRIVACY_STORAGE_KEY, isPrivacySettings, type PrivacySettings } from "./usePrivacyBudget.js";
 
 export function BudgetApp({
   data: rawData,
@@ -381,49 +122,17 @@ export function BudgetApp({
   initialMonth?: string;
   initialAccount?: number;
 }) {
-  // Privacy (screenshot) mode: every `data`/`api` use below sees the
-  // masked snapshot and the guarded api, so all views, modals, search,
-  // titles, and tooltips are disguised with no per-screen changes.
-  // Masked data must never be written back: the guard blocks all
-  // mutations while the mode is on.
-  const [privacy, setPrivacy] = useLocalStorage<PrivacySettings>(
-    PRIVACY_STORAGE_KEY,
-    { enabled: false, factor: 0 },
-    isPrivacySettings
-  );
-  const [privacyNotice, setPrivacyNotice] = useState(false);
-  const privacyMask = useMemo(
-    () =>
-      privacy.enabled && isPrivacyFactor(privacy.factor)
-        ? createPrivacyMask(rawData, privacy.factor)
-        : null,
-    [privacy, rawData]
-  );
-  const data = useMemo(
-    () => (privacyMask ? maskBudgetData(rawData, privacyMask) : rawData),
-    [rawData, privacyMask]
-  );
-  const api = useMemo(
-    () =>
-      privacyMask
-        ? guardApiForPrivacy(rawApi, privacyMask, () => setPrivacyNotice(true))
-        : rawApi,
-    [rawApi, privacyMask]
-  );
-  const enablePrivacy = useCallback(() => {
-    setPrivacy((p) => ({
-      enabled: true,
-      factor: isPrivacyFactor(p.factor) ? p.factor : randomPrivacyFactor(),
-    }));
-  }, [setPrivacy]);
-  const disablePrivacy = useCallback(() => {
-    setPrivacy((p) => ({ ...p, enabled: false }));
-    setPrivacyNotice(false);
-  }, [setPrivacy]);
-  const regeneratePrivacyFactor = useCallback(() => {
-    setPrivacy((p) => ({ ...p, factor: randomPrivacyFactor() }));
-  }, [setPrivacy]);
-
+  const {
+    data,
+    api,
+    privacy,
+    privacyMask,
+    privacyNotice,
+    setPrivacyNotice,
+    enablePrivacy,
+    disablePrivacy,
+    regeneratePrivacyFactor,
+  } = usePrivacyBudget(rawData, rawApi);
   const [view, setView] = useState<View>(
     (["budget", "reports", "transactions"] as View[]).includes(initialView as View)
       ? (initialView as View)
@@ -494,79 +203,17 @@ export function BudgetApp({
     DEFAULT_THEME_ID,
     isThemeId
   );
-  const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
-  const [snapshotSuggestion, setSnapshotSuggestion] = useState("");
-  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
-  const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
   const [navVisible, setNavVisible] = useLocalStorage<Record<View, boolean>>(
     NAV_VISIBILITY_STORAGE_KEY,
     DEFAULT_NAV_VISIBILITY,
     isNavVisibility
   );
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
-  // URL routing synchronization — path-based nice URLs
-  const updateUrl = useCallback((newView: View, newAccount: number | null, newMonth: string) => {
-    if (typeof window === "undefined") return;
-    let path: string;
-    if (newView === "budget") {
-      path = `/budget/${newMonth}`;
-    } else if (newView === "transactions" && newAccount != null) {
-      path = `/transactions/${newAccount}`;
-    } else {
-      path = `/${newView}`;
-    }
-    if (window.location.pathname !== path) {
-      try {
-        window.history.pushState(null, "", path);
-      } catch {
-        // pushState is cosmetic; in-memory state + popstate listener
-        // already keep the UI in sync.
-      }
-    }
-  }, []);
-
-  // Initialize from initial props on mount and listen for popstate
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const parsePath = () => {
-      const path = window.location.pathname.replace(/\/$/, "");
-      const segments = path.split("/").filter(Boolean);
-      const validViews = ["budget", "reports", "transactions"] as const;
-
-      if (segments.length >= 1 && (validViews as readonly string[]).includes(segments[0]!)) {
-        setView(segments[0] as View);
-      } else {
-        setView("budget");
-      }
-
-      // The transactions URL is the source of truth for the account
-      // filter: an id selects that account, a bare /transactions clears to
-      // All Transactions. Any other path leaves the selection alone.
-      if (segments[0] === "transactions") {
-        if (segments[1]) {
-          const accId = Number(segments[1]);
-          if (!Number.isNaN(accId)) {
-            setAccountFilter(accId);
-          }
-        } else {
-          setAccountFilter(null);
-        }
-      }
-
-      if (segments[0] === "budget" && segments[1] && isValidISOMonth(segments[1])) {
-        setMonth(segments[1]);
-      }
-    };
-
-    parsePath();
-    window.addEventListener("popstate", parsePath);
-    return () => window.removeEventListener("popstate", parsePath);
-  }, []);
+  const updateUrl = useBudgetUrlSync({ setView, setAccountFilter, setMonth });
 
   const isBudgetView = view === "budget";
-  const { year } = parseMonthKey(month);
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
 
@@ -634,112 +281,6 @@ export function BudgetApp({
     [data.transactions]
   );
 
-  // Quick-fill: last month's budgeted per category (only computed for budget view)
-  const lastMonthAssignments = useMemo(() => {
-    if (!isBudgetView) return new Map<number, number>();
-    const prevMonth = previousMonthKey(month);
-    const map = new Map<number, number>();
-    for (const a of data.assignments) {
-      if (a.month === prevMonth) {
-        map.set(a.categoryId, num(a.amount));
-      }
-    }
-    return map;
-  }, [data, month, isBudgetView]);
-
-  // Quick-fill: spent last month (outflows in M-1) per category (only computed for budget view)
-  const spentLastMonthByCategory = useMemo(() => {
-    if (!isBudgetView) return new Map<number, number>();
-    const prevMonth = previousMonthKey(month);
-    const map = new Map<number, number>();
-    const parentSet = new Set<number>();
-    for (const t of data.transactions) {
-      if (t.parentId != null) parentSet.add(t.parentId);
-    }
-    for (const t of data.transactions) {
-      if (t.date.slice(0, 7) !== prevMonth) continue;
-      if (t.categoryId == null) continue;
-      if (parentSet.has(t.id)) continue;
-      const amt = num(t.amount);
-      if (amt < 0) {
-        map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
-      }
-    }
-    return map;
-  }, [data, month, isBudgetView]);
-
-  // Quick-fill: average spent (outflow) over last 3 months per category (only computed for budget view)
-  const avgSpentByCategory = useMemo(() => {
-    if (!isBudgetView) return new Map<number, number>();
-    const { year: y, month0 } = parseMonthKey(month);
-    const map = new Map<number, number>();
-    const parentSet = new Set<number>();
-    for (const t of data.transactions) {
-      if (t.parentId != null) parentSet.add(t.parentId);
-    }
-    for (let i = 1; i <= 3; i++) {
-      const mm = ((month0 - i) % 12 + 12) % 12;
-      const yy = y + Math.floor((month0 - i) / 12);
-      const key = monthKey(yy, mm);
-      for (const t of data.transactions) {
-        if (t.date.slice(0, 7) !== key) continue;
-        if (t.categoryId == null) continue;
-        // Skip split parents so we do not double-count, but include split children!
-        if (parentSet.has(t.id)) continue;
-        const amt = num(t.amount);
-        if (amt >= 0) continue; // only outflows
-        map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + -amt);
-      }
-    }
-    const result = new Map<number, number>();
-    for (const [catId, sum] of map) {
-      if (sum > 0) {
-        result.set(catId, Math.round(sum / 3));
-      }
-    }
-    return result;
-  }, [data, month, isBudgetView]);
-
-  // Quick-fill: average budgeted over last 3 months per category (only computed for budget view)
-  const avgBudgetedByCategory = useMemo(() => {
-    if (!isBudgetView) return new Map<number, number>();
-    const { year: y, month0 } = parseMonthKey(month);
-    const map = new Map<number, { sum: number; count: number }>();
-    for (let i = 1; i <= 3; i++) {
-      const mm = ((month0 - i) % 12 + 12) % 12;
-      const yy = y + Math.floor((month0 - i) / 12);
-      const key = monthKey(yy, mm);
-      for (const a of data.assignments) {
-        if (a.month !== key) continue;
-        const amt = num(a.amount);
-        const entry = map.get(a.categoryId) ?? { sum: 0, count: 0 };
-        entry.sum += amt;
-        entry.count++;
-        map.set(a.categoryId, entry);
-      }
-    }
-    const result = new Map<number, number>();
-    for (const [catId, { sum, count }] of map) {
-      if (count > 0) result.set(catId, Math.round(sum / count));
-    }
-    return result;
-  }, [data, month, isBudgetView]);
-
-  // Quick-fill: underfunded = max(0, goalTarget - available)
-  const underfundedByCategory = useMemo(() => {
-    if (!isBudgetView) return new Map<number, number>();
-    const map = new Map<number, number>();
-    for (const g of budget.groups) {
-      for (const r of g.rows) {
-        if (r.category.goalTarget) {
-          const goal = num(r.category.goalTarget);
-          const underfunded = Math.max(0, goal - r.available);
-          if (underfunded > 0) map.set(r.category.id, underfunded);
-        }
-      }
-    }
-    return map;
-  }, [budget, isBudgetView]);
 
   const { history, avg } = useMemo(() => {
     const realMonths = new Set(data.assignments.map((a) => a.month));
@@ -789,119 +330,24 @@ export function BudgetApp({
         : null,
     [data.categories, selectedCategoryId]
   );
-
-  // Per-month quick-budget source maps, keyed by target month. Each month's
-  // "last month" / "spent last month" / "average budgeted" figures are
-  // relative to that column, not to the anchor month.
-  const quickMapsByMonth = useMemo(() => {
-    if (!isBudgetView) return {} as Record<string, { lastMonth: Map<number, number>; spentLastMonth: Map<number, number>; avgBudgeted: Map<number, number> }>;
-    const out: Record<string, { lastMonth: Map<number, number>; spentLastMonth: Map<number, number>; avgBudgeted: Map<number, number> }> = {};
-    for (const m of visibleMonths) {
-      out[m] = {
-        lastMonth: lastMonthMapFor(data.assignments, m),
-        spentLastMonth: spentLastMonthMapFor(data.transactions, m),
-        avgBudgeted: avgBudgetedMapFor(data.assignments, m),
-      };
-    }
-    return out;
-  }, [data.assignments, data.transactions, visibleMonths, isBudgetView]);
-
-  // Display totals per visible month for the header dropdowns. When a
-  // category is selected the figures cover just that category, otherwise
-  // they cover the entire budget (same scope the action applies to).
-  const quickBudgetByMonth = useMemo(() => {
-    const out: Record<string, { lastMonth: number; spentLastMonth: number; avgBudgeted: number }> = {};
-    for (const m of visibleMonths) {
-      const maps = quickMapsByMonth[m];
-      if (!maps) continue;
-      if (selectedCategoryId != null) {
-        out[m] = {
-          lastMonth: maps.lastMonth.get(selectedCategoryId) ?? 0,
-          spentLastMonth: maps.spentLastMonth.get(selectedCategoryId) ?? 0,
-          avgBudgeted: maps.avgBudgeted.get(selectedCategoryId) ?? 0,
-        };
-      } else {
-        let lastMonth = 0;
-        for (const v of maps.lastMonth.values()) lastMonth += v;
-        let spentLastMonth = 0;
-        for (const v of maps.spentLastMonth.values()) spentLastMonth += v;
-        let avgBudgeted = 0;
-        for (const v of maps.avgBudgeted.values()) avgBudgeted += v;
-        out[m] = { lastMonth, spentLastMonth, avgBudgeted };
-      }
-    }
-    return out;
-  }, [quickMapsByMonth, visibleMonths, selectedCategoryId]);
-
-  const handleQuickBudget = useCallback(
-    async (type: QuickBudgetType, catId?: number, targetMonth?: string) => {
-      const target = targetMonth ?? month;
-      const cached = quickMapsByMonth[target];
-      const lastMonthMap = cached?.lastMonth ?? lastMonthMapFor(data.assignments, target);
-      const spentLastMonthMap =
-        cached?.spentLastMonth ?? spentLastMonthMapFor(data.transactions, target);
-      const avgBudgetedMap =
-        cached?.avgBudgeted ?? avgBudgetedMapFor(data.assignments, target);
-      const getAmount = (categoryId: number): number => {
-        switch (type) {
-          case "lastMonth":
-            return lastMonthMap.get(categoryId) ?? 0;
-          case "spentLastMonth":
-            return spentLastMonthMap.get(categoryId) ?? 0;
-          case "avgBudgeted":
-            return avgBudgetedMap.get(categoryId) ?? 0;
-          case "clear":
-            return 0;
-        }
-      };
-
-      if (catId != null) {
-        await assign(catId, getAmount(catId), target);
-        return;
-      }
-
-      // Apply to all categories in visible structure groups
-      const allBudgetCats: number[] = [];
-      for (const g of budget.groups) {
-        if (g.group.isCreditCardPayments || isInternalGroup(g.group)) continue;
-        for (const r of g.rows) {
-          allBudgetCats.push(r.category.id);
-        }
-      }
-
-      const itemsToAssign: { categoryId: number; amount: number; month: string }[] = [];
-      for (const cId of allBudgetCats) {
-        const amt = getAmount(cId);
-        // Apply if there's an amount or if resetting to zero
-        if (amt > 0 || type === "clear") {
-          itemsToAssign.push({ categoryId: cId, amount: amt, month: target });
-        }
-      }
-
-      if (itemsToAssign.length === 0) return;
-
-      if (api.batchAssign) {
-        try {
-          await api.batchAssign(itemsToAssign);
-        } catch {
-          // Handled via notifications toast and rollback in BudgetAppShell
-        }
-      } else {
-        for (const item of itemsToAssign) {
-          await assign(item.categoryId, item.amount, item.month);
-        }
-      }
-    },
-    [
-      assign,
-      api.batchAssign,
-      budget.groups,
-      data.assignments,
-      data.transactions,
-      quickMapsByMonth,
-      month,
-    ]
-  );
+  const {
+    lastMonthAssignments,
+    spentLastMonthByCategory,
+    avgSpentByCategory,
+    avgBudgetedByCategory,
+    underfundedByCategory,
+    quickBudgetByMonth,
+    handleQuickBudget,
+  } = useQuickBudget({
+    data,
+    month,
+    visibleMonths,
+    isBudgetView,
+    selectedCategoryId,
+    budget,
+    assign,
+    batchAssign: api.batchAssign,
+  });
 
   const openReconcile = useCallback(
     (accountId: number) => setModal({ kind: "reconcile", accountId }),
@@ -927,33 +373,9 @@ export function BudgetApp({
     [updateUrl, month, accountFilter]
   );
 
-  const refreshSnapshots = useCallback(async () => {
-    if (!api.listSnapshots) return;
-    setSnapshotsLoading(true);
-    setSnapshotsError(null);
-    try {
-      const res = await api.listSnapshots();
-      setSnapshots(res.snapshots);
-      setSnapshotSuggestion(res.suggestedName);
-    } catch (e: any) {
-      setSnapshotsError(e?.message ? String(e.message) : String(e));
-    } finally {
-      setSnapshotsLoading(false);
-    }
-  }, [api]);
-
-  const [renameSuggestStatus, setRenameSuggestStatus] =
-    useState<RenameSuggestStatusResponse | null>(null);
-
-  const refreshRenameSuggestStatus = useCallback(async () => {
-    if (!api.getRenameSuggestStatus) return;
-    try {
-      setRenameSuggestStatus(await api.getRenameSuggestStatus());
-    } catch {
-      // Status is best-effort: a failure just hides the AI button.
-      setRenameSuggestStatus(null);
-    }
-  }, [api]);
+  const { snapshots, snapshotSuggestion, snapshotsLoading, snapshotsError, refreshSnapshots } =
+    useSnapshots(api);
+  const { renameSuggestStatus, refreshRenameSuggestStatus } = useRenameSuggestStatus(api);
 
   // Point <html data-theme> at the persisted theme. A pre-paint script
   // in the web layout applies the stored value before first paint; this
@@ -1311,22 +733,6 @@ export function BudgetApp({
     },
     [api, data.recurring]
   );
-
-  const otherAccounts = useMemo(
-    () => data.accounts.filter((a) => a.id !== accountFilter),
-    [data.accounts, accountFilter]
-  );
-
-  const payeesForAutocomplete: SearchListOption[] = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of data.transactions) {
-      const p = (t.payee || "").trim();
-      if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name]) => ({ value: name, label: name }));
-  }, [data.transactions]);
 
   const activeAccount = useMemo(
     () => data.accounts.find((a) => a.id === accountFilter) ?? null,

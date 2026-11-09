@@ -3,6 +3,7 @@ import {
   verifyBalanceIntegrity,
   recomputeAccountBalances,
 } from "@ynab/server";
+import { optionalErrorMessage } from "../../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,9 @@ export async function GET() {
       issueCount: issues.length,
       issues,
     });
-  } catch (err: any) {
+  } catch (err) {
     return Response.json(
-      { ok: false, error: err?.message ?? "Failed to verify balance integrity" },
+      { ok: false, error: optionalErrorMessage(err) ?? "Failed to verify balance integrity" },
       { status: 500 }
     );
   }
@@ -33,9 +34,9 @@ export async function POST() {
       repairedCount: result.updatedCount,
       remainingIssues: issues,
     });
-  } catch (err: any) {
+  } catch (err) {
     return Response.json(
-      { ok: false, error: err?.message ?? "Failed to repair balance integrity" },
+      { ok: false, error: optionalErrorMessage(err) ?? "Failed to repair balance integrity" },
       { status: 500 }
     );
   }

@@ -150,7 +150,7 @@ describe("Dropdown (Select)", () => {
       });
     }
 
-    function openSearchableControl(value = "1") {
+    function openSearchableControl() {
       const trigger = screen.getByRole("button", { name: /account/i });
       fireEvent.click(trigger);
       const input = screen.getByRole("textbox", { name: /account/i });

@@ -14,6 +14,7 @@ import {
 } from "@ynab/logic";
 import { Checkbox, Icon, Notice, Button, Tooltip } from "@ynab/theme";
 import { Modal, Field, Btn, inputCls } from "./ui.js";
+import { errorMessage } from "./errorMessage.js";
 
 type RuleDraft = {
   sourcePattern: string;
@@ -40,8 +41,8 @@ export type AcceptSuggestionsResult = {
   generalised: boolean;
 };
 
-function toError(title: string, e: any): { title: string; message: string } {
-  return { title, message: e?.message ? String(e.message) : String(e) };
+function toError(title: string, e: unknown): { title: string; message: string } {
+  return { title, message: errorMessage(e) };
 }
 
 export function SettingsView({
@@ -132,7 +133,7 @@ export function SettingsView({
     try {
       const res = await onApply(r.id);
       setApplyResult({ ...res, sourcePattern: r.sourcePattern });
-    } catch (e: any) {
+    } catch (e) {
       setError(toError("Rule not applied", e));
     } finally {
       setApplyingId(null);
@@ -163,8 +164,8 @@ export function SettingsView({
         let res: SuggestBatchResult;
         try {
           res = await onSuggestRules(done, RENAME_SUGGEST_BATCH_SIZE);
-        } catch (e: any) {
-          failures.push(e?.message ? String(e.message) : String(e));
+        } catch (e) {
+          failures.push(errorMessage(e));
           attempts += 1;
           done += RENAME_SUGGEST_BATCH_SIZE;
           setSuggestProgress({ done: Math.min(done, planned), total: planned });
@@ -225,7 +226,7 @@ export function SettingsView({
         skippedLocked: res.skippedLocked,
         generalised: res.generalised,
       });
-    } catch (e: any) {
+    } catch (e) {
       setError(toError("AI rules not created", e));
     } finally {
       setAccepting(false);
@@ -249,7 +250,7 @@ export function SettingsView({
       }
       setCreating(false);
       setEditing(null);
-    } catch (e: any) {
+    } catch (e) {
       setError(toError("Rule not saved", e));
     } finally {
       setBusy(false);
@@ -263,7 +264,7 @@ export function SettingsView({
     try {
       await onDelete(deletingId);
       setDeletingId(null);
-    } catch (e: any) {
+    } catch (e) {
       setError(toError("Rule not deleted", e));
     } finally {
       setBusy(false);

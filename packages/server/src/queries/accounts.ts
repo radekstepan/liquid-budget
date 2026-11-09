@@ -107,7 +107,7 @@ export async function createAccount(db: Database, input: CreateAccountInput) {
         ccGroup = newGroup;
       }
       if (ccGroup) {
-        let [existingCat] = await db
+        const [existingCat] = await db
           .select()
           .from(categories)
           .where(

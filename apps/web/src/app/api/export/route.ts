@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDefaultDb, exportYnab4Zip, getBudgetData } from "@ynab/server";
 import { num } from "@ynab/logic";
+import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -138,9 +139,9 @@ export async function GET(req: NextRequest) {
         "Content-Disposition": `attachment; filename="budget-${today}.y4backup"`,
       },
     });
-  } catch (err: any) {
+  } catch (err) {
     return Response.json(
-      { error: err?.message ?? "Failed to export data" },
+      { error: optionalErrorMessage(err) ?? "Failed to export data" },
       { status: 500 }
     );
   }

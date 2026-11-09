@@ -8,6 +8,7 @@ import {
   updateCategoryGroup,
 } from "@ynab/server";
 import { z } from "zod";
+import { peekBody } from "../action";
 import { apiErrorResponse } from "../errors";
 import {
   CategoryCreateSchema,
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
   }
   const db = getDefaultDb();
 
-  if (typeof json === "object" && json !== null && "type" in json && (json as any).type === "group") {
+  if (peekBody(json).type === "group") {
     const parseResult = CategoryGroupCreateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -72,7 +73,7 @@ export async function PATCH(req: Request) {
   }
   const db = getDefaultDb();
 
-  if (typeof json === "object" && json !== null && "type" in json && (json as any).type === "group") {
+  if (peekBody(json).type === "group") {
     const parseResult = CategoryGroupPatchSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });

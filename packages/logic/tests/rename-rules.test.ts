@@ -220,7 +220,7 @@ describe("learnRenameRule", () => {
   });
 
   it("generalises the second rename into BCF[N] -> BC Ferries", () => {
-    let { rules } = learnRenameRule([], "BCF1", "BC Ferries");
+    const { rules } = learnRenameRule([], "BCF1", "BC Ferries");
     const second = learnRenameRule(rules, "BCF2", "BC Ferries");
     expect(second.generalised).toBe(true);
     expect(second.rules).toHaveLength(1);
@@ -231,7 +231,7 @@ describe("learnRenameRule", () => {
   });
 
   it("generalises renames with mixed casing (e.g. bcf1 and BCF2)", () => {
-    let { rules } = learnRenameRule([], "bcf1", "BC Ferries");
+    const { rules } = learnRenameRule([], "bcf1", "BC Ferries");
     const second = learnRenameRule(rules, "BCF2", "BC Ferries");
     expect(second.generalised).toBe(true);
     expect(second.rules).toHaveLength(1);
@@ -256,7 +256,7 @@ describe("learnRenameRule", () => {
   });
 
   it("does not merge different targets", () => {
-    let { rules } = learnRenameRule([], "BCF1", "BC Ferries");
+    const { rules } = learnRenameRule([], "BCF1", "BC Ferries");
     const other = learnRenameRule(rules, "BCF2", "BC Ferries Downtown");
     expect(other.generalised).toBe(false);
     expect(other.rules).toHaveLength(2);
@@ -278,7 +278,7 @@ describe("learnRenameRule", () => {
   });
 
   it("generalises numbered branches like WHOLE FOODS #24/#25", () => {
-    let { rules } = learnRenameRule([], "WHOLE FOODS #24", "Whole Foods");
+    const { rules } = learnRenameRule([], "WHOLE FOODS #24", "Whole Foods");
     const second = learnRenameRule(rules, "WHOLE FOODS #25", "Whole Foods");
     expect(second.generalised).toBe(true);
     expect(second.rules[0]).toMatchObject({
@@ -306,7 +306,7 @@ describe("learnRenameRule", () => {
   });
 
   it("generalises 7-Eleven Store 123 and 7-Eleven Store 456 into 7-Eleven Store [N] without over-generalizing digits in merchant name", () => {
-    let { rules } = learnRenameRule([], "7-Eleven Store 123", "7-Eleven");
+    const { rules } = learnRenameRule([], "7-Eleven Store 123", "7-Eleven");
     const second = learnRenameRule(rules, "7-Eleven Store 456", "7-Eleven");
     expect(second.generalised).toBe(true);
     expect(second.rules).toHaveLength(1);
@@ -475,7 +475,7 @@ describe("inferRenameRule generalised families", () => {
 
 describe("learnRenameRule generalised families", () => {
   it("learns a middle-number family end to end", () => {
-    let { rules } = learnRenameRule([], "STORE #123 - SEATTLE", "PCC");
+    const { rules } = learnRenameRule([], "STORE #123 - SEATTLE", "PCC");
     const second = learnRenameRule(rules, "STORE #456 - SEATTLE", "PCC");
     expect(second.generalised).toBe(true);
     expect(second.rules).toHaveLength(1);
@@ -490,7 +490,7 @@ describe("learnRenameRule generalised families", () => {
   });
 
   it("learns a reference-code family end to end", () => {
-    let { rules } = learnRenameRule([], "AMZN Mktp US*RT3ABCD12", "Amazon");
+    const { rules } = learnRenameRule([], "AMZN Mktp US*RT3ABCD12", "Amazon");
     const second = learnRenameRule(rules, "AMZN Mktp US*XY9ZZ", "Amazon");
     expect(second.generalised).toBe(true);
     expect(second.rules).toHaveLength(1);

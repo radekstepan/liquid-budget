@@ -5188,7 +5188,7 @@ describe("transactions queries", () => {
     describe("BUG-02 & BUG-03: Income classification and bulk update invariants", () => {
       it("BUG-02: manual uncategorized inflow on a credit card is never classified as income", async () => {
         const db = openMigratedDb();
-        const { accountId: liquidId } = await seedTestData(db);
+        await seedTestData(db);
         const [ccAcct] = await db
           .insert(schema.accounts)
           .values({
@@ -5562,7 +5562,7 @@ describe("transactions queries", () => {
           it(`handles ${fromMode} -> ${toMode} with correct balance ledgers`, async () => {
             const ctx = await setupMatrixDb();
             const initial = await createInitial(ctx, fromMode);
-            const res = await updateTo(ctx, initial.id, toMode);
+            await updateTo(ctx, initial.id, toMode);
 
             // 1. Fetch current balances of all accounts
             const [curSrc] = await ctx.db.select().from(schema.accounts).where(eq(schema.accounts.id, ctx.srcAccount.id));

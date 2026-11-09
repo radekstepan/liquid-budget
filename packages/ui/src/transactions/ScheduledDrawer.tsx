@@ -204,7 +204,6 @@ export function ScheduledDrawer({
 
                     const isOverdue = r.active && r.nextDate < today;
                     const isDueToday = r.active && r.nextDate === today;
-                    const isFuture = r.active && r.nextDate > today;
 
                     const displayPayee =
                       flavour === "transfer"

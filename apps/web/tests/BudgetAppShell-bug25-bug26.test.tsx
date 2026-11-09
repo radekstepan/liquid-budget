@@ -18,7 +18,7 @@ describe("BudgetAppShell (BUG-25 & BUG-26)", () => {
   });
 
   it("BUG-25: out-of-order budget reload response does not overwrite newer mutation state", async () => {
-    let reloadResolvers: Array<(res: Response) => void> = [];
+    const reloadResolvers: Array<(res: Response) => void> = [];
     let budgetCallCount = 0;
 
     const staleBudget: BudgetData = {

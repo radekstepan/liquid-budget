@@ -94,7 +94,6 @@ const StaticChart = memo(function StaticChart({
   gid,
   selectedMonth,
   trends,
-  colorMap,
   hoveredConstituentId,
   onDrillSegment,
   onToggleMonth,
@@ -560,7 +559,6 @@ export function SpendingTrendsReport({
   data,
   startMonth,
   endMonth,
-  activeCategoryIds: initialActiveCategoryIds,
   resetKey,
   onSelectTransaction,
 }: {

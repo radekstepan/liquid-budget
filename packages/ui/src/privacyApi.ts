@@ -1,4 +1,4 @@
-import type { BudgetAppApi } from "./BudgetApp.js";
+import type { BudgetAppApi } from "./BudgetAppApi.js";
 import type { PrivacyMask } from "@ynab/logic";
 import {
   maskReconcileState,
@@ -35,7 +35,7 @@ export function guardApiForPrivacy(
 ): BudgetAppApi {
   const blocked =
     (method: string) =>
-    (..._args: any[]): Promise<never> => {
+    (..._args: unknown[]): Promise<never> => {
       onBlocked(method);
       return Promise.resolve(undefined as never);
     };

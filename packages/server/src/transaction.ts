@@ -47,7 +47,7 @@ const mutexMap = new WeakMap<object, AsyncMutex>();
 
 export function getDbConnectionKey(db: Database | Db | object): object {
   if (!db || typeof db !== "object") return db as unknown as object;
-  return ((db as any).$client ?? db) as object;
+  return (db as { $client?: object }).$client ?? db;
 }
 
 export function getDbMutex(db: Database | Db | object): AsyncMutex {

@@ -7,7 +7,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../src/schema.js";
 import {
-  CategoryError,
   createCategory,
   createCategoryGroup,
   deleteCategory,
@@ -729,7 +728,7 @@ describe("categories queries", () => {
 
     it("BUG-05: deleteCategoryGroup with replacement migrates historical assignments across all member categories", async () => {
       const db = openMigratedDb();
-      const [acct] = await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
+      await db.insert(schema.accounts).values({ name: "Checking", kind: "liquid", groupLabel: "Budget Accounts", sort: 0 }).returning();
       const [groupOld] = await db.insert(schema.categoryGroups).values({ name: "Old Group", sort: 0 }).returning();
       const [groupNew] = await db.insert(schema.categoryGroups).values({ name: "New Group", sort: 1 }).returning();
       const [cat1] = await db.insert(schema.categories).values({ name: "Cat 1", groupId: groupOld!.id, sort: 0, carryover: 1000 }).returning();

@@ -436,7 +436,7 @@ describe("accounts queries", () => {
       );
 
       // A is 75000, B is 20000
-      let a = await getAccount(db, acctA.id);
+      const a = await getAccount(db, acctA.id);
       let b = await getAccount(db, acctB.id);
       expect(a?.balance).toBe(75000);
       expect(b?.balance).toBe(20000);

@@ -4,7 +4,8 @@ import {
   reconcileAccount,
   unreconcileAccount,
 } from "@ynab/server";
-import { apiErrorResponse } from "../errors";
+import { readRouteAction } from "../action";
+import { apiErrorResponse, errorMessage, errorStatus } from "../errors";
 import {
   formatZodError,
   ReconcileAccountSchema,
@@ -42,7 +43,9 @@ export async function POST(req: Request) {
   }
   const db = getDefaultDb();
 
-  if (typeof json === "object" && json !== null && (json as any).action === "unreconcile") {
+  const actions = readRouteAction(req, json);
+
+  if (actions.bodyMatches("unreconcile")) {
     const parseResult = UnreconcileAccountSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -70,11 +73,11 @@ export async function POST(req: Request) {
       expectedWorkingBalance: body.expectedWorkingBalance ?? null,
     });
     return Response.json({ action: "reconcile", ...result });
-  } catch (e: any) {
-    if (e?.status === 422) {
+  } catch (e) {
+    if (errorStatus(e) === 422) {
       try {
         const state = await getReconcileState(db, body.accountId, body.statementDate);
-        return Response.json({ error: e.message, state }, { status: 422 });
+        return Response.json({ error: errorMessage(e), state }, { status: 422 });
       } catch {
         // Fallback to standard error response
       }

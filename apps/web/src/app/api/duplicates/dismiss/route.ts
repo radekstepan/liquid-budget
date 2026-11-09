@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dismissDuplicateGroup, getDefaultDb } from "@ynab/server";
 import { DuplicateDismissSchema, formatZodError } from "@ynab/logic";
+import { optionalErrorMessage } from "../../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +25,8 @@ export async function POST(req: Request) {
     const db = getDefaultDb();
     const result = await dismissDuplicateGroup(db, parseResult.data.fingerprint);
     return NextResponse.json(result);
-  } catch (e: any) {
+  } catch (e) {
     console.error("[duplicates/dismiss] Error:", e);
-    return NextResponse.json({ error: e.message || "Failed to dismiss duplicates" }, { status: 500 });
+    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to dismiss duplicates" }, { status: 500 });
   }
 }

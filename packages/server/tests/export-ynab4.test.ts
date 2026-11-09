@@ -527,7 +527,7 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     const db1 = openMigratedDb();
 
     // 1. Create checking and credit card accounts
-    const [accChecking] = await db1.insert(schema.accounts).values({
+    await db1.insert(schema.accounts).values({
       name: "Checking",
       kind: "liquid",
       groupLabel: "Budget Accounts",
@@ -566,7 +566,7 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     }).returning();
 
     // CC payment category starts with 0 seed carryover
-    const [catCcPayment] = await db1.insert(schema.categories).values({
+    await db1.insert(schema.categories).values({
       groupId: grpCC!.id,
       name: "Credit Card",
       sort: 0,
@@ -596,7 +596,6 @@ describe("exportYnab4 & exportYnab4Zip", () => {
     // Verify DB1 engine-computed available:
     // Groceries available: $200 - $50 = $150.00
     // CC Payment available: $0 + $50 = $50.00
-    const initialData1 = await getBudgetData(db1);
     const { ynabData } = await exportYnab4(db1);
 
     const exportedCcGroup = ynabData.masterCategories.find((mc: any) => mc.isCreditCardPayments);
@@ -620,7 +619,6 @@ describe("exportYnab4 & exportYnab4Zip", () => {
 
     const data2 = await getBudgetData(db2);
     // In DB2, the CC payment category and Groceries available balances match DB1 perfectly
-    const db1CcCat = initialData1.categories.find((c) => c.linkedAccountId === accCredit!.id);
     const db2CcCat = data2.categories.find((c) => c.linkedAccountId != null);
     expect(db2CcCat).toBeDefined();
 

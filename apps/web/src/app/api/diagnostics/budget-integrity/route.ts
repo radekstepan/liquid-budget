@@ -1,4 +1,5 @@
 import { getDefaultDb, verifyBudgetIntegrity } from "@ynab/server";
+import { optionalErrorMessage } from "../../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,9 @@ export async function GET(request?: Request) {
       ok: report.difference === 0,
       ...report,
     });
-  } catch (err: any) {
+  } catch (err) {
     return Response.json(
-      { ok: false, error: err?.message ?? "Failed to verify budget integrity" },
+      { ok: false, error: optionalErrorMessage(err) ?? "Failed to verify budget integrity" },
       { status: 500 }
     );
   }

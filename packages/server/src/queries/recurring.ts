@@ -32,6 +32,15 @@ function assertValidFrequency(frequency: unknown): string {
   return String(frequency);
 }
 
+function errorStatus(err: unknown): number | undefined {
+  if (err instanceof RecurringError) return err.status;
+  if (typeof err === "object" && err !== null && "status" in err) {
+    const status = (err as { status?: unknown }).status;
+    return typeof status === "number" ? status : undefined;
+  }
+  return undefined;
+}
+
 function assertValidISODate(date: unknown, fieldName: string = "date"): string {
   if (!isValidISODate(date)) {
     throw new RecurringError(`Invalid calendar date for ${fieldName}: ${date}`, 400);
@@ -794,7 +803,7 @@ export type AutoPostCapped = {
 };
 
 export type AutoPostResult = {
-  posted: any[];
+  posted: (typeof transactions.$inferSelect)[];
   failures: AutoPostFailure[];
   capped: AutoPostCapped[];
 };
@@ -819,7 +828,7 @@ export async function autoPostDueRecurringTransactions(
     .from(recurring)
     .where(and(eq(recurring.active, true), sql`${recurring.nextDate} <= ${validatedAsOfDate}`));
 
-  const posted: any[] = [];
+  const posted: (typeof transactions.$inferSelect)[] = [];
   const failures: AutoPostFailure[] = [];
   const capped: AutoPostCapped[] = [];
   const maxPerRule = options?.maxOccurrencesPerRule;
@@ -858,16 +867,17 @@ export async function autoPostDueRecurringTransactions(
       }
       try {
         const res = await postRecurringTransaction(db, r.id, currentNextDate);
-        posted.push(res.transaction);
+        posted.push(res.transaction as typeof transactions.$inferSelect);
         occurrencesForThisRule++;
         if (!res.active || res.nextDate <= currentNextDate) break;
         currentNextDate = res.nextDate;
-      } catch (err: any) {
-        const isConcurrency409 = (err instanceof RecurringError && err.status === 409) || err?.status === 409;
+      } catch (err) {
+        const status = errorStatus(err);
+        const isConcurrency409 = status === 409;
         const isDomainValidationError =
           (err instanceof RecurringError ||
             err instanceof TransactionError ||
-            (typeof err?.status === "number" && err.status >= 400 && err.status < 500)) &&
+            (status !== undefined && status >= 400 && status < 500)) &&
           !isConcurrency409;
 
         failures.push({

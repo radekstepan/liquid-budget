@@ -619,10 +619,9 @@ test.describe("Transfer Transaction Edge Cases", () => {
     const ccName = `PW CC ${stamp}`;
     const catName = `PW CCCat ${stamp}`;
 
-    const chkRes = await page.request.post("/api/accounts", {
+    await page.request.post("/api/accounts", {
       data: { name: chkName, kind: "liquid", groupLabel: "Budget Accounts" },
     });
-    const chkAcc = await chkRes.json();
 
     const ccRes = await page.request.post("/api/accounts", {
       data: { name: ccName, kind: "credit", groupLabel: "Credit Cards" },

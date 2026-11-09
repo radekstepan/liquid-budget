@@ -54,7 +54,9 @@ export function resetDefaultDb(): void {
   if (globalForDb.__ynabDb) {
     try {
       globalForDb.__ynabDb.$client.close();
-    } catch {}
+    } catch {
+      // Already closed (or the connection never opened): nothing to do.
+    }
     globalForDb.__ynabDb = undefined;
   }
 }

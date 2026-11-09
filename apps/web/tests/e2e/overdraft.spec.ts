@@ -136,8 +136,6 @@ test("inline Unassign button PATCHes an overdrafted category to assigned=0", asy
   // Find an inline Unassign button.
   const unassignBtn = page.getByRole("button", { name: /unassign/i }).first();
   await expect(unassignBtn).toBeVisible();
-  const label = await unassignBtn.textContent();
-  const match = label?.match(/Unassign \$?([\d,]+\.?\d*)/i);
 
   await unassignBtn.click();
 

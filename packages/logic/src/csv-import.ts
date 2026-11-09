@@ -386,7 +386,7 @@ export function parseAmount(input: string): number | null {
   }
 
   // If any remaining currency symbol or sign is embedded in the number, it's invalid (e.g. 1$2, 1-2, 1+)
-  if (/[$€£¥+\-]/.test(s)) return null;
+  if (/[$€£¥+-]/.test(s)) return null;
   if (!s) return null;
 
   let num: number;
@@ -608,8 +608,14 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   let rows: string[][];
   try {
     rows = parseCsv(text);
-  } catch (err: any) {
-    return { headerError: err?.message || "Invalid CSV", rows: [] };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message?: unknown }).message ?? "")
+          : "";
+    return { headerError: message || "Invalid CSV", rows: [] };
   }
 
   const nonEmptyRows = rows.filter((r) => r.some((c) => c.trim() !== ""));

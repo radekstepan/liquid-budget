@@ -1021,7 +1021,7 @@ describe("SpendingReport", () => {
     // Middle bars are the same parent groups in both dimensions, and the
     // segment rule has no dimension split — the Bills bar hatches its
     // bucket-cell span in Merchants view exactly like Categories view.
-    const { container } = render(
+    render(
       <SpendingReport
         categoryFlow={emptyFlow}
         merchantFlow={bucketRibbonFlow}
@@ -1031,7 +1031,6 @@ describe("SpendingReport", () => {
     );
     const slider = screen.getByRole("slider", { name: /merge smaller groups/i });
     fireEvent.change(slider, { target: { value: stepFor(2000, 500) } });
-    const svg = container.querySelector('[data-testid="sankey-svg"]')!;
     expect(screen.getByText("Spending by Merchant")).toBeInTheDocument();
     const groups = screen.getAllByTestId("sankey-group");
     const labels = screen.getAllByTestId("sankey-group-label");

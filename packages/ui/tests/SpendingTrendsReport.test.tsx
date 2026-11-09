@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { SpendingTrendsReport } from "../src/SpendingTrendsReport.js";
 import { colorAt } from "../src/chartUtils.js";
 import type { BudgetData, Transaction } from "@ynab/logic";

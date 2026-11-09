@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDefaultDb, importYnab4, extractYnab4DataFromZip, type Ynab4BudgetMetaData } from "@ynab/server";
+import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    let ynabData: any;
+    let ynabData: unknown;
     let settingsXml: string | undefined;
     let warnings: string[] = [];
     let budgetMetaData: Ynab4BudgetMetaData | undefined;
@@ -23,16 +24,16 @@ export async function POST(req: NextRequest) {
       settingsXml = extracted.settingsXml;
       warnings = extracted.warnings;
       budgetMetaData = extracted.budgetMetaData;
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message || "Invalid backup archive" }, { status: 400 });
+    } catch (e) {
+      return NextResponse.json({ error: optionalErrorMessage(e) || "Invalid backup archive" }, { status: 400 });
     }
 
     const db = getDefaultDb();
     const summary = await importYnab4(db, ynabData, settingsXml, { warnings, budgetMetaData });
 
     return NextResponse.json({ ok: true, summary });
-  } catch (e: any) {
+  } catch (e) {
     console.error("[import] Error:", e);
-    return NextResponse.json({ error: e.message || "Failed to import" }, { status: 500 });
+    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to import" }, { status: 500 });
   }
 }

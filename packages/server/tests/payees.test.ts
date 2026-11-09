@@ -4,10 +4,6 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { describe, expect, it, beforeEach } from "vitest";
 import { openDb, type Db } from "../src/client.js";
 import {
-  payees,
-  accounts,
-  categories,
-  categoryGroups,
   transactions,
   recurring,
 } from "../src/schema.js";

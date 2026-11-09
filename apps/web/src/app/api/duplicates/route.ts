@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeUnflaggedDuplicates, getDefaultDb } from "@ynab/server";
+import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,8 @@ export async function POST() {
     const db = getDefaultDb();
     const result = await analyzeUnflaggedDuplicates(db);
     return NextResponse.json(result);
-  } catch (e: any) {
+  } catch (e) {
     console.error("[duplicates] Error:", e);
-    return NextResponse.json({ error: e.message || "Failed to analyze duplicates" }, { status: 500 });
+    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to analyze duplicates" }, { status: 500 });
   }
 }

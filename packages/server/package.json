@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc -b && rm -rf dist/migrations && cp -R src/migrations dist/migrations",
     "clean": "rm -rf dist .tsbuildinfo",
-    "lint": "echo \"(no lint configured)\" && exit 0",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

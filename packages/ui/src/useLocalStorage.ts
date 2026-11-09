@@ -30,7 +30,9 @@ export function useLocalStorage<T>(
         // console output — Vitest onConsoleLog throws on any console call).
         try {
           window.localStorage.removeItem(key);
-        } catch {}
+        } catch {
+          // Ignore: the fallback value is still returned below.
+        }
         return fallback;
       }
       return parsed as T;
@@ -39,7 +41,9 @@ export function useLocalStorage<T>(
       // fall back silently (see above).
       try {
         window.localStorage.removeItem(key);
-      } catch {}
+      } catch {
+        // Ignore: the fallback value is still returned below.
+      }
       return fallback;
     }
   }, [key]);

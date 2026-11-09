@@ -8,7 +8,7 @@ import type { CsvImportRow } from "@ynab/logic";
 import { importCsvTransactions } from "../src/import-csv.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import { eq, sql } from "drizzle-orm";
-import { TransactionError, createSplitWithChildren, createTransfer } from "../src/queries/transactions.js";
+import { createSplitWithChildren, createTransfer } from "../src/queries/transactions.js";
 import { createRenameRule } from "../src/queries/rename-rules.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
@@ -221,7 +221,7 @@ describe("importCsvTransactions", () => {
       .values({ name: "Work", sort: 1, isCreditCardPayments: false })
       .returning();
 
-    const [c1] = await db
+    await db
       .insert(schema.categories)
       .values({
         groupId: g1!.id,
@@ -234,7 +234,7 @@ describe("importCsvTransactions", () => {
       })
       .returning();
 
-    const [c2] = await db
+    await db
       .insert(schema.categories)
       .values({
         groupId: g2!.id,

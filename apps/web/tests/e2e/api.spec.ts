@@ -285,9 +285,6 @@ test("POST /api/recurring creates and posts a recurring transfer", async () => {
   expect(source?.id).toBeTruthy();
   expect(dest?.id).toBeTruthy();
 
-  const sourceBalBefore = Number(source.balance);
-  const destBalBefore = Number(dest.balance);
-
   const created = await ctx.post("/api/recurring", {
     data: {
       accountId: source.id,

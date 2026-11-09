@@ -14,7 +14,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import { fileURLToPath } from "url";
-import { seedDatabase, resetDatabase, resetAndSeedDatabase, DEMO_MONTH } from "../src/seed.js";
+import { seedDatabase, resetDatabase, resetAndSeedDatabase } from "../src/seed.js";
 import { getBudgetData, isSeeded } from "../src/queries/budget.js";
 import * as diagnostics from "../src/queries/diagnostics.js";
 import * as schema from "../src/schema.js";
@@ -162,7 +162,7 @@ describe("seedDatabase", () => {
 
     it("atomically rolls back the entire wipe if seeding fails", async () => {
       // Seed initial custom accounts and payees
-      const [customAccount] = await db
+      await db
         .insert(schema.accounts)
         .values({
           name: "My Custom Checking",

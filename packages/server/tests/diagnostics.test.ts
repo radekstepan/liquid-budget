@@ -433,7 +433,7 @@ describe("diagnostics queries", () => {
     });
 
     it("BUG-07: does not false-positive on unfunded credit-card spending across months", async () => {
-      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
+      await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
       const amex = await createAccount(db, { name: "Amex", kind: "credit", onBudget: true, balance: 0 });
 
       const [group] = await db.insert(schema.categoryGroups).values({ name: "Everyday", sort: 0 }).returning();
@@ -472,14 +472,14 @@ describe("diagnostics queries", () => {
       const db = openMigratedDb();
 
       // Checking account with $1,000 starting balance
-      const chk = await createAccount(db, {
+      await createAccount(db, {
         name: "Checking",
         kind: "liquid",
         balance: 100000,
       });
 
       // Credit card with -$750 starting balance (debt)
-      const cc = await createAccount(db, {
+      await createAccount(db, {
         name: "Amex Card",
         kind: "credit",
         balance: -75000,
@@ -500,13 +500,13 @@ describe("diagnostics queries", () => {
 
     it("BUG-02: verifies budget integrity holds when receiving CC refund on prior unfunded spending", async () => {
       const db = openMigratedDb();
-      const checking = await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
+      await createAccount(db, { name: "Checking", kind: "liquid", onBudget: true, balance: 0 });
       const amex = await createAccount(db, { name: "Amex", kind: "credit", onBudget: true, balance: 0 });
 
       const [group] = await db.insert(schema.categoryGroups).values({ name: "Everyday", sort: 0 }).returning();
       const [ccGroup] = await db.insert(schema.categoryGroups).values({ name: "Credit Card Payments", sort: 1, isCreditCardPayments: true }).returning();
       const [groceries] = await db.insert(schema.categories).values({ groupId: group.id, name: "Groceries", sort: 0 }).returning();
-      const [amexPay] = await db.insert(schema.categories).values({ groupId: ccGroup.id, name: "Amex Payment", sort: 0, linkedAccountId: amex.id }).returning();
+      await db.insert(schema.categories).values({ groupId: ccGroup.id, name: "Amex Payment", sort: 0, linkedAccountId: amex.id }).returning();
 
       // Month 1 (2026-06): $100 unfunded spend on Amex
       await createTransaction(db, {

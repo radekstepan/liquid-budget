@@ -2,7 +2,6 @@ import { inArray } from "drizzle-orm";
 import type {
   DuplicateAnalysisResult,
   DuplicateEntry,
-  TransactionDuplicateFlag,
   TransactionFlagState,
 } from "@ynab/logic";
 import { findDuplicateGroups, TRANSACTION_DUPLICATE_FLAG } from "@ynab/logic";

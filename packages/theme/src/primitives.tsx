@@ -460,7 +460,6 @@ export const Select: React.FC<SelectProps> = ({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -477,7 +476,6 @@ export const Select: React.FC<SelectProps> = ({
       setActiveIdx(selectedIdx);
       setQuery("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {

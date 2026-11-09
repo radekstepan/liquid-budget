@@ -197,7 +197,7 @@ test("POST /api/import imports plain identical transactions and flags unreconcil
   await resetToDemo(base);
 });
 
-test("uploading a backup through the Settings menu reloads the app with imported data", async ({ page, request }) => {
+test("uploading a backup through the Settings menu reloads the app with imported data", async ({ page }) => {
   const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
   await resetToDemo(base);
 

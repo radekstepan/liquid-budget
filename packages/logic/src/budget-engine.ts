@@ -707,7 +707,6 @@ function buildRawIndexData(
     // Transfers involving credit cards (split parents excluded: their legs
     // live on the children, so counting the parent here would double-count)
     if (!isSplitParent && t.transferAccountId != null && isInternalTransfer) {
-      const sending = amt < 0 ? t.accountId : t.transferAccountId;
       const receiving = amt < 0 ? t.transferAccountId : t.accountId;
       const transferAmount = Math.abs(amt);
 

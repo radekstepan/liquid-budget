@@ -44,7 +44,6 @@ test("creates a transfer between two accounts", async ({ page }) => {
   const options = page.locator('.y-dropdown button[role="option"]');
   await expect(options.first()).toBeVisible();
   const destOption = options.nth(1);
-  const destName = (await destOption.textContent())?.trim()!;
   await destOption.click();
 
   await modal.getByRole("button", { name: "Save Transaction" }).click();

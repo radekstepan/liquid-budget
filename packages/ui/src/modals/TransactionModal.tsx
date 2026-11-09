@@ -187,9 +187,6 @@ export function TransactionModal({
   // user picks a manual color or clears the flag.
   const isDuplicateFlag = flagColor === "duplicate";
   const pickerFlagColor: TransactionFlagColor | null = isDuplicateFlag ? null : flagColor;
-  const savedFlagColor: TransactionFlagColor | null | undefined = isDuplicateFlag
-    ? undefined
-    : flagColor;
 
   // Transfer destination
   const [transferAccountId, setTransferAccountId] = useState<number | "">(
@@ -212,7 +209,6 @@ export function TransactionModal({
     ? (srcOnBudget ? transferAmountCents : 0) + (destOnBudget ? -transferAmountCents : 0)
     : 0;
   const isBoundaryOutflow = isTransferBoundary && transferNetOnBudgetDelta <= 0;
-  const isBoundaryInflow = isTransferBoundary && transferNetOnBudgetDelta > 0;
 
   // Split sub-rows
   const [subRows, setSubRows] = useState<DraftSubRow[]>(

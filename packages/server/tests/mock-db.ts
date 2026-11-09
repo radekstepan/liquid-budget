@@ -118,7 +118,7 @@ function makeChain(
       entry.orderBy = o;
       return chain;
     },
-    limit(l) {
+    limit(_l) {
       return chain;
     },
     set(s) {
@@ -129,7 +129,7 @@ function makeChain(
       entry.values = v;
       return chain;
     },
-    onConflictDoUpdate(opts) {
+    onConflictDoUpdate(_opts) {
       return chain;
     },
     async returning() {

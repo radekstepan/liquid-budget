@@ -178,8 +178,9 @@ describe("BudgetAppShell (BUG-24)", () => {
     const row = screen
       .getAllByText("Public Transport, Uber, Bike")
       .find((el) => el.closest("tr"))
-      ?.closest("tr")!;
+      ?.closest("tr");
     expect(row).toBeDefined();
+    if (!row) throw new Error("Public Transport row not found");
 
     // Click the June 2026 assignment cell to edit (May 2026 and June 2026 both have $75.00 assigned)
     const assignButtons = within(row).getAllByRole("button", { name: "$75.00" });
@@ -244,7 +245,6 @@ describe("BudgetAppShell (BUG-24)", () => {
       }
 
       if (url.includes("/api/transactions") && init?.method === "POST") {
-        const body = JSON.parse(init.body as string);
         return new Promise<Response>((resolve) => {
           postTransactionResolver = resolve;
         });

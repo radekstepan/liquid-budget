@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Icon, Notice, Button, Tooltip } from "@ynab/theme";
 import { Modal, Btn, inputCls } from "./ui.js";
+import { errorMessage } from "./errorMessage.js";
 
 export type SnapshotSummary = {
   id: string;
@@ -61,8 +62,8 @@ export function SnapshotsView({
       await onCreate(name.trim());
       setTouched(false);
       setName(suggestedName);
-    } catch (e: any) {
-      setLocalError(e?.message ? String(e.message) : String(e));
+    } catch (e) {
+      setLocalError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -75,8 +76,8 @@ export function SnapshotsView({
     try {
       await onRestore(restoringId);
       setRestoringId(null);
-    } catch (e: any) {
-      setLocalError(e?.message ? String(e.message) : String(e));
+    } catch (e) {
+      setLocalError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -89,8 +90,8 @@ export function SnapshotsView({
     try {
       await onDelete(deletingId);
       setDeletingId(null);
-    } catch (e: any) {
-      setLocalError(e?.message ? String(e.message) : String(e));
+    } catch (e) {
+      setLocalError(errorMessage(e));
     } finally {
       setBusy(false);
     }

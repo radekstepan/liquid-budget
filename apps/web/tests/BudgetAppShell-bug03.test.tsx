@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, act, waitFor } from "@testing-library/react";
 import React from "react";
 import { BudgetAppShell } from "../src/components/BudgetAppShell";
 import { makeSeedBudgetData, type BudgetData, type Transaction } from "@ynab/logic";
@@ -80,8 +80,6 @@ describe("BudgetAppShell (BUG-03)", () => {
   });
 
   it("BUG-03: optimistic deleteTransaction on split child with 2 children flattens remaining child and deletes parent", async () => {
-    let deleteUrl = "";
-
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
 
@@ -93,7 +91,6 @@ describe("BudgetAppShell (BUG-03)", () => {
       }
 
       if (url.includes("/api/transactions") && init?.method === "DELETE") {
-        deleteUrl = url;
         return new Promise<Response>(() => {}); // Keep in-flight to inspect optimistic state
       }
 

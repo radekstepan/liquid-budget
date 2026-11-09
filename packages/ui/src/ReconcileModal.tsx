@@ -13,11 +13,25 @@ import {
   evalAmount,
   dollarsToCents,
   isValidISODate,
+  parseReconcileStateResponse,
   todayISO,
 } from "@ynab/logic";
 import { Button, Notice, Select, TextField, money } from "@ynab/theme";
 import { Btn, Field, Modal } from "./ui.js";
 import { AmountPreview } from "./AmountInput.js";
+
+type ReconcileState = ReturnType<typeof computeReconcileState>;
+
+function reconcileStateFromError(err: unknown): ReconcileState | null {
+  if (typeof err !== "object" || err === null || !("state" in err)) return null;
+  const state = (err as { state?: unknown }).state;
+  if (!state) return null;
+  try {
+    return parseReconcileStateResponse(state);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Server response from `POST /api/reconcile` with `action: "reconcile"`.
@@ -66,7 +80,7 @@ export function ReconcileModal({
     adjustmentCategoryId: number | null;
     expectedWorkingBalance?: number | null;
   }) => Promise<void>;
-  onFetchState?: (accountId: number, statementDate: string) => Promise<any>;
+  onFetchState?: (accountId: number, statementDate: string) => Promise<ReconcileState>;
   onUnreconcile?: (accountId: number) => Promise<void>;
   busy?: boolean;
 }) {
@@ -152,8 +166,8 @@ export function ReconcileModal({
             : Number(adjustmentCategoryId),
         expectedWorkingBalance: state.workingBalance,
       });
-    } catch (err: any) {
-      let freshState: any = err?.state ?? null;
+    } catch (err) {
+      let freshState = reconcileStateFromError(err);
       if (!freshState && onFetchState) {
         try {
           freshState = await onFetchState(state.accountId, statementDate);

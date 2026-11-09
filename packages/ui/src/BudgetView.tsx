@@ -70,8 +70,6 @@ export const BudgetView = memo(function BudgetView({
   onDeleteCategory,
   onEditGroup,
   onDeleteGroup,
-  onCollapseAll,
-  onExpandAll,
   onReorderCategory,
   onReorderGroup,
   lastMonthAssignments,
@@ -865,9 +863,7 @@ function GroupBlock({
   showMulti,
   onAddCategory,
   onEditCategory,
-  onDeleteCategory,
   onEditGroup,
-  onDeleteGroup,
   onReorderCategory,
   isDragOver,
   onDragStart,
@@ -950,7 +946,7 @@ function GroupBlock({
               <span
                 role="button"
                 tabIndex={0}
-                onClick={(e) => {
+                onClick={() => {
                   if (isSpecialGroup) return;
                   onEditGroup();
                 }}

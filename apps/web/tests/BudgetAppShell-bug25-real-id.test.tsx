@@ -62,8 +62,9 @@ describe("BudgetAppShell (BUG-25)", () => {
     const row = screen
       .getAllByText("Groceries")
       .find((el) => el.closest("tr"))
-      ?.closest("tr")!;
+      ?.closest("tr");
     expect(row).toBeDefined();
+    if (!row) throw new Error("Groceries row not found");
 
     // Click the June assignment cell (the last $0.00 button in the row)
     const assignButtons = within(row).getAllByRole("button", { name: "$0.00" });

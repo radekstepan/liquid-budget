@@ -19,7 +19,6 @@ import {
   openSearchlistByPlaceholder,
   pickFromOpenDropdownByValue,
   pickFromOpenSearchableByValue,
-  pickPlaceholderDropdownByIndexByValue,
   pickPlaceholderSearchableByIndexByValue,
 } from "./dropdown.js";
 

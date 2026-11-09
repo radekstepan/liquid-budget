@@ -119,9 +119,9 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     await expect(addModal).toBeHidden();
 
     // Verify TD balance is debited -$60, Cash balance unchanged.
-    let budgetAfterAdd = await (await page.request.get("/api/budget")).json();
-    let tdAfterAdd = budgetAfterAdd.accounts.find((a: { name: string }) => a.name === "TD Unlimited Chequing");
-    let cashAfterAdd = budgetAfterAdd.accounts.find((a: { name: string }) => a.name === "Cash");
+    const budgetAfterAdd = await (await page.request.get("/api/budget")).json();
+    const tdAfterAdd = budgetAfterAdd.accounts.find((a: { name: string }) => a.name === "TD Unlimited Chequing");
+    const cashAfterAdd = budgetAfterAdd.accounts.find((a: { name: string }) => a.name === "Cash");
     expect(Number(tdAfterAdd.balance)).toBe(tdInitialBalance - 6000);
     expect(Number(cashAfterAdd.balance)).toBe(cashInitialBalance);
 
@@ -142,9 +142,9 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 5. Verify Checking balance is credited +$60 (restored to original).
     // 6. Verify Cash balance is debited -$60.
-    let budgetAfterEdit = await (await page.request.get("/api/budget")).json();
-    let tdAfterEdit = budgetAfterEdit.accounts.find((a: { name: string }) => a.name === "TD Unlimited Chequing");
-    let cashAfterEdit = budgetAfterEdit.accounts.find((a: { name: string }) => a.name === "Cash");
+    const budgetAfterEdit = await (await page.request.get("/api/budget")).json();
+    const tdAfterEdit = budgetAfterEdit.accounts.find((a: { name: string }) => a.name === "TD Unlimited Chequing");
+    const cashAfterEdit = budgetAfterEdit.accounts.find((a: { name: string }) => a.name === "Cash");
     expect(Number(tdAfterEdit.balance)).toBe(tdInitialBalance);
     expect(Number(cashAfterEdit.balance)).toBe(cashInitialBalance - 6000);
 

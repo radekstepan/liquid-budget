@@ -5,6 +5,8 @@ beforeEach(() => {
   try {
     window.localStorage?.clear();
     window.history.replaceState(null, "", "/");
-  } catch {}
+  } catch {
+    // Storage unavailable in this environment; the test starts clean anyway.
+  }
 });
 

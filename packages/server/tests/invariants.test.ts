@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertEntityInvariants, TransactionError } from "../src/index.js";
+import { assertEntityInvariants } from "../src/index.js";
 
 describe("assertEntityInvariants", () => {
   it("passes for valid standard non-transfer non-split transactions", () => {

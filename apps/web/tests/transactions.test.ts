@@ -3,7 +3,6 @@ import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import {
   accounts,
-  categories,
   createAccount,
   createCategory,
   createCategoryGroup,
@@ -503,7 +502,7 @@ describe("PATCH /api/transactions (BUG-19)", () => {
       describe.each(MODES)("to %s", (toMode) => {
         it(`handles ${fromMode} -> ${toMode} with correct balance ledgers`, async () => {
           const initial = await createInitial(fromMode);
-          const res = await updateTo(initial.id, toMode);
+          await updateTo(initial.id, toMode);
 
           // 1. Fetch current balances of all accounts
           const [curSrc] = await db.select().from(accounts).where(eq(accounts.id, srcAccount.id));

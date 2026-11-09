@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Category, CategoryGroup, Payee } from "@ynab/logic";
 import { Icon, Notice, Button } from "@ynab/theme";
 import { Modal, Field, Btn, inputCls } from "./ui.js";
+import { errorMessage } from "./errorMessage.js";
 
 export type PayeeManagerEntry = {
   /** Null when the name only appears as free text (no payees row yet). */
@@ -137,8 +138,8 @@ export function PayeesView({
     try {
       await fn();
       after?.();
-    } catch (e: any) {
-      setError(e?.message ? String(e.message) : String(e));
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef } from "react";
 import type { Account, AppView } from "@ynab/logic";
 import { fmt, num } from "@ynab/logic";
 import { Button, Icon, Tooltip, cx } from "@ynab/theme";
@@ -274,7 +274,9 @@ export const Sidebar = memo(function Sidebar({
           const n = parseInt(saved, 10);
           if (!isNaN(n) && n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
         }
-      } catch {}
+      } catch {
+        // Storage unavailable (private mode / SSR): keep the default width.
+      }
     }
     return DEFAULT_WIDTH;
   });
@@ -305,7 +307,9 @@ export const Sidebar = memo(function Sidebar({
       const finalWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, upEvent.clientX));
       try {
         localStorage.setItem(STORAGE_KEY, String(finalWidth));
-      } catch {}
+      } catch {
+        // Storage unavailable: the in-memory width still applies.
+      }
     };
 
     window.addEventListener("mousemove", onMouseMove);
@@ -316,7 +320,9 @@ export const Sidebar = memo(function Sidebar({
     setWidth(DEFAULT_WIDTH);
     try {
       localStorage.setItem(STORAGE_KEY, String(DEFAULT_WIDTH));
-    } catch {}
+    } catch {
+      // Storage unavailable: reset the in-memory width only.
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, id: number) => {

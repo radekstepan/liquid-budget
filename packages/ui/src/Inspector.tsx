@@ -12,19 +12,14 @@ import type {
 import { MONTHS, parseMonthKey, insightAbsDiff } from "@ynab/logic";
 import { Icon, Button, Panel, Notice, Tooltip, cx, money } from "@ynab/theme";
 import { Modal, Btn } from "./ui.js";
+import { errorMessage } from "./errorMessage.js";
 
 export const Inspector = memo(function Inspector({
-  groups,
   summary,
   month,
   history,
-  avg,
-  overspentPrevious,
-  overspentPreviousMonthKey,
   incomeFromFuture,
   incomeFromPast,
-  incomeDeferredToFuture,
-  incomeDeferredToPast,
   cashFlow,
   trailingNetWorth,
   insights,
@@ -227,8 +222,8 @@ export const Inspector = memo(function Inspector({
                       .then((res) => {
                         if (res) setAnalysisResult(res);
                       })
-                      .catch((err: any) =>
-                        setAnalysisError(err?.message ? String(err.message) : String(err))
+                      .catch((err) =>
+                        setAnalysisError(errorMessage(err))
                       )
                       .finally(() => setAnalyzing(false));
                   }}
@@ -255,8 +250,8 @@ export const Inspector = memo(function Inspector({
                     if (summary && summary.duplicatesSkipped?.length) {
                       setImportResult(summary);
                     }
-                  } catch (err: any) {
-                    setImportError(err?.message ? String(err.message) : String(err));
+                  } catch (err) {
+                    setImportError(errorMessage(err));
                   }
                 }
                 e.target.value = "";
@@ -443,11 +438,12 @@ export const Inspector = memo(function Inspector({
               if (pts.length === 1) return pts[0]!;
 
               const rect = el.getBoundingClientRect();
+              const nativeX = e.nativeEvent.clientX;
               const clientX =
                 typeof e.clientX === "number" && !Number.isNaN(e.clientX)
                   ? e.clientX
-                  : typeof (e.nativeEvent as any)?.clientX === "number"
-                  ? (e.nativeEvent as any).clientX
+                  : typeof nativeX === "number"
+                  ? nativeX
                   : 0;
 
               const rectWidth = rect.width > 0 ? rect.width : W;

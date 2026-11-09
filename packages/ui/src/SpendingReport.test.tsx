@@ -43,7 +43,9 @@ describe("SpendingReport Sankey flow conservation", () => {
     // cleared by the shared setup).
     try {
       window.sessionStorage?.clear();
-    } catch {}
+    } catch {
+      // Storage unavailable in this environment; nothing to reset.
+    }
   });
 
   it("matches each left-hop sub-ribbon to its right-hop ribbon per color when a minimum distorts a bar", () => {

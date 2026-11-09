@@ -7,14 +7,13 @@ import {
   deleteTransaction,
   getDefaultDb,
   mergeTransactions,
-  TransactionError,
   updateSplit,
   updateTransaction,
-  type SubTransactionInput,
 } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
+import { bodyHasField, peekBody, readRouteAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import {
   formatZodError,
@@ -30,11 +29,12 @@ import {
 export async function POST(req: Request) {
   let json: unknown;
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
+  const actions = readRouteAction(req, json);
   const db = getDefaultDb();
 
-  if (action === "bulk-delete" || (typeof json === "object" && json !== null && "action" in json && (json as any).action === "delete")) {
+  // Both spellings are accepted: the legacy query verb (`?action=bulk-delete`)
+  // and the body discriminator (`{ action: "delete" }`).
+  if (actions.queryMatches("bulk-delete") || actions.bodyMatches("delete")) {
     const parseResult = TransactionBulkDeleteSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (action === "merge" || (typeof json === "object" && json !== null && (json as any).action === "merge")) {
+  if (actions.matches("merge")) {
     const parseResult = TransactionMergeSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (action === "bulk-update" || (typeof json === "object" && json !== null && (json as any).action === "bulk-update")) {
+  if (actions.matches("bulk-update")) {
     const parseResult = TransactionBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -138,7 +138,7 @@ export async function PATCH(req: Request) {
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const db = getDefaultDb();
 
-  if (typeof json === "object" && json !== null && "ids" in json) {
+  if (bodyHasField(json, "ids")) {
     const parseResult = TransactionBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -188,7 +188,7 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const isExplicitSingle = typeof json === "object" && json !== null && (json as any).mode === "single";
+    const isExplicitSingle = peekBody(json).mode === "single";
     const isConvertingSplit =
       (body.mode === "single" && (body.categoryId !== undefined || body.amount !== undefined || "transferAccountId" in body)) ||
       (body.mode === "transfer" && "transferAccountId" in body && body.transferAccountId !== undefined);
