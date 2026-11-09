@@ -13,7 +13,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, pickSubCategory, filterRegisterByText } from "./helpers";
+import { fillSearchlist, pickSubCategory, filterRegisterByText, selectModalOption } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -117,6 +117,7 @@ test("reconciled rows do not expose the cycle button", async ({ page }) => {
   await modal.locator('input[inputmode="decimal"]').first().fill("3.21");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -149,6 +150,7 @@ test("editing a transaction through the modal persists the new amount", async ({
   await modal.locator('input[inputmode="decimal"]').first().fill("1.11");
   await modal.locator('input[type="date"]').first().fill("2026-08-15");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -174,11 +176,14 @@ test("editing a transaction through the modal persists the new amount", async ({
 });
 
 test("toggling the Cleared flag does not shift the modal fields", async ({ page }) => {
-  // Open the edit modal on the first register row.
+  // Open the edit modal on the first register row. Click the balance cell
+  // (last, never interactive) instead of the row center: a center click can
+  // land on the checkbox cell during layout settling, which selects the row
+  // instead of opening the modal.
   const row = page
     .locator("table.y-table:not(.y-scheduled-table) tbody tr.y-row")
     .first();
-  await row.click();
+  await row.locator("td").last().click();
 
   const modal = page.locator(".y-modal").last();
   await expect(modal.getByText("Edit Transaction")).toBeVisible();

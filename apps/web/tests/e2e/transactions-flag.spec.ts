@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, filterRegisterByText } from "./helpers";
+import { fillSearchlist, filterRegisterByText, selectModalOption } from "./helpers";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
@@ -35,6 +35,7 @@ test("adds, changes, clears, and persists a transaction color flag", async ({ pa
   await modal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
   await modal.getByRole("radio", { name: "Red" }).click();
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 

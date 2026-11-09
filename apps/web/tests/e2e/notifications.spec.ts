@@ -13,7 +13,7 @@
 // baseline. Toasts auto-dismiss after 4 seconds; every assertion targets
 // exact toast text so stale toasts from earlier steps cannot collide.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, filterRegisterByText } from "./helpers";
+import { fillSearchlist, filterRegisterByText, selectModalOption } from "./helpers";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
@@ -62,6 +62,7 @@ async function addTransactionViaModal(
   await modal.locator('input[inputmode="decimal"]').first().fill(amount);
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 }
@@ -217,6 +218,7 @@ test.describe("failure notifications", () => {
     await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-15");
     await fillSearchlist(modal, "e.g. Whole Foods", payee);
+    await selectModalOption(modal, "Category", "Groceries", page);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
 
     await expect(page.getByText("Failed to add transaction. Please try again.")).toBeVisible();

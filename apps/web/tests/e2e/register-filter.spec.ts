@@ -13,7 +13,7 @@
 // filter persistence across navigation, the no-match empty state, payee and
 // transaction jumps landing in the register, and the global Cmd+K entry point.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, filterRegisterByText } from "./helpers";
+import { fillSearchlist, filterRegisterByText, selectModalOption } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -37,6 +37,7 @@ async function createTransaction(page: Page, payee: string) {
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", payee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 }

@@ -113,6 +113,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     await fillSearchlist(addModal, "e.g. Whole Foods", payee);
 
     await selectOption(addModal, "Account", "TD Unlimited Chequing", page);
+    await selectOption(addModal, "Category", "Groceries", page);
 
     await addModal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(addModal).toBeHidden();
@@ -412,6 +413,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
     await addModal.locator('input[inputmode="decimal"]').first().fill("-45.00");
     await addModal.locator('input[type="date"]').first().fill("2026-06-15");
     await fillSearchlist(addModal, "e.g. Whole Foods", rawPayee);
+    await selectOption(addModal, "Category", "Groceries", page);
     await addModal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(addModal).toBeHidden();
 
@@ -464,9 +466,9 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
 
     // 2. Create 3 transactions with dates: 2026-06-01 (+$1000), 2026-06-05 (-$200), 2026-06-10 (-$300)
     const txConfigs = [
-      { payee: payee1, amount: "1000.00", date: "2026-06-01" },
-      { payee: payee2, amount: "-200.00", date: "2026-06-05" },
-      { payee: payee3, amount: "-300.00", date: "2026-06-10" },
+      { payee: payee1, amount: "1000.00", date: "2026-06-01", category: "Income: Available this month" },
+      { payee: payee2, amount: "-200.00", date: "2026-06-05", category: "Groceries" },
+      { payee: payee3, amount: "-300.00", date: "2026-06-10", category: "Groceries" },
     ];
 
     for (const cfg of txConfigs) {
@@ -477,6 +479,7 @@ test.describe("Transaction Modification & CRUD Edge Cases", () => {
       await fillSearchlist(modal, "e.g. Whole Foods", cfg.payee);
 
       await selectOption(modal, "Account", accName, page);
+      await selectOption(modal, "Category", cfg.category, page);
 
       await modal.getByRole("button", { name: "Save Transaction" }).click();
       await expect(modal).toBeHidden();

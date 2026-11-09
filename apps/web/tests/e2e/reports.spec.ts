@@ -89,7 +89,11 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   await expect(
     page.locator(".y-panel-head").filter({ hasText: "Spending by Merchant" })
   ).toBeVisible();
-  await panel.getByRole("button", { name: "Categories", exact: true }).click();
+  // The retitle orphans the `panel` locator (it filters on the old head
+  // text), so re-scope to the merchant head for the way back. Clicking
+  // Categories retitles back, reviving the original `panel` below.
+  const merchantPanel = page.locator(".y-panel-head").filter({ hasText: "Spending by Merchant" }).locator("..");
+  await merchantPanel.getByRole("button", { name: "Categories", exact: true }).click();
   await expect(panel.getByText("Mortgage Interest")).toBeVisible();
 
   // Threshold slider merges smaller groups into Other without changing
@@ -100,7 +104,11 @@ test("Spending by Category tab renders the Sankey flow and toggles view, dimensi
   const slider = panel.getByRole("slider", { name: /merge smaller groups/i });
   const sliderMax = await slider.getAttribute("max");
   await slider.fill(sliderMax ?? "0");
-  await expect(panel.getByText("Other")).toBeVisible();
+  // Exact match + first: a bare "Other" matches the "(N in Other)" header
+  // note plus one merged-bucket label per Sankey column (income, group,
+  // target). Any one of the labels proves the merge rendered; the header
+  // note is asserted on the next line.
+  await expect(panel.getByText("Other", { exact: true }).first()).toBeVisible();
   await expect(panel.getByText(/\(\d+ in Other\)/)).toBeVisible();
   expect((await outValue.textContent())?.trim()).toBe(outBefore);
 

@@ -9,7 +9,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, openSearchField, pickSubCategory, filterRegisterByText, clearRegisterFilter } from "./helpers";
+import { fillSearchlist, openSearchField, pickSubCategory, filterRegisterByText, clearRegisterFilter, selectModalOption } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -40,6 +40,7 @@ test("adds a new transaction via the modal and renders the row", async ({ page }
   await modal.locator('input[inputmode="decimal"]').first().fill("12.34");
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
 
   // Modal closes and the new row appears.
@@ -60,6 +61,7 @@ test("search filter narrows the register rows", async ({ page }) => {
   await modal.locator('input[inputmode="decimal"]').first().fill("5.00");
   await modal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(modal, "e.g. Whole Foods", uniquePayee);
+  await selectModalOption(modal, "Category", "Groceries", page);
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
@@ -124,6 +126,7 @@ test("clicking a row opens the edit modal pre-filled with the payee", async ({ p
   await addModal.locator('input[inputmode="decimal"]').first().fill("12.34");
   await addModal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(addModal, "e.g. Whole Foods", uniquePayee);
+  await selectModalOption(addModal, "Category", "Groceries", page);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
@@ -146,6 +149,7 @@ test("deletes a transaction via the modal after confirming", async ({ page }) =>
   await addModal.locator('input[inputmode="decimal"]').first().fill("25.00");
   await addModal.locator('input[type="date"]').first().fill("2026-06-15");
   await fillSearchlist(addModal, "e.g. Whole Foods", uniquePayee);
+  await selectModalOption(addModal, "Category", "Groceries", page);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 

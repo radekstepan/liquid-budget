@@ -10,7 +10,7 @@
 //
 // Mutating tests rely on the CI global setup for determinism.
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist, pickSubCategory, filterRegisterByText } from "./helpers";
+import { fillSearchlist, pickSubCategory, filterRegisterByText, selectModalOption } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -41,6 +41,7 @@ test("selects multiple rows with checkboxes and displays the bulk action bar", a
     await modal.locator('input[inputmode="decimal"]').first().fill("15.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-01");
     await fillSearchlist(modal, "e.g. Whole Foods", p);
+    await selectModalOption(modal, "Category", "Groceries", page);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
@@ -87,6 +88,7 @@ test("bulk edits selected rows with field isolation and confirmation step", asyn
     await modal.locator('input[inputmode="decimal"]').first().fill(cfg.amount);
     await modal.locator('input[type="date"]').first().fill(cfg.date);
     await fillSearchlist(modal, "e.g. Whole Foods", cfg.payee);
+    await selectModalOption(modal, "Category", "Groceries", page);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
@@ -142,6 +144,7 @@ test("bulk deletes selected transactions", async ({ page }) => {
     await modal.locator('input[inputmode="decimal"]').first().fill("18.00");
     await modal.locator('input[type="date"]').first().fill("2026-06-01");
     await fillSearchlist(modal, "e.g. Whole Foods", p);
+    await selectModalOption(modal, "Category", "Groceries", page);
     await modal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(modal).toBeHidden();
   }
@@ -192,6 +195,7 @@ test("keyboard shortcuts navigate rows, open edit modal, and cycle status", asyn
   await addModal.locator('input[inputmode="decimal"]').first().fill("33.00");
   await addModal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(addModal, "e.g. Whole Foods", payee);
+  await selectModalOption(addModal, "Category", "Groceries", page);
   await addModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(addModal).toBeHidden();
 
@@ -258,6 +262,7 @@ test("BUG-05: bulk editing a split parent propagates status and date to its chil
   await companionModal.locator('input[inputmode="decimal"]').first().fill("10.00");
   await companionModal.locator('input[type="date"]').first().fill("2026-06-01");
   await fillSearchlist(companionModal, "e.g. Whole Foods", companionPayee);
+  await selectModalOption(companionModal, "Category", "Groceries", page);
   await companionModal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(companionModal).toBeHidden();
 

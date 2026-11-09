@@ -73,6 +73,38 @@ export async function clearRegisterFilter(page: Page): Promise<void> {
   await expect(bar).toBeHidden();
 }
 
+/**
+ * Pick an option in a searchable modal <Select> (Account, Category,
+ * Transfer to, ...). Single-mode saves require an explicit category
+ * (blank blocks save on-budget), so transaction-creating flows must
+ * call this before Save — e.g. ("Category", "Groceries") for expenses
+ * or ("Category", "Income: Available this month") for inflows.
+ */
+export async function selectModalOption(
+  scope: Locator,
+  labelText: string,
+  optionText: string,
+  page: Page
+): Promise<void> {
+  const labelSpan = scope.locator("span.y-label", { hasText: labelText }).first();
+  await expect(labelSpan).toBeVisible();
+  const field = labelSpan.locator("xpath=..");
+  const trigger = field.locator('button[aria-haspopup="listbox"]').first();
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+
+  const searchInput = field.locator("input.y-select-search").first();
+  if (await searchInput.isVisible().catch(() => false)) {
+    await searchInput.fill(optionText);
+  }
+  const option = page
+    .locator('.y-dropdown button[role="option"]')
+    .filter({ hasText: optionText })
+    .first();
+  await expect(option).toBeVisible();
+  await option.click();
+}
+
 /** Open and fill a closed <SearchList> (free-text) field, e.g. the payee. */
 export async function fillSearchlist(
   scope: Locator,

@@ -512,7 +512,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
     expect(Number(invAcc.balance)).toBe(50000);
   });
 
-  test("boundary transfer inflow (Off-Budget to On-Budget) handles uncategorized income vs categorized refund", async ({
+  test("boundary transfer inflow (Off-Budget to On-Budget) handles explicit income vs categorized refund", async ({
     page,
   }) => {
     const stamp = Date.now();
@@ -545,7 +545,8 @@ test.describe("Transfer Transaction Edge Cases", () => {
     await gotoBudget(page);
     const initialTbb = await getTbb(page);
 
-    // 1. Create boundary transfer inflow from Investment Account (off-budget) to Checking (on-budget) of +$400 without category.
+    // 1. Create boundary transfer inflow from Investment Account (off-budget) to Checking (on-budget) of +$400 with an
+    // explicit Income pick (blank blocks save on boundary inflows — the modal forces Income-or-category).
     await gotoAllTransactions(page);
     await page.getByRole("button", { name: "Add a new transaction", exact: true }).click();
     let modal = page.locator(".y-modal").last();
@@ -558,6 +559,7 @@ test.describe("Transfer Transaction Edge Cases", () => {
 
     const catLabel = modal.locator("span.y-label", { hasText: /^Category$/ });
     await expect(catLabel).toBeVisible();
+    await selectOption(modal, "Category", "Income: Available this month", page);
 
     let createPromise = page.waitForResponse(
       (r) => r.url().includes("/api/transactions") && r.request().method() === "POST"

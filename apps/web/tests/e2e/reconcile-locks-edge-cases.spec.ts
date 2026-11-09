@@ -10,7 +10,7 @@
 // Skeletons define the exact behavior and verification steps required for 100% reconcile lock coverage.
 
 import { test, expect, type Page } from "@playwright/test";
-import { fillSearchlist } from "./helpers";
+import { fillSearchlist, selectModalOption } from "./helpers";
 
 async function waitForReady(page: Page) {
   await expect(page.getByText("Loading budget")).toBeHidden({ timeout: 15_000 });
@@ -45,6 +45,7 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     await addModal.locator('input[inputmode="decimal"]').first().fill("15.50");
     await addModal.locator('input[type="date"]').first().fill("2026-08-15");
     await fillSearchlist(addModal, "e.g. Whole Foods", payee);
+    await selectModalOption(addModal, "Category", "Groceries", page);
     await addModal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(addModal).toBeHidden();
 
@@ -174,6 +175,7 @@ test.describe("Reconcile Locks & Immutability Edge Cases", () => {
     await addModal.locator('input[inputmode="decimal"]').first().fill("20.00");
     await addModal.locator('input[type="date"]').first().fill("2026-08-15");
     await fillSearchlist(addModal, "e.g. Whole Foods", payee);
+    await selectModalOption(addModal, "Category", "Groceries", page);
     await addModal.getByRole("button", { name: "Save Transaction" }).click();
     await expect(addModal).toBeHidden();
 
