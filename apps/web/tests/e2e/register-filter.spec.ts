@@ -156,7 +156,13 @@ test("filter with no matches shows the empty state and Clear search restores row
   page,
 }) => {
   const rows = registerRows(page);
-  const totalBefore = await rows.count();
+  // Rows are virtualized, so the DOM holds only the visible window (and its
+  // size settles after the container's ResizeObserver reports). Use the
+  // summary bar's domain count, which is independent of scroll/window size.
+  const summaryCount = page.getByText(/^\d+ transactions$/);
+  // textContent (not innerText) so the `.y-caps` uppercase transform doesn't
+  // change the captured value.
+  const totalBefore = Number.parseInt((await summaryCount.textContent()) ?? "", 10);
   expect(totalBefore).toBeGreaterThan(0);
 
   await filterRegisterByText(page, `zzz-no-such-payee-${Date.now()}`);
@@ -165,7 +171,8 @@ test("filter with no matches shows the empty state and Clear search restores row
 
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(page.getByTestId("register-filter-bar")).toBeHidden();
-  await expect(rows).toHaveCount(totalBefore);
+  await expect(summaryCount).toHaveText(`${totalBefore} transactions`);
+  await expect(rows.first()).toBeVisible();
 });
 
 test("picking a payee suggestion jumps to a payee-filtered register", async ({

@@ -66,7 +66,12 @@ test("search filter narrows the register rows", async ({ page }) => {
   await expect(modal).toBeHidden();
 
   const allRows = page.locator("table.y-table:not(.y-scheduled-table) tbody tr.y-row");
-  const totalBefore = await allRows.count();
+  // Virtualized rows mean the DOM only holds the visible window; the summary
+  // bar's domain count is the stable "before" value to restore.
+  const summaryCount = page.getByText(/^\d+ transactions$/);
+  // textContent (not innerText) so the `.y-caps` uppercase transform doesn't
+  // change the captured value.
+  const totalBefore = Number.parseInt((await summaryCount.textContent()) ?? "", 10);
 
   // Type the exact stamp; only the matching row stays visible.
   await filterRegisterByText(page, stamp);
@@ -75,7 +80,8 @@ test("search filter narrows the register rows", async ({ page }) => {
 
   // Clearing the search restores every row.
   await clearRegisterFilter(page);
-  await expect(allRows).toHaveCount(totalBefore);
+  await expect(summaryCount).toHaveText(`${totalBefore} transactions`);
+  await expect(allRows.first()).toBeVisible();
 });
 
 test("selecting a sidebar account marks the row and scopes the register; Transactions nav clears the filter", async ({ page }) => {
