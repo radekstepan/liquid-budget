@@ -94,8 +94,28 @@ describe("GET /api/export", () => {
     expect(json.transactions).toBeDefined();
   });
 
-  it("exports SQLite DB binary including newest writes (BUG-29)", async () => {
+  it("neutralizes CSV formula injection in payee/memo cells", async () => {
     const db = getDefaultDb();
+    await db.insert(transactions).values({
+      accountId: 1,
+      categoryId: null,
+      date: "2026-06-25",
+      payee: "=cmd|'/C calc'!A0",
+      memo: "@malicious",
+      amount: -100,
+      status: "c",
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/export?format=csv");
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain("'=cmd");
+    expect(text).toContain("'@malicious");
+    expect(text).not.toMatch(/,=cmd/);
+  });
+
+  it("exports SQLite DB binary including newest writes (BUG-29)", async () => {    const db = getDefaultDb();
     await db.insert(transactions).values({
       accountId: 1,
       categoryId: null,
@@ -156,6 +176,36 @@ describe("POST /api/import", () => {
     expect(json.summary.settings).toBeDefined();
     expect(json.summary.settings.budgetName).toBe("My Custom & Saved Budget");
     expect(json.summary.settings.currencySymbol).toBe("£");
+  });
+
+  it("rejects uploads with oversized Content-Length with 413 before parsing", async () => {
+    const formData = new FormData();
+    formData.append("file", new File(["x"], "budget.y4backup"));
+    const req = new NextRequest("http://localhost:3000/api/import", {
+      method: "POST",
+      headers: { "content-length": String(60 * 1024 * 1024) },
+      body: formData,
+    });
+    const res = await importPOST(req);
+    expect(res.status).toBe(413);
+  });
+
+  it("returns 400 for an archive without a .ynab4 payload", async () => {
+    const { default: AdmZip } = await import("adm-zip");
+    const zip = new AdmZip();
+    zip.addFile("random.txt", Buffer.from("hello", "utf-8"));
+    const file = new File([new Uint8Array(zip.toBuffer())], "budget.y4backup", {
+      type: "application/octet-stream",
+    });
+    const formData = new FormData();
+    formData.append("file", file);
+    const req = new NextRequest("http://localhost:3000/api/import", {
+      method: "POST",
+      body: formData,
+    });
+    const res = await importPOST(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Could not find .ynab4/);
   });
 });
 

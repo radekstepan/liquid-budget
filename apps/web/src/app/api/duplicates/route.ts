@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { analyzeUnflaggedDuplicates, getDefaultDb } from "@ynab/server";
 import { optionalErrorMessage } from "../errors";
+import { mutationGuardResponse } from "../guard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,9 @@ export const dynamic = "force-dynamic";
  * duplicates that already carry a flag or are reconciled are reported
  * but left untouched. The full report is returned to the client.
  */
-export async function POST() {
+export async function POST(req?: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   try {
     const db = getDefaultDb();
     const result = await analyzeUnflaggedDuplicates(db);

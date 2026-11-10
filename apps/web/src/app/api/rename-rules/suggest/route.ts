@@ -5,6 +5,7 @@ import {
   suggestRenameRules,
 } from "@ynab/server";
 import { apiErrorResponse } from "../../errors";
+import { mutationGuardResponse } from "../../guard";
 import {
   formatZodError,
   RenameSuggestAcceptSchema,
@@ -43,6 +44,8 @@ export async function GET() {
  * standard rule learner, optionally backfilling existing transactions.
  */
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const action = searchParams.get("action");
   const db = getDefaultDb();

@@ -5,13 +5,34 @@ import type { ExtractedYnab4Data } from "./types.js";
 
 /**
  * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
+ *
+ * Zip-bomb guards: the raw upload is capped before inflate, entry count and
+ * per-entry uncompressed sizes are capped before readAsText, and the inflated
+ * .ynab4 JSON text is capped before JSON.parse. All caps throw plain Errors
+ * surfaced by routes as 400/413.
  */
-// TODO(P0) [import-caps]: cap entry count/size + ynab4 JSON size before AdmZip inflate/JSON.parse
-// to prevent zip-bomb OOM; reject Content-Length > ~50MB at route layer first.
+export const MAX_YNAB4_UPLOAD_BYTES = 50 * 1024 * 1024;
+export const MAX_ZIP_ENTRIES = 2000;
+export const MAX_YNAB4_JSON_CHARS = 100_000_000;
+export const MAX_ENTRY_UNCOMPRESSED_BYTES = 100_000_000;
+export const MAX_SETTINGS_XML_CHARS = 5_000_000;
+
 export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): ExtractedYnab4Data {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  if (buf.length > MAX_YNAB4_UPLOAD_BYTES) {
+    throw new Error("Backup archive exceeds the 50MB upload limit");
+  }
   const zip = new AdmZip(buf);
   const zipEntries = zip.getEntries();
+  if (zipEntries.length > MAX_ZIP_ENTRIES) {
+    throw new Error(`Backup archive has too many entries (${zipEntries.length}; limit ${MAX_ZIP_ENTRIES})`);
+  }
+  for (const entry of zipEntries) {
+    const uncompressed = entry.header.size;
+    if (typeof uncompressed === "number" && uncompressed > MAX_ENTRY_UNCOMPRESSED_BYTES) {
+      throw new Error(`Backup archive entry "${entry.entryName}" exceeds the size limit`);
+    }
+  }
 
   let ynab4JsonStr = "";
   let settingsXml: string | undefined = undefined;
@@ -26,6 +47,12 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
 
   if (!ynab4JsonStr) {
     throw new Error("Could not find .ynab4 data file inside the zip archive");
+  }
+  if (ynab4JsonStr.length > MAX_YNAB4_JSON_CHARS) {
+    throw new Error("Backup .ynab4 payload exceeds the size limit");
+  }
+  if (settingsXml && settingsXml.length > MAX_SETTINGS_XML_CHARS) {
+    throw new Error("Backup settings payload exceeds the size limit");
   }
 
   const ynabData = JSON.parse(ynab4JsonStr);

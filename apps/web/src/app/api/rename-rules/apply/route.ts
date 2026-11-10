@@ -1,5 +1,6 @@
 import { applyRenameRuleToExisting, getDefaultDb } from "@ynab/server";
 import { apiErrorResponse } from "../../errors";
+import { mutationGuardResponse } from "../../guard";
 import { formatZodError, RenameRuleApplySchema } from "../../schemas";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
  * otherwise only affects future CSV imports; this backfills history.
  */
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { getDefaultDb, resetDefaultDb } from "../src/client.js";
 import {
+  __resetSnapshotRateLimitForTests,
   createSnapshot,
   deleteSnapshot,
   listSnapshots,
@@ -24,6 +25,7 @@ describe("snapshots", () => {
     vi.stubEnv("DATABASE_URL", path.join(tmpRoot, "budget.db"));
     vi.stubEnv("SNAPSHOTS_DIR", snapsDir);
     resetDefaultDb();
+    __resetSnapshotRateLimitForTests();
   });
 
   afterEach(() => {
@@ -147,6 +149,34 @@ describe("snapshots", () => {
     it("returns [] when the snapshots directory does not exist", () => {
       expect(listSnapshots(path.join(tmpRoot, "nope"))).toEqual([]);
     });
+
+    it("rejects creation past the snapshot quota with 429", async () => {
+      await seedAccount();
+      fs.mkdirSync(snapsDir, { recursive: true });
+      const { MAX_SNAPSHOTS } = await import("../src/snapshots.js");
+      for (let i = 0; i < MAX_SNAPSHOTS; i++) {
+        fs.writeFileSync(path.join(snapsDir, `qtest-${String(i).padStart(4, "0")}.db`), "x");
+      }
+      await expect(createSnapshot(getDefaultDb(), { name: "one too many" })).rejects.toMatchObject({
+        name: "SnapshotError",
+        status: 429,
+      });
+    });
+
+    it("throttles rapid creation with 429", async () => {
+      const { __resetSnapshotRateLimitForTests, MAX_SNAPSHOT_CREATES_PER_MINUTE } = await import(
+        "../src/snapshots.js"
+      );
+      __resetSnapshotRateLimitForTests();
+      await seedAccount();
+      for (let i = 0; i < MAX_SNAPSHOT_CREATES_PER_MINUTE; i++) {
+        await createSnapshot(getDefaultDb(), { name: `burst ${i}` });
+      }
+      await expect(createSnapshot(getDefaultDb(), { name: "over the line" })).rejects.toMatchObject({
+        name: "SnapshotError",
+        status: 429,
+      });
+    });
   });
 
   describe("restoreSnapshot", () => {
@@ -173,6 +203,62 @@ describe("snapshots", () => {
       });
       await expect(restoreSnapshot("../evil")).rejects.toMatchObject({ status: 400 });
       await expect(restoreSnapshot("")).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("rejects a truncated snapshot with 422 and leaves the live DB untouched", async () => {
+      const account = await seedAccount();
+      await seedTransaction(account.id, { payee: "Original" });
+      const snap = await createSnapshot(getDefaultDb(), { name: "good" });
+      const before = await getDefaultDb().select().from(schema.transactions);
+
+      const corruptId = "corruptintegrity1";
+      fs.copyFileSync(path.join(snapsDir, `${snap.id}.db`), path.join(snapsDir, `${corruptId}.db`));
+      const size = fs.statSync(path.join(snapsDir, `${corruptId}.db`)).size;
+      fs.truncateSync(path.join(snapsDir, `${corruptId}.db`), Math.floor(size / 2));
+      fs.writeFileSync(
+        path.join(snapsDir, `${corruptId}.json`),
+        JSON.stringify({ name: "corrupt", createdAt: new Date().toISOString() })
+      );
+
+      await expect(restoreSnapshot(corruptId)).rejects.toMatchObject({
+        name: "SnapshotError",
+        status: 422,
+      });
+      const after = await getDefaultDb().select().from(schema.transactions);
+      expect(after).toEqual(before);
+    });
+
+    it("rejects a non-database file with 422 without touching the live DB", async () => {
+      const account = await seedAccount();
+      await seedTransaction(account.id, { payee: "Original" });
+      const before = await getDefaultDb().select().from(schema.transactions);
+
+      const badId = "notadbfile1";
+      fs.mkdirSync(snapsDir, { recursive: true });
+      fs.writeFileSync(path.join(snapsDir, `${badId}.db`), "this is not sqlite");
+      fs.writeFileSync(
+        path.join(snapsDir, `${badId}.json`),
+        JSON.stringify({ name: "bad", createdAt: new Date().toISOString() })
+      );
+
+      await expect(restoreSnapshot(badId)).rejects.toMatchObject({
+        name: "SnapshotError",
+        status: 422,
+      });
+      expect(await getDefaultDb().select().from(schema.transactions)).toEqual(before);
+    });
+
+    it("leaves no staging or pre-restore files behind after a successful restore", async () => {
+      const account = await seedAccount();
+      await seedTransaction(account.id, { payee: "Original" });
+      const snap = await createSnapshot(getDefaultDb(), { name: "before mess" });
+      await seedTransaction(account.id, { payee: "Messy", date: "2026-09-07" });
+
+      await restoreSnapshot(snap.id);
+      const leftovers = fs
+        .readdirSync(tmpRoot)
+        .filter((f) => f.includes("pre-restore") || f.includes("restore-tmp") || f.includes("rollback-tmp"));
+      expect(leftovers).toEqual([]);
     });
   });
 

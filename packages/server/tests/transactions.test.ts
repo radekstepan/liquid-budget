@@ -14,6 +14,7 @@ import {
   deleteSplitChildren,
   deleteTransaction,
   TransactionError,
+  updateSingleOrTransferTransaction,
   updateSplit,
   updateTransaction,
 } from "../src/queries/transactions.js";
@@ -5181,6 +5182,80 @@ describe("transactions queries", () => {
           // Account balance should remain 10000 (parent -10000 reversed, children -6000 + -4000 = -10000 applied)
           [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
           expect(acct?.balance).toBe(10000);
+        });
+      });
+
+      describe("updateSingleOrTransferTransaction: split-membership transition lives in the query", () => {
+        it("converts a split to a single with children deleted and balance intact", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id, cat2Id } = await seedTestData(db);
+          await db.update(schema.accounts).set({ balance: 20000 }).where(eq(schema.accounts.id, accountId));
+
+          const split = await createSplitWithChildren(
+            db,
+            {
+              accountId,
+              date: "2026-08-01",
+              payee: "Whole Foods",
+              memo: "",
+              amount: -10000,
+              status: "c",
+            },
+            [
+              { categoryId: cat1Id, amount: -6000, memo: "groceries" },
+              { categoryId: cat2Id, amount: -4000, memo: "household" },
+            ]
+          );
+
+          let [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(10000);
+
+          const row = await updateSingleOrTransferTransaction(db, split.parent.id, {
+            mode: "single",
+            categoryId: cat1Id,
+            amount: -10000,
+          });
+
+          expect(row?.categoryId).toBe(cat1Id);
+          const children = await db
+            .select()
+            .from(schema.transactions)
+            .where(eq(schema.transactions.parentId, split.parent.id));
+          expect(children).toHaveLength(0);
+
+          [acct] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId));
+          expect(acct?.balance).toBe(10000);
+        });
+
+        it("clears the transfer leg only for an explicitly sent mode:single", async () => {
+          const db = openMigratedDb();
+          const { accountId, cat1Id } = await seedTestData(db);
+          const [dest] = await db
+            .insert(schema.accounts)
+            .values({ name: "Savings", kind: "liquid", groupLabel: "Budget Accounts", balance: 0, onBudget: true, sort: 1 })
+            .returning();
+
+          const transfer = await createTransfer(
+            db,
+            { accountId, date: "2026-08-01", payee: "Transfer : Savings", amount: -5000, status: "c" },
+            dest!.id
+          );
+
+          // Inferred single (no explicit mode): transfer leg preserved.
+          const kept = await updateSingleOrTransferTransaction(db, transfer!.id, {
+            mode: "single",
+            payee: "Transfer : Savings",
+          });
+          expect(kept?.transferAccountId).toBe(dest!.id);
+
+          // Explicit mode:single: transfer leg cleared.
+          const cleared = await updateSingleOrTransferTransaction(
+            db,
+            transfer!.id,
+            { mode: "single", categoryId: cat1Id, payee: "Store" },
+            { explicitSingle: true }
+          );
+          expect(cleared?.transferAccountId).toBeNull();
         });
       });
     });

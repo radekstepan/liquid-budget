@@ -7,6 +7,7 @@ import {
 } from "@ynab/server";
 import { z } from "zod";
 import { apiErrorResponse } from "../errors";
+import { mutationGuardResponse } from "../guard";
 import {
   formatZodError,
   RenameRuleCreateSchema,
@@ -24,6 +25,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();
@@ -48,6 +51,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();
@@ -73,6 +78,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const parsedId = z.coerce.number().int().positive().safeParse(searchParams.get("id"));
   if (!parsedId.success) {

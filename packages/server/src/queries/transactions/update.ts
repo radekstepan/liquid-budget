@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
-import type { ClearedStatus } from "@ynab/logic";
+import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
 import { classifyBoundaryTransfer, TransactionError } from "@ynab/logic";
 import { assertEntityInvariants } from "../../invariants.js";
 import type { Database } from "../../client.js";
@@ -9,6 +9,7 @@ import { learnRenameRuleFromPayees } from "../rename-rules.js";
 import { assertValidISODate, assertValidISOMonth, assertValidAmount, sanitizeFlagColor } from "./validation.js";
 import { isAccountOnBudget, assertTargetAccountsOpen, getAccountInfo } from "./accounts.js";
 import { applyBalance, getAccountName, childCount, getChildren } from "./shared.js";
+import { deleteSplitChildren } from "./splits.js";
 import type { UpdateTransactionInput } from "./types.js";
 
 async function lastCategoryForPayee(
@@ -35,6 +36,72 @@ async function lastCategoryForPayee(
     .orderBy(desc(transactions.date), desc(transactions.id))
     .limit(1);
   return prior?.categoryId ?? null;
+}
+
+/** Parsed `mode: "single" | "transfer"` PATCH body (see contracts.ts). */
+export type SingleOrTransferPatchInput = {
+  mode: "single" | "transfer";
+  accountId?: number;
+  categoryId?: number | null;
+  transferAccountId?: number | null;
+  date?: string;
+  payee?: string;
+  memo?: string | null;
+  amount?: number;
+  status?: ClearedStatus;
+  transferStatus?: ClearedStatus;
+  flagColor?: TransactionFlagColor | null;
+  isIncome?: boolean;
+  incomeMonth?: string | null;
+};
+
+/**
+ * Single/transfer PATCH path. Owns the split-membership transition
+ * (deleting children when a split becomes a single/transfer) and the
+ * patch shaping, atomically in one transaction — split conversion is a
+ * domain invariant, not route plumbing. `explicitSingle` must be true
+ * only when the caller literally sent `mode: "single"` (the contract
+ * infers "single" when mode is absent, which must NOT clear the
+ * transfer leg on its own).
+ */
+export async function updateSingleOrTransferTransaction(
+  db: Database,
+  id: number,
+  body: SingleOrTransferPatchInput,
+  opts?: { explicitSingle?: boolean }
+) {
+  const isConvertingSplit =
+    (body.mode === "single" &&
+      (body.categoryId !== undefined ||
+        body.amount !== undefined ||
+        "transferAccountId" in body)) ||
+    (body.mode === "transfer" && "transferAccountId" in body && body.transferAccountId !== undefined);
+
+  return withTransaction(db, async () => {
+    if (isConvertingSplit) {
+      await deleteSplitChildren(db, id);
+    }
+
+    const patch: UpdateTransactionInput = {};
+    if (body.accountId !== undefined) patch.accountId = body.accountId;
+    if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
+    if (body.isIncome !== undefined) patch.isIncome = body.isIncome;
+    if (body.transferAccountId !== undefined) {
+      patch.transferAccountId = body.transferAccountId;
+    } else if (opts?.explicitSingle) {
+      patch.transferAccountId = null;
+    }
+    if (body.date !== undefined) patch.date = body.date;
+    if (body.payee !== undefined) patch.payee = body.payee;
+    if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
+    if (body.amount !== undefined) patch.amount = body.amount;
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.transferStatus !== undefined) patch.transferStatus = body.transferStatus;
+    if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
+    if (body.incomeMonth !== undefined) patch.incomeMonth = body.incomeMonth;
+
+    return updateTransaction(db, id, patch);
+  });
 }
 
 export async function updateTransaction(db: Database, id: number, patch: UpdateTransactionInput) {

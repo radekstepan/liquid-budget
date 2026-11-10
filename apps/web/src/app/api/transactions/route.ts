@@ -3,22 +3,18 @@ import {
   bulkUpdateTransactions,
   createSplitWithChildren,
   createTransaction,
-  deleteSplitChildren,
   deleteTransaction,
   getDefaultDb,
   mergeTransactions,
+  updateSingleOrTransferTransaction,
   updateSplit,
-  updateTransaction,
 } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
-// TODO(P0) [auth-hardening]: bind-or-guard mutating routes — require loopback token or
-// extend RESET_ENABLED pattern to import/restore/export; document auth-proxy need for any
-// non-localhost deployment. All routes here call getDefaultDb() with no session check.
-
 import { bodyHasField, peekBody, readRouteAction } from "../action";
 import { apiErrorResponse } from "../errors";
+import { mutationGuardResponse } from "../guard";
 import {
   formatZodError,
   IdListQuerySchema,
@@ -31,6 +27,8 @@ import {
 } from "../schemas";
 
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const actions = readRouteAction(req, json);
@@ -138,6 +136,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const db = getDefaultDb();
@@ -191,43 +191,13 @@ export async function PATCH(req: Request) {
     }
   }
 
-  // TODO(P1) [thin-route]: push split-vs-single conversion (deleteSplitChildren) into
-  // server/queries/transactions/update.ts — split-membership transition is a domain invariant.
-  // TODO(P1) [thin-route]: accept contract patch type directly in updateTransaction signature
-  // instead of manually copying 10+ fields here; new fields currently need two edits.
-  // TODO(P1) [api-consistency]: extend TransactionPatchSchema with isIncome instead of
-  // (body as {isIncome}) cast below; unify ?action=/body-discriminator dispatch to one canonical form.
+  // TODO(P1) [api-consistency]: unify ?action=/body-discriminator dispatch to one canonical form.
   try {
-    const isExplicitSingle = peekBody(json).mode === "single";
-    const isConvertingSplit =
-      (body.mode === "single" && (body.categoryId !== undefined || body.amount !== undefined || "transferAccountId" in body)) ||
-      (body.mode === "transfer" && "transferAccountId" in body && body.transferAccountId !== undefined);
-
-    if (isConvertingSplit) {
-      await deleteSplitChildren(db, body.id);
-    }
-
-    const patch: Parameters<typeof updateTransaction>[2] = {};
-    if (body.accountId !== undefined) patch.accountId = body.accountId;
-    if (body.categoryId !== undefined) patch.categoryId = body.categoryId;
-    if ("isIncome" in body && (body as { isIncome?: boolean }).isIncome !== undefined) {
-      patch.isIncome = (body as { isIncome: boolean }).isIncome;
-    }
-    if ("transferAccountId" in body && body.transferAccountId !== undefined) {
-      patch.transferAccountId = body.transferAccountId;
-    } else if (isExplicitSingle) {
-      patch.transferAccountId = null;
-    }
-    if (body.date !== undefined) patch.date = body.date;
-    if (body.payee !== undefined) patch.payee = body.payee;
-    if (body.memo !== undefined) patch.memo = body.memo ?? undefined;
-    if (body.amount !== undefined) patch.amount = body.amount;
-    if (body.status !== undefined) patch.status = body.status;
-    if (body.transferStatus !== undefined) patch.transferStatus = body.transferStatus;
-    if (body.flagColor !== undefined) patch.flagColor = body.flagColor;
-    if (body.incomeMonth !== undefined) patch.incomeMonth = body.incomeMonth;
-
-    const row = await updateTransaction(db, body.id, patch);
+    // Split-membership transition + patch shaping live in the server query;
+    // only the explicit-mode signal stays here (the contract infers "single"
+    // when mode is absent, which must not clear the transfer leg on its own).
+    const explicitSingle = peekBody(json).mode === "single";
+    const row = await updateSingleOrTransferTransaction(db, body.id, body, { explicitSingle });
     if (!row) return Response.json({ error: "not found" }, { status: 404 });
     return Response.json(row);
   } catch (e) {
@@ -236,6 +206,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const idsParam = searchParams.get("ids");
   if (idsParam !== null) {

@@ -9,6 +9,7 @@ import {
 import { z } from "zod";
 import { readRouteAction } from "../action";
 import { apiErrorResponse } from "../errors";
+import { mutationGuardResponse } from "../guard";
 import {
   formatZodError,
   ISODateSchema,
@@ -24,6 +25,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const queryAction = readRouteAction(req);
   const db = getDefaultDb();
@@ -174,6 +177,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();
@@ -247,6 +252,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const db = getDefaultDb();
 

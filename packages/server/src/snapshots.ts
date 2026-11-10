@@ -31,6 +31,34 @@ export const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 export const MAX_SNAPSHOT_NAME_LENGTH = 120;
 
+/** Cap on stored snapshots: each is a full-DB VACUUM INTO copy, so unbounded
+ * creation fills disk. Enforced in createSnapshot with a 429 SnapshotError. */
+export const MAX_SNAPSHOTS = 50;
+
+/** Sliding-window throttle on snapshot creation: each call copies the whole
+ * DB via VACUUM INTO, so rapid-fire creation stalls the single writer.
+ * Enforced in createSnapshot with a 429 SnapshotError. */
+export const MAX_SNAPSHOT_CREATES_PER_MINUTE = 10;
+
+const snapshotCreateStamps: number[] = [];
+
+/** Test helper: clear the in-memory creation throttle (module state is fresh
+ * per test file under vitest isolation, but tests within one file share it). */
+export function __resetSnapshotRateLimitForTests(): void {
+  snapshotCreateStamps.length = 0;
+}
+
+function assertSnapshotRateLimit(): void {
+  const now = Date.now();
+  while (snapshotCreateStamps.length > 0 && now - snapshotCreateStamps[0]! > 60_000) {
+    snapshotCreateStamps.shift();
+  }
+  if (snapshotCreateStamps.length >= MAX_SNAPSHOT_CREATES_PER_MINUTE) {
+    throw new SnapshotError("Snapshot creation rate limit exceeded; try again shortly", 429);
+  }
+  snapshotCreateStamps.push(now);
+}
+
 function assertValidSnapshotId(id: string): void {
   if (typeof id !== "string" || !SNAPSHOT_ID_PATTERN.test(id)) {
     throw new SnapshotError("Invalid snapshot id", 400);
@@ -109,6 +137,13 @@ export async function createSnapshot(
 ): Promise<SnapshotMeta> {
   const dir = getSnapshotsDir(opts?.snapshotsDir);
   fs.mkdirSync(dir, { recursive: true });
+  if (listSnapshots(dir).length >= MAX_SNAPSHOTS) {
+    throw new SnapshotError(
+      `Snapshot limit reached (${MAX_SNAPSHOTS}); delete old snapshots before creating new ones`,
+      429
+    );
+  }
+  assertSnapshotRateLimit();
 
   let name = (opts?.name ?? "").trim();
   if (!name) name = await suggestSnapshotName(db);
@@ -217,6 +252,7 @@ function readSnapshotMigrationHashes(snapshotPath: string, id: string): Set<stri
     throw new SnapshotError(`Cannot restore snapshot "${id}": snapshot file is not a readable database`, 422);
   }
   try {
+    assertSnapshotIntegrityRaw(raw, id);
     let rows: Array<{ hash: string }>;
     try {
       rows = raw.prepare("SELECT hash FROM __drizzle_migrations").all() as Array<{ hash: string }>;
@@ -233,6 +269,31 @@ function readSnapshotMigrationHashes(snapshotPath: string, id: string): Set<stri
     } catch {
       // Best-effort close of the read-only handle.
     }
+  }
+}
+
+/**
+ * Reject corrupt/truncated snapshot files even when the migration journal
+ * table itself is intact. Runs on the already-open read-only handle so the
+ * pre-flight needs a single open per restore.
+ */
+function assertSnapshotIntegrityRaw(raw: Database.Database, id: string): void {
+  let rows: unknown;
+  try {
+    rows = raw.prepare("PRAGMA integrity_check").all();
+  } catch {
+    throw new SnapshotError(`Cannot restore snapshot "${id}": snapshot failed integrity check`, 422);
+  }
+  const values = (rows as Array<Record<string, unknown> | string>).map((r) =>
+    typeof r === "string" ? r : String(Object.values(r)[0] ?? "")
+  );
+  const ok = values.length === 1 && values[0]!.toLowerCase() === "ok";
+  if (!ok) {
+    const detail = values.slice(0, 3).join("; ").slice(0, 300);
+    throw new SnapshotError(
+      `Cannot restore snapshot "${id}": snapshot failed integrity check${detail ? ` (${detail})` : ""}`,
+      422
+    );
   }
 }
 
@@ -263,21 +324,15 @@ function assertSnapshotMatchesCurrentMigrations(snapshotPath: string, id: string
 }
 
 /**
- * Replace the live database with a snapshot. Closes the shared connection,
- * copies the snapshot file over the database path, drops stale WAL sidecars,
- * and reopens (running migrations as a sanity check). Serialized on the
- * connection mutex so no write can interleave the swap.
- *
- * A pre-flight migration-lineage check runs BEFORE the live database is
- * touched: the snapshot's `__drizzle_migrations` hashes must match the
- * running app's journal head. A snapshot taken before (or after) the
- * current head is rejected with a clear `SnapshotError` without replacing
- * the live database.
+ * Replace the live database with a snapshot. Crash-safe: pre-flight
+ * `integrity_check` + migration-lineage checks run BEFORE the live database
+ * is touched; the live file is backed up to `<db>.pre-restore-<ts>.db`, the
+ * snapshot is staged to a temp file and atomically renamed over the live
+ * path, and the backup is deleted only after the restored database reopens
+ * cleanly. On failure the backup is rolled back and the live database is
+ * reopened. Serialized on the connection mutex so no write can interleave
+ * the swap.
  */
-// TODO(P0) [restore-safety]: make restore crash-safe — copy live DB to
-// budget.db.pre-restore-<ts> (or createSnapshot), run PRAGMA integrity_check on snapshot
-// via read-only handle, copy to temp + atomic rename, delete backup only on success.
-// TODO(P0) [restore-safety]: reject corrupt/truncated snapshot DBs even when journal table is intact.
 export async function restoreSnapshot(
   id: string,
   opts?: { snapshotsDir?: string }
@@ -306,6 +361,8 @@ export async function restoreSnapshot(
 
   const db = getDefaultDb();
   const release = await getDbMutex(db).acquire();
+  let stagingPath: string | null = null;
+  let backupPath: string | null = null;
   try {
     try {
       db.$client.pragma("wal_checkpoint(TRUNCATE)");
@@ -314,7 +371,18 @@ export async function restoreSnapshot(
     }
     resetDefaultDb();
     const resolved = path.resolve(dbPath);
-    fs.copyFileSync(src, resolved);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const rand = Math.random().toString(36).slice(2, 8);
+    stagingPath = `${resolved}.restore-tmp-${process.pid}-${rand}.db`;
+    if (fs.existsSync(resolved)) {
+      backupPath = `${resolved}.pre-restore-${stamp}.db`;
+      fs.copyFileSync(resolved, backupPath);
+    }
+    // Stage + atomic rename: a crash between copy and rename leaves the live
+    // DB untouched; rename on the same directory is atomic.
+    fs.copyFileSync(src, stagingPath);
+    fs.renameSync(stagingPath, resolved);
+    stagingPath = null;
     for (const suffix of ["-wal", "-shm", "-journal"]) {
       try {
         fs.unlinkSync(`${resolved}${suffix}`);
@@ -323,7 +391,44 @@ export async function restoreSnapshot(
       }
     }
     // Reopen to verify the restored file is a usable, migrated database.
+    // Throws (raw sqlite error) when the staged file is unusable — roll back below.
     getDefaultDb();
+    // Success: backup is redundant; remove it so pre-restore files don't accumulate.
+    if (backupPath) {
+      try {
+        fs.unlinkSync(backupPath);
+      } catch {
+        // Best-effort cleanup; a leftover .pre-restore file is harmless.
+      }
+      backupPath = null;
+    }
+  } catch (e) {
+    // Roll back to the pre-restore backup when the swap or reopen failed.
+    try {
+      if (backupPath && fs.existsSync(backupPath)) {
+        const resolved = path.resolve(dbPath);
+        const rollbackStage = `${resolved}.rollback-tmp-${process.pid}.db`;
+        fs.copyFileSync(backupPath, rollbackStage);
+        fs.renameSync(rollbackStage, resolved);
+      }
+    } catch {
+      // Rollback is best-effort; surface the original failure below.
+    }
+    try {
+      if (stagingPath && fs.existsSync(stagingPath)) fs.unlinkSync(stagingPath);
+    } catch {
+      // Best-effort temp cleanup.
+    }
+    try {
+      getDefaultDb();
+    } catch {
+      // Reopen is best-effort here; the original error carries the signal.
+    }
+    if (e instanceof SnapshotError) throw e;
+    throw new SnapshotError(
+      `Cannot restore snapshot "${id}": restored database failed to reopen (${e instanceof Error ? e.message : String(e ?? "")})`,
+      422
+    );
   } finally {
     release();
   }

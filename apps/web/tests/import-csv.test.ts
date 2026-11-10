@@ -121,4 +121,30 @@ describe("POST /api/import/csv", () => {
     const json = await res.json();
     expect(json.error).toBe("Unclosed quote in CSV on line 2");
   });
+
+  it("rejects CSV payloads over ~5MB with 400", async () => {
+    const db = getDefaultDb();
+    const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+    const req = new NextRequest("http://localhost:3000/api/import/csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: account!.id, csv: "x".repeat(5_000_001) }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects oversized Content-Length with 413 before parsing", async () => {
+    const db = getDefaultDb();
+    const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+
+    const req = new NextRequest("http://localhost:3000/api/import/csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "content-length": String(7 * 1024 * 1024) },
+      body: JSON.stringify({ accountId: account!.id, csv: "Date,Payee,Amount\n" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+  });
 });

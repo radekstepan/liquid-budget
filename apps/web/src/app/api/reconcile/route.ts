@@ -6,6 +6,7 @@ import {
 } from "@ynab/server";
 import { readRouteAction } from "../action";
 import { apiErrorResponse, errorMessage, errorStatus } from "../errors";
+import { mutationGuardResponse } from "../guard";
 import {
   formatZodError,
   ReconcileAccountSchema,
@@ -35,6 +36,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();

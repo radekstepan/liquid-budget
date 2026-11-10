@@ -19,6 +19,14 @@ export {
 export { parseYnab4BudgetMetaData, parseYnab4SettingsXml } from "./settings-xml.js";
 export { extractYnab4TxLineage, ynabFlagToColor } from "./lineage.js";
 export { parseMangledHiddenName } from "./sentinels.js";
-export { collectYnab4PackageWarnings, extractYnab4DataFromZip } from "./archive.js";
-export { importYnab4 } from "./import.js";
+export {
+  collectYnab4PackageWarnings,
+  extractYnab4DataFromZip,
+  MAX_ENTRY_UNCOMPRESSED_BYTES,
+  MAX_SETTINGS_XML_CHARS,
+  MAX_YNAB4_JSON_CHARS,
+  MAX_YNAB4_UPLOAD_BYTES,
+  MAX_ZIP_ENTRIES,
+} from "./archive.js";
+export { importYnab4, importYnab4FromArchive } from "./import.js";
 export { recomputeAccountBalances } from "../queries/diagnostics.js";

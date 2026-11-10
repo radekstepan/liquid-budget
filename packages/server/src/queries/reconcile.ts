@@ -136,22 +136,20 @@ export async function reconcileAccount(
     const state = await getReconcileState(db, input.accountId, statementDate);
     const diff = state.workingBalance - input.statementBalance;
 
-    // TODO(P1) [reconcile-staleness]: always compare expectedWorkingBalance when present —
-    // move check out of adjustmentCategoryId==null branch so stale modals can't silently reconcile.
     // TODO(P1) [reconcile-idempotency]: add idempotency key / disable-while-pending — rapid
     // double-submit currently inserts two reconciliations rows (second is no-op flip).
+    if (
+      input.expectedWorkingBalance !== undefined &&
+      input.expectedWorkingBalance !== null &&
+      input.expectedWorkingBalance !== state.workingBalance
+    ) {
+      throw new TransactionError(
+        `Account balance changed since the reconcile modal was opened (expected working balance ${input.expectedWorkingBalance}, actual is ${state.workingBalance}). Please review the updated difference.`,
+        422
+      );
+    }
     if (diff !== 0) {
       if (input.adjustmentCategoryId == null) {
-        if (
-          input.expectedWorkingBalance !== undefined &&
-          input.expectedWorkingBalance !== null &&
-          input.expectedWorkingBalance !== state.workingBalance
-        ) {
-          throw new TransactionError(
-            `Account balance changed since the reconcile modal was opened (expected working balance ${input.expectedWorkingBalance}, actual is ${state.workingBalance}). Please review the updated difference.`,
-            422
-          );
-        }
         throw new TransactionError(
           "Statement balance does not match the working balance; provide an adjustment category to absorb the difference.",
           422

@@ -4,8 +4,6 @@ import type { Assignment, BudgetData } from "./types.js";
 import type { ReconcileState } from "./reconcile.js";
 import type { DuplicateAnalysisResult } from "./duplicates.js";
 
-// TODO(P1) [bulk-cap]: add .max(1000) to bulk ids arrays (TransactionBulkDelete/Update/Merge) —
-// unbounded arrays build giant IN clauses and hold the single-writer SQLite lock.
 // TODO(P1) [api-consistency]: collapse BudgetAppApi inline txn shapes onto these canonical
 // TransactionSavePayload/contract types so callers can't drift.
 
@@ -213,14 +211,16 @@ export const TransactionPatchSchema = z
 export const TransactionBulkDeleteSchema = z
   .object({
     action: z.literal("delete").optional(),
-    ids: z.array(z.number().int().positive()).min(1),
+    // Capped so a single request can't build a 100k-element IN clause and hold
+    // the single-writer SQLite lock; clients chunk larger selections.
+    ids: z.array(z.number().int().positive()).min(1).max(1000),
   })
   .strict();
 
 export const TransactionBulkUpdateSchema = z
   .object({
     action: z.literal("bulk-update").optional(),
-    ids: z.array(z.number().int().positive()).min(1),
+    ids: z.array(z.number().int().positive()).min(1).max(1000),
     patch: z
       .object({
         status: z.enum(["u", "c"]).optional(),

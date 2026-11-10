@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { dismissDuplicateGroup, getDefaultDb } from "@ynab/server";
 import { DuplicateDismissSchema, formatZodError } from "@ynab/logic";
 import { optionalErrorMessage } from "../../errors";
+import { mutationGuardResponse } from "../../guard";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * duplicate marker is cleared from the group's rows immediately.
  */
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();

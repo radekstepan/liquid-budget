@@ -1,139 +1,52 @@
 import { NextRequest } from "next/server";
-import { getDefaultDb, exportYnab4Zip, getBudgetData } from "@ynab/server";
-import { num } from "@ynab/logic";
+import { getDefaultDb, exportYnab4Zip, exportBudgetCsv, exportBudgetJson, exportBudgetSqlite } from "@ynab/server";
 import { optionalErrorMessage } from "../errors";
+import { mutationGuardResponse } from "../guard";
 
 export const dynamic = "force-dynamic";
 
-// TODO(P1) [export-cleanup]: move CSV/JSON/SQLite serialization out of this route into
-// packages/server export-* next to exportYnab4Zip; keep route to getDefaultDb()+exportX()+Response.
-// TODO(P1) [csv-injection]: neutralize formula injection in csvEscape — prefix leading =+-@ cells.
-// TODO(P1) [export-race]: hold withTransaction/mutex for ?format=sqlite (pragma+serialize races writers).
-// TODO(P2) [logging]: replace console.warn below with logger abstraction routed via apiErrorResponse.
-
-/** Our flag enum → YNAB4 colour name (round-trip with .y4backup import). */
-const FLAG_NAME: Record<string, string> = {
-  red: "Red",
-  orange: "Orange",
-  yellow: "Yellow",
-  green: "Green",
-  blue: "Blue",
-  purple: "Purple",
-};
-
-function csvEscape(val: string | number | null | undefined): string {
-  if (val == null) return "";
-  const s = String(val);
-  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-function csvLine(fields: (string | number | null | undefined)[]): string {
-  return fields.map(csvEscape).join(",") + "\n";
-}
-
-function formatCents(cents: number | string | null | undefined): string {
-  if (cents == null) return "0.00";
-  return (num(cents) / 100).toFixed(2);
-}
+// TODO(P2) [logging]: replace console-free error mapping below with logger abstraction +
+// apiErrorResponse for consistent client envelopes.
 
 export async function GET(req: NextRequest) {
+  // Full-budget dump: sensitive read, same loopback bar as mutations.
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
+  // BudgetExport.body is string | Uint8Array<ArrayBufferLike>; copying the
+  // binary case into a fresh Uint8Array<ArrayBuffer> satisfies BodyInit.
+  const toResponseBody = (body: string | Uint8Array): BodyInit =>
+    typeof body === "string" ? body : new Uint8Array(body);
   try {
     const format = req.nextUrl?.searchParams?.get("format")?.toLowerCase();
     const db = getDefaultDb();
     const today = new Date().toISOString().slice(0, 10);
 
     if (format === "json") {
-      const data = await getBudgetData(db);
-      return new Response(JSON.stringify(data, null, 2), {
+      const out = await exportBudgetJson(db, today);
+      return new Response(toResponseBody(out.body), {
         headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": `attachment; filename="liquid-budget-${today}.json"`,
+          "Content-Type": out.contentType,
+          "Content-Disposition": `attachment; filename="${out.filename}"`,
         },
       });
     }
 
     if (format === "sqlite" || format === "db") {
-      try {
-        db.$client.pragma("wal_checkpoint(TRUNCATE)");
-      } catch (e) {
-        console.warn("[export] wal_checkpoint failed:", e);
-      }
-      const buffer = db.$client.serialize();
-      return new Response(new Uint8Array(buffer), {
+      const out = await exportBudgetSqlite(db, today);
+      return new Response(toResponseBody(out.body), {
         headers: {
-          "Content-Type": "application/x-sqlite3",
-          "Content-Disposition": `attachment; filename="budget-${today}.db"`,
+          "Content-Type": out.contentType,
+          "Content-Disposition": `attachment; filename="${out.filename}"`,
         },
       });
     }
 
     if (format === "csv") {
-      const data = await getBudgetData(db);
-      const lines: string[] = [];
-
-      // Accounts
-      lines.push(csvLine(["Type", "ID", "Name", "Kind", "Group", "Balance", "On Budget", "Archived", "Notes"]));
-      for (const a of data.accounts) {
-        lines.push(csvLine(["Account", a.id, a.name, a.kind, a.groupLabel, formatCents(a.balance), a.onBudget ? "Y" : "N", a.archived ? "Y" : "N", (a as { notes?: string | null }).notes ?? ""]));
-      }
-
-      lines.push("");
-
-      // Category Groups
-      lines.push(csvLine(["Type", "ID", "Name", "Sort", "CC Payments", "Hidden"]));
-      for (const g of data.groups) {
-        lines.push(csvLine(["Group", g.id, g.name, g.sort, g.isCreditCardPayments ? "Y" : "N", g.isHidden ? "Y" : "N"]));
-      }
-
-      lines.push("");
-
-      // Categories
-      lines.push(csvLine(["Type", "ID", "GroupID", "Name", "Sort", "Carryover", "Goal", "LinkedAccountID"]));
-      for (const c of data.categories) {
-        lines.push(csvLine(["Category", c.id, c.groupId, c.name, c.sort, formatCents(c.carryover), c.goalTarget != null ? formatCents(c.goalTarget) : "", c.linkedAccountId ?? ""]));
-      }
-
-      lines.push("");
-
-      // Assignments
-      lines.push(csvLine(["Type", "ID", "CategoryID", "Month", "Amount"]));
-      for (const a of data.assignments) {
-        lines.push(csvLine(["Assignment", a.id, a.categoryId, a.month, formatCents(a.amount)]));
-      }
-
-      lines.push("");
-
-      // Transactions
-      lines.push(csvLine(["Type", "ID", "AccountID", "CategoryID", "Date", "Payee", "Memo", "Amount", "Status", "Flag", "TransferAccountID", "ParentID", "IsIncome"]));
-      for (const t of data.transactions) {
-        lines.push(csvLine([
-          "Transaction", t.id, t.accountId, t.categoryId ?? "", t.date,
-          t.payee, t.memo, formatCents(t.amount), t.status,
-          t.flagColor ? (FLAG_NAME[t.flagColor] ?? "") : "",
-          t.transferAccountId ?? "", t.parentId ?? "", t.isIncome ? "Y" : "N"
-        ]));
-      }
-
-      lines.push("");
-
-      // Recurring
-      lines.push(csvLine(["Type", "ID", "AccountID", "CategoryID", "Payee", "Amount", "Frequency", "NextDate", "Active", "TransferAccountID"]));
-      for (const r of data.recurring) {
-        lines.push(csvLine([
-          "Recurring", r.id, r.accountId, r.categoryId ?? "", r.payee,
-          formatCents(r.amount), r.frequency, r.nextDate, r.active ? "Y" : "N",
-          r.transferAccountId ?? ""
-        ]));
-      }
-
-      const csv = lines.join("");
-      return new Response(csv, {
+      const out = await exportBudgetCsv(db, today);
+      return new Response(toResponseBody(out.body), {
         headers: {
-          "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="liquid-budget-${today}.csv"`,
+          "Content-Type": out.contentType,
+          "Content-Disposition": `attachment; filename="${out.filename}"`,
         },
       });
     }

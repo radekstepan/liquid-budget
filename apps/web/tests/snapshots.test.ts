@@ -122,4 +122,27 @@ describe("/api/snapshots", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.payee).toBe("Original");
   });
+
+  it("POST returns 429 once the snapshot quota is reached", async () => {
+    const { MAX_SNAPSHOTS } = await import("@ynab/server");
+    fs.mkdirSync(snapsDir, { recursive: true });
+    for (let i = 0; i < MAX_SNAPSHOTS; i++) {
+      fs.writeFileSync(path.join(snapsDir, `qtest-${String(i).padStart(4, "0")}.db`), "x");
+    }
+    const res = await post({ name: "one too many" });
+    expect(res.status).toBe(429);
+  });
+
+  it("POST returns 429 when creation is throttled", async () => {
+    const { __resetSnapshotRateLimitForTests, MAX_SNAPSHOT_CREATES_PER_MINUTE } = await import(
+      "@ynab/server"
+    );
+    __resetSnapshotRateLimitForTests();
+    for (let i = 0; i < MAX_SNAPSHOT_CREATES_PER_MINUTE; i++) {
+      const res = await post({ name: `burst ${i}` });
+      expect(res.status).toBe(200);
+    }
+    const throttled = await post({ name: "over the line" });
+    expect(throttled.status).toBe(429);
+  });
 });

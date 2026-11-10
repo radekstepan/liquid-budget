@@ -25,6 +25,17 @@ import {
 } from "./phases/payees.js";
 import { importScheduled } from "./phases/scheduled.js";
 import { importTransactions } from "./phases/transactions.js";
+import { extractYnab4DataFromZip } from "./archive.js";
+
+/**
+ * Thin entry point for upload routes: archive bytes in, import summary out.
+ * Owns zip extraction (incl. size caps) so routes stay to
+ * `getDefaultDb() + importYnab4FromArchive() + Response`.
+ */
+export async function importYnab4FromArchive(db: Db, archive: Buffer | ArrayBuffer) {
+  const { ynabData, settingsXml, warnings, budgetMetaData } = extractYnab4DataFromZip(archive);
+  return importYnab4(db, ynabData, settingsXml, { warnings, budgetMetaData });
+}
 
 export async function importYnab4(
   db: Db,

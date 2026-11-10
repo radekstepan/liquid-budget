@@ -3,6 +3,7 @@ import { getDefaultDb, importCsvTransactions, TransactionError } from "@ynab/ser
 import { parseCsvImport } from "@ynab/logic";
 import { z } from "zod";
 import { formatZodError } from "../../schemas";
+import { mutationGuardResponse } from "../../guard";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +11,19 @@ const BodySchema = z.object({
   accountId: z.number().int().positive(),
   swap: z.boolean().optional().default(false),
   dateFormat: z.enum(["auto", "dmy", "mdy"]).optional().default("auto"),
-  // TODO(P0) [import-caps]: add .max(5_000_000) (~5MB) on csv + Content-Length check in route —
-  // single hostile CSV currently OOMs the server; also caps lock-hold time of import txn.
-  csv: z.string().min(1),
+  // ~5MB: caps memory and the single-transaction lock-hold time of the import.
+  csv: z.string().min(1).max(5_000_000),
 });
 
+export const MAX_CSV_CONTENT_LENGTH = 6 * 1024 * 1024;
+
 export async function POST(req: NextRequest) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_CSV_CONTENT_LENGTH) {
+    return NextResponse.json({ error: "CSV upload exceeds the size limit" }, { status: 413 });
+  }
   let json: unknown;
   try {
     json = await req.json();

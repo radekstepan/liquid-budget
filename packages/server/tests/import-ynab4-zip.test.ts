@@ -14,7 +14,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import AdmZip from "adm-zip";
 import path from "path";
 import { fileURLToPath } from "url";
-import { importYnab4, extractYnab4DataFromZip } from "../src/import-ynab4.js";
+import { importYnab4, importYnab4FromArchive, extractYnab4DataFromZip, MAX_YNAB4_UPLOAD_BYTES, MAX_ZIP_ENTRIES } from "../src/import-ynab4.js";
 import { getBudgetData } from "../src/queries/budget.js";
 import * as schema from "../src/schema.js";
 import type { Db } from "../src/client.js";
@@ -60,6 +60,71 @@ describe("Stage 1: extractYnab4DataFromZip", () => {
     expect(() => extractYnab4DataFromZip(zip.toBuffer())).toThrow(
       "Could not find .ynab4 data file inside the zip archive"
     );
+  });
+
+  it("rejects uploads larger than 50MB before inflate", () => {
+    expect(() => extractYnab4DataFromZip(Buffer.alloc(MAX_YNAB4_UPLOAD_BYTES + 1))).toThrow(
+      /exceeds the 50MB/
+    );
+  });
+
+  it("rejects archives with too many entries (zip-bomb guard)", () => {
+    const zip = new AdmZip();
+    for (let i = 0; i < MAX_ZIP_ENTRIES + 1; i++) {
+      zip.addFile(`filler-${i}.txt`, Buffer.from("x", "utf-8"));
+    }
+    expect(() => extractYnab4DataFromZip(zip.toBuffer())).toThrow(/too many entries/);
+  });
+});
+
+describe("importYnab4FromArchive: single-call upload entry point", () => {
+  function buildZip(payload: unknown): Buffer {
+    const zip = new AdmZip();
+    zip.addFile("budget.ynab4", Buffer.from(JSON.stringify(payload), "utf-8"));
+    return zip.toBuffer();
+  }
+
+  it("extracts and imports archive bytes in one call", async () => {
+    const payload = {
+      fileMetaData: { budgetDataVersion: "4.2.0" },
+      accounts: [
+        {
+          entityId: "acc-1",
+          accountName: "Checking",
+          accountType: "Checking",
+          onBudget: true,
+          sortableIndex: 0,
+        },
+      ],
+      payees: [],
+      masterCategories: [],
+      transactions: [],
+      scheduledTransactions: [],
+      monthlyBudgets: [],
+    };
+    const db = openMigratedDb();
+    const summary = await importYnab4FromArchive(db, buildZip(payload));
+    expect(summary.accounts).toBe(1);
+    const data = await getBudgetData(db);
+    expect(data.accounts.map((a) => a.name)).toContain("Checking");
+  });
+
+  it("propagates extraction failures instead of wiping the ledger", async () => {
+    const zip = new AdmZip();
+    zip.addFile("random.txt", Buffer.from("hello", "utf-8"));
+    const db = openMigratedDb();
+    await db.insert(schema.accounts).values({
+      name: "Keep Me",
+      kind: "liquid",
+      groupLabel: "Budget Accounts",
+      balance: 123,
+    });
+    await expect(importYnab4FromArchive(db, zip.toBuffer())).rejects.toThrow(
+      /Could not find .ynab4 data file/
+    );
+    const rows = await db.select().from(schema.accounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("Keep Me");
   });
 });
 

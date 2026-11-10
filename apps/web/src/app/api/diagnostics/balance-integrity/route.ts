@@ -4,6 +4,7 @@ import {
   recomputeAccountBalances,
 } from "@ynab/server";
 import { optionalErrorMessage } from "../../errors";
+import { mutationGuardResponse } from "../../guard";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,9 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(req?: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   try {
     const db = getDefaultDb();
     const result = await recomputeAccountBalances(db);

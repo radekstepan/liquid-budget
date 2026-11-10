@@ -108,6 +108,16 @@ describe("API Runtime Schemas (UNI-21 / F-15 / BUG-26)", () => {
       expect(TransactionBulkDeleteSchema.safeParse({ ids: [] }).success).toBe(false);
     });
 
+    it("caps bulk ids at 1000 so one request can't hold the single-writer lock", () => {
+      const big = Array.from({ length: 1001 }, (_, i) => i + 1);
+      expect(TransactionBulkDeleteSchema.safeParse({ ids: big }).success).toBe(false);
+      expect(
+        TransactionBulkUpdateSchema.safeParse({ ids: big, patch: { status: "c" } }).success
+      ).toBe(false);
+      const max = Array.from({ length: 1000 }, (_, i) => i + 1);
+      expect(TransactionBulkDeleteSchema.safeParse({ ids: max }).success).toBe(true);
+    });
+
     it("validates bulk update", () => {
       expect(
         TransactionBulkUpdateSchema.safeParse({ ids: [1, 2], patch: { status: "c" } }).success

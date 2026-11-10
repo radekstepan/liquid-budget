@@ -1,10 +1,13 @@
 import { getDefaultDb, upsertAssignment } from "@ynab/server";
 import { apiErrorResponse } from "../errors";
+import { mutationGuardResponse } from "../guard";
 import { AssignmentUpsertSchema, formatZodError } from "../schemas";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();

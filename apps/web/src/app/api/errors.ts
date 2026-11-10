@@ -83,5 +83,7 @@ export function apiErrorResponse(e: unknown): Response {
     return Response.json({ error: msg || "Request failed" }, { status });
   }
 
-  return Response.json({ error: msg || "Internal server error" }, { status: 500 });
+  // Unknown errors: return a generic message so raw sqlite/stack/PII details
+  // never leak to the client. Log server-side via the logger abstraction instead.
+  return Response.json({ error: "Internal server error" }, { status: 500 });
 }

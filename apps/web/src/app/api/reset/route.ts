@@ -1,10 +1,7 @@
 import { getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
+import { mutationGuardResponse } from "../guard";
 
 export const dynamic = "force-dynamic";
-
-// TODO(P0) [auth-hardening]: extend RESET_ENABLED guard to all mutating routes
-// (import/snapshots-restore/export); add loopback-only bind or token check —
-// localhost-trusted is currently never enforced, any LAN client can wipe DB.
 
 /**
  * POST /api/reset
@@ -12,9 +9,14 @@ export const dynamic = "force-dynamic";
  * Wipes all budget data and immediately re-seeds with the demo dataset atomically.
  * Useful during development to get back to a clean slate.
  *
+ * Loopback-only (see ../guard): non-localhost callers get a 403 before the
+ * RESET_ENABLED check below is even reached.
+ *
  * curl -X POST http://localhost:3000/api/reset
  */
-export async function POST() {
+export async function POST(req?: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const isProd = process.env.NODE_ENV === "production";
   const isResetEnabled = process.env.RESET_ENABLED === "true";
 

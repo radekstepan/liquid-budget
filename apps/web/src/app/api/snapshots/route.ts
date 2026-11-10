@@ -7,12 +7,12 @@ import {
   suggestSnapshotName,
 } from "@ynab/server";
 import { apiErrorResponse } from "../errors";
+import { mutationGuardResponse } from "../guard";
 
 export const dynamic = "force-dynamic";
 
 // TODO(P1) [api-consistency]: unify action dispatch on body discriminator + uniform {ok,data}
 // envelope; add zod schema for snapshot restore {id} instead of hand-rolled typeof check.
-// TODO(P0) [snapshot-quota]: add snapshot count/quota + rate-limit on POST (VACUUM INTO per request).
 
 /**
  * GET /api/snapshots
@@ -39,6 +39,8 @@ export async function GET() {
  * Replaces the live database with the snapshot.
  */
 export async function POST(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   let json: unknown;
   try {
     json = await req.json();
@@ -73,6 +75,8 @@ export async function POST(req: Request) {
  * DELETE /api/snapshots?id=<snapshotId>
  */
 export async function DELETE(req: Request) {
+  const blocked = mutationGuardResponse(req);
+  if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id") ?? "";
   try {
