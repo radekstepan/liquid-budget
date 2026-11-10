@@ -20,7 +20,7 @@
 │           │       ├── reconcile/route.ts
 │           │       ├── recurring/route.ts
 │           │       ├── rename-rules/route.ts + apply/ + suggest/
-│           │       ├── duplicates/route.ts
+│           │       ├── duplicates/route.ts + duplicates/dismiss/route.ts
 │           │       ├── import/route.ts + import/csv/route.ts
 │           │       ├── export/route.ts
 │           │       ├── snapshots/route.ts
@@ -28,8 +28,9 @@
 │           │       ├── health/route.ts
 │           │       ├── diagnostics/balance-integrity/route.ts
 │           │       ├── diagnostics/budget-integrity/route.ts
-│           │       ├── schemas.ts + errors.ts
-│           └── components/BudgetAppShell.tsx      # layout → ui/BudgetApp bridge
+│           │       ├── action.ts (dispatcher) + schemas.ts + errors.ts
+│           └── components/BudgetAppShell.tsx      # shell bridge to ui/BudgetApp
+│               └── components/api/               # typed fetch client (accounts, transactions, …)
 ├── packages/
 │   ├── logic/src/              # @ynab/logic — pure domain rules (no I/O)
 │   │   ├── budget-engine.ts / reconcile.ts / recurring.ts
@@ -38,17 +39,19 @@
 │   │   ├── search.ts / searchQuery.ts / csv-import.ts / reports.ts
 │   │   ├── format.ts / types.ts / contracts.ts (zod) / page-title.ts
 │   │   ├── action-payloads.ts / payload-builders.ts / register.ts
+│   │   ├── sankey.ts + sankey/ / privacy.ts / optimistic.ts
 │   │   └── seed-fixture.ts + index.ts
 │   ├── server/src/             # @ynab/server — persistence + use-cases
 │   │   ├── schema.ts / client.ts / index.ts
 │   │   ├── migrate.ts / migrate-bootstrap.ts / seed.ts
 │   │   ├── db-import.ts / db-reset.ts / transaction.ts / invariants.ts
-│   │   ├── import-ynab4.ts / import-csv.ts / export-ynab4.ts
+│   │   ├── import-ynab4.ts (4-line re-export) + import-ynab4/ (phased pipeline: import.ts, phases/, archive.ts, amounts.ts, lineage.ts, …)
+│   │   ├── import-csv.ts / export-ynab4.ts
 │   │   ├── snapshots.ts / llm.ts (OpenAI-compatible chat client)
 │   │   ├── queries/ (accounts, assignments, budget, categories, payees,
-│   │   │          transactions, reconcile, recurring, rename-rules,
-│   │   │          rename-suggest, duplicates, diagnostics)
-│   │   └── migrations/0000–0025_*.sql + meta/   # 26 files, append-only
+│   │   │          transactions/ (index, create, update, remove, merge, splits, …), reconcile,
+│   │   │          recurring, rename-rules, rename-suggest, duplicates, diagnostics)
+│   │   └── migrations/0000–0034_*.sql + meta/   # 35 files, append-only
 │   ├── ui/src/                 # @ynab/ui — all React views
 │   │   ├── BudgetApp.tsx (root) / Sidebar.tsx / Inspector.tsx
 │   │   ├── BudgetView / TransactionsView / ReportsView (+ Spending,

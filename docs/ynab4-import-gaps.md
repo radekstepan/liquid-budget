@@ -13,21 +13,32 @@ Reference material (sibling project, read-only, lives outside this repo):
 
 Our code (this repo):
 
-- Importer: `packages/server/src/import-ynab4.ts`
+- Importer: `packages/server/src/import-ynab4/` phased pipeline (`import.ts`,
+  `phases/{accounts,categories,payees,transactions,scheduled,budgets,balances,ofx,shared}.ts`,
+  `archive.ts`, `amounts.ts`, `lineage.ts`, `settings-xml.ts`, `versions.ts`).
+  `packages/server/src/import-ynab4.ts` is only a 4-line re-export of
+  `import-ynab4/index.ts` kept for the old import path — grep the directory,
+  not the facade.
 - Exporter: `packages/server/src/export-ynab4.ts`
-- Schema: `packages/server/src/schema.ts`
+- Schema: `packages/server/src/schema.ts` (+ `settings.ts` key-value store, see G-02)
 - Import API: `apps/web/src/app/api/import/route.ts`
 - Import summary types: `packages/logic/src/duplicates.ts` (`ImportSummary`, `ImportSkippedEntry`)
 - Import tests: `packages/server/tests/import-ynab4*.test.ts`,
   `apps/web/tests/e2e/import.spec.ts`
+
+> Freshness note (2026-11-10): the `import-ynab4.ts:<line>` citations in each
+> gap predate the monolith → `import-ynab4/` split and are stale as line
+> numbers. Treat them as area pointers and re-grep the paths above.
+> The YNAB4 sibling paths below are external reference material and do not
+> exist in this checkout.
 
 How to re-check anything below: each gap lists exact source paths on both
 sides plus a grep/spot-check an agent can rerun. General entry points:
 
 ```sh
 # our side — what the importer touches
-rg -n "checkNumber|FITID|YNABID|importedPayee|accepted|dateEnteredFromSchedule|matchedTrans|accountMapping|payeeLocation|renameCondition|autoFill|extraData|fileMetaData|strictBudget|twiceAMonth" packages/server/src/import-ynab4.ts
-rg -n "entryName|ybsettings|ymeta|devices|snapshot" packages/server/src/import-ynab4.ts
+rg -n "checkNumber|FITID|YNABID|importedPayee|accepted|dateEnteredFromSchedule|matchedTrans|accountMapping|payeeLocation|renameCondition|autoFill|extraData|fileMetaData|strictBudget|twiceAMonth" packages/server/src/import-ynab4/
+rg -n "entryName|ybsettings|ymeta|devices|snapshot" packages/server/src/import-ynab4/
 
 # YNAB4 side — persisted field lists (getters = serialized JSON keys)
 rg -n "public function get" "/home/radek/dev/ynab4/ynab4-swf-analysis/src/scripts/com/ynab/ynabData/vo/PayeeVO.as"
@@ -106,8 +117,10 @@ Our behavior:
 - `importYnab4` (`:1661-1675`) puts the result into
   `ImportSummary.settings` (`packages/logic/src/duplicates.ts:104-111`).
 - `api/import/route.ts:17-27` passes `settingsXml` through and returns the
-  summary as JSON. `schema.ts` has no settings/locale table, so nothing is
-  stored; formatting/locale is lost on every import.
+  summary as JSON. A `settings` key-value table now exists (`schema.ts`,
+  `server/src/settings.ts` — added for G-02) holding locale/currency
+  formatting from `.ybsettings`; verify what is persisted vs still dropped
+  before treating this gap as open.
 - Mirror problem: `export-ynab4.ts:168-176` hardcodes
   `currencyLocale/dateLocale=en_US, strictBudget=TRUE, budgetType=Personal`.
 
@@ -121,8 +134,9 @@ sed -n 1,30p "/home/radek/dev/ynab4/ynab4-swf-analysis/src/scripts/com/ynab/ynab
 
 Fix:
 
-1. Decide where settings live: either a new `settings` key-value table (or
-   reuse snapshots metadata) storing at least `currencySymbol,
+1. ~~Decide where settings live~~ — DONE: `settings` key-value table
+   (`schema.ts`, `server/src/settings.ts`). Remaining work: confirm it stores
+   at least `currencySymbol,
    currencyISOSymbol, decimalSeparator, groupSeparator, dateFormat,
    budgetName` + `budgetMetaData { budgetType, currencyLocale, dateLocale,
    strictBudget }` from the `.ynab4` JSON root.

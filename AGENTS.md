@@ -19,11 +19,11 @@
 
 ## Code Map
 
-- `apps/web` - Next.js host: routes + REST handlers + shell (thin glue, no domain logic)
-- `packages/logic` - pure domain rules, no I/O (budget math, transfers, splits, search, AI contracts)
-- `packages/server` - SQLite persistence, migrations, import/export, snapshots, LLM client
-- `packages/ui` - all React views, modals, and client state
-- `packages/theme` - design tokens + themes (`./styles.css` export)
+- `apps/web` - Next.js host: routes + REST handlers + shell (thin glue, no domain logic). Edit: `src/app/api/<name>/route.ts` for endpoints, `src/components/api/` for the typed client, `src/components/BudgetAppShell.tsx` for shell wiring.
+- `packages/logic` - pure domain rules, no I/O. Edit: `budget-engine.ts` (budget math), `transfers.ts`/`split.ts`/`reconcile.ts`/`recurring.ts`, `reports.ts`/`sankey/` (reports), `search.ts`/`searchQuery.ts`, `duplicates.ts`/`merge.ts`, `rename-rules.ts`/`rename-suggest.ts`, `csv-import.ts`.
+- `packages/server` - SQLite persistence, migrations, import/export, snapshots, LLM client. Edit: `queries/<entity>.ts` (`transactions/` is split per operation) for DB behavior, `schema.ts` + `migrations/` for tables, `import-ynab4/` (`import-ynab4.ts` is only a re-export) for YNAB4 import.
+- `packages/ui` - all React views, modals, and client state. Edit: `*View.tsx` for screens (wired in `BudgetApp.tsx` + `Sidebar.tsx`/`navVisibility.ts`), `transactions/` for register, `spending/` for charts, `modals/` for dialogs.
+- `packages/theme` - design tokens + themes (`./styles.css` export). Edit: `src/themes.ts` for theme meta, `src/index.css` for tokens, `src/primitives.tsx`/`blocks.tsx` for shared pieces.
 
 ## Conventions
 
