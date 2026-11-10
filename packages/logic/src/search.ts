@@ -1,4 +1,6 @@
 import type { BudgetData } from "./types.js";
+// TODO(P1) [search-perf]: buildSearchIndex is O(n) client index on every load — add server-side
+// cursor search (SELECT LIMIT + FTS) for 100k-txn budgets; keep client index as fallback.
 
 export type SearchScope = { scopeAccountId: number | null; searchAll: boolean };
 

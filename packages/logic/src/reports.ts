@@ -4,6 +4,10 @@
  * Pure business logic for financial reports (Net Worth, etc.).
  * No React, no DB access.
  */
+// TODO(P2) [decompose]: extract computeSpendingTrends ~190-line + computeMonthlyInsights ~140-line
+// sub-aggregators; reuse transfers.isInternalTransfer instead of inlining boundary math.
+// TODO(P1) [sql-aggregation]: for large budgets move group-bys to SQL; keep these pure fns as fallback.
+
 
 import type { BudgetData, Transaction } from "./types.js";
 import { fmt, num, isValidISODate } from "./format.js";

@@ -7,6 +7,9 @@ import { accounts, assignments, categoryGroups, categories, payees, reconciliati
 import { getAllSettings } from "./settings.js";
 import { getBudgetData } from "./queries/budget.js";
 
+// TODO(P1) [export-perf]: 11 parallel full scans + Array.find per row is O(accounts x txns) —
+// index by id via Map; stream export to temp-file instead of full serialize for large budgets.
+
 const FLAG_NAMES: Record<string, string> = {
   red: "Red",
   orange: "Orange",

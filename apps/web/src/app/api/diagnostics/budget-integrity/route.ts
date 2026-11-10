@@ -3,6 +3,9 @@ import { optionalErrorMessage } from "../../errors";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P2) [operational]: add PRAGMA integrity_check to diagnostics endpoints + scheduled VACUUM/
+// checkpoint note; keep yarn check:artifacts in CI gate so budget.db/y4backup/CSV never get tracked.
+
 export async function GET(request?: Request) {
   try {
     const db = getDefaultDb();

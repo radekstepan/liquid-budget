@@ -9,6 +9,10 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+// TODO(P2) [schema-hygiene]: YNAB4 lineage (entityId/transferEntityId/fitid/ynabId/importedPayee/...)
+// pollutes core tables for round-trip fidelity — consider ynab4_lineage side table or documented
+// compat block so 30-column transactions table stays readable.
+
 export const accounts = sqliteTable(
   "accounts",
   {

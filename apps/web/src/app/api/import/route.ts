@@ -4,6 +4,12 @@ import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P0) [import-caps]: reject Content-Length > ~50MB before arrayBuffer(); cap ynab entry
+// count/size in archive.ts to prevent zip-bomb OOM (AdmZip inflates fully in memory).
+// TODO(P1) [thin-route]: move extractYnab4DataFromZip call into importYnab4(db, arrayBuffer)
+// so route stays thin and server owns archive parsing.
+// TODO(P2) [logging]: replace console.error below with logger abstraction + apiErrorResponse.
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();

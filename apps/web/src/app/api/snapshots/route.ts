@@ -10,6 +10,10 @@ import { apiErrorResponse } from "../errors";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P1) [api-consistency]: unify action dispatch on body discriminator + uniform {ok,data}
+// envelope; add zod schema for snapshot restore {id} instead of hand-rolled typeof check.
+// TODO(P0) [snapshot-quota]: add snapshot count/quota + rate-limit on POST (VACUUM INTO per request).
+
 /**
  * GET /api/snapshots
  * Lists manual snapshots newest-first plus a suggested name for the next one

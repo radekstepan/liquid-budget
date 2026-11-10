@@ -274,6 +274,10 @@ function assertSnapshotMatchesCurrentMigrations(snapshotPath: string, id: string
  * current head is rejected with a clear `SnapshotError` without replacing
  * the live database.
  */
+// TODO(P0) [restore-safety]: make restore crash-safe — copy live DB to
+// budget.db.pre-restore-<ts> (or createSnapshot), run PRAGMA integrity_check on snapshot
+// via read-only handle, copy to temp + atomic rename, delete backup only on success.
+// TODO(P0) [restore-safety]: reject corrupt/truncated snapshot DBs even when journal table is intact.
 export async function restoreSnapshot(
   id: string,
   opts?: { snapshotsDir?: string }

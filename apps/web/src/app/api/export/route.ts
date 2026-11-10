@@ -5,6 +5,12 @@ import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P1) [export-cleanup]: move CSV/JSON/SQLite serialization out of this route into
+// packages/server export-* next to exportYnab4Zip; keep route to getDefaultDb()+exportX()+Response.
+// TODO(P1) [csv-injection]: neutralize formula injection in csvEscape — prefix leading =+-@ cells.
+// TODO(P1) [export-race]: hold withTransaction/mutex for ?format=sqlite (pragma+serialize races writers).
+// TODO(P2) [logging]: replace console.warn below with logger abstraction routed via apiErrorResponse.
+
 /** Our flag enum → YNAB4 colour name (round-trip with .y4backup import). */
 const FLAG_NAME: Record<string, string> = {
   red: "Red",

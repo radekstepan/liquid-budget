@@ -4,6 +4,9 @@ import { optionalErrorMessage } from "../errors";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P2) [logging]: replace console.error below with logger + apiErrorResponse (no PII leak;
+// Vitest console ban doesn't cover Next runtime).
+
 /**
  * Analyze the whole database for duplicate transactions. Any unflagged
  * duplicates are flagged yellow so they stand out in the register;

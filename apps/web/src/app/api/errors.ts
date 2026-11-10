@@ -41,6 +41,8 @@ function errorCode(e: unknown): unknown {
 }
 
 export function apiErrorResponse(e: unknown): Response {
+  // TODO(P1) [layering]: translate SQLITE_CONSTRAINT_* inside packages/server queries
+  // (throw AccountError/409/422 at source); web should only see domain errors, not DB wire details.
   if (
     e instanceof AccountError ||
     e instanceof CategoryError ||

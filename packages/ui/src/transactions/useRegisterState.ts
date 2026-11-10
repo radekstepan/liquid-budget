@@ -9,6 +9,8 @@ import type {
   Transaction,
 } from "@ynab/logic";
 import { num, pickMergePrimary } from "@ynab/logic";
+// TODO(P2) [merge-dedupe]: selection recomputes pickMergePrimary client-side — prefer server
+// merged.id response to avoid duplicating merge-rule knowledge in UI.
 import { useLocalStorage } from "../useLocalStorage.js";
 import type { SortKey, SortState } from "./registerTypes.js";
 import {

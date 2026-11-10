@@ -10,6 +10,8 @@ const BodySchema = z.object({
   accountId: z.number().int().positive(),
   swap: z.boolean().optional().default(false),
   dateFormat: z.enum(["auto", "dmy", "mdy"]).optional().default("auto"),
+  // TODO(P0) [import-caps]: add .max(5_000_000) (~5MB) on csv + Content-Length check in route —
+  // single hostile CSV currently OOMs the server; also caps lock-hold time of import txn.
   csv: z.string().min(1),
 });
 

@@ -1,4 +1,6 @@
 import { MONTHS, MONTHS_LONG, dollarsToCents } from "./format.js";
+// TODO(P2) [type-safety]: replace ~80 non-null assertions (this file worst offender) with
+// Map.get ?? throw / atOrThrow helper at module boundaries — CSV input is untrusted.
 
 export type CsvImportRow = {
   rowNumber: number;

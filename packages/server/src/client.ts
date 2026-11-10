@@ -1,5 +1,8 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+// TODO(P2) [toolchain]: ADR better-sqlite3 vs node:sqlite (stable since Node 22) to remove native
+// binding fragility (rebuild after Node switch); pin @types/node to .nvmrc; unify Vitest to one
+// major; drop turbo ^build from lint/typecheck; consolidate db:generate ownership on @ynab/server.
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema.js";
 import { fileURLToPath } from "url";

@@ -1,6 +1,8 @@
 "use client";
 
 import { useId, useMemo, useState, useRef, useEffect, useCallback, memo, type ReactNode } from "react";
+// TODO(P2) [ui-split]: split this 1573-line report — extract chart primitives, aggregation hooks,
+// outlier-break computation into submodules; add keyboard/SSR-text alternative for hover-only charts.
 import type { BudgetData, Transaction, SpendingTrendsConstituent } from "@ynab/logic";
 import {
   fmt,

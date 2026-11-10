@@ -14,6 +14,9 @@
  * Amounts in `BudgetData` are decimal strings; delta maps and row builders
  * use integer cents via `num()`/`toFixed(2)`, matching the server.
  */
+// TODO(P2) [optimistic-drift]: this module mirrors server income/boundary/split rules — any server
+// rule change needs parallel update here; mitigate with shared helpers (classifyBoundaryTransfer
+// done) + transactionUpdateNeedsReload/skipReload safety net; consider extracting shared rule fns.
 import { num } from "./format.js";
 import { classifyBoundaryTransfer } from "./transfers.js";
 import {

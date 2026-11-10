@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+// TODO(P2) [ui-split]: split this 1313-line shell — extract view routing, month-nav memo,
+// entity mutations into hooks; every new mutation must remember skipReload semantics today.
+// TODO(P2) [i18n]: hardcoded en-US/$ throughout (fmt/searchQuery) — record single-locale decision
+// or introduce locale plumbing before adding more formatters.
 import type { BudgetData, Query, RenameRule, Transaction } from "@ynab/logic";
 import {
   buildPageTitle,

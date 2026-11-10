@@ -136,6 +136,10 @@ export async function reconcileAccount(
     const state = await getReconcileState(db, input.accountId, statementDate);
     const diff = state.workingBalance - input.statementBalance;
 
+    // TODO(P1) [reconcile-staleness]: always compare expectedWorkingBalance when present —
+    // move check out of adjustmentCategoryId==null branch so stale modals can't silently reconcile.
+    // TODO(P1) [reconcile-idempotency]: add idempotency key / disable-while-pending — rapid
+    // double-submit currently inserts two reconciliations rows (second is no-op flip).
     if (diff !== 0) {
       if (input.adjustmentCategoryId == null) {
         if (

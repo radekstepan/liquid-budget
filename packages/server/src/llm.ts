@@ -13,6 +13,8 @@ import { DEFAULT_MAX_SUGGEST_PAYEES } from "@ynab/logic";
 
 export const DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_LLM_TIMEOUT_MS = 60_000;
+// TODO(P2) [llm-privacy]: pin https:// for non-loopback baseUrls; audit-log model+candidate count
+// per request; document that LLM_BASE_URL=http://localhost is fine but external URLs exfiltrate payees.
 
 export type LlmConfig = {
   apiKey: string;

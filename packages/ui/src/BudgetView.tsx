@@ -1,6 +1,10 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
+// TODO(P2) [ui-split]: split this 1358-line God component — extract toolbar/scroll-visibility
+// ResizeObserver, DnD reorder, month grid, inline edit cell, quick-budget menu into subcomponents.
+// TODO(P2) [a11y]: add keyboard reorder path for draggable rows + non-color balance cue (icon/text),
+// focus-trap/return-focus for quick-budget menu; balanceColor is red/green only today.
 import type { GroupRow, CatRow, BudgetResult, CategoryGroup } from "@ynab/logic";
 import { evalAmount, fmt, MONTHS, parseMonthKey, monthKey, todayISO, dollarsToCents, validateAmountInput } from "@ynab/logic";
 import {

@@ -13,6 +13,9 @@ import {
 } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { completeChatJson, getLlmConfig, isLlmRenameEnabled, LlmError, type LlmFetch } from "../llm.js";
+// TODO(P2) [llm-privacy]: strip/allowlist fields sent to model (payee only, drop/truncate memo
+// evidence — memos often contain account numbers); log model+candidate count; warn in UI that
+// payee names leave the machine; pin https:// for non-loopback LLM_BASE_URL.
 import { transactions } from "../schema.js";
 import {
   applyRenameRuleToExisting,

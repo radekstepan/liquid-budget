@@ -8,6 +8,9 @@ import {
 } from "@ynab/logic";
 import { getDefaultDb, listAccounts } from "@ynab/server";
 
+// TODO(P1) [layering]: remove direct DB I/O from generateMetadata — fetch /api/* read-model
+// instead of opening SQLite from RSC; couples rendering to connection lifecycle.
+
 export const dynamic = "force-dynamic";
 
 const VALID_VIEWS: AppView[] = ["budget", "reports", "transactions"];

@@ -8,6 +8,10 @@ import { getRenameRules } from "./rename-rules.js";
 import { getPayees } from "./payees.js";
 
 export async function getBudgetData(db: Db): Promise<BudgetData> {
+  // TODO(P1) [pagination]: add cursor-paginated transactions endpoint (?accountId&before&limit)
+  // with SELECT LIMIT; this full-table fan-out (7x SELECT * incl. every txn) is the scaling cliff.
+  // TODO(P1) [sql-aggregation]: move report group-bys into SQL SUM/GROUP BY month+category
+  // instead of full-table JS aggregation on every navigation.
   const [accts, groups, cats, assigns, txns, recur, recurSubs] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort)),

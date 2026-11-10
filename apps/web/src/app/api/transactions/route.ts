@@ -13,6 +13,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// TODO(P0) [auth-hardening]: bind-or-guard mutating routes — require loopback token or
+// extend RESET_ENABLED pattern to import/restore/export; document auth-proxy need for any
+// non-localhost deployment. All routes here call getDefaultDb() with no session check.
+
 import { bodyHasField, peekBody, readRouteAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import {
@@ -187,6 +191,12 @@ export async function PATCH(req: Request) {
     }
   }
 
+  // TODO(P1) [thin-route]: push split-vs-single conversion (deleteSplitChildren) into
+  // server/queries/transactions/update.ts — split-membership transition is a domain invariant.
+  // TODO(P1) [thin-route]: accept contract patch type directly in updateTransaction signature
+  // instead of manually copying 10+ fields here; new fields currently need two edits.
+  // TODO(P1) [api-consistency]: extend TransactionPatchSchema with isIncome instead of
+  // (body as {isIncome}) cast below; unify ?action=/body-discriminator dispatch to one canonical form.
   try {
     const isExplicitSingle = peekBody(json).mode === "single";
     const isConvertingSplit =

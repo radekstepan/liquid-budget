@@ -7,6 +7,11 @@ import type { BudgetData } from "@ynab/logic";
 import { invalidateBudgetIndex, parseBudgetDataResponse, parseRecurringAutoPostResponse } from "@ynab/logic";
 import { createBudgetApi, jsonReq, useToasts, type MutationMessages } from "./api/index";
 
+// TODO(P1) [optimistic-helper]: extract single optimisticMutation(plan,request,rollback) helper —
+// reload/runMutation/seq-guard + reconcile preview + skipReload logic is now 3 copies.
+// TODO(P2) [logging]: replace console.error paths in shell with logger abstraction (Vitest
+// onConsoleLog ban doesn't cover Next runtime; apiErrorResponse leaks raw msg for unknown errors).
+
 export function BudgetAppShell({
   initialView = "budget",
   initialMonth,

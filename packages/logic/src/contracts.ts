@@ -4,6 +4,11 @@ import type { Assignment, BudgetData } from "./types.js";
 import type { ReconcileState } from "./reconcile.js";
 import type { DuplicateAnalysisResult } from "./duplicates.js";
 
+// TODO(P1) [bulk-cap]: add .max(1000) to bulk ids arrays (TransactionBulkDelete/Update/Merge) —
+// unbounded arrays build giant IN clauses and hold the single-writer SQLite lock.
+// TODO(P1) [api-consistency]: collapse BudgetAppApi inline txn shapes onto these canonical
+// TransactionSavePayload/contract types so callers can't drift.
+
 export const ISODateSchema = z.string().refine(isValidISODate, {
   message: "Invalid calendar date (expected YYYY-MM-DD)",
 });

@@ -2,6 +2,9 @@ import type { TransactionSavePayload, RecurringSavePayload } from "./Modals.js";
 import type { BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, ReconcileState, RenameSuggestResponse, RenameSuggestStatusResponse, TransactionFlagColor } from "@ynab/logic";
 import type { SnapshotSummary } from "./SnapshotsView.js";
 
+// TODO(P1) [api-consistency]: collapse legacy inline TransactionSavePayload shapes below onto
+// canonical contracts.ts TransactionSavePayload/RecurringSavePayload — doubles contract surface today.
+
 export type BudgetAppApi = {
   reload: () => Promise<void>;
   assign: (categoryId: number, amount: number, month: string) => Promise<void>;

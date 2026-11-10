@@ -53,6 +53,9 @@
  * folding, integer-cents money) are documented in
  * `.planning/codebase/INTEGRATIONS.md` ("YNAB4 fidelity vs deliberate forks").
  */
+// TODO(P2) [decompose]: extract computeAllMonths ~310-line 2-pass CC-buffer walk + 5-step refund
+// waterfall into month-walk passes + sub-aggregators; extract collectSplitParents()/ccGroupIds()
+// helpers to kill duplicated set-construction across budget-engine/reports.
 
 import type {
   Account,

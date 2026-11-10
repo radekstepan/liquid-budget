@@ -8,6 +8,11 @@ import { TransactionError } from "./queries/transactions.js";
 import { findOrCreatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
 
+// TODO(P1) [csv-perf]: hoist per-row rename-prior SELECT (payee ORDER BY date DESC LIMIT 1) out of
+// the row loop; batch balance bumps into single UPDATE CASE to shorten single-writer lock hold.
+// TODO(P1) [bulk-cap]: cap rows/ids arrays (e.g. .max(1000)) — bulk-delete with 100k ids builds one
+// giant IN clause in a single withTransaction today.
+
 export type ImportCsvInput = {
   accountId: number;
   rows: CsvImportRow[];

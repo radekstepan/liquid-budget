@@ -2,6 +2,10 @@ import { getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 
 export const dynamic = "force-dynamic";
 
+// TODO(P0) [auth-hardening]: extend RESET_ENABLED guard to all mutating routes
+// (import/snapshots-restore/export); add loopback-only bind or token check —
+// localhost-trusted is currently never enforced, any LAN client can wipe DB.
+
 /**
  * POST /api/reset
  *

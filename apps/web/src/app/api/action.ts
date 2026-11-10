@@ -5,6 +5,8 @@ import { z } from "zod";
  * still validate the full payload afterwards, so this one must tolerate the
  * extra fields each branch carries (`ids`, `patch`, `mode`, ...).
  */
+// TODO(P1) [api-consistency]: converge on one canonical discriminator (body {action}) —
+// query ?action= + body action + bodyHasField(ids) heuristic triples the test matrix.
 const BodyPeekSchema = z.looseObject({
   action: z.string().optional(),
   type: z.string().optional(),

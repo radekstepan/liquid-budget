@@ -6,6 +6,8 @@ import type { ExtractedYnab4Data } from "./types.js";
 /**
  * Stage 1: Extract and parse YNAB4 data from a .y4backup or .zip archive buffer.
  */
+// TODO(P0) [import-caps]: cap entry count/size + ynab4 JSON size before AdmZip inflate/JSON.parse
+// to prevent zip-bomb OOM; reject Content-Length > ~50MB at route layer first.
 export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): ExtractedYnab4Data {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   const zip = new AdmZip(buf);
