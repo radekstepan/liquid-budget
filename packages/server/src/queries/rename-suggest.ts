@@ -12,10 +12,7 @@ import {
   selectRenameCandidates,
 } from "@ynab/logic";
 import type { Db } from "../client.js";
-import { completeChatJson, getLlmConfig, isLlmRenameEnabled, LlmError, type LlmFetch } from "../llm.js";
-// TODO(P2) [llm-privacy]: strip/allowlist fields sent to model (payee only, drop/truncate memo
-// evidence — memos often contain account numbers); log model+candidate count; warn in UI that
-// payee names leave the machine; pin https:// for non-loopback LLM_BASE_URL.
+import { bareLlmHostname, completeChatJson, getLlmConfig, isLlmRenameEnabled, LlmError, type LlmAuditEntry, type LlmFetch } from "../llm.js";
 import { transactions } from "../schema.js";
 import {
   applyRenameRuleToExisting,
@@ -82,10 +79,23 @@ export type RenameSuggestResult = {
  */
 export async function suggestRenameRules(
   db: Db,
-  opts?: { env?: NodeJS.ProcessEnv; fetchImpl?: LlmFetch; offset?: number; limit?: number }
+  opts?: {
+    env?: NodeJS.ProcessEnv;
+    fetchImpl?: LlmFetch;
+    offset?: number;
+    limit?: number;
+    /**
+     * Per-request audit sink (model served + candidate count; never key,
+     * payee, or memo text). Not called when the page is empty (no LLM
+     * request is made). Server routes wire this to logging; tests pass
+     * a collector to stay clear of the console-output ban.
+     */
+    onAudit?: (entry: LlmAuditEntry) => void;
+  }
 ): Promise<RenameSuggestResult> {
   const env = opts?.env ?? process.env;
-  const maxPayees = getLlmConfig(env).maxPayees;
+  const config = getLlmConfig(env);
+  const maxPayees = config.maxPayees;
   const status = getRenameSuggestStatus(db, env);
   if (!status.enabled) {
     throw new LlmError(
@@ -100,22 +110,62 @@ export async function suggestRenameRules(
     return {
       suggestions: [],
       skipped: [],
-      model: getLlmConfig(env).model,
+      model: config.model,
       candidates: 0,
     };
   }
-  const { content, model } = await completeChatJson(buildRenameSuggestMessages(slice), {
-    env,
-    fetchImpl: opts?.fetchImpl,
-  });
+  const host = (() => {
+    try {
+      return bareLlmHostname(new URL(config.baseUrl));
+    } catch {
+      return "";
+    }
+  })();
+  // Privacy: the wire payload is allowlisted to payee display names.
+  // Memo evidence is attached only when LLM_INCLUDE_MEMOS opts in —
+  // memos often contain account numbers.
+  let content: string;
+  let servedModel: string;
+  try {
+    ({ content, model: servedModel } = await completeChatJson(
+      buildRenameSuggestMessages(slice, { includeMemos: config.includeMemos }),
+      { env, fetchImpl: opts?.fetchImpl }
+    ));
+  } catch (e) {
+    opts?.onAudit?.({
+      host,
+      requestedModel: config.model,
+      candidates: slice.length,
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
   const parsed = parseRenameSuggestions(content, slice);
   if (parsed.error) {
+    // Parse errors echo model output (which echoes payees), so the audit
+    // trail records a fixed reason instead of the message.
+    opts?.onAudit?.({
+      host,
+      requestedModel: config.model,
+      servedModel,
+      candidates: slice.length,
+      ok: false,
+      error: "unusable AI response",
+    });
     throw new LlmError(parsed.error, 502);
   }
+  opts?.onAudit?.({
+    host,
+    requestedModel: config.model,
+    servedModel,
+    candidates: slice.length,
+    ok: true,
+  });
   return {
     suggestions: parsed.suggestions,
     skipped: parsed.skipped,
-    model,
+    model: servedModel,
     candidates: slice.length,
   };
 }

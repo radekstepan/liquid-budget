@@ -75,6 +75,23 @@ async function gotoRenameRules(page: Page) {
 }
 
 /**
+ * Accept posts pass through to the real server in either spelling: the
+ * canonical body discriminator (`{ action: "accept", ... }`, what the
+ * client sends) or the deprecated `?action=accept` query alias. Without
+ * the body check the accept POST would be fulfilled with the canned
+ * *suggest* response and rule creation would fail its contract parse.
+ */
+function isAcceptPost(route: Route): boolean {
+  const url = new URL(route.request().url());
+  if (url.searchParams.get("action") === "accept") return true;
+  try {
+    return (route.request().postDataJSON() as { action?: unknown } | null)?.action === "accept";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Mock the LLM boundary: status passes through with `enabled` forced on
  * (real candidates from the CSV import are preserved), suggest returns
  * the canned AI response, and accept passes through to the real server.
@@ -97,7 +114,7 @@ async function mockLlmBoundary(
       });
       return;
     }
-    if (method === "POST" && url.searchParams.get("action") === "accept") {
+    if (method === "POST" && isAcceptPost(route)) {
       await route.continue();
       return;
     }

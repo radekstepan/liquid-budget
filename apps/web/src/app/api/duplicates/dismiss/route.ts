@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { dismissDuplicateGroup, getDefaultDb } from "@ynab/server";
 import { DuplicateDismissSchema, formatZodError } from "@ynab/logic";
-import { optionalErrorMessage } from "../../errors";
+import { apiErrorResponse } from "../../errors";
 import { mutationGuardResponse } from "../../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+
+const log = createScopedLogger("duplicates/dismiss");
 
 /**
  * Confirm a duplicate group as legitimate. The group's fingerprint is
@@ -29,7 +32,7 @@ export async function POST(req: Request) {
     const result = await dismissDuplicateGroup(db, parseResult.data.fingerprint);
     return NextResponse.json(result);
   } catch (e) {
-    console.error("[duplicates/dismiss] Error:", e);
-    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to dismiss duplicates" }, { status: 500 });
+    log.error("Error:", toLogDetails(e));
+    return apiErrorResponse(e);
   }
 }

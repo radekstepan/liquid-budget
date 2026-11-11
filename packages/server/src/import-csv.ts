@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { CsvImportRow, ImportSkippedEntry } from "@ynab/logic";
 import { applyRenameRules, buildExistingImportFingerprints, duplicateFingerprint } from "@ynab/logic";
 import type { Db } from "./client.js";
@@ -8,10 +8,18 @@ import { TransactionError } from "./queries/transactions.js";
 import { findOrCreatePayee } from "./queries/payees.js";
 import { getRenameRules } from "./queries/rename-rules.js";
 
-// TODO(P1) [csv-perf]: hoist per-row rename-prior SELECT (payee ORDER BY date DESC LIMIT 1) out of
-// the row loop; batch balance bumps into single UPDATE CASE to shorten single-writer lock hold.
-// TODO(P1) [bulk-cap]: cap rows/ids arrays (e.g. .max(1000)) — bulk-delete with 100k ids builds one
-// giant IN clause in a single withTransaction today.
+// Bulk-cap closed: every ids/rows array at the trust boundary is capped —
+// bulk transaction ids (.max(1000) in contracts), recurring bulk ids
+// (.max(1000) in contracts), CSV rows (MAX_CSV_IMPORT_ROWS below).
+
+/**
+ * Hard cap on rows per CSV import request. A single withTransaction holds
+ * the single-writer SQLite lock for the whole import, so unbounded rows
+ * (a ~5MB CSV can carry 100k+ rows) stall every other writer. Clients
+ * chunk larger statements; bulk-delete/update ids are likewise capped at
+ * 1000 in @ynab/logic contracts.
+ */
+export const MAX_CSV_IMPORT_ROWS = 1000;
 
 export type ImportCsvInput = {
   accountId: number;
@@ -107,7 +115,34 @@ export function resolveImportCategory(
   return null;
 }
 
+/**
+ * Latest categorized use per payee in one query (ORDER BY date DESC,
+ * id DESC, first row per payee wins) — the batched form of the old
+ * per-row rename-prior SELECT inside the import loop.
+ */
+export async function getLatestCategoryByPayee(db: Db, payees: string[]): Promise<Map<string, number>> {
+  const latest = new Map<string, number>();
+  if (payees.length === 0) return latest;
+  const rows = await db
+    .select({ payee: transactions.payee, categoryId: transactions.categoryId })
+    .from(transactions)
+    .where(and(inArray(transactions.payee, payees), isNotNull(transactions.categoryId)))
+    .orderBy(desc(transactions.date), desc(transactions.id));
+  for (const r of rows) {
+    if (!latest.has(r.payee) && r.categoryId != null) {
+      latest.set(r.payee, r.categoryId);
+    }
+  }
+  return latest;
+}
+
 export async function importCsvTransactions(db: Db, input: ImportCsvInput): Promise<ImportCsvResult> {
+  if (input.rows.length > MAX_CSV_IMPORT_ROWS) {
+    throw new TransactionError(
+      `CSV import is limited to ${MAX_CSV_IMPORT_ROWS} rows per request; split larger statements`,
+      413
+    );
+  }
   return withTransaction(db, async () => {
     const [account] = await db.select().from(accounts).where(eq(accounts.id, input.accountId));
     if (!account) {
@@ -166,6 +201,21 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
     );
     const created: number[] = [];
     const skipped: ImportSkippedEntry[] = [];
+    // Pass 1 (row order preserved for fingerprint consume semantics):
+    // validate, rename, dedupe, resolve payees/categories. Rows whose payee
+    // was rename-corrected defer the latest-prior-category lookup to one
+    // batched query below instead of N per-row SELECTs.
+    type PreparedRow = {
+      date: string;
+      payee: string;
+      payeeId: number;
+      memo: string;
+      amount: number;
+      categoryId: number | null;
+      needsPrior: boolean;
+    };
+    const prepared: PreparedRow[] = [];
+    const priorPayees = new Set<string>();
     for (const rawRow of input.rows) {
       if (rawRow.error || rawRow.date == null || rawRow.amountCents == null || !rawRow.payee?.trim()) {
         skipped.push({
@@ -242,42 +292,47 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
       // uncategorized, matching the explicit-category resolution above.
       const payeeRow = findOrCreatePayee(db, row.payee ?? "");
       let effectiveCategoryId = categoryId;
+      let needsPrior = false;
       const wasRenamed = (row.payee ?? "") !== (rawRow.payee ?? "");
       if (effectiveCategoryId === null && account.onBudget && wasRenamed) {
         if (payeeRow.autoCategoryId != null) {
           effectiveCategoryId = payeeRow.autoCategoryId;
         } else {
-          const renamedPrior = db
-            .select({ categoryId: transactions.categoryId })
-            .from(transactions)
-            .where(
-              and(
-                eq(transactions.payee, row.payee ?? ""),
-                isNotNull(transactions.categoryId)
-              )
-            )
-            .orderBy(desc(transactions.date), desc(transactions.id))
-            .limit(1)
-            .get();
-          if (renamedPrior?.categoryId != null) {
-            effectiveCategoryId = renamedPrior.categoryId;
-          }
+          needsPrior = true;
+          priorPayees.add(row.payee ?? "");
         }
       }
+      prepared.push({
+        date: row.date!,
+        payee: row.payee ?? "",
+        payeeId: payeeRow.id,
+        memo: row.memo ?? "",
+        amount,
+        categoryId: effectiveCategoryId,
+        needsPrior,
+      });
+    }
+    // One batched latest-prior-category lookup for every rename-corrected
+    // payee (replaces N per-row SELECTs ordered by date DESC, id DESC).
+    const priorCategoryByPayee = await getLatestCategoryByPayee(db, [...priorPayees]);
+    // Pass 2: insert in original row order, accumulating one balance bump.
+    // A single UPDATE shortens the single-writer lock hold vs N bumps.
+    let balanceDelta = 0;
+    for (const p of prepared) {
+      const finalCategoryId = p.needsPrior ? (priorCategoryByPayee.get(p.payee) ?? null) : p.categoryId;
       // YNAB4-style: imports never auto-mark income. Positive rows stay
       // uncategorized (highlighted) until the user explicitly categorizes
       // them as Income via the category picker.
-      const isIncome = false;
       const [inserted] = await db
         .insert(transactions)
         .values({
           accountId: input.accountId,
-          categoryId: effectiveCategoryId,
-          date: row.date!,
-          payee: row.payee ?? "",
-          payeeId: payeeRow.id,
-          memo: row.memo ?? "",
-          amount,
+          categoryId: finalCategoryId,
+          date: p.date,
+          payee: p.payee,
+          payeeId: p.payeeId,
+          memo: p.memo,
+          amount: p.amount,
           // Imports land Uncleared so the user approves each row via the
           // C column — the same concept as scheduled transactions, which
           // also post as "u". Approving (u -> c) counts as reviewing the
@@ -286,7 +341,7 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
           flagColor: null,
           transferAccountId: null,
           parentId: null,
-          isIncome,
+          isIncome: false,
           incomeMonth: null,
           // Freshly imported rows need user review (shown bold, YNAB4-style)
           // until any user edit, payee-manager cascade, or reconcile clears
@@ -295,9 +350,12 @@ export async function importCsvTransactions(db: Db, input: ImportCsvInput): Prom
         })
         .returning();
       created.push(inserted!.id);
+      balanceDelta += p.amount;
+    }
+    if (balanceDelta !== 0) {
       await db
         .update(accounts)
-        .set({ balance: sql`${accounts.balance} + ${amount}` })
+        .set({ balance: sql`${accounts.balance} + ${balanceDelta}` })
         .where(eq(accounts.id, input.accountId));
     }
     return { count: created.length, skipped };

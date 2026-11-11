@@ -1,108 +1,26 @@
-import type { TransactionSavePayload, RecurringSavePayload } from "./Modals.js";
-import type { BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, ReconcileState, RenameSuggestResponse, RenameSuggestStatusResponse, TransactionFlagColor } from "@ynab/logic";
+import type { TransactionSavePayload, RecurringSavePayload, TransactionFlagColor } from "@ynab/logic";
+import type { BulkUpdateTransactionPatch, DuplicateAnalysisResult, ImportSummary, MergeOverrides, ReconcileState, RenameSuggestResponse, RenameSuggestStatusResponse, TransactionMergeResponse } from "@ynab/logic";
 import type { SnapshotSummary } from "./SnapshotsView.js";
 
-// TODO(P1) [api-consistency]: collapse legacy inline TransactionSavePayload shapes below onto
-// canonical contracts.ts TransactionSavePayload/RecurringSavePayload — doubles contract surface today.
+// Canonical wire inputs live in @ynab/logic (action-payloads.ts):
+// TransactionSavePayload / RecurringSavePayload. This interface references
+// them directly (Partial for PATCH-style updates) so the shapes cannot drift.
 
 export type BudgetAppApi = {
   reload: () => Promise<void>;
   assign: (categoryId: number, amount: number, month: string) => Promise<void>;
   batchAssign?: (assignments: { categoryId: number; amount: number; month: string }[]) => Promise<void>;
-  addTransaction: (t: TransactionSavePayload | {
-    accountId: number;
-    categoryId?: number | null;
-    date: string;
-    payee: string;
-    amount: number;
-    memo?: string;
-    status?: "u" | "c" | "r";
-    transferStatus?: "u" | "c" | "r";
-    flagColor?: TransactionFlagColor | null;
-    transferAccountId?: number | null;
-    incomeMonth?: string | null;
-    isIncome?: boolean;
-    subTransactions?: {
-      categoryId: number | null;
-      amount: number;
-      memo?: string;
-      transferAccountId?: number | null;
-      transferStatus?: "u" | "c" | "r";
-    }[];
-  }) => Promise<void>;
-  updateTransaction: (
-    id: number,
-    t: Partial<TransactionSavePayload> | {
-      accountId?: number;
-      categoryId?: number | null;
-      date?: string;
-      payee?: string;
-      amount?: number;
-      memo?: string;
-      status?: "u" | "c" | "r";
-      transferStatus?: "u" | "c" | "r";
-      flagColor?: TransactionFlagColor | null;
-      transferAccountId?: number | null;
-      incomeMonth?: string | null;
-      isIncome?: boolean;
-      subTransactions?: {
-        categoryId: number | null;
-        amount: number;
-        memo?: string;
-        transferAccountId?: number | null;
-        transferStatus?: "u" | "c" | "r";
-      }[];
-    }
-  ) => Promise<void>;
+  addTransaction: (t: TransactionSavePayload) => Promise<void>;
+  updateTransaction: (id: number, t: Partial<TransactionSavePayload>) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
   bulkDeleteTransactions?: (ids: number[]) => Promise<void>;
   bulkUpdateTransactions?: (
     ids: number[],
     patch: BulkUpdateTransactionPatch
   ) => Promise<void>;
-  mergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void>;
-  addRecurring: (v: RecurringSavePayload | {
-    accountId: number;
-    categoryId?: number | null;
-    payee: string;
-    memo?: string;
-    amount: number;
-    frequency: string;
-    nextDate: string;
-    anchorDay?: number | null;
-    active?: boolean;
-    flagColor?: TransactionFlagColor | null;
-    transferAccountId?: number | null;
-    subTransactions?: {
-      categoryId: number | null;
-      amount: number;
-      memo?: string;
-      transferAccountId?: number | null;
-    }[];
-  }) => Promise<void>;
-  updateRecurring: (
-    id: number,
-    v: Partial<RecurringSavePayload> | {
-      accountId?: number;
-      categoryId?: number | null;
-      payee?: string;
-      memo?: string;
-      amount?: number;
-      frequency?: string;
-      nextDate?: string;
-      anchorDay?: number | null;
-      active?: boolean;
-      flagColor?: TransactionFlagColor | null;
-      transferAccountId?: number | null;
-      subTransactions?: {
-        id?: number;
-        categoryId: number | null;
-        amount: number;
-        memo?: string;
-        transferAccountId?: number | null;
-      }[];
-    }
-  ) => Promise<void>;
+  mergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<TransactionMergeResponse | void>;
+  addRecurring: (v: RecurringSavePayload) => Promise<void>;
+  updateRecurring: (id: number, v: Partial<RecurringSavePayload>) => Promise<void>;
   deleteRecurring: (id: number) => Promise<void>;
   postRecurring: (id: number, date?: string) => Promise<void>;
   bulkPostRecurring?: (ids: number[], date?: string) => Promise<void>;

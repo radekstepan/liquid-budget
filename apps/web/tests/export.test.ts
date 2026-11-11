@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import Database from "better-sqlite3";
-import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase, transactions } from "@ynab/server";
+import { extractYnab4DataFromZip, exportYnab4Zip, getDefaultDb, resetAndSeedDatabase, transactions, arrayField } from "@ynab/server";
 import { GET } from "../src/app/api/export/route";
 import { POST as importPOST } from "../src/app/api/import/route";
 import { POST as importCsvPOST } from "../src/app/api/import/csv/route";
@@ -27,8 +27,8 @@ describe("GET /api/export", () => {
     const extracted = extractYnab4DataFromZip(arrayBuf);
     expect(extracted.ynabData).toBeDefined();
     expect(extracted.settingsXml).toBeDefined();
-    expect(extracted.ynabData.accounts.length).toBeGreaterThan(0);
-    expect(extracted.ynabData.transactions.length).toBeGreaterThan(0);
+    expect(arrayField(extracted.ynabData, "accounts").length).toBeGreaterThan(0);
+    expect(arrayField(extracted.ynabData, "transactions").length).toBeGreaterThan(0);
   });
 
   it("exports CSV with formatted dollar amounts (not raw cents)", async () => {

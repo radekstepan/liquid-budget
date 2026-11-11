@@ -122,6 +122,37 @@ describe("Recurring API routes (BUG-19, BUG-41, BUG-42)", () => {
       expect(res2.status).toBe(400);
     });
 
+    it("canonical body post allows early posting like the deprecated query alias (Enter Now)", async () => {
+      const db = getDefaultDb();
+      const account = await createAccount(db, { name: "Checking", kind: "liquid" });
+      const rec = await createRecurring(db, {
+        accountId: account!.id,
+        categoryId: null,
+        amount: -1500,
+        frequency: "monthly",
+        nextDate: "2026-12-01",
+        payee: "Future Bill",
+      });
+
+      // Manual "Enter Now" posts today even when the schedule's nextDate is
+      // in the future (postRecurringOneClick passes date=today). The
+      // canonical body spelling must behave exactly like the deprecated
+      // query alias — both are manual posts, not autopost.
+      const bodyReq = new NextRequest("http://localhost:3000/api/recurring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "post", id: rec!.id, date: "2026-11-11" }),
+      });
+      const bodyRes = await POST(bodyReq);
+      expect(bodyRes.status).toBe(200);
+
+      const posted = await db.select().from(transactions).where(eq(transactions.accountId, account!.id));
+      expect(posted).toHaveLength(1);
+      expect(posted[0]?.date).toBe("2026-11-11");
+      const [advanced] = await db.select().from(recurring).where(eq(recurring.id, rec!.id));
+      expect(advanced?.nextDate).toBe("2027-01-01");
+    });
+
     it("rejects invalid dates in query action=post and action=autopost", async () => {
       const postQueryReq = new NextRequest("http://localhost:3000/api/recurring?action=post&id=1&date=2026-04-31", {
         method: "POST",
@@ -217,6 +248,16 @@ describe("Recurring API routes (BUG-19, BUG-41, BUG-42)", () => {
     it("DELETE with query id validates id parameter", async () => {
       const req = new NextRequest("http://localhost:3000/api/recurring?id=not-a-number", {
         method: "DELETE",
+      });
+      const res = await DELETE(req);
+      expect(res.status).toBe(400);
+    });
+
+    it("bulk-delete rejects id arrays over 1000 with 400", async () => {
+      const req = new NextRequest("http://localhost:3000/api/recurring", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from({ length: 1001 }, (_, i) => i + 1) }),
       });
       const res = await DELETE(req);
       expect(res.status).toBe(400);

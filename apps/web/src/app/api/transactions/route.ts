@@ -5,6 +5,7 @@ import {
   createTransaction,
   deleteTransaction,
   getDefaultDb,
+  listTransactionsPage,
   mergeTransactions,
   updateSingleOrTransferTransaction,
   updateSplit,
@@ -12,7 +13,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-import { bodyHasField, peekBody, readRouteAction } from "../action";
+import { bodyHasField, peekBody, resolveAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
 import {
@@ -24,19 +25,51 @@ import {
   TransactionCreateSchema,
   TransactionMergeSchema,
   TransactionPatchSchema,
+  TransactionsPageQuerySchema,
 } from "../schemas";
+
+/**
+ * GET /api/transactions?accountId=&before=&limit=
+ *
+ * Cursor-paginated reads over (date DESC, id DESC). `before` is the
+ * opaque `nextCursor` of the previous page. Read-only, so no loopback
+ * guard — same policy as the other GET endpoints.
+ */
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const parsed = TransactionsPageQuerySchema.safeParse({
+    accountId: searchParams.get("accountId") ?? undefined,
+    before: searchParams.get("before") ?? undefined,
+    limit: searchParams.get("limit") ?? undefined,
+  });
+  if (!parsed.success) {
+    return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
+  }
+  try {
+    const page = await listTransactionsPage(getDefaultDb(), {
+      accountId: parsed.data.accountId,
+      before: parsed.data.before,
+      limit: parsed.data.limit,
+    });
+    return Response.json(page);
+  } catch (e) {
+    return apiErrorResponse(e);
+  }
+}
 
 export async function POST(req: Request) {
   const blocked = mutationGuardResponse(req);
   if (blocked) return blocked;
   let json: unknown;
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
-  const actions = readRouteAction(req, json);
+  // Canonical dispatch is body {action}; ?action= is a deprecated alias.
+  // Legacy query spelling `bulk-delete` maps to canonical `delete`.
+  const action = resolveAction(req, json, ["delete", "merge", "bulk-update"], {
+    "bulk-delete": "delete",
+  });
   const db = getDefaultDb();
 
-  // Both spellings are accepted: the legacy query verb (`?action=bulk-delete`)
-  // and the body discriminator (`{ action: "delete" }`).
-  if (actions.queryMatches("bulk-delete") || actions.bodyMatches("delete")) {
+  if (action === "delete") {
     const parseResult = TransactionBulkDeleteSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -49,7 +82,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (actions.matches("merge")) {
+  if (action === "merge") {
     const parseResult = TransactionMergeSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -66,7 +99,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (actions.matches("bulk-update")) {
+  if (action === "bulk-update") {
     const parseResult = TransactionBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -142,7 +175,11 @@ export async function PATCH(req: Request) {
   try { json = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const db = getDefaultDb();
 
-  if (bodyHasField(json, "ids")) {
+  // PATCH bulk path: canonical body {action:"bulk-update"}. Requests without
+  // any discriminator but with `ids` keep the legacy bulk meaning so old
+  // clients don't misroute into single-patch validation.
+  const patchAction = resolveAction(req, json, ["bulk-update"]);
+  if (patchAction === "bulk-update" || (patchAction === null && bodyHasField(json, "ids"))) {
     const parseResult = TransactionBulkUpdateSchema.safeParse(json);
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -191,7 +228,6 @@ export async function PATCH(req: Request) {
     }
   }
 
-  // TODO(P1) [api-consistency]: unify ?action=/body-discriminator dispatch to one canonical form.
   try {
     // Split-membership transition + patch shaping live in the server query;
     // only the explicit-mode signal stays here (the contract infers "single"

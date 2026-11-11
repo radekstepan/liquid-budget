@@ -1,6 +1,7 @@
 import { eq, asc, or, and, isNull, inArray } from "drizzle-orm";
 import { isTransferPayee } from "@ynab/logic";
 import type { Db } from "../client.js";
+import { translateConstraintError } from "../errors.js";
 import { categories, payees, transactions, recurring } from "../schema.js";
 import { withTransaction } from "../transaction.js";
 import { learnRenameRuleFromPayees } from "./rename-rules.js";
@@ -55,28 +56,40 @@ export function findOrCreatePayee(
       patch.entityId = entityId;
     }
     if (Object.keys(patch).length > 0) {
-      db.update(payees)
-        .set(patch)
-        .where(eq(payees.id, existing.id))
-        .run();
+      try {
+        db.update(payees)
+          .set(patch)
+          .where(eq(payees.id, existing.id))
+          .run();
+      } catch (e) {
+        // find-or-create runs outside withTransaction: translate UNIQUE
+        // name violations at the source.
+        throw translateConstraintError(e);
+      }
       return { ...existing, ...patch };
     }
     return existing;
   }
 
   const now = new Date().toISOString();
-  const inserted = db
-    .insert(payees)
-    .values({
-      entityId: entityId ?? null,
-      name: trimmed,
-      autoCategoryId: autoCategoryId ?? null,
-      createdAt: now,
-    })
-    .returning()
-    .get();
+  try {
+    const inserted = db
+      .insert(payees)
+      .values({
+        entityId: entityId ?? null,
+        name: trimmed,
+        autoCategoryId: autoCategoryId ?? null,
+        createdAt: now,
+      })
+      .returning()
+      .get();
 
-  return inserted;
+    return inserted;
+  } catch (e) {
+    // find-or-create runs outside withTransaction: translate UNIQUE
+    // name violations at the source.
+    throw translateConstraintError(e);
+  }
 }
 
 export async function updatePayee(

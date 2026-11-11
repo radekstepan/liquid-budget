@@ -1104,5 +1104,18 @@ describe("BudgetApp", () => {
       window.localStorage.removeItem("ynab:transactions:accountFilter");
     }
   });
+
+  it("opens global search on '/' and Cmd+K (test-bar keyboard branch)", () => {
+    const { api } = makeApi();
+    render(<BudgetApp data={makeSeedBudgetData()} api={api} />);
+    expect(screen.queryByLabelText("Search transactions")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "/" });
+    expect(screen.getByLabelText("Search transactions")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Search transactions"), { key: "Escape" });
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByLabelText("Search transactions")).toBeInTheDocument();
+  });
 });
 

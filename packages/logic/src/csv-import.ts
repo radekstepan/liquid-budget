@@ -1,6 +1,42 @@
 import { MONTHS, MONTHS_LONG, dollarsToCents } from "./format.js";
-// TODO(P2) [type-safety]: replace ~80 non-null assertions (this file worst offender) with
-// Map.get ?? throw / atOrThrow helper at module boundaries — CSV input is untrusted.
+
+/**
+ * Checked `Map.get`: CSV input is untrusted, so a missing key at a site that
+ * requires the entry is a bug — throw instead of asserting non-null.
+ */
+export function getOrThrow<K, V>(map: ReadonlyMap<K, V>, key: K, what: string): V {
+  const v = map.get(key);
+  if (v === undefined) {
+    throw new Error(`CSV import: missing ${what} for key ${String(key)}`);
+  }
+  return v;
+}
+
+/**
+ * Checked array index: throws when `idx` is out of bounds. Call sites only
+ * pass length-guarded indices, so a throw here means a broken invariant,
+ * never a malformed CSV row (row/cell reads that can legitimately miss use
+ * `?? ""` / `?? throw`-free fallbacks instead).
+ */
+export function atOrThrow<T>(arr: readonly T[], idx: number, what: string): T {
+  const v = idx >= 0 && idx < arr.length ? arr[idx] : undefined;
+  if (v === undefined) {
+    throw new Error(`CSV import: ${what} index ${idx} out of bounds`);
+  }
+  return v;
+}
+
+/**
+ * Checked regex capture group: patterns in this file have no optional groups,
+ * so a participating match always carries every group — a miss is a bug.
+ */
+export function matchGroup(m: RegExpMatchArray, idx: number): string {
+  const g = m[idx];
+  if (g === undefined) {
+    throw new Error(`CSV import: missing capture group ${idx}`);
+  }
+  return g;
+}
 
 export type CsvImportRow = {
   rowNumber: number;
@@ -44,10 +80,11 @@ MONTH_MAP.set("sept", 9);
 
 function parseMonthName(str: string): number | null {
   const clean = str.replace(/[^a-zA-Z]/g, "").toLowerCase();
-  if (MONTH_MAP.has(clean)) return MONTH_MAP.get(clean)!;
+  const full = MONTH_MAP.get(clean);
+  if (full !== undefined) return full;
   if (clean.length >= 3) {
-    const short = clean.slice(0, 3);
-    if (MONTH_MAP.has(short)) return MONTH_MAP.get(short)!;
+    const short = MONTH_MAP.get(clean.slice(0, 3));
+    if (short !== undefined) return short;
   }
   return null;
 }
@@ -62,7 +99,10 @@ export function parseCsv(text: string): string[][] {
   const s = text.replace(/^\uFEFF/, "");
   let i = 0;
   while (i < s.length) {
-    const ch = s[i]!;
+    const ch = s[i];
+    // Unreachable: the loop bound keeps i in range. Breaks instead of
+    // asserting so a future bound change fails closed, not loud.
+    if (ch === undefined) break;
     if (inQuotes) {
       if (ch === '"') {
         if (s[i + 1] === '"') {
@@ -80,7 +120,7 @@ export function parseCsv(text: string): string[][] {
         if (s[i + 1] === "\n") {
           currentLine += 1;
           cell += ch;
-          cell += s[i + 1]!;
+          cell += "\n";
           i += 2;
           continue;
         } else {
@@ -274,14 +314,14 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
 
   // Numeric ISO: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(t);
-  if (m) return toISO(m[1]!, m[2]!, m[3]!);
+  if (m) return toISO(matchGroup(m, 1), matchGroup(m, 2), matchGroup(m, 3));
 
   // Numeric DMY / MDY: DD/MM/YYYY, MM/DD/YYYY, etc.
   m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(t);
   if (m) {
-    const n1 = Number(m[1]);
-    const n2 = Number(m[2]);
-    const y = expandYear(Number(m[3]));
+    const n1 = Number(matchGroup(m, 1));
+    const n2 = Number(matchGroup(m, 2));
+    const y = expandYear(Number(matchGroup(m, 3)));
     const d = convention === "mdy" ? n2 : n1;
     const mo = convention === "mdy" ? n1 : n2;
     return toISO(String(y), String(mo), String(d));
@@ -290,27 +330,27 @@ export function parseDate(input: string, convention: DateFormatConvention = "dmy
   // Text month: YYYY-Mon-DD (Year-first, e.g. 2026-Aug-15, 2026 August 15)
   m = /^(\d{4})[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?$/.exec(t);
   if (m) {
-    const mo = parseMonthName(m[2]!);
-    if (mo != null) return toISO(m[1]!, String(mo), m[3]!);
+    const mo = parseMonthName(matchGroup(m, 2));
+    if (mo != null) return toISO(matchGroup(m, 1), String(mo), matchGroup(m, 3));
   }
 
   // Text month: Mon DD, YYYY (Month-first, e.g. Aug 15, 2026, Aug-15-2026, Aug 15 26)
   m = /^([a-zA-Z]+)\.?[-/.,\s]+(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+(\d{2,4})$/.exec(t);
   if (m) {
-    const mo = parseMonthName(m[1]!);
+    const mo = parseMonthName(matchGroup(m, 1));
     if (mo != null) {
-      const y = expandYear(Number(m[3]));
-      return toISO(String(y), String(mo), m[2]!);
+      const y = expandYear(Number(matchGroup(m, 3)));
+      return toISO(String(y), String(mo), matchGroup(m, 2));
     }
   }
 
   // Text month: DD-Mon-YYYY (Day-first, e.g. 15-Aug-2026, 15-AUG-2026, 15 Aug 2026, 15-Aug-26)
   m = /^(\d{1,2})(?:st|nd|rd|th)?[-/.,\s]+([a-zA-Z]+)\.?[-/.,\s]+(\d{2,4})$/.exec(t);
   if (m) {
-    const mo = parseMonthName(m[2]!);
+    const mo = parseMonthName(matchGroup(m, 2));
     if (mo != null) {
-      const y = expandYear(Number(m[3]));
-      return toISO(String(y), String(mo), m[1]!);
+      const y = expandYear(Number(matchGroup(m, 3)));
+      return toISO(String(y), String(mo), matchGroup(m, 1));
     }
   }
 
@@ -504,7 +544,7 @@ function analyzeHeaderless(
   if (dateIdx === 0 && numCols > 1) {
     payeeIdx = 1;
   } else if (nonDateCols.length > 0) {
-    payeeIdx = nonDateCols[0]!;
+    payeeIdx = atOrThrow(nonDateCols, 0, "payee column");
   }
 
   // 3. Map remaining columns (amount / outflow / inflow / memo / category)
@@ -516,7 +556,7 @@ function analyzeHeaderless(
   let categoryIdx = -1;
 
   if (remaining.length === 1) {
-    const other = remaining[0]!;
+    const other = atOrThrow(remaining, 0, "amount column");
     amountIdx = other;
     // Amount-before-payee layout: the positional guess puts payee on the
     // lower column, but when that column parses as amounts in every
@@ -539,11 +579,12 @@ function analyzeHeaderless(
       payeeIdx = other;
     }
   } else if (remaining.length === 2) {
-    const [c1, c2] = remaining;
+    const c1 = atOrThrow(remaining, 0, "amount/memo column");
+    const c2 = atOrThrow(remaining, 1, "amount/memo column");
     let c1HasAmount = false;
     let c1HasText = false;
     for (const r of allRows) {
-      const val = (r[c1!] ?? "").trim();
+      const val = (r[c1] ?? "").trim();
       if (!val) continue;
       if (parseAmount(val) != null) {
         c1HasAmount = true;
@@ -552,15 +593,15 @@ function analyzeHeaderless(
       }
     }
     if (c1HasAmount && !c1HasText) {
-      outflowIdx = c1!;
-      inflowIdx = c2!;
+      outflowIdx = c1;
+      inflowIdx = c2;
     } else {
-      memoIdx = c1!;
-      amountIdx = c2!;
+      memoIdx = c1;
+      amountIdx = c2;
     }
   } else if (remaining.length >= 3) {
-    const last1 = remaining[remaining.length - 2]!;
-    const last2 = remaining[remaining.length - 1]!;
+    const last1 = atOrThrow(remaining, remaining.length - 2, "outflow/amount column");
+    const last2 = atOrThrow(remaining, remaining.length - 1, "inflow/amount column");
     let last1HasAmount = false;
     let last1HasText = false;
     for (const r of allRows) {
@@ -576,17 +617,17 @@ function analyzeHeaderless(
     if (last1HasAmount && !last1HasText) {
       outflowIdx = last1;
       inflowIdx = last2;
-      memoIdx = remaining[0]!;
+      memoIdx = atOrThrow(remaining, 0, "memo column");
       // remaining[1] IS the outflow column when only three columns remain,
       // so a category needs a fourth spare column here.
       if (remaining.length >= 4) {
-        categoryIdx = remaining[1]!;
+        categoryIdx = atOrThrow(remaining, 1, "category column");
       }
     } else {
       amountIdx = last2;
-      memoIdx = remaining[0]!;
+      memoIdx = atOrThrow(remaining, 0, "memo column");
       if (remaining.length >= 3) {
-        categoryIdx = remaining[1]!;
+        categoryIdx = atOrThrow(remaining, 1, "category column");
       }
     }
   }
@@ -629,8 +670,9 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   let headerAnalysis: ReturnType<typeof analyzeHeader> | null = null;
 
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i]!.some((c) => c.trim() !== "")) {
-      const analysis = analyzeHeader(rows[i]!);
+    const row = atOrThrow(rows, i, "CSV row");
+    if (row.some((c) => c.trim() !== "")) {
+      const analysis = analyzeHeader(row);
       if (analysis.isValid) {
         headerIdx = i;
         headerAnalysis = analysis;
@@ -652,7 +694,7 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
       dateAmbiguous = detection.ambiguous;
     }
   } else {
-    const firstNonEmpty = nonEmptyRows[0]!;
+    const firstNonEmpty = atOrThrow(nonEmptyRows, 0, "data row");
     let candidateDateIdx = 0;
     if (parseDate(firstNonEmpty[0] ?? "") == null) {
       for (let c = 0; c < firstNonEmpty.length; c++) {
@@ -702,7 +744,7 @@ export function parseCsvImport(text: string, opts?: CsvImportOptions): CsvImport
   const parsedRows: CsvImportRow[] = [];
   const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
   for (let i = startRow; i < rows.length; i++) {
-    const cells = rows[i]!;
+    const cells = atOrThrow(rows, i, "CSV row");
     if (cells.every((c) => c.trim() === "")) continue;
     if (isMultiSection && cells[0]?.trim().toLowerCase() !== "transaction") continue;
     const raw = (idx: number) => (idx >= 0 ? (cells[idx] ?? "").trim() : "");

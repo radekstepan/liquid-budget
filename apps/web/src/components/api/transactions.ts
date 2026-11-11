@@ -1,11 +1,11 @@
 import type { BudgetAppApi } from "@ynab/ui";
 import type { BulkUpdateTransactionPatch, MergeOverrides } from "@ynab/logic";
-import { applyOptimisticTransactionDeletion, applyPreparedMerge, collectSplitAffectedIds, isStatusOnlyBulkUpdate, isStatusOrFlagOnlyUpdate, mapOptimisticInsertIds, planOptimisticBulkUpdate, planOptimisticInsert, planOptimisticUpdate, prepareOptimisticMerge, restoreTransactionRows, rollbackOptimisticInsert, snapshotTransactions, transactionUpdateNeedsReload, parseTransactionMutationResult } from "@ynab/logic";
+import { applyOptimisticTransactionDeletion, applyPreparedMerge, collectSplitAffectedIds, isStatusOnlyBulkUpdate, isStatusOrFlagOnlyUpdate, mapOptimisticInsertIds, planOptimisticBulkUpdate, planOptimisticInsert, planOptimisticUpdate, prepareOptimisticMerge, restoreTransactionRows, rollbackOptimisticInsert, snapshotTransactions, transactionUpdateNeedsReload, parseTransactionMergeResponse, parseTransactionMutationResult } from "@ynab/logic";
 import type { BudgetApiDeps } from "./types";
 import { jsonReq } from "./client";
 
 export function createTransactionsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addTransaction" | "updateTransaction" | "deleteTransaction" | "bulkDeleteTransactions" | "bulkUpdateTransactions" | "mergeTransactions"> {
-  const { dataRef, setData, reload, runMutation, withSync } = deps;
+  const { dataRef, setData, optimisticMutation } = deps;
   return {
   addTransaction: async (t) => {
     const successMsg = "Transaction added.";
@@ -17,38 +17,36 @@ export function createTransactionsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "
     }
 
     let appliedDeltas = new Map<number, number>();
-    setData((prev) => {
-      if (!prev) return prev;
-      const planned = planOptimisticInsert(prev, t, tempId);
-      appliedDeltas = planned.deltas;
-      return planned.next;
-    });
-    return withSync(async () => {
-      await runMutation(
-        async () => {
-          const res = parseTransactionMutationResult(
-            await jsonReq<unknown>("/api/transactions", {
-              method: "POST",
-              body: JSON.stringify(t),
-            })
-          );
-          setData((prev) => {
-            if (!prev) return prev;
-            return { ...prev, transactions: mapOptimisticInsertIds(prev.transactions, tempId, res) };
-          });
-          return res;
-        },
-        { success: successMsg, failure: "Failed to add transaction. Please try again." },
-        {
-          onRollback: () => {
-            setData((current) => {
-              if (!current) return current;
-              return rollbackOptimisticInsert(current, createdTempIds, tempId, appliedDeltas);
-            });
-            reload().catch(() => {});
-          },
-        }
-      );
+    await optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const planned = planOptimisticInsert(prev, t, tempId);
+          appliedDeltas = planned.deltas;
+          return planned.next;
+        });
+      },
+      request: async () => {
+        return parseTransactionMutationResult(
+          await jsonReq<unknown>("/api/transactions", {
+            method: "POST",
+            body: JSON.stringify(t),
+          })
+        );
+      },
+      mapResult: (res) => {
+        setData((prev) => {
+          if (!prev) return prev;
+          return { ...prev, transactions: mapOptimisticInsertIds(prev.transactions, tempId, res) };
+        });
+      },
+      messages: { success: successMsg, failure: "Failed to add transaction. Please try again." },
+      rollback: () => {
+        setData((current) => {
+          if (!current) return current;
+          return rollbackOptimisticInsert(current, createdTempIds, tempId, appliedDeltas);
+        });
+      },
     });
   },
   updateTransaction: async (id, t) => {
@@ -62,36 +60,33 @@ export function createTransactionsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "
 
     const appliedDeltas = new Map<number, number>();
 
-    setData((prev) => {
-      if (!prev) return prev;
-      const planned = planOptimisticUpdate(prev, id, t, splitParentId);
-      for (const [k, v] of planned.deltas.entries()) {
-        appliedDeltas.set(k, v);
-      }
-      return planned.next;
-    });
     const statusOrFlagOnly = isStatusOrFlagOnlyUpdate(t);
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/transactions", {
-            method: "PATCH",
-            body: JSON.stringify({ id, ...t }),
-          });
-        },
-        { success: statusOrFlagOnly ? undefined : "Transaction updated.", failure: "Failed to update transaction." },
-        {
-          onRollback: () => {
-            setData((current) => {
-              if (!current) return current;
-              return restoreTransactionRows(current, affectedTxIds, prevAffectedTxs, appliedDeltas);
-            });
-            reload().catch(() => {});
-          },
-          skipReload: !transactionUpdateNeedsReload(t),
-        }
-      )
-    );
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const planned = planOptimisticUpdate(prev, id, t, splitParentId);
+          for (const [k, v] of planned.deltas.entries()) {
+            appliedDeltas.set(k, v);
+          }
+          return planned.next;
+        });
+      },
+      request: async () => {
+        return await jsonReq("/api/transactions", {
+          method: "PATCH",
+          body: JSON.stringify({ id, ...t }),
+        });
+      },
+      messages: { success: statusOrFlagOnly ? undefined : "Transaction updated.", failure: "Failed to update transaction." },
+      rollback: () => {
+        setData((current) => {
+          if (!current) return current;
+          return restoreTransactionRows(current, affectedTxIds, prevAffectedTxs, appliedDeltas);
+        });
+      },
+      skipReload: !transactionUpdateNeedsReload(t),
+    });
   },
   deleteTransaction: async (id) => {
     const snapshot = dataRef.current;
@@ -99,62 +94,55 @@ export function createTransactionsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "
     const prevAffectedTxs = snapshotTransactions(snapshot?.transactions ?? [], allAffectedIds);
 
     let appliedDeltas = new Map<number, number>();
-    setData((prev) => {
-      if (!prev) return prev;
-      const result = applyOptimisticTransactionDeletion(prev, [id]);
-      appliedDeltas = result.deltas;
-      return result.nextData;
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const result = applyOptimisticTransactionDeletion(prev, [id]);
+          appliedDeltas = result.deltas;
+          return result.nextData;
+        });
+      },
+      request: async () => {
+        return await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
+      },
+      messages: { success: "Transaction deleted.", failure: "Failed to delete transaction." },
+      rollback: () => {
+        setData((current) => {
+          if (!current) return current;
+          return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
+        });
+      },
     });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq(`/api/transactions?id=${id}`, { method: "DELETE" });
-        },
-        { success: "Transaction deleted.", failure: "Failed to delete transaction." },
-        {
-          onRollback: () => {
-            setData((current) => {
-              if (!current) return current;
-              return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
-            });
-            reload().catch(() => {});
-          },
-        }
-      )
-    );
   },
-  bulkDeleteTransactions: async (ids: number[]) => {
-    const snapshot = dataRef.current;
+  bulkDeleteTransactions: async (ids: number[]) => {    const snapshot = dataRef.current;
     const allAffectedIds = collectSplitAffectedIds(snapshot?.transactions ?? [], ids);
     const prevAffectedTxs = snapshotTransactions(snapshot?.transactions ?? [], allAffectedIds);
 
     let appliedDeltas = new Map<number, number>();
-    setData((prev) => {
-      if (!prev) return prev;
-      const result = applyOptimisticTransactionDeletion(prev, ids);
-      appliedDeltas = result.deltas;
-      return result.nextData;
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const result = applyOptimisticTransactionDeletion(prev, ids);
+          appliedDeltas = result.deltas;
+          return result.nextData;
+        });
+      },
+      request: async () => {
+        return await jsonReq("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify({ action: "delete", ids }),
+        });
+      },
+      messages: { success: `Deleted ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete transactions." },
+      rollback: () => {
+        setData((current) => {
+          if (!current) return current;
+          return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
+        });
+      },
     });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/transactions?action=bulk-delete", {
-            method: "POST",
-            body: JSON.stringify({ ids }),
-          });
-        },
-        { success: `Deleted ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete transactions." },
-        {
-          onRollback: () => {
-            setData((current) => {
-              if (!current) return current;
-              return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
-            });
-            reload().catch(() => {});
-          },
-        }
-      )
-    );
   },
   bulkUpdateTransactions: async (
     ids: number[],
@@ -166,74 +154,70 @@ export function createTransactionsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "
 
     const appliedDeltas = new Map<number, number>();
 
-    setData((prev) => {
-      if (!prev) return prev;
-      const planned = planOptimisticBulkUpdate(prev, ids, patch);
-      for (const [k, v] of planned.deltas.entries()) {
-        appliedDeltas.set(k, v);
-      }
-      return planned.next;
-    });
     const statusOnly = isStatusOnlyBulkUpdate(patch);
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/transactions?action=bulk-update", {
-            method: "POST",
-            body: JSON.stringify({ ids, patch }),
-          });
-        },
-        { success: statusOnly ? undefined : `Updated ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update transactions." },
-        {
-          onRollback: () => {
-            setData((current) => {
-              if (!current) return current;
-              return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
-            });
-            reload().catch(() => {});
-          },
-        }
-      )
-    );
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const planned = planOptimisticBulkUpdate(prev, ids, patch);
+          for (const [k, v] of planned.deltas.entries()) {
+            appliedDeltas.set(k, v);
+          }
+          return planned.next;
+        });
+      },
+      request: async () => {
+        return await jsonReq("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify({ action: "bulk-update", ids, patch }),
+        });
+      },
+      messages: { success: statusOnly ? undefined : `Updated ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to update transactions." },
+      rollback: () => {
+        setData((current) => {
+          if (!current) return current;
+          return restoreTransactionRows(current, allAffectedIds, prevAffectedTxs, appliedDeltas);
+        });
+      },
+    });
   },
   mergeTransactions: async (ids: number[], overrides?: MergeOverrides) => {
     const prepared = prepareOptimisticMerge(dataRef.current, ids, overrides);
     const patch = overrides ?? {};
     let appliedDeltas = new Map<number, number>();
-    setData((prev) => {
-      if (!prev) return prev;
-      const applied = applyPreparedMerge(prev, prepared);
-      appliedDeltas = applied.deltas;
-      return applied.next;
-    });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/transactions?action=merge", {
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const applied = applyPreparedMerge(prev, prepared);
+          appliedDeltas = applied.deltas;
+          return applied.next;
+        });
+      },
+      request: async () => {
+        return parseTransactionMergeResponse(
+          await jsonReq<unknown>("/api/transactions", {
             method: "POST",
             body: JSON.stringify(
-              Object.keys(patch).length > 0 ? { ids, patch } : { ids }
+              Object.keys(patch).length > 0 ? { action: "merge", ids, patch } : { action: "merge", ids }
             ),
-          });
-        },
-        { success: "Merged 2 transactions into one.", failure: "Failed to merge transactions." },
-        {
-          onRollback: () => {
-            setData((currentData) => {
-              if (!currentData) return currentData;
-              return restoreTransactionRows(
-                currentData,
-                new Set([prepared.primary.id, prepared.secondary.id]),
-                prepared.prevRows,
-                appliedDeltas,
-                { includeChildren: false }
-              );
-            });
-            reload().catch(() => {});
-          },
-        }
-      )
-    );
+          })
+        );
+      },
+      messages: { success: "Merged 2 transactions into one.", failure: "Failed to merge transactions." },
+      rollback: () => {
+        setData((currentData) => {
+          if (!currentData) return currentData;
+          return restoreTransactionRows(
+            currentData,
+            new Set([prepared.primary.id, prepared.secondary.id]),
+            prepared.prevRows,
+            appliedDeltas,
+            { includeChildren: false }
+          );
+        });
+      },
+    });
   },
   };
 }

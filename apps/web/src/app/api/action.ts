@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 /**
- * Lenient peek used only to pick a dispatch branch. Branch-specific schemas
- * still validate the full payload afterwards, so this one must tolerate the
- * extra fields each branch carries (`ids`, `patch`, `mode`, ...).
+ * Canonical action dispatch: body `{action}` wins, `?action=` is a deprecated
+ * alias honored for old clients. Every action route resolves through
+ * {@link resolveAction} with its allowed set plus any legacy alias map
+ * (e.g. `bulk-delete` -> `delete`), so query and body spellings share one
+ * code path instead of tripling the test matrix.
  */
-// TODO(P1) [api-consistency]: converge on one canonical discriminator (body {action}) —
-// query ?action= + body action + bodyHasField(ids) heuristic triples the test matrix.
 const BodyPeekSchema = z.looseObject({
   action: z.string().optional(),
   type: z.string().optional(),
@@ -54,4 +54,26 @@ export function readRouteAction(req: Request, json?: unknown): RouteAction {
 /** Mirrors the old `"field" in json` guard without widening to `any`. */
 export function bodyHasField(json: unknown, field: string): boolean {
   return typeof json === "object" && json !== null && field in json;
+}
+
+/**
+ * Resolve the canonical action for a request. Body `{action}` is canonical
+ * and wins; `?action=` is a deprecated alias kept for old clients.
+ * `aliases` maps legacy spellings (e.g. `bulk-delete` -> `delete`) before
+ * the allow-list check. Returns the canonical name or null when neither
+ * side carries an accepted value.
+ */
+export function resolveAction(
+  req: Request,
+  json: unknown,
+  allowed: readonly string[],
+  aliases?: Readonly<Record<string, string>>
+): string | null {
+  const normalise = (raw: string | null | undefined): string | null => {
+    if (raw == null || raw === "") return null;
+    const mapped = aliases?.[raw] ?? raw;
+    return (allowed as readonly string[]).includes(mapped) ? mapped : null;
+  };
+  const body = json === undefined ? undefined : peekBody(json).action;
+  return normalise(body) ?? normalise(new URL(req.url).searchParams.get("action"));
 }

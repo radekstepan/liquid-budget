@@ -1,4 +1,10 @@
-import AdmZip from "adm-zip";
+import { createDeflateRaw } from "node:zlib";
+import { createReadStream, createWriteStream, promises as fsp } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { once } from "node:events";
+import type { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { asc } from "drizzle-orm";
 import { computeBudget, getMonthsWithData, todayISO } from "@ynab/logic";
 import type { Db } from "./client.js";
@@ -6,9 +12,6 @@ import { CURRENT_BUDGET_DATA_VERSION } from "./import-ynab4.js";
 import { accounts, assignments, categoryGroups, categories, payees, reconciliations, recurring, recurringSubTransactions, renameRules, transactions } from "./schema.js";
 import { getAllSettings } from "./settings.js";
 import { getBudgetData } from "./queries/budget.js";
-
-// TODO(P1) [export-perf]: 11 parallel full scans + Array.find per row is O(accounts x txns) —
-// index by id via Map; stream export to temp-file instead of full serialize for large budgets.
 
 const FLAG_NAMES: Record<string, string> = {
   red: "Red",
@@ -131,11 +134,10 @@ function txDestLineage(t: {
  */
 function hiddenExportName(
   c: { name: string; oldMasterName: string | null; oldMasterEntityId: string | null },
-  allGroups: { entityId: string | null; name: string }[]
+  groupNameByEntityId: Map<string, string>
 ): string {
   const oldId = c.oldMasterEntityId ?? null;
-  const oldName =
-    c.oldMasterName ?? (oldId ? allGroups.find((g) => g.entityId === oldId)?.name ?? null : null);
+  const oldName = c.oldMasterName ?? (oldId ? groupNameByEntityId.get(oldId) ?? null : null);
   if (!oldName) return c.name;
   return oldId ? `${oldName} \` ${c.name} \` ${oldId}` : `${oldName} \` ${c.name}`;
 }
@@ -264,15 +266,36 @@ export async function exportYnab4(
     }
   }
 
-  const categoryMap = new Map<number, typeof allCategories[number]>();
+  const categoryMap = new Map<number, (typeof allCategories)[number]>();
   for (const c of allCategories) {
     categoryMap.set(c.id, c);
   }
 
+  // O(1) lookup indexes: the per-row `.find()` scans below used to make
+  // export quadratic in accounts x transactions. First match wins, matching
+  // the old `Array.find` order for case-colliding names.
+  const accountById = new Map(allAccounts.map((a) => [a.id, a]));
+  const accountEntityById = new Map(allAccounts.map((a) => [a.id, a.entityId || `acc-${a.id}`]));
+  const accountByLowerName = new Map<string, (typeof allAccounts)[number]>();
+  for (const a of allAccounts) {
+    const key = a.name.toLowerCase();
+    if (!accountByLowerName.has(key)) accountByLowerName.set(key, a);
+  }
+  const recEntityById = new Map(allReconciliations.map((r) => [r.id, r.entityId || `rec-${r.id}`]));
+  const txEntityById = new Map(allTransactions.map((t) => [t.id, t.entityId || `tx-${t.id}`]));
+  const payeeByLowerName = new Map<string, (typeof allPayees)[number]>();
+  for (const p of allPayees) {
+    const key = p.name.toLowerCase();
+    if (!payeeByLowerName.has(key)) payeeByLowerName.set(key, p);
+  }
+  const groupNameByEntityId = new Map<string, string>();
+  for (const g of allGroups) {
+    if (g.entityId) groupNameByEntityId.set(g.entityId, g.name);
+  }
+
   const getAccountEntityId = (accountId: number | null | undefined): string => {
     if (accountId == null) return "";
-    const acc = allAccounts.find((a) => a.id === accountId);
-    return acc?.entityId || `acc-${accountId}`;
+    return accountEntityById.get(accountId) ?? `acc-${accountId}`;
   };
 
   const getCategoryEntityId = (categoryId: number | null | undefined): string | null => {
@@ -283,14 +306,12 @@ export async function exportYnab4(
 
   const getReconciliationEntityId = (recId: number | null | undefined): string | null => {
     if (recId == null) return null;
-    const rec = allReconciliations.find((r) => r.id === recId);
-    return rec?.entityId || `rec-${recId}`;
+    return recEntityById.get(recId) ?? `rec-${recId}`;
   };
 
   const getTransactionEntityId = (txId: number | null | undefined): string | null => {
     if (txId == null) return null;
-    const t = allTransactions.find((tx) => tx.id === txId);
-    return t?.entityId || `tx-${txId}`;
+    return txEntityById.get(txId) ?? `tx-${txId}`;
   };
 
   // 1. Budget Metadata (G-02): explicit options win, then the
@@ -417,13 +438,13 @@ export async function exportYnab4(
     if (trimmed.startsWith("Transfer : ")) {
       // Transfer payee matching account name
       const targetAccName = trimmed.replace("Transfer : ", "").trim();
-      const matchAcc = allAccounts.find((a) => a.name.toLowerCase() === targetAccName.toLowerCase());
+      const matchAcc = accountByLowerName.get(targetAccName.toLowerCase());
       if (matchAcc) {
         const accEntId = matchAcc.entityId || `acc-${matchAcc.id}`;
         return `Payee/Transfer:${accEntId}`;
       }
     }
-    const matchPayee = allPayees.find((p) => p.name.toLowerCase() === trimmed.toLowerCase());
+    const matchPayee = payeeByLowerName.get(trimmed.toLowerCase());
     const entityId = matchPayee?.entityId || `payee-${trimmed.toLowerCase()}`;
     if (!payeeMap.has(entityId)) {
       payeeMap.set(entityId, {
@@ -478,7 +499,7 @@ export async function exportYnab4(
           // components win verbatim, falling back to the live master
           // name when only the entity id survived. Rows without
           // lineage (e.g. pre-fix imports) export their plain name.
-          name: isHidden ? hiddenExportName(c, allGroups) : c.name,
+          name: isHidden ? hiddenExportName(c, groupNameByEntityId) : c.name,
           sortableIndex: (c.sort ?? 0) * 1000,
           type: "OUTFLOW",
           overspendingHandling: c.overspendCarriesOver ? "Confined" : "AffectsBuffer",
@@ -668,8 +689,8 @@ export async function exportYnab4(
       });
     } else if (t.transferAccountId != null) {
       // Transfer Pair
-      const sourceAcc = allAccounts.find((a) => a.id === t.accountId);
-      const destAcc = allAccounts.find((a) => a.id === t.transferAccountId);
+      const sourceAcc = accountById.get(t.accountId);
+      const destAcc = accountById.get(t.transferAccountId);
       const sourceAccEntityId = getAccountEntityId(t.accountId);
       const destAccEntityId = getAccountEntityId(t.transferAccountId);
       const srcTxEntityId = t.entityId || `tx-${t.id}-src`;
@@ -880,15 +901,22 @@ export async function exportYnab4(
   // `accepted: true` while the importer reports rows that carried
   // `accepted === false` or match links as warnings instead of
   // modeling match state.
+  // Non-transfer payee entries by lowercase name (first wins, matching the
+  // old linear scan); extended below when rename targets mint new entries.
+  const payeeEntryByLowerName = new Map<string, YPayee>();
+  for (const e of payeeMap.values()) {
+    if (e.targetAccountId) continue;
+    const key = e.name.toLowerCase();
+    if (!payeeEntryByLowerName.has(key)) payeeEntryByLowerName.set(key, e);
+  }
   for (const rule of allRenameRules) {
     const target = rule.targetPayee?.trim() || "";
     if (!target) continue;
-    let entry = [...payeeMap.values()].find(
-      (e) => !e.targetAccountId && e.name.toLowerCase() === target.toLowerCase()
-    );
+    let entry = payeeEntryByLowerName.get(target.toLowerCase());
     if (!entry) {
       const mintedId = getOrCreatePayeeId(target);
       entry = mintedId ? payeeMap.get(mintedId) : undefined;
+      if (entry) payeeEntryByLowerName.set(target.toLowerCase(), entry);
     }
     entry?.renameConditions.push({
       entityId: `renamecond-${rule.id}`,
@@ -959,15 +987,308 @@ export async function exportYnab4Zip(
   db: Db,
   options?: ExportYnab4Options
 ): Promise<Buffer> {
+  // Compat path (unchanged contract): the zip is assembled on disk with
+  // bounded memory and only the final archive is read back. Large budgets
+  // should prefer exportYnab4ZipToFile and stream the file instead.
+  const { filePath } = await exportYnab4ZipToFile(db, options);
+  try {
+    return await fsp.readFile(filePath);
+  } finally {
+    await fsp.unlink(filePath).catch(() => {});
+    await fsp.rmdir(path.dirname(filePath)).catch(() => {});
+  }
+}
+
+/**
+ * P1 export-perf: bounded-memory zip assembly. Writes the archive in a
+ * single pass with O(batch) heap (never the whole JSON string or zip):
+ * local file headers carry zeroed sizes + the data-descriptor flag, the
+ * entry bytes stream through deflate, and the central directory (entry
+ * metadata only) is emitted at the end. No zip64: entries and archives
+ * are capped at 4 GiB, far beyond realistic YNAB4 budgets.
+ */
+const ZIP_LOCAL_SIG = 0x04034b50;
+const ZIP_DESCRIPTOR_SIG = 0x08074b50;
+const ZIP_CENTRAL_SIG = 0x02014b50;
+const ZIP_EOCD_SIG = 0x06054b50;
+const ZIP_METHOD_DEFLATE = 8;
+// Bit 3: CRC/sizes follow in a data descriptor (streaming); bit 11:
+// entry names are UTF-8.
+const ZIP_FLAGS = 0x0808;
+const ZIP_MADE_BY = 0x031e;
+
+const CRC_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32Update(previous: number, buf: Buffer): number {
+  let crc = (previous ^ 0xffffffff) >>> 0;
+  for (let i = 0; i < buf.length; i++) {
+    crc = (CRC_TABLE[((crc ^ buf[i]!) >>> 0) & 0xff]! ^ (crc >>> 8)) >>> 0;
+  }
+  return ((crc ^ 0xffffffff) >>> 0);
+}
+
+function dosDateTime(d: Date): { time: number; date: number } {
+  const time = ((d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2)) & 0xffff;
+  const date = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff;
+  return { time, date };
+}
+
+async function writeAll(out: Writable, buf: Buffer): Promise<void> {
+  if (out.write(buf)) return;
+  await once(out, "drain");
+}
+
+interface ZipEntrySource {
+  name: string;
+  path: string;
+}
+
+export interface ZipWriteResult {
+  bytes: number;
+  entries: number;
+}
+
+export async function streamFilesToZip(
+  sources: ZipEntrySource[],
+  destPath: string
+): Promise<ZipWriteResult> {
+  const out = createWriteStream(destPath);
+  const central: Buffer[] = [];
+  let centralSize = 0;
+  let offset = 0;
+  try {
+    for (const src of sources) {
+      const nameBuf = Buffer.from(src.name, "utf-8");
+      if (nameBuf.length === 0 || nameBuf.length > 0xffff) {
+        throw new Error(`Invalid zip entry name: ${JSON.stringify(src.name)}`);
+      }
+      const { size } = await fsp.stat(src.path);
+      if (size >= 0xffffffff) {
+        throw new Error(`Zip entry too large (no zip64 support): ${src.name}`);
+      }
+      const { time, date } = dosDateTime(new Date());
+
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(ZIP_LOCAL_SIG, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt16LE(ZIP_FLAGS, 6);
+      local.writeUInt16LE(ZIP_METHOD_DEFLATE, 8);
+      local.writeUInt16LE(time, 10);
+      local.writeUInt16LE(date, 12);
+      local.writeUInt32LE(0, 14);
+      local.writeUInt32LE(0, 18);
+      local.writeUInt32LE(0, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      local.writeUInt16LE(0, 28);
+      await writeAll(out, local);
+      await writeAll(out, nameBuf);
+
+      let crc = 0;
+      let usize = 0;
+      let csize = 0;
+      const input = createReadStream(src.path);
+      // Raw deflate: ZIP method 8 stores the bare deflate stream (no zlib
+      // header/trailer). createDeflate would emit a zlib wrapper, which
+      // strict readers (including our own adm-zip import path) reject.
+      const deflate = createDeflateRaw({ level: 9 });
+      await new Promise<void>((resolve, reject) => {
+        input.on("error", reject);
+        deflate.on("error", reject);
+        input.on("data", (chunk: Buffer | string) => {
+          const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf-8") : chunk;
+          usize += buf.length;
+          crc = crc32Update(crc, buf);
+        });
+        input.pipe(deflate);
+        (async () => {
+          try {
+            for await (const piece of deflate) {
+              const buf = piece as Buffer;
+              csize += buf.length;
+              await writeAll(out, buf);
+            }
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        })();
+      });
+
+      const descriptor = Buffer.alloc(16);
+      descriptor.writeUInt32LE(ZIP_DESCRIPTOR_SIG, 0);
+      descriptor.writeUInt32LE(crc >>> 0, 4);
+      descriptor.writeUInt32LE(csize >>> 0, 8);
+      descriptor.writeUInt32LE(usize >>> 0, 12);
+      await writeAll(out, descriptor);
+
+      const entry = Buffer.alloc(46);
+      entry.writeUInt32LE(ZIP_CENTRAL_SIG, 0);
+      entry.writeUInt16LE(ZIP_MADE_BY, 4);
+      entry.writeUInt16LE(20, 6);
+      entry.writeUInt16LE(ZIP_FLAGS, 8);
+      entry.writeUInt16LE(ZIP_METHOD_DEFLATE, 10);
+      entry.writeUInt16LE(time, 12);
+      entry.writeUInt16LE(date, 14);
+      entry.writeUInt32LE(crc >>> 0, 16);
+      entry.writeUInt32LE(csize >>> 0, 20);
+      entry.writeUInt32LE(usize >>> 0, 24);
+      entry.writeUInt16LE(nameBuf.length, 28);
+      entry.writeUInt16LE(0, 30);
+      entry.writeUInt16LE(0, 32);
+      entry.writeUInt16LE(0, 34);
+      entry.writeUInt16LE(0, 36);
+      entry.writeUInt32LE((0o100644 << 16) >>> 0, 38);
+      entry.writeUInt32LE(offset >>> 0, 42);
+      central.push(entry, nameBuf);
+      centralSize += entry.length + nameBuf.length;
+
+      offset += 30 + nameBuf.length + csize + 16;
+    }
+
+    const centralOffset = offset;
+    for (const buf of central) {
+      await writeAll(out, buf);
+      offset += buf.length;
+    }
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(ZIP_EOCD_SIG, 0);
+    eocd.writeUInt16LE(0, 4);
+    eocd.writeUInt16LE(0, 6);
+    eocd.writeUInt16LE(central.length / 2, 8);
+    eocd.writeUInt16LE(central.length / 2, 10);
+    eocd.writeUInt32LE(centralSize >>> 0, 12);
+    eocd.writeUInt32LE(centralOffset >>> 0, 16);
+    eocd.writeUInt16LE(0, 20);
+    await writeAll(out, eocd);
+    offset += eocd.length;
+
+    out.end();
+    await finished(out);
+    return { bytes: offset, entries: sources.length };
+  } catch (err) {
+    out.destroy();
+    throw err;
+  }
+}
+
+/** Rows per JSON write batch: bounds the largest transient string. */
+export const YNAB4_JSON_BATCH_ROWS = 500;
+
+/**
+ * Incremental `.ynab4` JSON serializer. Emits the document section by
+ * section (array rows stringified in batches) so peak heap stays O(batch)
+ * instead of O(document). Parsed output is identical to
+ * `JSON.stringify(doc, null, 2)` modulo insignificant whitespace.
+ */
+export async function writeYnab4JsonStream(
+  doc: Ynab4ExportDocument,
+  dest: string | Writable,
+  batchSize: number = YNAB4_JSON_BATCH_ROWS
+): Promise<void> {
+  const out = typeof dest === "string" ? createWriteStream(dest, { encoding: "utf-8" }) : dest;
+  const write = async (s: string): Promise<void> => {
+    if (!out.write(s)) await once(out, "drain");
+  };
+  const block = (value: unknown, indent: string): string =>
+    JSON.stringify(value, null, 2)
+      .split("\n")
+      .map((line) => indent + line)
+      .join("\n");
+  const writeRows = async (key: string, rows: Ynab4ExportRow[], last: boolean): Promise<void> => {
+    await write(`  ${JSON.stringify(key)}: [`);
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const slice = rows
+        .slice(i, i + batchSize)
+        .map((row) => block(row, "    "))
+        .join(",\n");
+      await write(`${i === 0 ? "\n" : ",\n"}${slice}`);
+    }
+    await write(rows.length > 0 ? "\n  ]" : "]");
+    await write(last ? "\n" : ",\n");
+  };
+  try {
+    await write("{\n");
+    await write(`  "fileMetaData": ${block(doc.fileMetaData, "  ")},\n`);
+    await write(`  "budgetMetaData": ${block(doc.budgetMetaData, "  ")},\n`);
+    const sections: [string, Ynab4ExportRow[]][] = [
+      ["accounts", doc.accounts],
+      ["payees", doc.payees],
+      ["masterCategories", doc.masterCategories],
+      ["monthlyBudgets", doc.monthlyBudgets],
+      ["transactions", doc.transactions],
+      ["scheduledTransactions", doc.scheduledTransactions],
+      ["reconciliations", doc.reconciliations],
+    ];
+    for (let i = 0; i < sections.length; i++) {
+      const [key, rows] = sections[i]!;
+      await writeRows(key, rows, i === sections.length - 1);
+    }
+    await write("}\n");
+    if (typeof dest === "string") {
+      out.end();
+      await finished(out);
+    }
+  } catch (err) {
+    if (typeof dest === "string") out.destroy();
+    throw err;
+  }
+}
+
+export interface ExportYnab4ZipFileOptions extends ExportYnab4Options {
+  /** Directory for the temp JSON/settings staging files. Defaults to os.tmpdir(). */
+  dir?: string;
+  /** Final archive path. Defaults to `<tmpdir>/ynab-export-XXXXXX/budget-<ts>.y4backup`. */
+  filePath?: string;
+}
+
+export interface ExportYnab4ZipFileResult {
+  filePath: string;
+  bytes: number;
+  entries: number;
+}
+
+/**
+ * P1 export-perf: file-based export for very large budgets. Builds the
+ * document as before (per-row lookups are O(1) id maps), then serializes
+ * the JSON and assembles the zip with bounded memory — no full JSON
+ * string and no in-memory zip at any point. Only the final archive path
+ * is returned; staging files are removed before resolve.
+ */
+export async function exportYnab4ZipToFile(
+  db: Db,
+  options?: ExportYnab4ZipFileOptions
+): Promise<ExportYnab4ZipFileResult> {
   const { ynabData, settingsXml } = await exportYnab4(db, options);
-  const zip = new AdmZip();
-
-  const jsonStr = JSON.stringify(ynabData, null, 2);
-  const dataFileName = "Budget.ynab4";
-  const settingsFileName = "budgetSettings.ybsettings";
-
-  zip.addFile(dataFileName, Buffer.from(jsonStr, "utf-8"));
-  zip.addFile(settingsFileName, Buffer.from(settingsXml, "utf-8"));
-
-  return zip.toBuffer();
+  const dir = await fsp.mkdtemp(path.join(options?.dir ?? os.tmpdir(), "ynab-export-"));
+  const dataPath = path.join(dir, "Budget.ynab4");
+  const settingsPath = path.join(dir, "budgetSettings.ybsettings");
+  try {
+    await writeYnab4JsonStream(ynabData, dataPath);
+    await fsp.writeFile(settingsPath, settingsXml, "utf-8");
+    const filePath = options?.filePath ?? path.join(dir, `budget-${Date.now()}.y4backup`);
+    const { bytes, entries } = await streamFilesToZip(
+      [
+        { name: "Budget.ynab4", path: dataPath },
+        { name: "budgetSettings.ybsettings", path: settingsPath },
+      ],
+      filePath
+    );
+    return { filePath, bytes, entries };
+  } finally {
+    await fsp.unlink(dataPath).catch(() => {});
+    await fsp.unlink(settingsPath).catch(() => {});
+    // Removes the staging dir when the caller chose an outside path;
+    // no-op otherwise (the dir still holds the final archive).
+    await fsp.rmdir(dir).catch(() => {});
+  }
 }

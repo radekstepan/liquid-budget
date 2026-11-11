@@ -18,6 +18,7 @@ import {
   parseReconcileStateResponse,
   parseRecurringAutoPostResponse,
   parseSnapshotsResponse,
+  parseTransactionMergeResponse,
   parseTransactionMutationResult,
   toRecurringPayload,
   toTransactionPayload,
@@ -279,6 +280,21 @@ describe("mutation/read response contracts", () => {
     expect(() => parseDuplicateDismissResponse({ dismissed: true })).toThrow(
       /Invalid dismiss-duplicates response/
     );
+  });
+
+  it("merge response extracts the server survivor id", () => {
+    expect(
+      parseTransactionMergeResponse({ ok: true, merged: { id: 7, payee: "X" }, deletedId: 9 })
+    ).toEqual({ mergedId: 7, deletedId: 9 });
+    expect(() =>
+      parseTransactionMergeResponse({ ok: true, merged: { id: 7 } })
+    ).toThrow(/Invalid merge response/);
+    expect(() =>
+      parseTransactionMergeResponse({ ok: true, merged: {}, deletedId: 9 })
+    ).toThrow(/Invalid merge response/);
+    expect(() =>
+      parseTransactionMergeResponse({ ok: false, merged: { id: 7 }, deletedId: 9 })
+    ).toThrow(/Invalid merge response/);
   });
 
   it("transaction create response accepts single and split results", () => {

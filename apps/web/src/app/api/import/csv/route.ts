@@ -1,11 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { getDefaultDb, importCsvTransactions, TransactionError } from "@ynab/server";
 import { parseCsvImport } from "@ynab/logic";
 import { z } from "zod";
+import { apiErrorResponse } from "../../errors";
 import { formatZodError } from "../../schemas";
 import { mutationGuardResponse } from "../../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+
+const log = createScopedLogger("import/csv");
 
 const BodySchema = z.object({
   accountId: z.number().int().positive(),
@@ -47,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (e instanceof TransactionError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
-    console.error("[import/csv] Error:", e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    log.error("Error:", toLogDetails(e));
+    return apiErrorResponse(e);
   }
 }

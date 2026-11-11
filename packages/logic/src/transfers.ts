@@ -125,6 +125,42 @@ export function classifyBoundaryTransfer({
   };
 }
 
+export interface InferInflowIncomeParams {
+  categoryId: number | null;
+  /** Signed amount in integer cents. Only the sign is read. */
+  amountCents: number;
+  /**
+   * Explicit isIncome override ("Income" vs "Uncategorized" choice).
+   * Defaults to true when eligible.
+   */
+  explicitIsIncome?: boolean;
+  incomeMonth?: string | null;
+}
+
+/**
+ * Single source of truth for the uncategorized-inflow income rule on
+ * liquid on-budget accounts: a positive inflow with no category is
+ * income (explicit `isIncome: false` keeps it "Uncategorized"); anything
+ * else — categorized, outflow, or zero — is never income and carries no
+ * income month.
+ *
+ * Callers own the account-scope guard (off-budget / credit / transfer /
+ * split-parent branches) and any value-change preservation; they funnel
+ * the liquid on-budget non-transfer leaf through here so the server
+ * (`transactions/create`, `transactions/update`, `transactions/splits`)
+ * and the optimistic planner (`optimistic.ts`) cannot drift.
+ */
+export function inferUncategorizedInflowIncome({
+  categoryId,
+  amountCents,
+  explicitIsIncome,
+  incomeMonth = null,
+}: InferInflowIncomeParams): { isIncome: boolean; incomeMonth: string | null } {
+  const eligible = categoryId == null && amountCents > 0;
+  const isIncome = eligible ? (explicitIsIncome ?? true) : false;
+  return { isIncome, incomeMonth: isIncome ? (incomeMonth ?? null) : null };
+}
+
 type AccountLookup = Map<number, Account> | Account[] | undefined;
 
 function findAccount(accounts: AccountLookup, id: number): Account | undefined {
@@ -155,6 +191,22 @@ export function transferNetOnBudgetDelta(
   const onB = findAccount(accountMap, t.transferAccountId)?.onBudget ?? true;
   const amt = num(t.amount);
   return (onA ? amt : 0) + (onB ? -amt : 0);
+}
+
+/**
+ * Net on-budget delta of any row, transfer or plain: transfer rows delegate
+ * to {@link transferNetOnBudgetDelta}; plain rows score `amt` when their
+ * account is on-budget, else 0. Missing accounts default to on-budget
+ * (matches `isIncomeTransaction`). Read-path helper so cash-flow/report
+ * aggregators share one boundary-math site instead of inlining it.
+ */
+export function rowNetOnBudgetDelta(
+  t: Transaction,
+  accountMap?: Map<number, Account> | Account[]
+): number {
+  if (t.transferAccountId != null) return transferNetOnBudgetDelta(t, accountMap);
+  const onA = findAccount(accountMap, t.accountId)?.onBudget ?? true;
+  return onA ? num(t.amount) : 0;
 }
 
 /**

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { analyzeUnflaggedDuplicates, getDefaultDb } from "@ynab/server";
-import { optionalErrorMessage } from "../errors";
+import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
-// TODO(P2) [logging]: replace console.error below with logger + apiErrorResponse (no PII leak;
-// Vitest console ban doesn't cover Next runtime).
+const log = createScopedLogger("duplicates");
 
 /**
  * Analyze the whole database for duplicate transactions. Any unflagged
@@ -22,7 +22,7 @@ export async function POST(req?: Request) {
     const result = await analyzeUnflaggedDuplicates(db);
     return NextResponse.json(result);
   } catch (e) {
-    console.error("[duplicates] Error:", e);
-    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to analyze duplicates" }, { status: 500 });
+    log.error("Error:", toLogDetails(e));
+    return apiErrorResponse(e);
   }
 }

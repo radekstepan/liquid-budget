@@ -6,10 +6,6 @@ import {
   todayISO,
   type AppView,
 } from "@ynab/logic";
-import { getDefaultDb, listAccounts } from "@ynab/server";
-
-// TODO(P1) [layering]: remove direct DB I/O from generateMetadata — fetch /api/* read-model
-// instead of opening SQLite from RSC; couples rendering to connection lifecycle.
 
 export const dynamic = "force-dynamic";
 
@@ -43,22 +39,16 @@ export async function generateMetadata({
   params: Promise<{ slug?: string[] }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { view, month, accountId } = parseSlug(slug);
-  let accountName: string | null = null;
-  if (view === "transactions" && accountId != null) {
-    try {
-      const accounts = await listAccounts(getDefaultDb());
-      accountName = accounts.find((a) => a.id === accountId)?.name ?? null;
-    } catch {
-      // Fall through to the view-level title; the client takes over on
-      // hydration and resolves the account name from the loaded budget.
-    }
-  }
+  // No DB I/O here by design: opening SQLite from RSC couples rendering to
+  // the connection lifecycle (and breaks on DB failure). The transactions
+  // view gets a generic pre-hydration title; BudgetApp resolves the account
+  // name client-side via document.title on hydration.
+  const { view, month } = parseSlug(slug);
   return {
     title: buildPageTitle(view, {
       // The client defaults a month-less budget URL to today.
       month: view === "budget" ? (month ?? todayISO().slice(0, 7)) : undefined,
-      accountName,
+      accountName: null,
     }),
     description: "A zero-based envelope budgeting app. A YNAB4 alternative.",
   };

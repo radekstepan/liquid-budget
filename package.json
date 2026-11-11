@@ -22,7 +22,7 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "db:reset": "yarn workspace @ynab/server db:reset",
     "db:import": "npx tsx apps/web/scripts/do-import.ts",
-    "db:generate": "yarn workspace @ynab/web db:generate",
+    "db:generate": "yarn workspace @ynab/server db:generate",
     "db:migrate": "yarn workspace @ynab/server db:migrate",
     "coverage": "turbo run coverage",
     "check:artifacts": "node scripts/check-artifacts.mjs"

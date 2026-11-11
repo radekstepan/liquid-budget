@@ -13,8 +13,6 @@ import { DEFAULT_MAX_SUGGEST_PAYEES } from "@ynab/logic";
 
 export const DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_LLM_TIMEOUT_MS = 60_000;
-// TODO(P2) [llm-privacy]: pin https:// for non-loopback baseUrls; audit-log model+candidate count
-// per request; document that LLM_BASE_URL=http://localhost is fine but external URLs exfiltrate payees.
 
 export type LlmConfig = {
   apiKey: string;
@@ -22,6 +20,12 @@ export type LlmConfig = {
   baseUrl: string;
   timeoutMs: number;
   maxPayees: number;
+  /**
+   * Attach truncated memo evidence to the prompt. Default false (payee
+   * names only): memos often contain account numbers and other PII.
+   * Opt in with `LLM_INCLUDE_MEMOS=1` when disambiguation needs it.
+   */
+  includeMemos: boolean;
 };
 
 export class LlmError extends Error {
@@ -42,6 +46,11 @@ function readPositiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number):
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readFlag(env: NodeJS.ProcessEnv, key: string): boolean {
+  const raw = readEnv(env, key).toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 export function getLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfig {
   const baseUrl = readEnv(env, "LLM_BASE_URL") || DEFAULT_LLM_BASE_URL;
   return {
@@ -50,8 +59,69 @@ export function getLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfig {
     baseUrl: baseUrl.replace(/\/+$/, ""),
     timeoutMs: readPositiveInt(env, "LLM_TIMEOUT_MS", DEFAULT_LLM_TIMEOUT_MS),
     maxPayees: readPositiveInt(env, "LLM_MAX_PAYEES", DEFAULT_MAX_SUGGEST_PAYEES),
+    includeMemos: readFlag(env, "LLM_INCLUDE_MEMOS"),
   };
 }
+
+/**
+ * Hostnames where cleartext HTTP is acceptable: the request never leaves
+ * the machine, so no payee data is exfiltrated. Anything else must use
+ * TLS — otherwise payee names (and the bearer key) cross the network
+ * in the clear.
+ */
+const LOOPBACK_LLM_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/** Fail closed on plain-HTTP exfiltration targets. Never throws for loopback. */
+export function assertSecureLlmBaseUrl(baseUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new LlmError(
+      `LLM_BASE_URL is not a valid URL (${baseUrl || "(empty)"}). Use https:// for external services or http://localhost:<port> for local ones.`,
+      502
+    );
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new LlmError(
+      `LLM_BASE_URL must be http(s) (got "${parsed.protocol}").`,
+      502
+    );
+  }
+  if (protocol === "http:" && !LOOPBACK_LLM_HOSTS.has(bareLlmHostname(parsed))) {
+    throw new LlmError(
+      `Refusing to send payee names over plain HTTP to "${parsed.hostname}". Use https:// or a loopback URL (http://localhost:<port>).`,
+      502
+    );
+  }
+  return bareLlmHostname(parsed);
+}
+
+/** Hostname without IPv6 brackets (`[::1]` -> `::1`) for allowlist checks. */
+export function bareLlmHostname(parsed: URL): string {
+  return parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
+/**
+ * Audit record for one LLM request. Intentionally PII-free: model ids,
+ * counts, and the destination host only — never the key, payees, or
+ * memos. Emitted via the caller's `onAudit` sink (server routes log it;
+ * tests observe it without touching console output).
+ */
+export type LlmAuditEntry = {
+  /** Destination host (hostname only, no credentials). */
+  host: string;
+  /** Model id requested in configuration. */
+  requestedModel: string;
+  /** Model id that served the request (routers may resolve slugs). */
+  servedModel?: string;
+  /** Distinct payees sent in this request. */
+  candidates: number;
+  ok: boolean;
+  /** Failure reason (upstream detail already scrubbed by LlmError). */
+  error?: string;
+};
 
 /**
  * AI rename suggestions are available only when a key and a model are
@@ -164,6 +234,8 @@ export async function completeChatJson(
       501
     );
   }
+  // Fail closed before any payee data can leave the machine.
+  assertSecureLlmBaseUrl(config.baseUrl);
   const fetchImpl: LlmFetch = opts?.fetchImpl ?? (fetch as unknown as LlmFetch);
   const controller = new AbortController();
   const timeoutMs = opts?.timeoutMs ?? config.timeoutMs;

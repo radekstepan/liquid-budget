@@ -1,8 +1,16 @@
 // Root flat config: ESLint recommended + typescript-eslint recommended.
 // Every workspace `lint` script runs `eslint .` from its own directory;
 // config resolution walks up to this file, so all packages share one ruleset.
-// TODO(P2) [lint-harden]: adopt jsx-a11y + import/no-cycle (budget-engine<->transfers risk) +
-// no-non-null-assertion budget + complexity cap; narrow import-ynab4 any carve-out to boundary files.
+// Hardened subset (landed): `eqeqeq` (null allowed — `!= null` is idiomatic
+// here), `@typescript-eslint/consistent-type-imports`, `no-console` outside
+// the logger funnel + CLI scripts + tests. Fixed alongside: unused `Category`
+// import (budget-engine), unused `pre` (search), five value-imports used
+// only as types.
+// TODO(P2) [lint-harden]: remainder needs plugins/budget — jsx-a11y +
+// import/no-cycle need new deps (not installed); no-non-null-assertion needs
+// a ~200-site budget (sankey-heavy, 198 `!` today); complexity cap blocked
+// (importTransactions 433, TransactionModal 136, payload-builders 122);
+// narrow the import-ynab4 phase `any` carve-out to boundary files.
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import globals from "globals";
@@ -26,11 +34,21 @@ export default tseslint.config(
   {
     // `_`-prefixed names are deliberately unused (callback arity, stubbed
     // params); unused catch params are still errors — use `catch {`.
+    // `eqeqeq` allows `!= null` (pervasive null/undefined check idiom);
+    // `consistent-type-imports` keeps type-only imports erasable;
+    // `no-console` funnels app logging through `lib/logger` (CLI scripts,
+    // the funnel itself, and tests opt out below).
     rules: {
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "all" },
       ],
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        { disallowTypeAnnotations: false },
+      ],
+      eqeqeq: ["error", "always", { null: "ignore" }],
+      "no-console": "error",
     },
   },
   {
@@ -47,21 +65,53 @@ export default tseslint.config(
       "packages/server/src/migrate*.ts",
     ],
     languageOptions: { globals: globals.node },
+    // CLI entry points report progress via stdout/stderr by design.
+    rules: { "no-console": "off" },
   },
   {
-    // The YNAB4 wire format is untyped JSON by nature: the whole import
-    // pipeline works on `any` documents validated field-by-field at read
-    // sites. Narrowing the entire backup schema to `unknown` is follow-up
-    // work; every other rule stays enforced here.
-    // TODO(P2) [type-safety]: schedule unknown-migration for import-ynab4 boundary files; narrow
-    // any carve-out from whole pipeline to per-file boundaries with validated read sites.
-    files: ["packages/server/src/import-ynab4/**"],
+    // The single sanctioned `console.*` funnel — app code logs via this
+    // module (`getLogger`/`createScopedLogger`), never `console.*` direct.
+    files: ["apps/web/src/lib/logger.ts"],
+    rules: { "no-console": "off" },
+  },
+  {
+    // The YNAB4 wire format is untyped JSON by nature: the archive/version/
+    // scale/lineage boundary files read it as `unknown` through validated
+    // guards (`import-ynab4/guards.ts`). Only the phase files below still
+    // work row-typed `any` rows element-by-element; narrowing them is
+    // follow-up work. Every other rule stays enforced here.
+    files: [
+      "packages/server/src/import-ynab4/phases/accounts.ts",
+      "packages/server/src/import-ynab4/phases/budgets.ts",
+      "packages/server/src/import-ynab4/phases/categories.ts",
+      "packages/server/src/import-ynab4/phases/payees.ts",
+      "packages/server/src/import-ynab4/phases/scheduled.ts",
+      "packages/server/src/import-ynab4/phases/transactions.ts",
+    ],
     rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
   {
     // Test doubles capture untyped values (`api: any`, fetch stubs) by
-    // design; the freedom stops at the test boundary.
+    // design; the freedom stops at the test boundary. Console spies
+    // (`vi.spyOn(console, ...)`) likewise live here, never in app code.
     files: ["**/tests/**", "**/*.test.ts", "**/*.test.tsx", "**/vitest.setup.ts"],
-    rules: { "@typescript-eslint/no-explicit-any": "off" },
+    rules: { "@typescript-eslint/no-explicit-any": "off", "no-console": "off" },
+  },
+  {
+    // Marker-only block (no rules): the toolchain remainder lives in
+    // package.json version pins, where JSON allows no comments.
+    // Unify Vitest to one major once the v8 function-dedup artifact is
+    // fixed upstream — see docs/toolchain-adr.md item 6. Logic/server/ui
+    // stay on 2.1.9 (enforced coverage gate measures 93.4% functions
+    // there vs 74.7% phantom-inflated on v4); web is on v4.
+    // TODO(P2) [toolchain]: re-apply the v4 bump (vitest + coverage-v8,
+    // ui vite ^6 + jest-dom ^7) and keep it only if `logic coverage` stays green.
+    files: [
+      "packages/logic/package.json",
+      "packages/server/package.json",
+      "packages/ui/package.json",
+      "apps/web/package.json",
+    ],
+    rules: {},
   }
 );

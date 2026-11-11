@@ -1,7 +1,8 @@
+import { arrayField, asRecord } from "../guards.js";
 import type { Ynab4ImportContext } from "../types.js";
 
-export function reportDroppedOfxMappings(ynabData: any, ctx: Ynab4ImportContext): void {
-  const yAccounts = ynabData.accounts || [];
+export function reportDroppedOfxMappings(ynabData: unknown, ctx: Ynab4ImportContext): void {
+  const yAccounts = arrayField(ynabData, "accounts");
   // 5d. G-10: `accountMappings` (OFX import config) are
   // intentionally dropped. YNAB4's `AccountMappingVO` carries `fid,
   // shortenedAccountId, hash, salt, targetYNABAccountId,
@@ -16,24 +17,28 @@ export function reportDroppedOfxMappings(ynabData: any, ctx: Ynab4ImportContext)
   // built, revisit storing at least the three per-account booleans
   // (`skipImport`, `shouldFlipPayeesMemos`, `shouldImportMemos`).
   {
-    const mappings = Array.isArray(ynabData.accountMappings) ? ynabData.accountMappings : [];
-    const liveMappings = mappings.filter((m: any) => !m?.isTombstone);
+    const mappings = arrayField(ynabData, "accountMappings");
+    const liveMappings = mappings.filter((m) => !asRecord(m)?.isTombstone);
     if (liveMappings.length > 0) {
       ctx.warnings.push(
         `Dropped ${liveMappings.length} OFX account mapping(s) (fid/shortenedAccountId/targetYNABAccountId + import preferences); OFX import is not modeled`
       );
       const accountNameByEntity = new Map<string, string>();
       for (const a of yAccounts) {
-        if (!a?.isTombstone && typeof a?.entityId === "string" && typeof a?.accountName === "string") {
-          accountNameByEntity.set(a.entityId, a.accountName);
+        const row = asRecord(a);
+        const entityId = row == null ? undefined : row.entityId;
+        const accountName = row == null ? undefined : row.accountName;
+        if (row != null && !row.isTombstone && typeof entityId === "string" && typeof accountName === "string") {
+          accountNameByEntity.set(entityId, accountName);
         }
       }
       for (const m of liveMappings) {
-        const target = typeof m?.targetYNABAccountId === "string" ? m.targetYNABAccountId : "";
+        const row = asRecord(m);
+        const target = typeof row?.targetYNABAccountId === "string" ? row.targetYNABAccountId : "";
         const name = accountNameByEntity.get(target);
         const label = name ? `"${name}" (targetYNABAccountId ${target})` : `targetYNABAccountId ${target || "unknown"}`;
         ctx.warnings.push(
-          `OFX account mapping for ${label}: dropped import preferences skipImport=${m?.skipImport ?? false}, shouldFlipPayeesMemos=${m?.shouldFlipPayeesMemos ?? false}, shouldImportMemos=${m?.shouldImportMemos ?? true}; OFX import is not modeled`
+          `OFX account mapping for ${label}: dropped import preferences skipImport=${row?.skipImport ?? false}, shouldFlipPayeesMemos=${row?.shouldFlipPayeesMemos ?? false}, shouldImportMemos=${row?.shouldImportMemos ?? true}; OFX import is not modeled`
         );
       }
     }

@@ -3,6 +3,7 @@ import { isTransferPayee } from "@ynab/logic";
 import type { Db } from "../../client.js";
 import { payees, renameRules, transactions } from "../../schema.js";
 import { findOrCreatePayee } from "../../queries/payees.js";
+import { arrayField } from "../guards.js";
 import type { Ynab4ImportContext } from "../types.js";
 
 export function importPayees(db: Db, yPayees: any[], ctx: Ynab4ImportContext): void {
@@ -130,10 +131,13 @@ export async function backfillPayeeDefaults(
 
 export async function importPayeeRenameConditions(
   db: Db,
-  ynabData: any,
+  ynabData: unknown,
   ctx: Ynab4ImportContext
 ): Promise<void> {
-  const yPayees = ynabData.payees || [];
+  // Elements stay `any`: array shape is validated above, per-row wire
+  // typing belongs to the phase files (kept under the explicit-`any`
+  // carve-out) rather than this boundary.
+  const yPayees: any[] = arrayField(ynabData, "payees");
   // 5c. Import YNAB4 payee rename conditions into rename_rules.
   //
   // Operator audit (`data/StringCondition.as`,
@@ -155,7 +159,7 @@ export async function importPayeeRenameConditions(
   // transferAccountId), reported as one aggregated notice.
   {
     let transferPayeeCount = 0;
-    let droppedLocationCount = (ynabData.payeeLocations || []).filter((l: any) => !l?.isTombstone).length;
+    let droppedLocationCount = arrayField(ynabData, "payeeLocations").filter((l: any) => !l?.isTombstone).length;
     const importedAt = new Date().toISOString();
     for (const p of yPayees) {
       if (p.isTombstone) continue;

@@ -28,7 +28,8 @@ export interface Ynab4BudgetMetaData {
 export type Ynab4BudgetSettings = Ynab4Settings & Ynab4BudgetMetaData;
 
 export interface ExtractedYnab4Data {
-  ynabData: any;
+  /** Raw `.ynab4` document: untyped JSON, read only through `./guards.js`. */
+  ynabData: unknown;
   settingsXml?: string;
   settings?: Ynab4Settings;
   /**
@@ -110,8 +111,8 @@ export type Ynab4ImportContext = {
   accNameMap: Map<number, string>;
   allAccounts: (typeof accounts.$inferSelect)[];
   fallbackTransferCategoryId: number | null;
-  subTxById: Map<string, { parent: any; sub: any }>;
-  txById: Map<string, any>;
+  subTxById: Map<string, { parent: unknown; sub: unknown }>;
+  txById: Map<string, unknown>;
   processedTransferIds: Set<string>;
   totalImportedTxCount: number;
   legacyIncomeSentinelCount: number;

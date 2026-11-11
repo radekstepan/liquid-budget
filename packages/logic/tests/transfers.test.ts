@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyBoundaryTransfer,
+  inferUncategorizedInflowIncome,
   isCreditPayoffTransfer,
   isInternalTransfer,
   isOffBudgetTransfer,
@@ -523,6 +524,37 @@ describe("isOffBudgetTransfer", () => {
     expect(isOffBudgetTransfer(transferRow(1, 999, "-30000"), ALL_ACCOUNTS)).toBe(false);
     // No accounts at all: everything reads as on-budget (never off-budget).
     expect(isOffBudgetTransfer(transferRow(1, 5, "-30000"))).toBe(false);
+  });
+});
+
+describe("inferUncategorizedInflowIncome", () => {
+  it("defaults an uncategorized positive inflow to income with the given month", () => {
+    expect(
+      inferUncategorizedInflowIncome({ categoryId: null, amountCents: 5000, incomeMonth: "2026-06" })
+    ).toEqual({ isIncome: true, incomeMonth: "2026-06" });
+  });
+
+  it("honours an explicit isIncome: false (Uncategorized choice)", () => {
+    expect(
+      inferUncategorizedInflowIncome({
+        categoryId: null,
+        amountCents: 5000,
+        explicitIsIncome: false,
+        incomeMonth: "2026-06",
+      })
+    ).toEqual({ isIncome: false, incomeMonth: null });
+  });
+
+  it("never flags categorized rows, outflows, or zero amounts — and clears the month", () => {
+    expect(
+      inferUncategorizedInflowIncome({ categoryId: 7, amountCents: 5000, incomeMonth: "2026-06" })
+    ).toEqual({ isIncome: false, incomeMonth: null });
+    expect(
+      inferUncategorizedInflowIncome({ categoryId: null, amountCents: -5000, incomeMonth: "2026-06" })
+    ).toEqual({ isIncome: false, incomeMonth: null });
+    expect(
+      inferUncategorizedInflowIncome({ categoryId: null, amountCents: 0, explicitIsIncome: true })
+    ).toEqual({ isIncome: false, incomeMonth: null });
   });
 });
 

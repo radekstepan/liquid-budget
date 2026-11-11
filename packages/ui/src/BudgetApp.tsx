@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-// TODO(P2) [ui-split]: split this 1313-line shell — extract view routing, month-nav memo,
-// entity mutations into hooks; every new mutation must remember skipReload semantics today.
-// TODO(P2) [i18n]: hardcoded en-US/$ throughout (fmt/searchQuery) — record single-locale decision
-// or introduce locale plumbing before adding more formatters.
-import type { BudgetData, Query, RenameRule, Transaction } from "@ynab/logic";
+// Display locale is fixed en-US/$ by decision (docs/locale-decision.md) — no locale plumbing.
+import type { BudgetData, Query } from "@ynab/logic";
 import {
   buildPageTitle,
   computeBudget,
@@ -15,21 +12,20 @@ import {
   num,
   parseMonthKey,
   monthKey,
-  renameRulePayeeFilter,
   resolveSplitTemplatePresets,
   SPLIT_TEMPLATE_PRESETS,
   todayISO,
   countDuplicatesByAccount,
   countNewByAccount,
-  isValidISOMonth,
   DEMO_MONTH,
-  type TransactionFlagColor,
 } from "@ynab/logic";
 import { useLocalStorage } from "./useLocalStorage.js";
 import { useTodayISO } from "./useTodayISO.js";
 import { Sidebar, type View } from "./Sidebar.js";
 import { usePrivacyBudget } from "./usePrivacyBudget.js";
-import { useBudgetUrlSync } from "./useBudgetUrlSync.js";
+import { useBudgetMonthNav } from "./useBudgetMonthNav.js";
+import { useBudgetMutations } from "./useBudgetMutations.js";
+import { useBudgetViewRouting } from "./useBudgetViewRouting.js";
 import { useQuickBudget } from "./useQuickBudget.js";
 import { useRenameSuggestStatus, useSnapshots } from "./useSettingsData.js";
 import type { SearchListOption, ThemeId } from "@ynab/theme";
@@ -42,7 +38,6 @@ import {
   isThemeId,
   applyThemeId,
 } from "@ynab/theme";
-import type { GlobalSearchJump } from "./GlobalSearch.js";
 import { GlobalSearchModal } from "./GlobalSearchModal.js";
 import { Inspector } from "./Inspector.js";
 import { BudgetView } from "./BudgetView.js";
@@ -142,14 +137,6 @@ export function BudgetApp({
       ? (initialView as View)
       : "budget"
   );
-  const [month, setMonth] = useState(() =>
-    initialMonth && isValidISOMonth(initialMonth) ? initialMonth : todayISO().slice(0, 7)
-  );
-  const [monthCount, setMonthCount] = useLocalStorage<number>(
-    "ynab:budget:monthCount",
-    3,
-    (v): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 12
-  );
   const [collapsed, setCollapsed] = useLocalStorage<Record<number, boolean>>(
     "ynab:budget:collapsed",
     () => {
@@ -180,15 +167,6 @@ export function BudgetApp({
   );
   const setAccountFilter = setStoredAccountFilter;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
-  const [reportsResetKey, setReportsResetKey] = useState(0);
-  const [focusTransaction, setFocusTransaction] = useState<{ id: number; nonce: number } | null>(null);
-  const [registerFilter, setRegisterFilter] = useState<{
-    payee?: string;
-    categoryId?: number | null;
-    text?: string;
-    query?: Query;
-    nonce: number;
-  } | null>(null);
   // Register selection lives here (not in TransactionsView) so it survives
   // view switches — the register unmounts when we leave the view.
   const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
@@ -215,34 +193,29 @@ export function BudgetApp({
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [, startTransition] = useTransition();
 
-  const updateUrl = useBudgetUrlSync({ setView, setAccountFilter, setMonth });
+  const {
+    month,
+    monthCount,
+    updateUrl,
+    visibleMonths,
+    canShiftRight,
+    minYear,
+    maxYear,
+    shiftMonth,
+    handleSetMonth,
+    handleSetMonthCount,
+  } = useBudgetMonthNav({
+    data,
+    view,
+    setView,
+    accountFilter,
+    setAccountFilter,
+    initialMonth,
+  });
 
   const isBudgetView = view === "budget";
 
   const budget = useMemo(() => computeBudget(data, month), [data, month]);
-
-  const today = todayISO().slice(0, 7);
-  const { year: ty, month0: tm0 } = parseMonthKey(today);
-  const todayMonthTotal = ty * 12 + tm0;
-  const maxMonthTotal = todayMonthTotal + 1;
-  const maxAllowedMonth = monthKey(Math.floor(maxMonthTotal / 12), ((maxMonthTotal % 12) + 12) % 12);
-
-  const visibleMonths = useMemo(() => {
-    if (!isBudgetView) return [month];
-    const { year: y, month0 } = parseMonthKey(month);
-    const anchorTotal = y * 12 + month0;
-    const offset = Math.floor((monthCount - 1) / 2);
-    const start = anchorTotal - offset;
-    const keys: string[] = [];
-    for (let i = 0; i < monthCount; i++) {
-      const t = start + i;
-      if (t > maxMonthTotal) break;
-      const yy = Math.floor(t / 12);
-      const mm = ((t % 12) + 12) % 12;
-      keys.push(monthKey(yy, mm));
-    }
-    return keys.length > 0 ? keys : [month];
-  }, [month, monthCount, isBudgetView, maxMonthTotal]);
 
   const budgets = useMemo(
     () => (isBudgetView ? visibleMonths.map((m) => computeBudget(data, m)) : [budget]),
@@ -316,16 +289,12 @@ export function BudgetApp({
     [data, month]
   );
 
-  const assign = useCallback(
-    async (categoryId: number, amount: number, m?: string) => {
-      try {
-        await api.assign(categoryId, amount, m ?? month);
-      } catch {
-        // Handled via notifications toast and rollback in BudgetAppShell
-      }
-    },
-    [api, month]
-  );
+  const { assign, cycleStatus, setFlag, postRecurringOneClick } = useBudgetMutations({
+    api,
+    data,
+    month,
+    accountFilter,
+  });
 
   const selectedCategory = useMemo(
     () =>
@@ -358,24 +327,29 @@ export function BudgetApp({
     []
   );
 
-  const navigateView = useCallback(
-    (v: View) => {
-      startTransition(() => {
-        setView(v);
-        if (v === "reports") {
-          setReportsResetKey((k) => k + 1);
-        }
-        setShowSettingsOverlay(false);
-        if (v === "transactions") {
-          setAccountFilter(null);
-          updateUrl(v, null, month);
-        } else {
-          updateUrl(v, accountFilter, month);
-        }
-      });
-    },
-    [updateUrl, month, accountFilter]
-  );
+  const {
+    reportsResetKey,
+    setReportsResetKey,
+    focusTransaction,
+    registerFilter,
+    navigateView,
+    handleSelectAccount,
+    handleBadgeClick,
+    handleSelectTransactionFromReport,
+    handleGoToTransfer,
+    handleClearRegisterFilter,
+    handleGlobalSearchJump,
+    handleViewRuleMatches,
+  } = useBudgetViewRouting({
+    data,
+    month,
+    updateUrl,
+    setView,
+    accountFilter,
+    setAccountFilter,
+    setShowSettingsOverlay,
+    setSearchOpen,
+  });
 
   const { snapshots, snapshotSuggestion, snapshotsLoading, snapshotsError, refreshSnapshots } =
     useSnapshots(api);
@@ -424,129 +398,6 @@ export function BudgetApp({
     [navVisible, setNavVisible, view, updateUrl, month]
   );
 
-  const handleSelectAccount = useCallback(
-    (id: number) => {
-      startTransition(() => {
-        const next = accountFilter === id ? null : id;
-        setAccountFilter(next);
-        setShowSettingsOverlay(false);
-        updateUrl("transactions", next, month);
-        setView("transactions");
-      });
-    },
-    [updateUrl, month, accountFilter]
-  );
-
-  // Sidebar badge click: open the account's register pre-filtered to the
-  // badge kind (unreviewed rows for "new", marker rows for "duplicates").
-  // Unlike row clicks this never toggles the account off.
-  const handleBadgeClick = useCallback(
-    (accountId: number, kind: "new" | "duplicates") => {
-      startTransition(() => {
-        setAccountFilter(accountId);
-        setView("transactions");
-        setShowSettingsOverlay(false);
-        setRegisterFilter({
-          query: {
-            filters: [{ kind: "is", value: kind === "duplicates" ? "duplicate" : "new" }],
-            text: "",
-          },
-          nonce: Date.now(),
-        });
-        updateUrl("transactions", accountId, month);
-      });
-    },
-    [updateUrl, month]
-  );
-
-  const handleSelectTransactionFromReport = useCallback(
-    (t: Transaction) => {
-      const parentTxn = t.parentId != null ? data.transactions.find((x) => x.id === t.parentId) : null;
-      const targetAccountId = parentTxn ? parentTxn.accountId : t.accountId;
-      const targetTxnId = t.parentId ?? t.id;
-
-      startTransition(() => {
-        setAccountFilter(targetAccountId);
-        setView("transactions");
-        setFocusTransaction({ id: targetTxnId, nonce: Date.now() });
-        setShowSettingsOverlay(false);
-        updateUrl("transactions", targetAccountId, month);
-      });
-    },
-    [data.transactions, updateUrl, month]
-  );
-
-  const handleGoToTransfer = useCallback(
-    (targetAccountId: number, targetTxnId: number) => {
-      startTransition(() => {
-        setAccountFilter(targetAccountId);
-        setView("transactions");
-        setFocusTransaction({ id: targetTxnId, nonce: Date.now() });
-        setShowSettingsOverlay(false);
-        updateUrl("transactions", targetAccountId, month);
-      });
-    },
-    [updateUrl, month]
-  );
-
-  // Dropping the register filter entirely (rather than just hiding it) so a
-  // cleared filter can't resurrect when the register remounts after a view
-  // switch. Stable identity: TransactionsView effects depend on it.
-  const handleClearRegisterFilter = useCallback(() => {
-    setRegisterFilter(null);
-  }, []);
-
-  // Global search jumps always land in the register: a transaction focuses
-  // its row, while a payee/category/text/query selection filters the register.
-  const handleGlobalSearchJump = useCallback(
-    (jump: GlobalSearchJump) => {
-      startTransition(() => {
-        setShowSettingsOverlay(false);
-        setSearchOpen(false);
-        if (jump.kind === "transaction") {
-          setAccountFilter(jump.accountId);
-          setView("transactions");
-          setFocusTransaction({ id: jump.transactionId, nonce: Date.now() });
-          updateUrl("transactions", jump.accountId, month);
-        } else if (jump.kind === "payee") {
-          setView("transactions");
-          setRegisterFilter({ payee: jump.payee, categoryId: null, nonce: Date.now() });
-          updateUrl("transactions", accountFilter, month);
-        } else if (jump.kind === "category") {
-          setView("transactions");
-          setRegisterFilter({ categoryId: jump.categoryId, nonce: Date.now() });
-          updateUrl("transactions", accountFilter, month);
-        } else if (jump.kind === "query") {
-          setView("transactions");
-          setRegisterFilter({ query: jump.query, nonce: Date.now() });
-          updateUrl("transactions", accountFilter, month);
-        } else {
-          setView("transactions");
-          setRegisterFilter({ text: jump.text, nonce: Date.now() });
-          updateUrl("transactions", accountFilter, month);
-        }
-      });
-    },
-    [updateUrl, month, accountFilter]
-  );
-
-  // A rename rule's Source link jumps to the register filtered to the rows
-  // the rule likely matches (exact source, or longest literal fragment of
-  // a pattern). Mirrors the global-search payee jump.
-  const handleViewRuleMatches = useCallback(
-    (rule: RenameRule) => {
-      const payee = renameRulePayeeFilter(rule.sourcePattern);
-      if (!payee) return;
-      startTransition(() => {
-        setShowSettingsOverlay(false);
-        setView("transactions");
-        setRegisterFilter({ payee, categoryId: null, nonce: Date.now() });
-        updateUrl("transactions", accountFilter, month);
-      });
-    },
-    [updateUrl, month, accountFilter]
-  );
-
   // ⌘K / Ctrl+K and "/" open the search modal from anywhere except while
   // typing in a field. Escape is handled by the modal itself.
   useEffect(() => {
@@ -573,114 +424,15 @@ export function BudgetApp({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const cycleStatus = useCallback(
-    async (id: number) => {
-      const t = data.transactions.find((x) => x.id === id);
-      if (!t) return;
-      const isIncoming = accountFilter != null && t.transferAccountId === accountFilter;
-      const currentStatus = isIncoming ? (t.transferStatus ?? t.status) : t.status;
-      if (currentStatus === "r") return;
-      const next: "u" | "c" = currentStatus === "c" ? "u" : "c";
-      if (isIncoming) {
-        await api.updateTransaction(id, { transferStatus: next });
-      } else {
-        await api.updateTransaction(id, { status: next });
-      }
-    },
-    [api, data.transactions, accountFilter]
-  );
-
-  const setFlag = useCallback(
-    async (id: number, flagColor: TransactionFlagColor | null) => {
-      await api.updateTransaction(id, { flagColor });
-    },
-    [api]
-  );
-
   const toggleGroup = useCallback((id: number) => {
     setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   }, []);
-
-  const canShiftRight = useMemo(() => {
-    if (monthCount === 1) {
-      return month < maxAllowedMonth;
-    }
-    const rightmost = visibleMonths[visibleMonths.length - 1];
-    if (rightmost && rightmost >= maxAllowedMonth) {
-      return false;
-    }
-    const { year: y, month0 } = parseMonthKey(month);
-    const candidateTotal = y * 12 + month0 + 1;
-    const offset = Math.floor((monthCount - 1) / 2);
-    const candidateStart = candidateTotal - offset;
-    if (candidateStart > todayMonthTotal) {
-      return false;
-    }
-    return true;
-  }, [month, monthCount, visibleMonths, maxAllowedMonth, todayMonthTotal]);
 
   const collapseAll = useCallback(() => {
     setCollapsed(Object.fromEntries(data.groups.map((g) => [g.id, true])));
   }, [data.groups]);
 
   const expandAll = useCallback(() => setCollapsed({}), []);
-
-  const shiftMonth = useCallback(
-    (delta: number) => {
-      if (delta > 0 && !canShiftRight) return;
-      const { year: y, month0 } = parseMonthKey(month);
-      const total = y * 12 + month0 + delta;
-      const nextMonth = monthKey(Math.floor(total / 12), ((total % 12) + 12) % 12);
-      setMonth(nextMonth);
-      if (view === "budget") {
-        updateUrl(view, accountFilter, nextMonth);
-      }
-    },
-    [month, view, accountFilter, updateUrl, canShiftRight]
-  );
-
-  const handleSetMonth = useCallback(
-    (m: string) => {
-      const clamped = m > maxAllowedMonth ? maxAllowedMonth : m;
-      setMonth(clamped);
-      if (view === "budget") {
-        updateUrl(view, accountFilter, clamped);
-      }
-    },
-    [view, accountFilter, updateUrl, maxAllowedMonth]
-  );
-
-  const handleSetMonthCount = useCallback(
-    (count: number) => {
-      setMonthCount(count);
-      if (count > 1 && month > today) {
-        setMonth(today);
-        if (view === "budget") {
-          updateUrl(view, accountFilter, today);
-        }
-      }
-    },
-    [setMonthCount, month, today, view, accountFilter, updateUrl]
-  );
-
-  const { minYear, maxYear } = useMemo(() => {
-    const thisYear = Number(todayISO().slice(0, 4));
-    const futureCap = thisYear + 5;
-    let minY = thisYear;
-    let maxY = futureCap;
-    const consider = (dateStr: string | undefined | null) => {
-      if (!dateStr || dateStr.length < 4) return;
-      const y = parseInt(dateStr.slice(0, 4), 10);
-      if (Number.isFinite(y)) {
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    };
-    for (let i = 0; i < data.transactions.length; i++) consider(data.transactions[i]!.date);
-    for (let i = 0; i < data.assignments.length; i++) consider(data.assignments[i]!.month);
-    for (let i = 0; i < data.recurring.length; i++) consider(data.recurring[i]!.nextDate);
-    return { minYear: minY, maxYear: maxY };
-  }, [data.transactions, data.assignments, data.recurring]);
 
   const editingCategory =
     modal.kind === "editCategory" ? data.categories.find((c) => c.id === modal.categoryId) : undefined;
@@ -721,21 +473,6 @@ export function BudgetApp({
   const insights = useMemo(
     () => computeMonthlyInsights(data, month, budget, { asOfDate: todayDay }),
     [data, month, budget, todayDay]
-  );
-
-  // Single-click entry: resume a paused rule on the fly so posting never
-  // takes two clicks. This performs exactly the resume-then-post the user
-  // would otherwise do manually, with no new server capabilities.
-  const postRecurringOneClick = useCallback(
-    async (id: number, date?: string) => {
-      const today = todayISO();
-      const r = data.recurring.find((x) => x.id === id);
-      if (r && !r.active) {
-        await api.updateRecurring(id, { active: true });
-      }
-      await api.postRecurring(id, date ?? (r && r.nextDate > today ? today : undefined));
-    },
-    [api, data.recurring]
   );
 
   const activeAccount = useMemo(

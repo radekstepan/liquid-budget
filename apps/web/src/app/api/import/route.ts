@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { getDefaultDb, importYnab4FromArchive } from "@ynab/server";
-import { optionalErrorMessage } from "../errors";
+import { apiErrorResponse, optionalErrorMessage } from "../errors";
 import { mutationGuardResponse } from "../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +11,7 @@ export const MAX_IMPORT_UPLOAD_BYTES = 50 * 1024 * 1024;
 // Multipart overhead: Content-Length covers the whole form, not just the file.
 export const MAX_IMPORT_CONTENT_LENGTH = 55 * 1024 * 1024;
 
-// TODO(P2) [logging]: replace console.error below with logger abstraction + apiErrorResponse.
+const log = createScopedLogger("import");
 
 export async function POST(req: NextRequest) {
   const blocked = mutationGuardResponse(req);
@@ -39,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, summary });
   } catch (e) {
-    console.error("[import] Error:", e);
-    return NextResponse.json({ error: optionalErrorMessage(e) || "Failed to import" }, { status: 500 });
+    log.error("Error:", toLogDetails(e));
+    return apiErrorResponse(e);
   }
 }

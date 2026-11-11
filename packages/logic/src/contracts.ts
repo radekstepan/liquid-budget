@@ -4,8 +4,10 @@ import type { Assignment, BudgetData } from "./types.js";
 import type { ReconcileState } from "./reconcile.js";
 import type { DuplicateAnalysisResult } from "./duplicates.js";
 
-// TODO(P1) [api-consistency]: collapse BudgetAppApi inline txn shapes onto these canonical
-// TransactionSavePayload/contract types so callers can't drift.
+// Canonical transaction/recurring input shapes live in action-payloads.ts
+// (TransactionSavePayload, RecurringSavePayload). The zod schemas below are
+// the wire validation of those shapes — BudgetAppApi imports the TS types
+// directly so callers cannot drift.
 
 export const ISODateSchema = z.string().refine(isValidISODate, {
   message: "Invalid calendar date (expected YYYY-MM-DD)",
@@ -262,6 +264,27 @@ export const TransactionMergeSchema = z
   })
   .strict();
 
+export const TransactionMergeResponseSchema = z.looseObject({
+  ok: z.literal(true),
+  merged: z.looseObject({ id: z.number().int().positive() }),
+  deletedId: z.number().int().positive(),
+});
+
+/** Survivor ids for a completed merge: prefer the server response (below). */
+export type TransactionMergeResponse = {
+  /** Id of the surviving row (`merged.id` on the wire). */
+  mergedId: number;
+  deletedId: number;
+};
+
+export function parseTransactionMergeResponse(data: unknown): TransactionMergeResponse {
+  const result = TransactionMergeResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid merge response: ${formatZodError(result.error)}`);
+  }
+  return { mergedId: result.data.merged.id, deletedId: result.data.deletedId };
+}
+
 export const AccountCreateSchema = z
   .object({
     name: z.string().min(1).max(255),
@@ -428,6 +451,7 @@ export type RenameSuggestionInput = z.output<typeof RenameSuggestionSchema>;
  */
 export const RenameSuggestAcceptSchema = z
   .object({
+    action: z.literal("accept").optional(),
     suggestions: z.array(RenameSuggestionSchema).min(1).max(200),
     applyToExisting: z.boolean().optional().default(false),
   })
@@ -456,6 +480,7 @@ export const PayeeCreateSchema = z
 
 export const PayeeMergeSchema = z
   .object({
+    action: z.literal("merge").optional(),
     targetId: z.number().int().positive(),
     sourceIds: z.array(z.number().int().positive()).min(1).max(50),
   })
@@ -612,7 +637,7 @@ export const RecurringPostActionSchema = z
 export const RecurringBulkPostActionSchema = z
   .object({
     action: z.literal("bulk-post"),
-    ids: z.array(z.number().int().positive()).min(1),
+    ids: z.array(z.number().int().positive()).min(1).max(1000),
     date: ISODateSchema.optional(),
   })
   .strict();
@@ -627,7 +652,7 @@ export const RecurringAutoPostActionSchema = z
 export const RecurringBulkUpdateSchema = z
   .object({
     action: z.literal("bulk-update"),
-    ids: z.array(z.number().int().positive()).min(1),
+    ids: z.array(z.number().int().positive()).min(1).max(1000),
     patch: z
       .object({
         flagColor: TransactionFlagSchema.nullable().optional(),
@@ -642,7 +667,7 @@ export const RecurringBulkUpdateSchema = z
 export const RecurringBulkDeleteSchema = z
   .object({
     action: z.literal("delete").optional(),
-    ids: z.array(z.number().int().positive()).min(1),
+    ids: z.array(z.number().int().positive()).min(1).max(1000),
   })
   .strict();
 
@@ -948,6 +973,200 @@ export const TransactionResponseSchema = z.looseObject({
   needsReview: z.boolean().optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Cursor-paginated transaction reads (GET /api/transactions).
+//
+// Keyset on (date DESC, id DESC): `before` is the opaque cursor of the
+// last row of the previous page. Same row serialization as the full
+// getBudgetData() dump, so paged rows validate against
+// TransactionResponseSchema.
+// ---------------------------------------------------------------------------
+
+/** ?accountId=<id>&before=<cursor>&limit=<n> — all optional. */
+export const TransactionsPageQuerySchema = z.object({
+  accountId: PositiveIntQuerySchema.optional(),
+  before: z.string().min(1).max(1000).optional(),
+  limit: z
+    .string()
+    .regex(/^\d+$/, "Expected an integer limit")
+    .transform(Number)
+    .refine((n) => n >= 1 && n <= 500, { message: "limit must be between 1 and 500" })
+    .optional(),
+});
+
+export type TransactionsPageQuery = z.output<typeof TransactionsPageQuerySchema>;
+
+export const TransactionsPageResponseSchema = z.looseObject({
+  transactions: z.array(TransactionResponseSchema),
+  /** Opaque cursor for the next page; null when this page is the last. */
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+export type TransactionsPageResponse = z.output<typeof TransactionsPageResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `GET /api/transactions` JSON)
+ * against the page contract. Throws a descriptive Error on mismatch.
+ * Emits no console output so it is safe in tested fetch paths.
+ */
+export function parseTransactionsPageResponse(data: unknown): TransactionsPageResponse {
+  const result = TransactionsPageResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid transactions page response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
+// ---------------------------------------------------------------------------
+// Server-side global search reads (GET /api/search).
+//
+// Ranked cursor search over SQLite (see @ynab/server queries/search.ts) for
+// budgets at or above SERVER_SEARCH_TXN_THRESHOLD: the LIKE patterns and the
+// rank-then-date ordering mirror searchBudget() in search.ts row-for-row, so
+// the server path and the client-index fallback return the same hits. The
+// cursor is keyed on (rank, date DESC, id DESC).
+// ---------------------------------------------------------------------------
+
+/** Query-string booleans arrive as "true"/"false"; missing means the default. */
+const BoolFromQueryWithDefault = (defaultValue: boolean) =>
+  z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .transform((v) => (v === undefined ? defaultValue : v === true || v === "true"));
+
+/** ?query=&payee=&categoryId=&accountId=&scopeAccountId=&searchAll=&limit=&before= — all optional. */
+export const SearchQuerySchema = z.object({
+  query: z.string().max(200).optional().default(""),
+  payee: z.string().max(255).optional(),
+  categoryId: PositiveIntQuerySchema.optional(),
+  accountId: PositiveIntQuerySchema.optional(),
+  scopeAccountId: PositiveIntQuerySchema.optional(),
+  searchAll: BoolFromQueryWithDefault(true),
+  limit: z
+    .string()
+    .regex(/^\d+$/, "Expected an integer limit")
+    .transform(Number)
+    .refine((n) => n >= 1 && n <= 100, { message: "limit must be between 1 and 100" })
+    .optional(),
+  before: z.string().min(1).max(1000).optional(),
+});
+
+export type SearchQuery = z.output<typeof SearchQuerySchema>;
+
+export const SearchTransactionHitSchema = z.looseObject({
+  id: z.number().int(),
+  accountId: z.number().int(),
+  accountName: z.string(),
+  payee: z.string(),
+  memo: z.string(),
+  categoryId: z.number().int().nullable(),
+  categoryName: z.string(),
+  date: z.string(),
+  amount: z.number().int(),
+  rank: z.number().int().min(0).max(2),
+});
+
+export const SearchPayeeHitSchema = z.looseObject({
+  name: z.string(),
+  txnCount: z.number().int().nonnegative(),
+});
+
+export const SearchCategoryHitSchema = z.looseObject({
+  id: z.number().int(),
+  name: z.string(),
+  groupName: z.string(),
+  txnCount: z.number().int().nonnegative(),
+});
+
+export const SearchPayeeOptionSchema = z.looseObject({
+  value: z.string(),
+  label: z.string(),
+});
+
+export const SearchResponseSchema = z.looseObject({
+  payees: z.array(SearchPayeeHitSchema).max(8),
+  categories: z.array(SearchCategoryHitSchema).max(8),
+  transactions: z.array(SearchTransactionHitSchema),
+  /** Distinct-payee picker list (capped server-side); the client path derives this from the index. */
+  payeeOptions: z.array(SearchPayeeOptionSchema),
+  /** Opaque cursor for the next page; null when this page is the last. */
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+export type SearchResponse = z.output<typeof SearchResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `GET /api/search` JSON) against the
+ * search contract. Throws a descriptive Error on mismatch. Emits no
+ * console output so it is safe in tested fetch paths.
+ */
+export function parseSearchResponse(data: unknown): SearchResponse {
+  const result = SearchResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid search response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
+// ---------------------------------------------------------------------------
+// SQL-aggregated report reads (GET /api/reports).
+//
+// O(months x categories) group-bys from SQLite (see @ynab/server
+// queries/reports.ts) so report screens need not hydrate the full
+// transaction list. The pure compute* fns in reports.ts stay as fallback.
+// ---------------------------------------------------------------------------
+
+/** ?startMonth=YYYY-MM&endMonth=YYYY-MM — both optional, inclusive. */
+export const ReportAggregatesQuerySchema = z
+  .object({
+    startMonth: ISOMonthSchema.optional(),
+    endMonth: ISOMonthSchema.optional(),
+  })
+  .strict();
+
+export type ReportAggregatesQuery = z.output<typeof ReportAggregatesQuerySchema>;
+
+export const ReportOutflowRowSchema = z.looseObject({
+  month: ISOMonthSchema,
+  categoryId: z.number().int().nullable(),
+  total: z.number().int(),
+});
+
+export const ReportIncomeRowSchema = z.looseObject({
+  month: ISOMonthSchema,
+  incomeMonth: ISOMonthSchema,
+  total: z.number().int(),
+});
+
+export const ReportAccountDeltaRowSchema = z.looseObject({
+  month: ISOMonthSchema,
+  accountId: z.number().int().positive(),
+  total: z.number().int(),
+});
+
+export const ReportAggregatesResponseSchema = z.looseObject({
+  outflow: z.array(ReportOutflowRowSchema),
+  income: z.array(ReportIncomeRowSchema),
+  accountDeltas: z.array(ReportAccountDeltaRowSchema),
+});
+
+export type ReportAggregatesResponse = z.output<typeof ReportAggregatesResponseSchema>;
+
+/**
+ * Validate an unknown payload (e.g. `GET /api/reports` JSON) against the
+ * aggregates contract. Throws a descriptive Error on mismatch. Emits no
+ * console output so it is safe in tested fetch paths.
+ */
+export function parseReportAggregatesResponse(data: unknown): ReportAggregatesResponse {
+  const result = ReportAggregatesResponseSchema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Invalid report aggregates response: ${formatZodError(result.error)}`);
+  }
+  return result.data;
+}
+
 export const RecurringSubTransactionResponseSchema = z.looseObject({
   ...LooseIdEntity,
   recurringId: z.number().int(),
@@ -1115,6 +1334,34 @@ export const SnapshotResponseSchema = z.looseObject({
 });
 
 export type SnapshotResponse = z.output<typeof SnapshotResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Snapshot mutation inputs (POST /api/snapshots).
+//
+// Canonical dispatch is body {action}: `{action:"restore",id}` restores,
+// anything without the restore discriminator creates. `?action=restore` is a
+// deprecated alias the route still honors for old clients.
+// ---------------------------------------------------------------------------
+
+/** POST /api/snapshots create body — empty/omitted name falls back to suggestion. */
+export const SnapshotCreateSchema = z
+  .object({
+    action: z.undefined().optional(),
+    name: z.string().max(255).optional(),
+  })
+  .strict();
+
+export type SnapshotCreateInput = z.output<typeof SnapshotCreateSchema>;
+
+/** POST /api/snapshots restore body — canonical discriminator. */
+export const SnapshotRestoreSchema = z
+  .object({
+    action: z.literal("restore"),
+    id: z.string().min(1).max(255),
+  })
+  .strict();
+
+export type SnapshotRestoreInput = z.output<typeof SnapshotRestoreSchema>;
 
 export const SnapshotsResponseSchema = z.looseObject({
   snapshots: z.array(SnapshotResponseSchema),

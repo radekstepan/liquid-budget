@@ -55,7 +55,7 @@ TypeScript ESM monorepo (Yarn 4 workspaces + Turborepo) implementing a YNAB4-alt
 
 | Package | Entry | Deps |
 |---|---|---|
-| `apps/web` (`@ynab/web`, private) | Next.js app (`next dev/build/start`), `drizzle.config.json`, `next.config.ts`, `postcss.config.mjs` | `workspace:*` on logic/server/ui; `adm-zip`, `next`, `react`, `react-dom`, `zod`, `@fortawesome/fontawesome-free` |
+| `apps/web` (`@ynab/web`, private) | Next.js app (`next dev/build/start`), `next.config.ts`, `postcss.config.mjs` | `workspace:*` on logic/server/ui; `adm-zip`, `next`, `react`, `react-dom`, `zod`, `@fortawesome/fontawesome-free` |
 | `packages/logic` (`@ynab/logic`) | Pure logic, `dist/index.js` | `zod` (schema contracts shared with server/web) |
 | `packages/server` (`@ynab/server`) | SQLite persistence, ships `dist/migrations` (copied in build) | `@ynab/logic`, `adm-zip`, `better-sqlite3`, `drizzle-orm` |
 | `packages/ui` (`@ynab/ui`) | React components, `dist/index.js` | `@ynab/logic`, `@ynab/theme`; peer `react/react-dom 19.2.6` |
@@ -68,4 +68,4 @@ TypeScript ESM monorepo (Yarn 4 workspaces + Turborepo) implementing a YNAB4-alt
 - `tsconfig.base.json` — `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `declaration`+maps+sourceMap.
 - `.yarnrc.yml` — `nodeLinker: node-modules`, `enableGlobalCache: true`.
 - `.nvmrc` — `24.15.0`.
-- `apps/web/next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `playwright.config.ts`, `drizzle.config.json`.
+- `apps/web/next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `playwright.config.ts`.

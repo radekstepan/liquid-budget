@@ -1,6 +1,32 @@
 import type { BudgetData } from "./types.js";
-// TODO(P1) [search-perf]: buildSearchIndex is O(n) client index on every load — add server-side
-// cursor search (SELECT LIMIT + FTS) for 100k-txn budgets; keep client index as fallback.
+
+/**
+ * Server-side search (P1 search-perf): `buildSearchIndex` below is an O(n)
+ * client index rebuilt on every budget load — fine for small budgets, but a
+ * 100k-transaction budget pays the full scan plus per-keystroke JS filtering.
+ * `GET /api/search` pushes matching into SQLite (`SELECT ... WHERE ...
+ * LIMIT`, case-insensitive `LIKE ... ESCAPE '\'` mirroring `rankMatch`
+ * substring semantics, ranked in the same rank-then-date order) so large
+ * budgets fetch O(limit) rows instead of hydrating everything. The client
+ * index stays as the fallback for small budgets and when the fetch fails.
+ *
+ * FTS5 was considered and rejected: its unicode61 tokenizer only matches
+ * token prefixes, so mid-token substrings (`hole` in `Whole`) that the client
+ * `includes()` matches would silently drop. LIKE-in-SQLite keeps exact
+ * parity with a bounded native scan; equality facets (account/category/payee)
+ * still hit the existing indexes.
+ */
+
+/** Budgets at or above this many transactions use GET /api/search. */
+export const SERVER_SEARCH_TXN_THRESHOLD = 5000;
+
+/** Cap on the distinct-payee picker list returned by the server path. */
+export const MAX_SERVER_PAYEE_OPTIONS = 500;
+
+/** True when the budget is large enough that the client index costs more than a round-trip. */
+export function shouldUseServerSearch(transactionCount: number): boolean {
+  return transactionCount >= SERVER_SEARCH_TXN_THRESHOLD;
+}
 
 export type SearchScope = { scopeAccountId: number | null; searchAll: boolean };
 

@@ -1,3 +1,5 @@
+import { arrayField, asRecord, recordField } from "./guards.js";
+
 /**
  * Detect whether YNAB4 amounts are stored as milliunits (integer × 1000) or
  * decimal dollars (float). Stock YNAB4 backups encode amounts as milliunits
@@ -14,7 +16,7 @@
  *    - If virtually all (>= 95%) non-zero amounts are >= 1000 (e.g. 1000, 3990, 12500, 45000, 500000),
  *      it is milliunits.
  */
-export function detectMilliunitScale(ynabData: any): boolean {
+export function detectMilliunitScale(ynabData: unknown): boolean {
   const amounts: number[] = [];
 
   const collect = (v: unknown) => {
@@ -23,36 +25,42 @@ export function detectMilliunitScale(ynabData: any): boolean {
     if (Number.isFinite(n) && n !== 0) amounts.push(n);
   };
 
-  for (const t of ynabData.transactions || []) {
-    if (t.isTombstone) continue;
-    collect(t.amount);
-    for (const st of t.subTransactions || []) {
-      if (st.isTombstone) continue;
-      collect(st.amount);
+  /** Tombstoned rows and non-row junk contribute no amounts. */
+  const isLive = (row: unknown): boolean => {
+    const r = asRecord(row);
+    return r != null && !r.isTombstone;
+  };
+
+  for (const t of arrayField(ynabData, "transactions")) {
+    if (!isLive(t)) continue;
+    collect(recordField(t, "amount"));
+    for (const st of arrayField(t, "subTransactions")) {
+      if (!isLive(st)) continue;
+      collect(recordField(st, "amount"));
     }
   }
-  for (const mb of ynabData.monthlyBudgets || []) {
-    if (mb.isTombstone) continue;
-    for (const msb of mb.monthlySubCategoryBudgets || []) {
-      if (msb.isTombstone) continue;
-      collect(msb.budgeted);
+  for (const mb of arrayField(ynabData, "monthlyBudgets")) {
+    if (!isLive(mb)) continue;
+    for (const msb of arrayField(mb, "monthlySubCategoryBudgets")) {
+      if (!isLive(msb)) continue;
+      collect(recordField(msb, "budgeted"));
     }
   }
-  for (const st of ynabData.scheduledTransactions || []) {
-    if (st.isTombstone) continue;
-    collect(st.amount);
-    for (const sub of st.subTransactions || []) {
-      if (sub.isTombstone) continue;
-      collect(sub.amount);
+  for (const st of arrayField(ynabData, "scheduledTransactions")) {
+    if (!isLive(st)) continue;
+    collect(recordField(st, "amount"));
+    for (const sub of arrayField(st, "subTransactions")) {
+      if (!isLive(sub)) continue;
+      collect(recordField(sub, "amount"));
     }
   }
-  for (const r of ynabData.reconciliations || []) {
-    if (r.isTombstone) continue;
-    collect(r.statementBalance);
+  for (const r of arrayField(ynabData, "reconciliations")) {
+    if (!isLive(r)) continue;
+    collect(recordField(r, "statementBalance"));
   }
-  for (const acc of ynabData.accounts || []) {
-    if (acc.isTombstone) continue;
-    collect(acc.lastReconciledBalance);
+  for (const acc of arrayField(ynabData, "accounts")) {
+    if (!isLive(acc)) continue;
+    collect(recordField(acc, "lastReconciledBalance"));
   }
 
   if (amounts.length === 0) return false;

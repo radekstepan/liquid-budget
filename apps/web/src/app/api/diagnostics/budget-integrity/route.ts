@@ -1,10 +1,7 @@
-import { getDefaultDb, verifyBudgetIntegrity } from "@ynab/server";
+import { checkStorageIntegrity, getDefaultDb, verifyBudgetIntegrity } from "@ynab/server";
 import { optionalErrorMessage } from "../../errors";
 
 export const dynamic = "force-dynamic";
-
-// TODO(P2) [operational]: add PRAGMA integrity_check to diagnostics endpoints + scheduled VACUUM/
-// checkpoint note; keep yarn check:artifacts in CI gate so budget.db/y4backup/CSV never get tracked.
 
 export async function GET(request?: Request) {
   try {
@@ -15,9 +12,11 @@ export async function GET(request?: Request) {
       targetMonth = url.searchParams.get("month") ?? undefined;
     }
     const report = await verifyBudgetIntegrity(db, targetMonth);
+    const storage = await checkStorageIntegrity(db);
     return Response.json({
-      ok: report.difference === 0,
+      ok: report.difference === 0 && storage.ok,
       ...report,
+      storage,
     });
   } catch (err) {
     return Response.json(

@@ -26,6 +26,7 @@ export function createBudgetApi(deps: BudgetApiDeps): Omit<BudgetAppApi, "reload
     ...createSnapshotsApi(deps),
   };
 }
-export type { BudgetApiDeps, MutationMessages, MutationOptions, RunMutation, ToastFn } from "./types";
+export type { BudgetApiDeps, MutationMessages, MutationOptions, OptimisticMutation, OptimisticMutationOptions, RunMutation, ToastFn } from "./types";
 export { jsonReq, type ApiRequestError } from "./client";
+export { createOptimisticMutation, reportBudgetReloadFailure } from "./optimistic-mutation";
 export { useToasts } from "./useToasts";

@@ -1279,3 +1279,50 @@ describe("Quick Budget menu container-aware placement", () => {
     expect(menu).not.toHaveClass("is-right");
   });
 });
+
+describe("BudgetView CC-waterfall branches (test-bar)", () => {
+  it("highlights a group drop target on drag over and clears it on drag leave", () => {
+    renderView({ onReorderGroup: vi.fn() });
+    const rows = screen.getAllByRole("row").filter((r) => r.classList.contains("y-master"));
+    const bills = rows.find((r) => within(r).queryByText("Bills"))!;
+    const dt = { effectAllowed: "", dropEffect: "" };
+    fireEvent.dragOver(bills, { dataTransfer: dt });
+    expect(bills.classList.contains("is-drop-target")).toBe(true);
+    fireEvent.dragLeave(bills);
+    expect(bills.classList.contains("is-drop-target")).toBe(false);
+  });
+
+  it("opens group rename on Enter/Space keydown on the group name", () => {
+    const onEditGroup = vi.fn();
+    renderView({ onEditGroup });
+    const nameBtn = screen.getByRole("button", { name: /^everyday$/i });
+    fireEvent.keyDown(nameBtn, { key: "Enter" });
+    expect(onEditGroup).toHaveBeenCalledWith(1);
+    fireEvent.keyDown(nameBtn, { key: " " });
+    expect(onEditGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not bubble category selection when the inline amount input is clicked", () => {
+    const onSelectCategory = vi.fn();
+    renderView({ selectedCategoryId: null, onSelectCategory });
+    fireEvent.click(screen.getByRole("button", { name: "$100.00" }));
+    const input = document.querySelector("input.y-inline-amt")!;
+    fireEvent.click(input);
+    expect(onSelectCategory).not.toHaveBeenCalled();
+  });
+
+  it("clears the category drop-target highlight on drag leave without dropping", () => {
+    renderView({ onReorderCategory: vi.fn() });
+    const catRows = screen
+      .getAllByRole("row")
+      .filter((r) => r.getAttribute("data-cat-row") !== null);
+    const groceries = catRows.find((r) => within(r).queryByText("Groceries"))!;
+    const rent = catRows.find((r) => within(r).queryByText("Rent"))!;
+    const dt = { effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(groceries, { dataTransfer: dt });
+    fireEvent.dragOver(rent, { dataTransfer: dt });
+    expect(rent.classList.contains("is-drop-target")).toBe(true);
+    fireEvent.dragLeave(rent);
+    expect(rent.classList.contains("is-drop-target")).toBe(false);
+  });
+});

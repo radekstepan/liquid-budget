@@ -168,7 +168,7 @@ describe("buildRenameSuggestMessages", () => {
     expect(user).toContain('"WHOLE FOODS #24"');
   });
 
-  it("includes memos as disambiguation context when present", () => {
+  it("omits memos by default (payee-only wire payload)", () => {
     const messages = buildRenameSuggestMessages([
       {
         payee: "WONKY 123",
@@ -178,6 +178,29 @@ describe("buildRenameSuggestMessages", () => {
       },
       { payee: "PLAIN", count: 1, transactionIds: [3], memos: [] },
     ]);
+    // No memo context clause in the system prompt ...
+    expect(messages[0]!.content).not.toContain("memo shown after a payee");
+    // ... and none in the user payload, which stays payee-only.
+    const user = messages[1]!.content;
+    expect(user).not.toContain("downtown store");
+    expect(user).not.toContain("order #42");
+    expect(user).toMatch(/^1\. "WONKY 123" \(2 transactions\)$/m);
+    expect(user).toMatch(/^2\. "PLAIN"$/m);
+  });
+
+  it("includes memos as disambiguation context when explicitly enabled", () => {
+    const messages = buildRenameSuggestMessages(
+      [
+        {
+          payee: "WONKY 123",
+          count: 2,
+          transactionIds: [1, 2],
+          memos: ["downtown store", "order #42"],
+        },
+        { payee: "PLAIN", count: 1, transactionIds: [3], memos: [] },
+      ],
+      { includeMemos: true }
+    );
     expect(messages[0]!.content).toContain("memo");
     const user = messages[1]!.content;
     expect(user).toContain("downtown store");

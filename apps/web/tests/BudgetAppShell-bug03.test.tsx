@@ -140,8 +140,8 @@ describe("BudgetAppShell (BUG-03)", () => {
         });
       }
 
-      if (url.includes("/api/transactions?action=bulk-delete") && init?.method === "POST") {
-        return new Promise<Response>(() => {});
+      if (url.includes("/api/transactions") && init?.method === "POST") {
+        return new Promise<Response>(() => {}); // Keep in-flight to inspect optimistic state
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -355,7 +355,7 @@ describe("BudgetAppShell (BUG-03)", () => {
         });
       }
 
-      if (url.includes("/api/transactions?action=bulk-delete") && init?.method === "POST") {
+      if (url.includes("/api/transactions") && init?.method === "POST") {
         return new Promise<Response>(() => {});
       }
 

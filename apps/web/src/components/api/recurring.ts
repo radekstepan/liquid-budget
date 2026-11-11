@@ -3,7 +3,7 @@ import type { BudgetApiDeps } from "./types";
 import { jsonReq } from "./client";
 
 export function createRecurringApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addRecurring" | "updateRecurring" | "deleteRecurring" | "postRecurring" | "bulkPostRecurring" | "bulkUpdateRecurring" | "bulkDeleteRecurring"> {
-  const { dataRef, setData, reload, runMutation, withSync } = deps;
+  const { dataRef, setData, runMutation, withSync, optimisticMutation } = deps;
   return {
   addRecurring: async (v) => {
     return withSync(() =>
@@ -23,59 +23,56 @@ export function createRecurringApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "add
           subTransactions: prevRecurring.subTransactions?.map((st) => ({ ...st })),
         }
       : null;
-    setData((prev) => {
-      if (!prev) return prev;
-      const recurring = prev.recurring.map((r) => {
-        if (r.id !== id) return r;
-        const { subTransactions, amount, ...rest } = v;
-        return {
-          ...r,
-          ...rest,
-          amount: amount !== undefined ? amount.toFixed(2) : r.amount,
-          subTransactions:
-            subTransactions !== undefined
-              ? subTransactions.map((st, i) => ({
-                  id: r.subTransactions?.[i]?.id ?? -(i + 1),
-                  recurringId: id,
-                  categoryId: st.categoryId,
-                  transferAccountId: st.transferAccountId ?? null,
-                  amount: st.amount.toFixed(2),
-                  memo: st.memo ?? "",
-                  sort: i,
-                }))
-              : r.subTransactions,
-        };
-      });
-      return { ...prev, recurring, budgetIndex: undefined };
-    });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/recurring", {
-            method: "PATCH",
-            body: JSON.stringify({ id, ...v }),
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const recurring = prev.recurring.map((r) => {
+            if (r.id !== id) return r;
+            const { subTransactions, amount, ...rest } = v;
+            return {
+              ...r,
+              ...rest,
+              amount: amount !== undefined ? amount.toFixed(2) : r.amount,
+              subTransactions:
+                subTransactions !== undefined
+                  ? subTransactions.map((st, i) => ({
+                      id: r.subTransactions?.[i]?.id ?? -(i + 1),
+                      recurringId: id,
+                      categoryId: st.categoryId,
+                      transferAccountId: st.transferAccountId ?? null,
+                      amount: st.amount.toFixed(2),
+                      memo: st.memo ?? "",
+                      sort: i,
+                    }))
+                  : r.subTransactions,
+            };
           });
-        },
-        { success: "Recurring transaction updated.", failure: "Failed to update recurring transaction." },
-        {
-          onRollback: () => {
-            if (prevRecurringSnapshot) {
-              setData((current) => {
-                if (!current) return current;
-                return {
-                  ...current,
-                  recurring: current.recurring.map((r) =>
-                    r.id === id ? prevRecurringSnapshot : r
-                  ),
-                  budgetIndex: undefined,
-                };
-              });
-            }
-            reload().catch(() => {});
-          },
+          return { ...prev, recurring, budgetIndex: undefined };
+        });
+      },
+      request: async () => {
+        return await jsonReq("/api/recurring", {
+          method: "PATCH",
+          body: JSON.stringify({ id, ...v }),
+        });
+      },
+      messages: { success: "Recurring transaction updated.", failure: "Failed to update recurring transaction." },
+      rollback: () => {
+        if (prevRecurringSnapshot) {
+          setData((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              recurring: current.recurring.map((r) =>
+                r.id === id ? prevRecurringSnapshot : r
+              ),
+              budgetIndex: undefined,
+            };
+          });
         }
-      )
-    );
+      },
+    });
   },
   deleteRecurring: async (id) => {
     const prevRecurring = dataRef.current?.recurring.find((r) => r.id === id);
@@ -85,44 +82,41 @@ export function createRecurringApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "add
           subTransactions: prevRecurring.subTransactions?.map((st) => ({ ...st })),
         }
       : null;
-    setData((prev) => {
-      if (!prev) return prev;
-      const recurring = prev.recurring.filter((r) => r.id !== id);
-      return { ...prev, recurring, budgetIndex: undefined };
-    });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq(`/api/recurring?id=${id}`, { method: "DELETE" });
-        },
-        { success: "Recurring transaction deleted.", failure: "Failed to delete recurring transaction." },
-        {
-          onRollback: () => {
-            if (prevRecurringSnapshot) {
-              setData((current) => {
-                if (!current) return current;
-                if (current.recurring.some((r) => r.id === id)) return current;
-                return {
-                  ...current,
-                  recurring: [...current.recurring, prevRecurringSnapshot],
-                  budgetIndex: undefined,
-                };
-              });
-            }
-            reload().catch(() => {});
-          },
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const recurring = prev.recurring.filter((r) => r.id !== id);
+          return { ...prev, recurring, budgetIndex: undefined };
+        });
+      },
+      request: async () => {
+        return await jsonReq(`/api/recurring?id=${id}`, { method: "DELETE" });
+      },
+      messages: { success: "Recurring transaction deleted.", failure: "Failed to delete recurring transaction." },
+      rollback: () => {
+        if (prevRecurringSnapshot) {
+          setData((current) => {
+            if (!current) return current;
+            if (current.recurring.some((r) => r.id === id)) return current;
+            return {
+              ...current,
+              recurring: [...current.recurring, prevRecurringSnapshot],
+              budgetIndex: undefined,
+            };
+          });
         }
-      )
-    );
+      },
+    });
   },
   postRecurring: async (id: number, date?: string) => {
     return withSync(() =>
       runMutation(
         async () => {
-          const url = date
-            ? `/api/recurring?action=post&id=${id}&date=${encodeURIComponent(date)}`
-            : `/api/recurring?action=post&id=${id}`;
-          return await jsonReq(url, { method: "POST" });
+          return await jsonReq("/api/recurring", {
+            method: "POST",
+            body: JSON.stringify(date ? { action: "post", id, date } : { action: "post", id }),
+          });
         },
         { success: "Scheduled transaction entered.", failure: "Failed to post recurring transaction." }
       )
@@ -162,39 +156,36 @@ export function createRecurringApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "add
         ...r,
         subTransactions: r.subTransactions?.map((st) => ({ ...st })),
       }));
-    setData((prev) => {
-      if (!prev) return prev;
-      const recurring = prev.recurring.filter((r) => !idSet.has(r.id));
-      return { ...prev, recurring, budgetIndex: undefined };
-    });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq("/api/recurring", {
-            method: "DELETE",
-            body: JSON.stringify({ ids }),
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const recurring = prev.recurring.filter((r) => !idSet.has(r.id));
+          return { ...prev, recurring, budgetIndex: undefined };
+        });
+      },
+      request: async () => {
+        return await jsonReq("/api/recurring", {
+          method: "DELETE",
+          body: JSON.stringify({ ids }),
+        });
+      },
+      messages: { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." },
+      rollback: () => {
+        if (prevRecurringSnapshots.length > 0) {
+          setData((current) => {
+            if (!current) return current;
+            const currentIds = new Set(current.recurring.map((r) => r.id));
+            const toRestore = prevRecurringSnapshots.filter((r) => !currentIds.has(r.id));
+            return {
+              ...current,
+              recurring: [...current.recurring, ...toRestore],
+              budgetIndex: undefined,
+            };
           });
-        },
-        { success: `Deleted ${ids.length} scheduled transaction${ids.length === 1 ? "" : "s"}.`, failure: "Failed to delete scheduled transactions." },
-        {
-          onRollback: () => {
-            if (prevRecurringSnapshots.length > 0) {
-              setData((current) => {
-                if (!current) return current;
-                const currentIds = new Set(current.recurring.map((r) => r.id));
-                const toRestore = prevRecurringSnapshots.filter((r) => !currentIds.has(r.id));
-                return {
-                  ...current,
-                  recurring: [...current.recurring, ...toRestore],
-                  budgetIndex: undefined,
-                };
-              });
-            }
-            reload().catch(() => {});
-          },
         }
-      )
-    );
+      },
+    });
   },
   };
 }

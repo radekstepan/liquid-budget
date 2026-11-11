@@ -5,7 +5,7 @@ import type { BudgetApiDeps } from "./types";
 import { jsonReq } from "./client";
 
 export function createReconcileApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "getReconcileState" | "reconcileAccount" | "unreconcileAccount"> {
-  const { dataRef, setData, reload, runMutation, withSync, addToast } = deps;
+  const { dataRef, setData, runMutation, withSync, optimisticMutation } = deps;
   return {
   getReconcileState: async (accountId: number, statementDate?: string) => {
     const qs = new URLSearchParams({ accountId: String(accountId) });
@@ -88,56 +88,59 @@ export function createReconcileApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "get
     const previewDeltas = new Map<number, number>();
     if (provisional) previewDeltas.set(accountId, adjustmentAmount);
 
-    if (canPreview) {
-      setData((prev) => {
-        if (!prev) return prev;
-        const flipped = applyOptimisticReconcileFlips(prev.transactions, accountId, statementDateEff);
-        const transactions = provisional ? [provisional, ...flipped] : flipped;
-        const accounts = applyAccountDeltas(prev.accounts, previewDeltas).map((a) =>
-          a.id === accountId
-            ? { ...a, lastReconciledAt: today, lastReconciledBalance: statementBalance }
-            : a
-        );
-        return { ...prev, accounts, transactions, budgetIndex: undefined };
-      });
-    }
-
-    await withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq<{ adjustmentTransactionId?: number | null }>("/api/reconcile", {
-            method: "POST",
-            body: JSON.stringify({
-              action: "reconcile",
-              accountId,
-              statementBalance,
-              statementDate,
-              adjustmentCategoryId,
-              expectedWorkingBalance,
-            }),
+    await optimisticMutation({
+      // Resolve as soon as the POST lands so the modal closes onto the
+      // already-updated register; the confirming reload below picks up
+      // server-assigned ids and round stamps.
+      deferredReload: true,
+      plan: () => {
+        if (!canPreview) return;
+        setData((prev) => {
+          if (!prev) return prev;
+          const flipped = applyOptimisticReconcileFlips(prev.transactions, accountId, statementDateEff);
+          const transactions = provisional ? [provisional, ...flipped] : flipped;
+          const accounts = applyAccountDeltas(prev.accounts, previewDeltas).map((a) =>
+            a.id === accountId
+              ? { ...a, lastReconciledAt: today, lastReconciledBalance: statementBalance }
+              : a
+          );
+          return { ...prev, accounts, transactions, budgetIndex: undefined };
+        });
+      },
+      request: async () => {
+        return await jsonReq<{ adjustmentTransactionId?: number | null }>("/api/reconcile", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "reconcile",
+            accountId,
+            statementBalance,
+            statementDate,
+            adjustmentCategoryId,
+            expectedWorkingBalance,
+          }),
+        });
+      },
+      mapResult: (result) => {
+        const realId = result?.adjustmentTransactionId;
+        if (tempAdjustmentId != null && typeof realId === "number") {
+          setData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              transactions: prev.transactions.map((tx) =>
+                tx.id === tempAdjustmentId ? { ...tx, id: realId } : tx
+              ),
+            };
           });
-        },
-        {
-          success: "Account reconciled.",
-          failure: "Failed to reconcile account.",
-          onSuccess: (result) => {
-            const realId = result?.adjustmentTransactionId;
-            if (tempAdjustmentId != null && typeof realId === "number") {
-              setData((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  transactions: prev.transactions.map((tx) =>
-                    tx.id === tempAdjustmentId ? { ...tx, id: realId } : tx
-                  ),
-                };
-              });
-            }
-          },
-        },
-        {
-          onRollback: () => {
-            if (!canPreview || !prevAccount) return;
+        }
+      },
+      messages: {
+        success: "Account reconciled.",
+        failure: "Failed to reconcile account.",
+      },
+      rollback: canPreview
+        ? () => {
+            if (!prevAccount) return;
             const restoredAccount = prevAccount;
             const restoredById = new Map(prevAffectedTxs.map((tx) => [tx.id, tx]));
             setData((current) => {
@@ -150,19 +153,8 @@ export function createReconcileApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "get
                 .map((tx) => restoredById.get(tx.id) ?? tx);
               return { ...current, accounts, transactions, budgetIndex: undefined };
             });
-            reload().catch(() => {});
-          },
-          // Resolve as soon as the POST lands so the modal closes onto
-          // the already-updated register; the confirming reload below
-          // picks up server-assigned ids and round stamps.
-          skipReload: true,
-        }
-      )
-    );
-
-    reload().catch((refreshErr) => {
-      console.error("Budget reload failed after successful mutation:", refreshErr);
-      addToast("Saved changes, but failed to refresh latest budget data.", "warn");
+          }
+        : undefined,
     });
   },
   unreconcileAccount: async (accountId) => {

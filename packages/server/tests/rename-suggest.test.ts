@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import path from "path";
 import { fileURLToPath } from "url";
 import type { CsvImportRow } from "@ynab/logic";
-import { completeChatJson, getLlmConfig, isLlmRenameEnabled, LlmError, type LlmFetch } from "../src/llm.js";
+import { assertSecureLlmBaseUrl, completeChatJson, getLlmConfig, isLlmRenameEnabled, LlmError, type LlmFetch } from "../src/llm.js";
 import { importCsvTransactions } from "../src/import-csv.js";
 import { findOrCreatePayee, updatePayee } from "../src/queries/payees.js";
 import { reconcileAccount } from "../src/queries/reconcile.js";
@@ -103,6 +103,7 @@ describe("llm config", () => {
       baseUrl: "https://api.openai.com/v1",
       timeoutMs: 60_000,
       maxPayees: 200,
+      includeMemos: false,
     });
     const custom = getLlmConfig({
       LLM_API_KEY: "  k  ",
@@ -120,6 +121,73 @@ describe("llm config", () => {
     const invalid = getLlmConfig({ LLM_TIMEOUT_MS: "nope", LLM_MAX_PAYEES: "-3" } as NodeJS.ProcessEnv);
     expect(invalid.timeoutMs).toBe(60_000);
     expect(invalid.maxPayees).toBe(200);
+  });
+
+  it("opts memo evidence in only via LLM_INCLUDE_MEMOS", () => {
+    expect(getLlmConfig({} as NodeJS.ProcessEnv).includeMemos).toBe(false);
+    expect(getLlmConfig({ LLM_INCLUDE_MEMOS: "1" } as NodeJS.ProcessEnv).includeMemos).toBe(true);
+    expect(getLlmConfig({ LLM_INCLUDE_MEMOS: "true" } as NodeJS.ProcessEnv).includeMemos).toBe(true);
+    expect(getLlmConfig({ LLM_INCLUDE_MEMOS: "0" } as NodeJS.ProcessEnv).includeMemos).toBe(false);
+  });
+});
+
+describe("assertSecureLlmBaseUrl", () => {
+  it("allows https anywhere and http on loopback", () => {
+    expect(assertSecureLlmBaseUrl("https://api.openai.com/v1")).toBe("api.openai.com");
+    expect(assertSecureLlmBaseUrl("http://localhost:11434/v1")).toBe("localhost");
+    expect(assertSecureLlmBaseUrl("http://127.0.0.1:11434/v1")).toBe("127.0.0.1");
+    expect(assertSecureLlmBaseUrl("http://[::1]:11434/v1")).toBe("::1");
+  });
+
+  it("rejects plain http to non-loopback hosts and non-http schemes", () => {
+    for (const baseUrl of [
+      "http://example.com/v1",
+      "http://192.168.1.10:11434/v1",
+      "ftp://example.com/v1",
+      "not a url",
+      "",
+    ]) {
+      try {
+        assertSecureLlmBaseUrl(baseUrl);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toMatchObject({ name: "LlmError", status: 502 });
+      }
+    }
+  });
+
+  it("refuses the request before any fetch on insecure base URLs", async () => {
+    let calls = 0;
+    const fetchImpl: LlmFetch = async () => {
+      calls += 1;
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    };
+    await expect(
+      completeChatJson([{ role: "user", content: "hi" }], {
+        env: { LLM_API_KEY: "k", LLM_MODEL: "m", LLM_BASE_URL: "http://example.com/v1" } as NodeJS.ProcessEnv,
+        fetchImpl,
+      })
+    ).rejects.toMatchObject({ name: "LlmError", status: 502 });
+    expect(calls).toBe(0);
+  });
+
+  it("lets loopback http through to fetch", async () => {
+    let seenUrl = "";
+    const fetchImpl: LlmFetch = async (url) => {
+      seenUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: '{"a":1}' } }] }),
+        text: async () => "",
+      };
+    };
+    const res = await completeChatJson([{ role: "user", content: "hi" }], {
+      env: { LLM_API_KEY: "k", LLM_MODEL: "m", LLM_BASE_URL: "http://localhost:11434/v1" } as NodeJS.ProcessEnv,
+      fetchImpl,
+    });
+    expect(res.content).toBe('{"a":1}');
+    expect(seenUrl).toBe("http://localhost:11434/v1/chat/completions");
   });
 });
 
@@ -252,36 +320,64 @@ describe("getRenameSuggestStatus", () => {
 });
 
 describe("suggestRenameRules", () => {
-  it("sends only uncovered payees and parses the reply", async () => {
+  it("sends payee names only — memos stay on the server by default", async () => {
     const db = openMigratedDb();
     const accountId = await seedAccount(db);
     await createRenameRule(db, { sourcePattern: "Covered", targetPayee: "Covered cafe" });
     await seedTransaction(db, accountId, { payee: "Covered" });
-    await seedTransaction(db, accountId, { payee: "WONKY 123", memo: "downtown store" });
+    await seedTransaction(db, accountId, { payee: "WONKY 123", memo: "downtown store acct 4821" });
 
     let sentUserPrompt = "";
+    let sentBody = "";
     const fetchImpl = stubFetch({
       content: JSON.stringify({ renames: [{ source: "WONKY 123", target: "Wonky" }] }),
       onCall: (_url, body) => {
+        sentBody = JSON.stringify(body);
         const messages = body.messages as { role: string; content: string }[];
         sentUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
       },
     });
     const res = await suggestRenameRules(db, { env: enabledEnv, fetchImpl });
     expect(sentUserPrompt).toContain("WONKY 123");
-    expect(sentUserPrompt).toContain("downtown store");
+    expect(sentUserPrompt).not.toContain("downtown store");
+    expect(sentUserPrompt).not.toContain("4821");
     expect(sentUserPrompt).not.toContain("Covered");
+    // Allowlist: no ids, amounts, dates, or statuses on the wire.
+    expect(sentBody).not.toContain("transactionIds");
+    // Review evidence still rides the local candidate rows (never sent).
     expect(res.suggestions).toEqual([
       {
         sourcePattern: "WONKY 123",
         targetPayee: "Wonky",
         count: 1,
-        memos: ["downtown store"],
+        memos: ["downtown store acct 4821"],
       },
     ]);
     expect(res.skipped).toEqual([]);
     expect(res.model).toBe("test-model");
     expect(res.candidates).toBe(1);
+  });
+
+  it("attaches memo evidence only when LLM_INCLUDE_MEMOS opts in", async () => {
+    const db = openMigratedDb();
+    const accountId = await seedAccount(db);
+    await seedTransaction(db, accountId, { payee: "WONKY 123", memo: "downtown store" });
+
+    let sentUserPrompt = "";
+    const fetchImpl = stubFetch({
+      content: JSON.stringify({ renames: [{ source: "WONKY 123", target: "Wonky" }] }),
+      onCall: (_url, body) => {
+        const messages = (body as Record<string, unknown>).messages as { role: string; content: string }[];
+        sentUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
+      },
+    });
+    const env = { LLM_API_KEY: "k", LLM_MODEL: "m", LLM_INCLUDE_MEMOS: "1" } as NodeJS.ProcessEnv;
+    const res = await suggestRenameRules(db, { env, fetchImpl });
+    expect(sentUserPrompt).toContain("WONKY 123");
+    expect(sentUserPrompt).toContain("downtown store");
+    expect(res.suggestions).toEqual([
+      { sourcePattern: "WONKY 123", targetPayee: "Wonky", count: 1, memos: ["downtown store"] },
+    ]);
   });
 
   it("pages through candidates with offset/limit", async () => {
@@ -356,6 +452,109 @@ describe("suggestRenameRules", () => {
     await expect(
       suggestRenameRules(db, { env: {} as NodeJS.ProcessEnv, fetchImpl: stubFetch({}) })
     ).rejects.toMatchObject({ status: 501 });
+  });
+
+  it("audits success with model and candidate count, never key/payee/memo text", async () => {
+    const db = openMigratedDb();
+    const accountId = await seedAccount(db);
+    await seedTransaction(db, accountId, { payee: "WONKY 123", memo: "downtown store acct 4821" });
+    const entries: unknown[] = [];
+    const res = await suggestRenameRules(db, {
+      env: enabledEnv,
+      fetchImpl: stubFetch({
+        content: JSON.stringify({ renames: [{ source: "WONKY 123", target: "Wonky" }] }),
+      }),
+      onAudit: (entry) => entries.push(entry),
+    });
+    expect(res.candidates).toBe(1);
+    expect(entries).toEqual([
+      {
+        host: "api.openai.com",
+        requestedModel: "test-model",
+        servedModel: "test-model",
+        candidates: 1,
+        ok: true,
+      },
+    ]);
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("test-key");
+    expect(serialized).not.toContain("WONKY");
+    expect(serialized).not.toContain("downtown");
+    expect(serialized).not.toContain("4821");
+  });
+
+  it("audits the serving model id when a router resolves the slug", async () => {
+    const db = openMigratedDb();
+    const accountId = await seedAccount(db);
+    await seedTransaction(db, accountId, { payee: "WONKY 123" });
+    const routedEntries: { servedModel?: string; ok: boolean }[] = [];
+    await suggestRenameRules(db, {
+      env: enabledEnv,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          model: "some/free-model",
+          choices: [{ message: { content: JSON.stringify({ renames: [] }) } }],
+        }),
+        text: async () => "",
+      }),
+      onAudit: (entry) => routedEntries.push(entry),
+    });
+    expect(routedEntries).toEqual([
+      expect.objectContaining({ servedModel: "some/free-model", ok: true }),
+    ]);
+  });
+
+  it("audits failures without calling the audit twice and stays PII-free", async () => {
+    const db = openMigratedDb();
+    const accountId = await seedAccount(db);
+    await seedTransaction(db, accountId, { payee: "WONKY 123", memo: "secret memo" });
+
+    // Upstream failure: error detail is the scrubbed LlmError message.
+    const upstreamEntries: unknown[] = [];
+    await expect(
+      suggestRenameRules(db, {
+        env: enabledEnv,
+        fetchImpl: stubFetch({ ok: false, status: 500 }),
+        onAudit: (entry) => upstreamEntries.push(entry),
+      })
+    ).rejects.toMatchObject({ status: 502 });
+    expect(upstreamEntries).toHaveLength(1);
+    expect(upstreamEntries[0]).toMatchObject({ candidates: 1, ok: false });
+    expect(JSON.stringify(upstreamEntries)).not.toContain("secret memo");
+
+    // Unusable AI output echoes payees, so the audit records a fixed reason.
+    const parseEntries: { error?: string }[] = [];
+    await expect(
+      suggestRenameRules(db, {
+        env: enabledEnv,
+        fetchImpl: stubFetch({ content: "WONKY 123 is great, no JSON here" }),
+        onAudit: (entry) => parseEntries.push(entry),
+      })
+    ).rejects.toMatchObject({ status: 502 });
+    expect(parseEntries).toEqual([
+      expect.objectContaining({ ok: false, error: "unusable AI response" }),
+    ]);
+    expect(JSON.stringify(parseEntries)).not.toContain("WONKY");
+
+    // Insecure base URL: blocked before fetch, audited once.
+    let calls = 0;
+    const countingFetch: LlmFetch = async () => {
+      calls += 1;
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    };
+    const insecureEntries: unknown[] = [];
+    await expect(
+      suggestRenameRules(db, {
+        env: { LLM_API_KEY: "k", LLM_MODEL: "m", LLM_BASE_URL: "http://example.com/v1" } as NodeJS.ProcessEnv,
+        fetchImpl: countingFetch,
+        onAudit: (entry) => insecureEntries.push(entry),
+      })
+    ).rejects.toMatchObject({ status: 502 });
+    expect(calls).toBe(0);
+    expect(insecureEntries).toHaveLength(1);
+    expect(insecureEntries[0]).toMatchObject({ host: "example.com", ok: false });
   });
 
   it("returns empty without calling the LLM when nothing is uncovered", async () => {

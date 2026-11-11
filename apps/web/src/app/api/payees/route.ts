@@ -7,6 +7,7 @@ import {
   updatePayee,
 } from "@ynab/server";
 import { z } from "zod";
+import { resolveAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
 import {
@@ -61,9 +62,10 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  const { searchParams } = new URL(req.url);
   try {
-    if (searchParams.get("action") === "merge") {
+    // Canonical dispatch is body {action:"merge"}; `?action=merge` is a
+    // deprecated alias.
+    if (resolveAction(req, json, ["merge"]) === "merge") {
       const parseResult = PayeeMergeSchema.safeParse(json);
       if (!parseResult.success) {
         return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });

@@ -21,7 +21,7 @@ Self-contained budgeting app. The browser UI talks to the Next.js server over a 
 |---|---|
 | SQLite via better-sqlite3 `11.10.0` + drizzle-orm `0.45.2` | Primary store. Live files at repo root: `budget.db` (+ `-shm`/`-wal`), `budget.test.db` (+ `-shm`/`-wal`). Path overridable via `DATABASE_URL` (`:memory:` in unit tests). Writes serialized through an `AsyncMutex` in `server/transaction.ts` |
 | Migrations via drizzle-kit `0.31.10` | `packages/server` build copies `src/migrations` → `dist/migrations`; scripts: `db:reset` (`dist/db-reset.js`), `db:migrate` (`dist/migrate.js`), `db:import` (`dist/db-import.js`), `db:generate`/`db:check` |
-| Web-side drizzle config | `apps/web/drizzle.config.json` + `db:generate` (`drizzle-kit generate`); schema and migration output both point into `packages/server` |
+| Drizzle config | `packages/server/drizzle.config.ts` + `db:generate` (`drizzle-kit generate`), owned by `@ynab/server`; schema and migration output both live in `packages/server` (see `docs/toolchain-adr.md` item 4) |
 | Snapshots | Full `.db` copies + `.json` sidecars in `snapshots/` next to the DB file (`server/snapshots.ts`, `SNAPSHOTS_DIR` override, `snapshots/*.json` git-ignored) |
 
 ## File-Import Integrations (local, no network)

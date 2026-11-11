@@ -20,6 +20,18 @@ export {
   BUDGET_INDEX_VERSION,
 } from "./budget-engine.js";
 export type { OverspendOverridesInput } from "./budget-engine.js";
+// Month-walk passes + shared set collectors (P2 decompose)
+export {
+  collectCCGroupIds,
+  collectSplitParentIds,
+  mapCCPayCategories,
+} from "./budget-walk.js";
+export type {
+  CategoryTxEntry,
+  CCPaymentWalkShared,
+  NonCCWalkShared,
+  RefundWaterfallAccounts,
+} from "./budget-walk.js";
 // Register (per-row running balance + payee autofill recall)
 export { computeRunningBalances } from "./register.js";
 export type { RegisterRow, RegisterInputRow } from "./register.js";
@@ -31,6 +43,7 @@ export type {
 } from "./payee-autofill.js";
 export { makeSeedBudgetData, DEMO_MONTH } from "./seed-fixture.js";
 export * from "./reports.js";
+export * from "./report-spending.js";
 export * from "./sankey.js";
 export * from "./duplicates.js";
 export * from "./merge.js";

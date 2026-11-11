@@ -6,13 +6,16 @@ import {
   restoreSnapshot,
   suggestSnapshotName,
 } from "@ynab/server";
+import { resolveAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
+import {
+  formatZodError,
+  SnapshotCreateSchema,
+  SnapshotRestoreSchema,
+} from "../schemas";
 
 export const dynamic = "force-dynamic";
-
-// TODO(P1) [api-consistency]: unify action dispatch on body discriminator + uniform {ok,data}
-// envelope; add zod schema for snapshot restore {id} instead of hand-rolled typeof check.
 
 /**
  * GET /api/snapshots
@@ -31,12 +34,11 @@ export async function GET() {
 }
 
 /**
- * POST /api/snapshots { name? }
- * Saves a snapshot of the live database. An empty/omitted name falls back to
- * the suggested name.
+ * POST /api/snapshots { name? } — create; both branches return the uniform
+ * {ok:true,snapshot} envelope.
  *
- * POST /api/snapshots?action=restore { id }
- * Replaces the live database with the snapshot.
+ * POST /api/snapshots { action:"restore", id } — restore. Canonical
+ * discriminator is the body; `?action=restore` is a deprecated alias.
  */
 export async function POST(req: Request) {
   const blocked = mutationGuardResponse(req);
@@ -47,24 +49,27 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
+  const action = resolveAction(req, json, ["restore"]);
 
   try {
     if (action === "restore") {
-      const id = (json as { id?: unknown } | null)?.id;
-      if (typeof id !== "string" || id.trim() === "") {
-        return Response.json({ error: "snapshot id is required" }, { status: 400 });
+      // Accept the legacy query spelling `?action=restore` with a bare
+      // `{id}` body: normalise to the canonical body discriminator before
+      // validation so both spellings share one schema.
+      const raw = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+      const parsed = SnapshotRestoreSchema.safeParse({ ...raw, action: "restore" });
+      if (!parsed.success) {
+        return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
       }
-      const snapshot = await restoreSnapshot(id);
+      const snapshot = await restoreSnapshot(parsed.data.id);
       return Response.json({ ok: true, snapshot });
     }
 
-    const name = (json as { name?: unknown } | null)?.name;
-    if (name !== undefined && typeof name !== "string") {
-      return Response.json({ error: "snapshot name must be a string" }, { status: 400 });
+    const parsed = SnapshotCreateSchema.safeParse(json);
+    if (!parsed.success) {
+      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
-    const snapshot = await createSnapshot(getDefaultDb(), { name });
+    const snapshot = await createSnapshot(getDefaultDb(), { name: parsed.data.name });
     return Response.json({ ok: true, snapshot });
   } catch (e) {
     return apiErrorResponse(e);

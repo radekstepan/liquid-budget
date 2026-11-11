@@ -154,6 +154,11 @@ test("editing a transaction through the modal persists the new amount", async ({
   await modal.getByRole("button", { name: "Save Transaction" }).click();
   await expect(modal).toBeHidden();
 
+  // The register virtualizes rows, so narrow it to this payee first —
+  // otherwise the back-dated row sits outside the rendered window (the
+  // demo seed plus auto-posted catch-up rows alone already bury it).
+  await filterRegisterByText(page, payee);
+
   // Click the row to open the edit modal. We filter out child
   // rows (those with the ↳ glyph) so we don't accidentally click
   // a split child.

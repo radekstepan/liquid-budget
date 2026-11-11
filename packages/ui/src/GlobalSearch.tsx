@@ -1,8 +1,14 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { BudgetData, Query } from "@ynab/logic";
-import { buildSearchIndex, payeeFacetOptions, searchBudget } from "@ynab/logic";
+import type { BudgetData, Query, SearchResults } from "@ynab/logic";
+import {
+  buildSearchIndex,
+  payeeFacetOptions,
+  parseSearchResponse,
+  searchBudget,
+  shouldUseServerSearch,
+} from "@ynab/logic";
 import { Icon, TextField, money } from "@ynab/theme";
 
 export type GlobalSearchJump =
@@ -56,23 +62,76 @@ export function GlobalSearch({
     setAccountFacet("");
   }, [scopeAccountId]);
 
-  const index = useMemo(() => buildSearchIndex(data), [data]);
-  const payeeOptions = useMemo(() => payeeFacetOptions(index), [index]);
+  // Server-side search for large budgets (P1 search-perf): fetching
+  // GET /api/search costs less than the O(n) client index at scale, so big
+  // registers query the server and keep the client index purely as the
+  // fallback when the fetch fails.
+  const useServer = shouldUseServerSearch(data.transactions.length);
+  const [serverResults, setServerResults] = useState<
+    (SearchResults & { payeeOptions?: { value: string; label: string }[] }) | null
+  >(null);
+  const [serverFailed, setServerFailed] = useState(false);
+  const serverReqRef = useRef(0);
 
-  const results = useMemo(
-    () =>
-      searchBudget(
-        index,
-        {
-          query: deferredQuery,
-          payee: payeeFacet || null,
-          categoryId: categoryFacet ? Number(categoryFacet) : null,
-          accountId: accountFacet ? Number(accountFacet) : null,
-        },
-        { scopeAccountId, searchAll }
-      ),
-    [index, deferredQuery, payeeFacet, categoryFacet, accountFacet, scopeAccountId, searchAll]
+  useEffect(() => {
+    if (!useServer) {
+      setServerResults(null);
+      setServerFailed(false);
+      return;
+    }
+    setServerFailed(false);
+    const id = ++serverReqRef.current;
+    const ctrl = new AbortController();
+    const params = new URLSearchParams({ query: deferredQuery, searchAll: String(searchAll) });
+    if (payeeFacet) params.set("payee", payeeFacet);
+    if (categoryFacet) params.set("categoryId", categoryFacet);
+    if (accountFacet) params.set("accountId", accountFacet);
+    if (scopeAccountId != null) params.set("scopeAccountId", String(scopeAccountId));
+    fetch(`/api/search?${params.toString()}`, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`search failed: ${res.status}`);
+        const json: unknown = await res.json();
+        if (serverReqRef.current !== id) return;
+        setServerResults(parseSearchResponse(json));
+      })
+      .catch(() => {
+        if (ctrl.signal.aborted || serverReqRef.current !== id) return;
+        setServerFailed(true);
+        setServerResults(null);
+      });
+    return () => {
+      ctrl.abort();
+    };
+  }, [useServer, data, deferredQuery, payeeFacet, categoryFacet, accountFacet, scopeAccountId, searchAll]);
+
+  // The client index is the fallback: skip the O(n) build while the server
+  // path is healthy, (re)build it the moment the fetch fails.
+  const needIndex = !useServer || serverFailed;
+  const index = useMemo(
+    () => (needIndex ? buildSearchIndex(data) : null),
+    [data, needIndex]
   );
+
+  const results: SearchResults = useMemo(
+    () =>
+      serverResults ??
+      (index
+        ? searchBudget(
+            index,
+            {
+              query: deferredQuery,
+              payee: payeeFacet || null,
+              categoryId: categoryFacet ? Number(categoryFacet) : null,
+              accountId: accountFacet ? Number(accountFacet) : null,
+            },
+            { scopeAccountId, searchAll }
+          )
+        : { payees: [], categories: [], transactions: [] }),
+    [serverResults, index, deferredQuery, payeeFacet, categoryFacet, accountFacet, scopeAccountId, searchAll]
+  );
+
+  const effectivePayeeOptions =
+    serverResults?.payeeOptions ?? (index ? payeeFacetOptions(index) : []);
 
   const flat: FlatRow[] = useMemo(() => {
     const rows: FlatRow[] = [];
@@ -198,7 +257,7 @@ export function GlobalSearch({
               onChange={(e) => setPayeeFacet(e.target.value)}
             >
               <option value="">Payee: all</option>
-              {payeeOptions.map((o) => (
+              {effectivePayeeOptions.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>

@@ -1,17 +1,18 @@
 import { asc, desc, sql } from "drizzle-orm";
-import type { BudgetData, ClearedStatus } from "@ynab/logic";
+import type { BudgetData } from "@ynab/logic";
 import { buildBudgetIndex } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { accounts, assignments, categoryGroups, categories, recurring, recurringSubTransactions, transactions } from "../schema.js";
-import { sanitizeFlagColor, sanitizeFlagState } from "./transactions.js";
+import { sanitizeFlagColor, serializeTransactionRow } from "./transactions.js";
 import { getRenameRules } from "./rename-rules.js";
 import { getPayees } from "./payees.js";
 
 export async function getBudgetData(db: Db): Promise<BudgetData> {
-  // TODO(P1) [pagination]: add cursor-paginated transactions endpoint (?accountId&before&limit)
-  // with SELECT LIMIT; this full-table fan-out (7x SELECT * incl. every txn) is the scaling cliff.
-  // TODO(P1) [sql-aggregation]: move report group-bys into SQL SUM/GROUP BY month+category
-  // instead of full-table JS aggregation on every navigation.
+  // Report group-bys live in SQL now (queries/reports.ts: getReportAggregates,
+  // SUM/GROUP BY month+category). The full transaction fan-out below stays
+  // for the register/budget engine; report screens on large budgets should
+  // page rows via listTransactionsPage (?accountId&before&limit) and fetch
+  // O(months x categories) aggregates via GET /api/reports instead.
   const [accts, groups, cats, assigns, txns, recur, recurSubs] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.sort)),
     db.select().from(categoryGroups).orderBy(asc(categoryGroups.sort)),
@@ -55,23 +56,7 @@ export async function getBudgetData(db: Db): Promise<BudgetData> {
       goalTarget: c.goalTarget != null ? String(c.goalTarget) : null,
     })),
     assignments: assigns.map((a) => ({ ...a, amount: String(a.amount) })),
-    transactions: txns.map((t) => ({
-      ...t,
-      amount: String(t.amount),
-      status: (t.status as ClearedStatus) ?? "c",
-      transferStatus: (t.transferStatus as ClearedStatus | null) ?? null,
-      // createdAt is already a text string in SQLite
-      createdAt: t.createdAt,
-      isIncome: Boolean(t.isIncome),
-      needsReview: Boolean(t.needsReview),
-      reconciledAt: t.reconciledAt,
-      reconciliationId: t.reconciliationId,
-      transferReconciledAt: t.transferReconciledAt,
-      transferReconciliationId: t.transferReconciliationId,
-      // Sanitize any flag_color read from the DB so a rogue value never
-      // reaches the UI. The internal "duplicate" marker is allowed here.
-      flagColor: sanitizeFlagState(t.flagColor),
-    })),
+    transactions: txns.map(serializeTransactionRow),
     recurring: recur.map((r) => ({
       ...r,
       flagColor: sanitizeFlagColor(r.flagColor),

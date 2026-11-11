@@ -1,4 +1,5 @@
 import type { TransactionFlagColor } from "@ynab/logic";
+import { recordField } from "./guards.js";
 import type { Ynab4TxLineage } from "./types.js";
 
 /** YNAB4 flag color name → our enum. Unknown/missing values map to null. */
@@ -29,12 +30,12 @@ function cleanLineageString(value: unknown): string | null {
 }
 
 /** Pull the persistable lineage fields off any YNAB4 tx/sub-tx object. */
-export function extractYnab4TxLineage(src: any): Ynab4TxLineage {
+export function extractYnab4TxLineage(src: unknown): Ynab4TxLineage {
   return {
-    checkNumber: cleanLineageString(src?.checkNumber),
-    fitid: cleanLineageString(src?.FITID),
-    ynabId: cleanLineageString(src?.YNABID),
-    importedPayee: cleanLineageString(src?.importedPayee),
-    source: cleanLineageString(src?.source),
+    checkNumber: cleanLineageString(recordField(src, "checkNumber")),
+    fitid: cleanLineageString(recordField(src, "FITID")),
+    ynabId: cleanLineageString(recordField(src, "YNABID")),
+    importedPayee: cleanLineageString(recordField(src, "importedPayee")),
+    source: cleanLineageString(recordField(src, "source")),
   };
 }

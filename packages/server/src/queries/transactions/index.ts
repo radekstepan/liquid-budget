@@ -7,5 +7,6 @@ export * from "./splits.js";
 export * from "./remove.js";
 export * from "./merge.js";
 export * from "./bulk-update.js";
+export * from "./list.js";
 export { TransactionError } from "@ynab/logic";
 export { assertEntityInvariants, type TransactionRow, type RecurringRow } from "../../invariants.js";

@@ -4,7 +4,7 @@ import {
   reconcileAccount,
   unreconcileAccount,
 } from "@ynab/server";
-import { readRouteAction } from "../action";
+import { resolveAction } from "../action";
 import { apiErrorResponse, errorMessage, errorStatus } from "../errors";
 import { mutationGuardResponse } from "../guard";
 import {
@@ -46,10 +46,16 @@ export async function POST(req: Request) {
   }
   const db = getDefaultDb();
 
-  const actions = readRouteAction(req, json);
+  // Canonical dispatch is body {action}; `?action=` is a deprecated alias.
+  const action = resolveAction(req, json, ["reconcile", "unreconcile"], {
+    reconcile: "reconcile",
+  });
 
-  if (actions.bodyMatches("unreconcile")) {
-    const parseResult = UnreconcileAccountSchema.safeParse(json);
+  if (action === "unreconcile") {
+    // Accept the legacy `?action=unreconcile` spelling with a bare
+    // `{accountId}` body: normalise to the canonical discriminator.
+    const raw = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+    const parseResult = UnreconcileAccountSchema.safeParse({ ...raw, action: "unreconcile" });
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }

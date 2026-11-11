@@ -1,6 +1,7 @@
 import {
   AccountError,
   CategoryError,
+  ConstraintError,
   PayeeError,
   RecurringError,
   RenameRuleError,
@@ -33,19 +34,15 @@ export function errorStatus(e: unknown): number | undefined {
   return typeof record?.status === "number" ? record.status : undefined;
 }
 
-function errorCode(e: unknown): unknown {
-  const record = asRecord(e);
-  if (!record) return undefined;
-  const cause = asRecord(record.cause);
-  return record.code || cause?.code;
-}
-
 export function apiErrorResponse(e: unknown): Response {
-  // TODO(P1) [layering]: translate SQLITE_CONSTRAINT_* inside packages/server queries
-  // (throw AccountError/409/422 at source); web should only see domain errors, not DB wire details.
+  // SQLite wire errors never reach this layer: packages/server translates
+  // SQLITE_CONSTRAINT_* at the source (withTransaction + the handful of
+  // non-transactional writes) into ConstraintError/domain errors. The status
+  // branch below renders them; anything without a status is a 500.
   if (
     e instanceof AccountError ||
     e instanceof CategoryError ||
+    e instanceof ConstraintError ||
     e instanceof PayeeError ||
     e instanceof RecurringError ||
     e instanceof RenameRuleError ||
@@ -55,28 +52,6 @@ export function apiErrorResponse(e: unknown): Response {
   }
 
   const msg = e instanceof Error ? e.message : String(e ?? "");
-  const code = errorCode(e);
-
-  if (code === "SQLITE_CONSTRAINT_FOREIGNKEY" || msg.includes("FOREIGN KEY constraint failed")) {
-    return Response.json(
-      { error: "Referenced entity does not exist or foreign key constraint failed" },
-      { status: 400 }
-    );
-  }
-
-  if (code === "SQLITE_CONSTRAINT_UNIQUE" || msg.includes("UNIQUE constraint failed")) {
-    return Response.json(
-      { error: "A record with these details already exists" },
-      { status: 409 }
-    );
-  }
-
-  if (code === "SQLITE_CONSTRAINT_CHECK" || msg.includes("CHECK constraint failed")) {
-    return Response.json(
-      { error: "Constraint check failed" },
-      { status: 422 }
-    );
-  }
 
   const status = errorStatus(e);
   if (status !== undefined && status >= 400 && status < 600) {
@@ -84,6 +59,7 @@ export function apiErrorResponse(e: unknown): Response {
   }
 
   // Unknown errors: return a generic message so raw sqlite/stack/PII details
-  // never leak to the client. Log server-side via the logger abstraction instead.
+  // never leak to the client. Log server-side via @/lib/logger
+  // (createScopedLogger + toLogDetails) instead.
   return Response.json({ error: "Internal server error" }, { status: 500 });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { apiErrorResponse } from "../src/app/api/errors";
-import { TransactionError } from "@ynab/server";
+import { ConstraintError, TransactionError } from "@ynab/server";
 
 describe("apiErrorResponse", () => {
   it("preserves domain error messages with their status", async () => {
@@ -15,5 +15,20 @@ describe("apiErrorResponse", () => {
     const json = await res.json();
     expect(json).toEqual({ error: "Internal server error" });
     expect(JSON.stringify(json)).not.toContain("secret");
+  });
+
+  it("renders server-translated constraint errors with their status", async () => {
+    const res = apiErrorResponse(new ConstraintError("A record with these details already exists", 409));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "A record with these details already exists" });
+  });
+
+  it("never leaks raw SQLITE wire errors (translated at the source)", async () => {
+    const wire = Object.assign(new Error("UNIQUE constraint failed: payees.name"), {
+      code: "SQLITE_CONSTRAINT_UNIQUE",
+    });
+    const res = apiErrorResponse(wire);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Internal server error" });
   });
 });

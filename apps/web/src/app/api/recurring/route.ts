@@ -7,7 +7,7 @@ import {
   updateRecurring,
 } from "@ynab/server";
 import { z } from "zod";
-import { readRouteAction } from "../action";
+import { bodyHasField, resolveAction } from "../action";
 import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
 import {
@@ -28,10 +28,35 @@ export async function POST(req: Request) {
   const blocked = mutationGuardResponse(req);
   if (blocked) return blocked;
   const { searchParams } = new URL(req.url);
-  const queryAction = readRouteAction(req);
   const db = getDefaultDb();
 
-  if (queryAction.queryMatches("post")) {
+  // Canonical dispatch is body {action}; `?action=` is a deprecated alias.
+  // Query spellings carry params in the URL, body spellings in JSON — both
+  // resolve to one canonical name below.
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    json = undefined;
+  }
+  const action = resolveAction(req, json, ["post", "bulk-post", "autopost"]);
+
+  if (action === "post") {
+    if (json !== undefined && typeof json === "object" && json !== null && "id" in json) {
+      const parsed = RecurringPostActionSchema.safeParse(json);
+      if (!parsed.success) {
+        return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
+      }
+      try {
+        // Manual "Enter Now" always allows early posting (same as the
+        // deprecated query spelling below) — the client posts today even
+        // when the schedule's nextDate is in the future.
+        const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date, true);
+        return Response.json(res);
+      } catch (e) {
+        return apiErrorResponse(e);
+      }
+    }
     const PostQuerySchema = z.object({
       id: z.coerce.number().int().positive(),
       date: ISODateSchema.optional(),
@@ -51,7 +76,26 @@ export async function POST(req: Request) {
     }
   }
 
-  if (queryAction.queryMatches("autopost")) {
+  if (action === "autopost") {
+    if (json !== undefined && typeof json === "object" && json !== null && ("asOfDate" in json || "action" in json)) {
+      const parsed = RecurringAutoPostActionSchema.safeParse(
+        "action" in json ? json : { action: "autopost", ...(json as Record<string, unknown>) }
+      );
+      if (!parsed.success) {
+        return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
+      }
+      try {
+        const result = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
+        return Response.json({
+          postedCount: result.posted.length,
+          posted: result.posted,
+          failures: result.failures,
+          capped: result.capped,
+        });
+      } catch (e) {
+        return apiErrorResponse(e);
+      }
+    }
     const AutoPostQuerySchema = z.object({
       asOfDate: ISODateSchema.optional(),
     });
@@ -74,30 +118,15 @@ export async function POST(req: Request) {
     }
   }
 
-  let json: unknown;
-  try {
-    json = await req.json();
-  } catch {
+  if (json === undefined) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const actions = readRouteAction(req, json);
-
-  if (actions.bodyMatches("post")) {
-    const parsed = RecurringPostActionSchema.safeParse(json);
-    if (!parsed.success) {
-      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
-    }
-    try {
-      const res = await postRecurringTransaction(db, parsed.data.id, parsed.data.date);
-      return Response.json(res);
-    } catch (e) {
-      return apiErrorResponse(e);
-    }
-  }
-
-  if (actions.bodyMatches("bulk-post")) {
-    const parsed = RecurringBulkPostActionSchema.safeParse(json);
+  if (action === "bulk-post") {
+    // Normalise the deprecated query alias (`?action=bulk-post` with a bare
+    // body) to the canonical discriminator before validation.
+    const rawBulk = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+    const parsed = RecurringBulkPostActionSchema.safeParse({ ...rawBulk, action: "bulk-post" });
     if (!parsed.success) {
       return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
@@ -126,24 +155,8 @@ export async function POST(req: Request) {
     }
   }
 
-  if (actions.bodyMatches("autopost")) {
-    const parsed = RecurringAutoPostActionSchema.safeParse(json);
-    if (!parsed.success) {
-      return Response.json({ error: formatZodError(parsed.error) }, { status: 400 });
-    }
-    try {
-      const result = await autoPostDueRecurringTransactions(db, parsed.data.asOfDate);
-      return Response.json({
-        postedCount: result.posted.length,
-        posted: result.posted,
-        failures: result.failures,
-        capped: result.capped,
-      });
-    } catch (e) {
-      return apiErrorResponse(e);
-    }
-  }
-
+  // `autopost` via body was handled above (with query fallback); reaching
+  // here means no action discriminator, so fall through to create.
   const parseResult = RecurringCreateSchema.safeParse(json);
   if (!parseResult.success) {
     return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
@@ -186,10 +199,13 @@ export async function PATCH(req: Request) {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const actions = readRouteAction(req, json);
+  const bulkAction = resolveAction(req, json, ["bulk-update"]);
 
-  if (actions.bodyMatches("bulk-update")) {
-    const parseResult = RecurringBulkUpdateSchema.safeParse(json);
+  // Legacy bulk bodies without a discriminator still route to bulk when they
+  // carry `ids` (mirrors the transactions PATCH fallback).
+  if (bulkAction === "bulk-update" || (bulkAction === null && bodyHasField(json, "ids"))) {
+    const rawBulk = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+    const parseResult = RecurringBulkUpdateSchema.safeParse({ ...rawBulk, action: "bulk-update" });
     if (!parseResult.success) {
       return Response.json({ error: formatZodError(parseResult.error) }, { status: 400 });
     }

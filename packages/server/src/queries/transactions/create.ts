@@ -1,5 +1,5 @@
 import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
-import { classifyBoundaryTransfer, TransactionError } from "@ynab/logic";
+import { classifyBoundaryTransfer, inferUncategorizedInflowIncome, TransactionError } from "@ynab/logic";
 import { assertEntityInvariants } from "../../invariants.js";
 import type { Database } from "../../client.js";
 import { withTransaction } from "../../transaction.js";
@@ -87,14 +87,16 @@ export async function createTransaction(db: Database, input: CreateTransactionIn
       incomeMonth = null;
     } else {
       categoryId = input.categoryId ?? null;
-      // An explicit isIncome distinguishes "Income" (true) from
-      // "Uncategorized" (false) when the category is null. Income is only
-      // valid for positive inflows; anything else stays uncategorized.
-      const isEligibleForIncome = categoryId == null && amount > 0;
-      isIncome = isEligibleForIncome
-        ? (input.isIncome !== undefined ? Boolean(input.isIncome) : true)
-        : false;
-      incomeMonth = isIncome ? (input.incomeMonth ?? null) : null;
+      // Uncategorized positive inflows default to income on liquid
+      // on-budget accounts (shared helper — see optimistic planner).
+      const inferred = inferUncategorizedInflowIncome({
+        categoryId,
+        amountCents: amount,
+        explicitIsIncome: input.isIncome !== undefined ? Boolean(input.isIncome) : undefined,
+        incomeMonth: input.incomeMonth ?? null,
+      });
+      isIncome = inferred.isIncome;
+      incomeMonth = inferred.incomeMonth;
     }
 
     const [row] = await db
@@ -344,7 +346,10 @@ export async function createSplitWithChildren(
           categoryId = c.categoryId ? Number(c.categoryId) : null;
           isIncome = false;
         } else {
-          isIncome = categoryId == null && childAmount > 0;
+          isIncome = inferUncategorizedInflowIncome({
+            categoryId,
+            amountCents: childAmount,
+          }).isIncome;
         }
       }
 

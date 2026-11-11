@@ -3,7 +3,7 @@ import type { BudgetApiDeps } from "./types";
 import { jsonReq } from "./client";
 
 export function createAccountsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addAccount" | "deleteAccount" | "updateAccount" | "reorderAccount"> {
-  const { dataRef, setData, reload, runMutation, withSync, addToast } = deps;
+  const { dataRef, setData, runMutation, withSync, optimisticMutation, addToast } = deps;
   const api: Pick<BudgetAppApi, "addAccount" | "deleteAccount" | "updateAccount" | "reorderAccount"> = {
   addAccount: async (v) => {
     return withSync(() =>
@@ -18,35 +18,32 @@ export function createAccountsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addA
   deleteAccount: async (id) => {
     const prevAccount = dataRef.current?.accounts.find((a) => a.id === id);
     const prevAccountSnapshot = prevAccount ? { ...prevAccount } : null;
-    setData((prev) => {
-      if (!prev) return prev;
-      const accounts = prev.accounts.filter((a) => a.id !== id);
-      return { ...prev, accounts, budgetIndex: undefined };
-    });
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq(`/api/accounts?id=${id}`, { method: "DELETE" });
-        },
-        { success: "Account deleted.", failure: "Failed to delete account." },
-        {
-          onRollback: () => {
-            if (prevAccountSnapshot) {
-              setData((current) => {
-                if (!current) return current;
-                if (current.accounts.some((a) => a.id === id)) return current;
-                return {
-                  ...current,
-                  accounts: [...current.accounts, prevAccountSnapshot],
-                  budgetIndex: undefined,
-                };
-              });
-            }
-            reload().catch(() => {});
-          },
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const accounts = prev.accounts.filter((a) => a.id !== id);
+          return { ...prev, accounts, budgetIndex: undefined };
+        });
+      },
+      request: async () => {
+        return await jsonReq(`/api/accounts?id=${id}`, { method: "DELETE" });
+      },
+      messages: { success: "Account deleted.", failure: "Failed to delete account." },
+      rollback: () => {
+        if (prevAccountSnapshot) {
+          setData((current) => {
+            if (!current) return current;
+            if (current.accounts.some((a) => a.id === id)) return current;
+            return {
+              ...current,
+              accounts: [...current.accounts, prevAccountSnapshot],
+              budgetIndex: undefined,
+            };
+          });
         }
-      )
-    );
+      },
+    });
   },
   updateAccount: async (id, patch, opts?: { undo?: boolean }) => {
     const prevAccount = dataRef.current?.accounts.find((a) => a.id === id);
@@ -64,39 +61,40 @@ export function createAccountsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addA
           };
         });
       }
-      reload().catch(() => {});
     };
     const sendPatch = (p: typeof patch) => {
-      setData((prev) => {
-        if (!prev) return prev;
-        const accounts = prev.accounts.map((a) => {
-          if (a.id !== id) return a;
-          const nextKind = p.kind !== undefined ? p.kind : a.kind;
-          const nextOnBudget =
-            p.onBudget !== undefined
-              ? p.onBudget
-              : p.kind !== undefined
-                ? p.kind !== "offbudget"
-                : a.onBudget;
-          return {
-            ...a,
-            ...p,
-            kind: nextKind,
-            onBudget: nextOnBudget,
-          };
-        });
-        return { ...prev, accounts, budgetIndex: undefined };
-      });
-      return withSync(() =>
-        runMutation(
-          async () => {
-            return await jsonReq("/api/accounts", {
-              method: "PATCH",
-              body: JSON.stringify({ id, ...p }),
+      return optimisticMutation({
+        plan: () => {
+          setData((prev) => {
+            if (!prev) return prev;
+            const accounts = prev.accounts.map((a) => {
+              if (a.id !== id) return a;
+              const nextKind = p.kind !== undefined ? p.kind : a.kind;
+              const nextOnBudget =
+                p.onBudget !== undefined
+                  ? p.onBudget
+                  : p.kind !== undefined
+                    ? p.kind !== "offbudget"
+                    : a.onBudget;
+              return {
+                ...a,
+                ...p,
+                kind: nextKind,
+                onBudget: nextOnBudget,
+              };
             });
-          },
-          // Close/reopen toasts are raised manually below so they can
-          // carry an Undo action; other patches use the default toast.
+            return { ...prev, accounts, budgetIndex: undefined };
+          });
+        },
+        request: async () => {
+          return await jsonReq("/api/accounts", {
+            method: "PATCH",
+            body: JSON.stringify({ id, ...p }),
+          });
+        },
+        // Close/reopen toasts are raised manually below so they can
+        // carry an Undo action; other patches use the default toast.
+        messages:
           p.archived !== undefined && opts?.undo !== false
             ? { success: undefined, failure: "Failed to update account." }
             : {
@@ -108,9 +106,8 @@ export function createAccountsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addA
                       : "Account updated.",
                 failure: "Failed to update account.",
               },
-          { onRollback: rollback }
-        )
-      );
+        rollback,
+      });
     };
     const result = await sendPatch(patch);
     void result;

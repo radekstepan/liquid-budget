@@ -1,3 +1,5 @@
+import { recordField } from "./guards.js";
+
 /**
  * YNAB4 data-version policy (see docs/ynab4-import-gaps.md G-01).
  *
@@ -6,6 +8,7 @@
  * migration (or are legacy-XML conversions) and cannot be trusted to
  * parse, so the zip boundary rejects them instead of misparsing.
  */
+
 export const MIN_SUPPORTED_BUDGET_DATA_VERSION: [number, number, number] = [2, 6, 0];
 export const CURRENT_BUDGET_DATA_VERSION = "4.2.0";
 const CURRENT_BUDGET_DATA_VERSION_TUPLE: [number, number, number] = [4, 2, 0];
@@ -50,8 +53,8 @@ function formatVersionTuple(t: [number, number, number]): string {
  * `fileMetaData.budgetDataVersion` is missing/unparseable or older
  * than 2.6. Returns the normalized version string on success.
  */
-export function assertYnab4BudgetDataVersion(ynabData: any): string {
-  const raw = ynabData?.fileMetaData?.budgetDataVersion;
+export function assertYnab4BudgetDataVersion(ynabData: unknown): string {
+  const raw = recordField(recordField(ynabData, "fileMetaData"), "budgetDataVersion");
   const parsed = parseBudgetDataVersion(raw);
   if (parsed == null) {
     throw new Error(
@@ -71,8 +74,8 @@ export function assertYnab4BudgetDataVersion(ynabData: any): string {
  * Collect non-fatal version warnings for data that passed the gate:
  * a single notice when the version is older than the current 4.2.0.
  */
-export function collectYnab4VersionWarnings(ynabData: any): string[] {
-  const raw = ynabData?.fileMetaData?.budgetDataVersion;
+export function collectYnab4VersionWarnings(ynabData: unknown): string[] {
+  const raw = recordField(recordField(ynabData, "fileMetaData"), "budgetDataVersion");
   const parsed = parseBudgetDataVersion(raw);
   if (parsed == null) return [];
   if (compareVersionTuples(parsed, CURRENT_BUDGET_DATA_VERSION_TUPLE) < 0) {

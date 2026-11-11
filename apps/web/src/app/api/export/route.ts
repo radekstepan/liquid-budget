@@ -1,12 +1,14 @@
-import { NextRequest } from "next/server";
-import { getDefaultDb, exportYnab4Zip, exportBudgetCsv, exportBudgetJson, exportBudgetSqlite } from "@ynab/server";
-import { optionalErrorMessage } from "../errors";
+import type { NextRequest } from "next/server";
+import { createReadStream, promises as fsp } from "node:fs";
+import { Readable } from "node:stream";
+import { getDefaultDb, exportYnab4ZipToFile, exportBudgetCsv, exportBudgetJson, exportBudgetSqlite } from "@ynab/server";
+import { apiErrorResponse } from "../errors";
 import { mutationGuardResponse } from "../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
-// TODO(P2) [logging]: replace console-free error mapping below with logger abstraction +
-// apiErrorResponse for consistent client envelopes.
+const log = createScopedLogger("export");
 
 export async function GET(req: NextRequest) {
   // Full-budget dump: sensitive read, same loopback bar as mutations.
@@ -51,17 +53,31 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const buffer = await exportYnab4Zip(db);
-    return new Response(new Uint8Array(buffer), {
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="budget-${today}.y4backup"`,
-      },
-    });
+    // P1 export-perf: the archive is assembled on disk with bounded memory
+    // and streamed to the client; only the staging path (never the bytes)
+    // is held. Cleanup runs when the file stream closes (or errors).
+    const tmp = await exportYnab4ZipToFile(db);
+    const cleanup = () => {
+      fsp.unlink(tmp.filePath).catch(() => {});
+    };
+    try {
+      const size = (await fsp.stat(tmp.filePath)).size;
+      const nodeStream = createReadStream(tmp.filePath);
+      nodeStream.on("error", cleanup);
+      nodeStream.on("close", cleanup);
+      return new Response(Readable.toWeb(nodeStream) as ReadableStream, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="budget-${today}.y4backup"`,
+          "Content-Length": String(size),
+        },
+      });
+    } catch (err) {
+      cleanup();
+      throw err;
+    }
   } catch (err) {
-    return Response.json(
-      { error: optionalErrorMessage(err) ?? "Failed to export data" },
-      { status: 500 }
-    );
+    log.error("Error:", toLogDetails(err));
+    return apiErrorResponse(err);
   }
 }

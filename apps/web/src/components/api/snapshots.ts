@@ -27,9 +27,9 @@ export function createSnapshotsApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "lis
     return withSync(() =>
       runMutation(
         async () => {
-          await jsonReq("/api/snapshots?action=restore", {
+          await jsonReq("/api/snapshots", {
             method: "POST",
-            body: JSON.stringify({ id }),
+            body: JSON.stringify({ action: "restore", id }),
           });
         },
         { success: "Snapshot restored.", failure: "Failed to restore snapshot.", notifyFailure: false }

@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import type { BudgetData, BudgetResult } from "@ynab/logic";
 import { monthKey, num, parseMonthKey, previousMonthKey } from "@ynab/logic";
-import { isInternalGroup } from "./BudgetView.js";
+import { isInternalGroup } from "./budgetViewHelpers.js";
 
 export type QuickBudgetType = "lastMonth" | "spentLastMonth" | "avgBudgeted" | "clear";
 

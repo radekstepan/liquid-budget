@@ -7,10 +7,9 @@ import type {
   MergeOverrides,
   Query,
   Transaction,
+  TransactionMergeResponse,
 } from "@ynab/logic";
 import { num, pickMergePrimary } from "@ynab/logic";
-// TODO(P2) [merge-dedupe]: selection recomputes pickMergePrimary client-side — prefer server
-// merged.id response to avoid duplicating merge-rule knowledge in UI.
 import { useLocalStorage } from "../useLocalStorage.js";
 import type { SortKey, SortState } from "./registerTypes.js";
 import {
@@ -40,7 +39,7 @@ export function useRegisterState({
   onSelectedIdsChange?: (update: Set<number> | ((prev: Set<number>) => Set<number>)) => void;
   controlledSelectedRecurringIds?: Set<number>;
   onSelectedRecurringIdsChange?: (update: Set<number> | ((prev: Set<number>) => Set<number>)) => void;
-  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void> | void;
+  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<TransactionMergeResponse | void> | void;
   onClearFilter?: () => void;
 }) {
   const [appliedQuery, setAppliedQuery] = useState<Query | null>(null);
@@ -104,12 +103,20 @@ export function useRegisterState({
       : setInternalSelectedRecurringIds;
 
   // Confirm a merge preview: run the merge, then leave the surviving
-  // (merged) row selected. On failure the modal stays open with the
-  // error and the selection is untouched.
+  // (merged) row selected. The survivor id comes from the server response;
+  // the client-side recompute below is only a compat fallback for
+  // BudgetAppApi impls that resolve void (tests, privacy-blocked).
+  // On failure the modal stays open with the error and the selection is
+  // untouched.
   const confirmMergePreview = useCallback(
     async (ids: number[], overrides: MergeOverrides) => {
       if (!onMergeTransactions) return;
-      await onMergeTransactions(ids, overrides);
+      const result = await onMergeTransactions(ids, overrides);
+      setMergePreviewIds(null);
+      if (result) {
+        setSelectedIds(new Set([result.mergedId]));
+        return;
+      }
       const [a, b] = ids.map((id) => data.transactions.find((t) => t.id === id));
       if (a && b) {
         const toMergeable = (t: Transaction): MergeableTransaction => ({
@@ -122,7 +129,6 @@ export function useRegisterState({
       } else {
         setSelectedIds(new Set());
       }
-      setMergePreviewIds(null);
     },
     [data.transactions, onMergeTransactions, setSelectedIds]
   );

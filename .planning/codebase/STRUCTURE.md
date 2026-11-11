@@ -86,7 +86,7 @@
 | New page/view | `packages/ui/src/*View.tsx` + sidebar entry (`Sidebar.tsx`/`navVisibility.ts`); only add a slug route if it must be deep-linkable (see `parseSlug`) |
 | New API endpoint | `apps/web/src/app/api/<name>/route.ts` + `schemas.ts`, implement in `packages/server/src/queries/<name>.ts` |
 | New budget rule | `packages/logic/src/` (pure fn) + re-export in `index.ts`, call from `server/queries/*` or `ui/*` |
-| New table/column | `packages/server/src/schema.ts` + new `migrations/NNNN_*.sql` (append-only; `yarn db:generate` from `@ynab/web` writes into the server migrations dir) |
+| New table/column | `packages/server/src/schema.ts` + new `migrations/NNNN_*.sql` (append-only; `yarn db:generate` is owned by `@ynab/server`, see `docs/toolchain-adr.md` item 4) |
 | New shared component | `packages/ui/src/ui.tsx` or new file + `index.ts` export |
 | New import/export format | `packages/server/src/import-*.ts` / `export-*.ts` + parsing help in `packages/logic/src/csv-import.ts` |
 

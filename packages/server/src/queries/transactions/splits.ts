@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { ClearedStatus } from "@ynab/logic";
-import { classifyBoundaryTransfer, isTransferPayee, TransactionError } from "@ynab/logic";
+import { classifyBoundaryTransfer, inferUncategorizedInflowIncome, isTransferPayee, TransactionError } from "@ynab/logic";
 import { assertEntityInvariants } from "../../invariants.js";
 import type { Database } from "../../client.js";
 import { withTransaction } from "../../transaction.js";
@@ -196,7 +196,10 @@ export async function updateSplit(
           categoryId = c.categoryId ? Number(c.categoryId) : null;
           isIncome = false;
         } else {
-          isIncome = categoryId == null && childAmount > 0;
+          isIncome = inferUncategorizedInflowIncome({
+            categoryId,
+            amountCents: childAmount,
+          }).isIncome;
         }
       }
 

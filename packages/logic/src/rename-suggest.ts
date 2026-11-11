@@ -157,33 +157,49 @@ export type LlmChatMessage = {
  * mapped (even unchanged ones) so the response is a total function over
  * the request — no-ops are filtered locally by
  * {@link parseRenameSuggestions}, not by the model.
+ *
+ * Privacy: the wire payload is allowlisted to payee display names (+ a
+ * count). Memos often contain account numbers, so memo context is only
+ * attached when `includeMemos` is explicitly enabled — never ids,
+ * amounts, dates, or statuses.
  */
-export function buildRenameSuggestMessages(candidates: RenameCandidate[]): LlmChatMessage[] {
+export function buildRenameSuggestMessages(
+  candidates: RenameCandidate[],
+  opts?: { includeMemos?: boolean }
+): LlmChatMessage[] {
+  const includeMemos = opts?.includeMemos === true;
   const lines = candidates.map((c, i) => {
     const memoClause =
-      c.memos.length > 0
+      includeMemos && c.memos.length > 0
         ? ` — memo${c.memos.length === 1 ? "" : "s"}: ${c.memos.map((m) => JSON.stringify(m)).join("; ")}`
         : "";
     return `${i + 1}. "${c.payee}"${c.count > 1 ? ` (${c.count} transactions)` : ""}${memoClause}`;
   });
+  const rules = [
+    "You clean up bank statement payee names for a personal budgeting app.",
+    "Each raw payee becomes a short, human-readable merchant name.",
+    "",
+    "Rules:",
+    "- Strip card/transaction reference codes, dates, phone numbers, and store numbers (e.g. \"AMZN Mktp US*RT3ABCD12\" -> \"Amazon\", \"WHOLE FOODS #24\" -> \"Whole Foods\").",
+    "- Use natural capitalization (\"BC Ferries\", not \"BCF1\" or \"BC FERRIES\").",
+    "- Keep genuinely distinct merchants distinct; never merge two different businesses into one name.",
+  ];
+  if (includeMemos) {
+    rules.push(
+      "- A memo shown after a payee is extra context to help identify the merchant; use it for disambiguation but never copy memo text into the target unless it is the merchant's name."
+    );
+  }
+  rules.push(
+    "- Never output a payee starting with \"Transfer :\" — that prefix is reserved by the app.",
+    "- Respond with JSON ONLY, no prose or markdown: an object with a \"renames\" array.",
+    "- Include EVERY numbered input exactly once, echoing its raw payee text verbatim in \"source\" (payee only, never the memo), even when it is already clean (then \"target\" equals \"source\").",
+    "",
+    'Example: {"renames": [{"source": "AMZN Mktp US*RT3ABCD12", "target": "Amazon"}]}'
+  );
   return [
     {
       role: "system",
-      content: [
-        "You clean up bank statement payee names for a personal budgeting app.",
-        "Each raw payee becomes a short, human-readable merchant name.",
-        "",
-        "Rules:",
-        "- Strip card/transaction reference codes, dates, phone numbers, and store numbers (e.g. \"AMZN Mktp US*RT3ABCD12\" -> \"Amazon\", \"WHOLE FOODS #24\" -> \"Whole Foods\").",
-        "- Use natural capitalization (\"BC Ferries\", not \"BCF1\" or \"BC FERRIES\").",
-        "- Keep genuinely distinct merchants distinct; never merge two different businesses into one name.",
-        "- A memo shown after a payee is extra context to help identify the merchant; use it for disambiguation but never copy memo text into the target unless it is the merchant's name.",
-        "- Never output a payee starting with \"Transfer :\" — that prefix is reserved by the app.",
-        "- Respond with JSON ONLY, no prose or markdown: an object with a \"renames\" array.",
-        "- Include EVERY numbered input exactly once, echoing its raw payee text verbatim in \"source\" (payee only, never the memo), even when it is already clean (then \"target\" equals \"source\").",
-        "",
-        'Example: {"renames": [{"source": "AMZN Mktp US*RT3ABCD12", "target": "Amazon"}]}',
-      ].join("\n"),
+      content: rules.join("\n"),
     },
     {
       role: "user",

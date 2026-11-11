@@ -1,7 +1,10 @@
 import { getDefaultDb, resetAndSeedDatabase } from "@ynab/server";
 import { mutationGuardResponse } from "../guard";
+import { createScopedLogger, toLogDetails } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+
+const log = createScopedLogger("reset");
 
 /**
  * POST /api/reset
@@ -32,7 +35,7 @@ export async function POST(req?: Request) {
     await resetAndSeedDatabase(db);
     return Response.json({ ok: true, message: "Database reset and re-seeded." });
   } catch (err) {
-    console.error("[reset]", err);
+    log.error("Error:", toLogDetails(err));
     return Response.json(
       { ok: false, message: String(err) },
       { status: 500 }

@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
-import { classifyBoundaryTransfer, TransactionError } from "@ynab/logic";
+import { classifyBoundaryTransfer, inferUncategorizedInflowIncome, TransactionError } from "@ynab/logic";
 import { assertEntityInvariants } from "../../invariants.js";
 import type { Database } from "../../client.js";
 import { withTransaction } from "../../transaction.js";
@@ -422,9 +422,15 @@ export async function updateTransaction(db: Database, id: number, patch: UpdateT
       const incomeMonthChanged =
         "incomeMonth" in p && (p.incomeMonth as string | null) !== (current.incomeMonth ?? null);
       if (categoryChanged || amountChanged || accountChanged || incomeExplicit || incomeMonthChanged) {
-        const isIncome = isEligibleForIncome
-          ? ("isIncome" in p ? Boolean(p.isIncome) : true)
-          : false;
+        // Shared leaf rule with the optimistic planner: eligible
+        // uncategorized inflows default to income unless explicitly
+        // un-flagged. The income month keeps its patched/current value
+        // here (only cleared below); lineage clearing stays server-side.
+        const { isIncome } = inferUncategorizedInflowIncome({
+          categoryId: finalCatId,
+          amountCents: newAmount,
+          explicitIsIncome: "isIncome" in p ? Boolean(p.isIncome) : undefined,
+        });
         p.isIncome = isIncome;
         if (!isIncome) {
           p.incomeMonth = null;

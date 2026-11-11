@@ -53,9 +53,9 @@ export function createPayeesApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "ensure
     return withSync(() =>
       runMutation(
         async () => {
-          await jsonReq("/api/payees?action=merge", {
+          await jsonReq("/api/payees", {
             method: "POST",
-            body: JSON.stringify({ targetId, sourceIds }),
+            body: JSON.stringify({ action: "merge", targetId, sourceIds }),
           });
         },
         { success: "Payees merged.", failure: "Failed to merge payees.", notifyFailure: false }

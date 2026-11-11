@@ -14,12 +14,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      // TODO(P2) [test-bar]: raise functions threshold 50->70 and cover BudgetView/BudgetApp/
-      // SpendingTrends branches directly — E2E happy paths can't bisect CC-waterfall regressions.
       thresholds: {
         statements: 85,
         branches: 80,
-        functions: 50,
+        functions: 70,
         lines: 85,
       },
     },

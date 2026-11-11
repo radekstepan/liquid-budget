@@ -50,6 +50,31 @@ describe("SettingsView AI suggestions", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("warns that payee names leave the machine when AI suggestions are available", () => {
+    const { rerender } = render(
+      <SettingsView
+        rules={[]}
+        onAdd={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        suggestStatus={{ enabled: true, candidates: [], totalUnique: 0, truncated: false }}
+        onSuggestRules={async () => ({ suggestions: [], skipped: [], model: "m", processed: 0 })}
+      />
+    );
+    expect(screen.getByText("Payee names are sent to your configured AI service.")).toBeDefined();
+    rerender(
+      <SettingsView
+        rules={[]}
+        onAdd={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        suggestStatus={{ enabled: false, candidates: [], totalUnique: 0, truncated: false }}
+        onSuggestRules={async () => ({ suggestions: [], skipped: [], model: "m", processed: 0 })}
+      />
+    );
+    expect(screen.queryByText("Payee names are sent to your configured AI service.")).toBeNull();
+  });
+
   it("reviews suggestions and creates only the selected rules", async () => {
     const onSuggestRules = vi.fn(async () => ({
       suggestions: [

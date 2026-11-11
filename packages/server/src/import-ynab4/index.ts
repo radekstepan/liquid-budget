@@ -1,4 +1,6 @@
 export { detectMilliunitScale } from "./amounts.js";
+export type { Ynab4Record } from "./guards.js";
+export { arrayField, asRecord, recordField } from "./guards.js";
 export type {
   ExtractedYnab4Data,
   ImportYnab4Options,

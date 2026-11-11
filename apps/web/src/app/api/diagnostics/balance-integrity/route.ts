@@ -1,4 +1,5 @@
 import {
+  checkStorageIntegrity,
   getDefaultDb,
   verifyBalanceIntegrity,
   recomputeAccountBalances,
@@ -12,10 +13,12 @@ export async function GET() {
   try {
     const db = getDefaultDb();
     const issues = await verifyBalanceIntegrity(db);
+    const storage = await checkStorageIntegrity(db);
     return Response.json({
-      ok: issues.length === 0,
+      ok: issues.length === 0 && storage.ok,
       issueCount: issues.length,
       issues,
+      storage,
     });
   } catch (err) {
     return Response.json(
@@ -32,10 +35,12 @@ export async function POST(req?: Request) {
     const db = getDefaultDb();
     const result = await recomputeAccountBalances(db);
     const issues = await verifyBalanceIntegrity(db);
+    const storage = await checkStorageIntegrity(db);
     return Response.json({
-      ok: issues.length === 0,
+      ok: issues.length === 0 && storage.ok,
       repairedCount: result.updatedCount,
       remainingIssues: issues,
+      storage,
     });
   } catch (err) {
     return Response.json(

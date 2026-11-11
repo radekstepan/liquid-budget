@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // TODO(P2) [toolchain]: document why build uses `next build --webpack` (better-sqlite3 bundling?)
-  // vs Turbopack on Next 16; remove flag if not deliberate. See apps/web/package.json build script.
+  // Deliberate: API routes bundle @ynab/server (transpilePackages, not
+  // serverExternalPackages), whose better-sqlite3 dependency is a native
+  // `.node` binding that Turbopack (the Next 16 default) cannot bundle.
+  // See docs/toolchain-adr.md item 2; drop the flag only with a
+  // stdlib-only sqlite driver or an externalized server.
   transpilePackages: ["@ynab/logic", "@ynab/server", "@ynab/ui", "@ynab/theme"],
 };
 

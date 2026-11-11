@@ -7,6 +7,7 @@ import type {
   MergeOverrides,
   Query,
   TransactionFlagColor,
+  TransactionMergeResponse,
 } from "@ynab/logic";
 import type { SearchListOption } from "@ynab/theme";
 import { MergePreviewModal } from "./MergePreviewModal.js";
@@ -87,7 +88,7 @@ export const TransactionsView = memo(function TransactionsView({
   onFlag: (id: number, color: TransactionFlagColor | null) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
   onBulkUpdate?: (ids: number[], patch: BulkUpdateTransactionPatch) => Promise<void> | void;
-  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void> | void;
+  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<TransactionMergeResponse | void> | void;
   /** Confirm a duplicate group as legitimate so it is never flagged again. */
   onDismissDuplicateGroup?: (fingerprint: string) => Promise<void> | void;
   /** Existing payee names for the searchable payee field in the merge preview. */

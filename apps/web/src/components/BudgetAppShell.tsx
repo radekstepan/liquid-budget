@@ -5,12 +5,8 @@ import { BudgetApp, ErrorBoundary, useTodayISO, type BudgetAppApi } from "@ynab/
 import { Notice, Toast } from "@ynab/theme";
 import type { BudgetData } from "@ynab/logic";
 import { invalidateBudgetIndex, parseBudgetDataResponse, parseRecurringAutoPostResponse } from "@ynab/logic";
-import { createBudgetApi, jsonReq, useToasts, type MutationMessages } from "./api/index";
-
-// TODO(P1) [optimistic-helper]: extract single optimisticMutation(plan,request,rollback) helper —
-// reload/runMutation/seq-guard + reconcile preview + skipReload logic is now 3 copies.
-// TODO(P2) [logging]: replace console.error paths in shell with logger abstraction (Vitest
-// onConsoleLog ban doesn't cover Next runtime; apiErrorResponse leaks raw msg for unknown errors).
+import { logger } from "@/lib/logger";
+import { createBudgetApi, createOptimisticMutation, jsonReq, reportBudgetReloadFailure, useToasts, type MutationMessages } from "./api/index";
 
 export function BudgetAppShell({
   initialView = "budget",
@@ -87,8 +83,7 @@ export function BudgetAppShell({
         try {
           await reload();
         } catch (refreshErr) {
-          console.error("Budget reload failed after successful mutation:", refreshErr);
-          addToast("Saved changes, but failed to refresh latest budget data.", "warn");
+          reportBudgetReloadFailure(refreshErr, addToast);
         }
       }
 
@@ -109,7 +104,10 @@ export function BudgetAppShell({
   const runAutoPost = useCallback(async () => {
     try {
       const autoPostRes = parseRecurringAutoPostResponse(
-        await jsonReq<unknown>("/api/recurring?action=autopost", { method: "POST" })
+        await jsonReq<unknown>("/api/recurring", {
+          method: "POST",
+          body: JSON.stringify({ action: "autopost" }),
+        })
       );
       if (autoPostRes) {
         const count = autoPostRes.postedCount ?? 0;
@@ -141,7 +139,7 @@ export function BudgetAppShell({
         }
       }
     } catch (autoErr) {
-      console.error("Auto-post failed:", autoErr);
+      logger.error("Auto-post failed:", autoErr);
     }
   }, [addToast]);
 
@@ -182,7 +180,7 @@ export function BudgetAppShell({
       try {
         await reload();
       } catch (e: unknown) {
-        console.error("Budget reload after date rollover failed:", e);
+        logger.error("Budget reload after date rollover failed:", e);
       }
     })();
     return () => {
@@ -192,7 +190,15 @@ export function BudgetAppShell({
 
   const api: BudgetAppApi = {
     reload,
-    ...createBudgetApi({ dataRef, setData, reload, runMutation, withSync, addToast }),
+    ...createBudgetApi({
+      dataRef,
+      setData,
+      reload,
+      runMutation,
+      optimisticMutation: createOptimisticMutation({ reload, runMutation, withSync, addToast }),
+      withSync,
+      addToast,
+    }),
   };
 
   if (error) {

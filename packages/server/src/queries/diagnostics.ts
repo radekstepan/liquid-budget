@@ -22,6 +22,49 @@ export type BudgetIntegrityReport = {
   month: string;
 };
 
+export type StorageIntegrityReport = {
+  /** true when `PRAGMA integrity_check` returns exactly one "ok" row */
+  ok: boolean;
+  /** corruption detail lines, capped (empty when ok) */
+  errors: string[];
+};
+
+const MAX_STORAGE_ERROR_LINES = 5;
+const MAX_STORAGE_ERROR_CHARS = 300;
+
+/**
+ * Parse raw `PRAGMA integrity_check` rows into a report. Pure (no I/O) so
+ * corruption shapes are unit-testable without a corrupt database file.
+ */
+export function parseIntegrityCheckRows(rows: unknown): StorageIntegrityReport {
+  const values = (
+    Array.isArray(rows) ? rows : []
+  ).map((r) =>
+    typeof r === "string" ? r : String(Object.values(r as Record<string, unknown>)[0] ?? "")
+  );
+  const ok = values.length === 1 && values[0]!.toLowerCase() === "ok";
+  return {
+    ok,
+    errors: ok
+      ? []
+      : values.slice(0, MAX_STORAGE_ERROR_LINES).map((v) => v.slice(0, MAX_STORAGE_ERROR_CHARS)),
+  };
+}
+
+/**
+ * Run SQLite's `PRAGMA integrity_check` against the live database. Read-only
+ * and fast for this workload (single-user budgets are a few MB at most); both
+ * diagnostics endpoints surface the result as `storage` alongside their
+ * domain checks so page-cache corruption is caught before it silently skews
+ * balances. Corrupt pages make most domain reads throw first, so a failing
+ * `storage.ok` with a 200 domain result means "page-level fault, domain math
+ * still computed" — treat any `ok: false` as stop-and-restore-from-snapshot.
+ */
+export async function checkStorageIntegrity(db: Database): Promise<StorageIntegrityReport> {
+  const rows = db.$client.prepare("PRAGMA integrity_check").all();
+  return parseIntegrityCheckRows(rows);
+}
+
 /**
  * Audit all accounts in the database and verify that `account.balance` equals
  * the sum of all direct transaction amounts minus incoming transfer amounts

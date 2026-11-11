@@ -1,6 +1,7 @@
 import { dollarsToCents, type ImportSummary } from "@ynab/logic";
 import type { Db } from "../client.js";
 import { withTransaction } from "../transaction.js";
+import { arrayField, recordField } from "./guards.js";
 import { resetDatabase } from "../seed.js";
 import { setSettings } from "../settings.js";
 import { detectMilliunitScale } from "./amounts.js";
@@ -39,7 +40,7 @@ export async function importYnab4FromArchive(db: Db, archive: Buffer | ArrayBuff
 
 export async function importYnab4(
   db: Db,
-  ynabData: any,
+  ynabData: unknown,
   settingsXmlOrObj?: string | Ynab4Settings,
   options?: ImportYnab4Options
 ) {
@@ -48,7 +49,7 @@ export async function importYnab4(
     // before the wipe, so a failed import never destroys the ledger.
     // A missing version is tolerated here for programmatic callers;
     // the zip boundary (extractYnab4DataFromZip) already rejects it.
-    const rawVersion = ynabData?.fileMetaData?.budgetDataVersion;
+    const rawVersion = recordField(recordField(ynabData, "fileMetaData"), "budgetDataVersion");
     if (rawVersion !== undefined && rawVersion !== null) {
       assertYnab4BudgetDataVersion(ynabData);
     }
@@ -75,11 +76,11 @@ export async function importYnab4(
     // 1. Wipe current data
     await resetDatabase(db, true);
 
-    const yAccounts = ynabData.accounts || [];
-    const yPayees = ynabData.payees || [];
-    const yMasterCategories = ynabData.masterCategories || [];
-    const yScheduled = ynabData.scheduledTransactions || [];
-    const yBudgets = ynabData.monthlyBudgets || [];
+    const yAccounts = arrayField(ynabData, "accounts");
+    const yPayees = arrayField(ynabData, "payees");
+    const yMasterCategories = arrayField(ynabData, "masterCategories");
+    const yScheduled = arrayField(ynabData, "scheduledTransactions");
+    const yBudgets = arrayField(ynabData, "monthlyBudgets");
 
     const ctx: Ynab4ImportContext = {
       db,
@@ -101,8 +102,8 @@ export async function importYnab4(
       accNameMap: new Map<number, string>(),
       allAccounts: [],
       fallbackTransferCategoryId: null,
-      subTxById: new Map<string, { parent: any; sub: any }>(),
-      txById: new Map<string, any>(),
+      subTxById: new Map<string, { parent: unknown; sub: unknown }>(),
+      txById: new Map<string, unknown>(),
       processedTransferIds: new Set<string>(),
       totalImportedTxCount: 0,
       legacyIncomeSentinelCount: 0,
@@ -115,7 +116,7 @@ export async function importYnab4(
     };
 
     importPayees(db, yPayees, ctx);
-    await importAccounts(db, yAccounts, ynabData.reconciliations || [], ctx);
+    await importAccounts(db, yAccounts, arrayField(ynabData, "reconciliations"), ctx);
     await importCategories(db, yMasterCategories, yBudgets, ctx);
     await importBudgets(db, yBudgets, ctx);
     await importTransactions(db, ynabData, ctx);
@@ -159,7 +160,7 @@ export async function importYnab4(
     // them back. The document root wins on overlap
     // (`currencyISOSymbol` exists in both halves).
     const budgetMetaData =
-      options?.budgetMetaData ?? parseYnab4BudgetMetaData(ynabData?.budgetMetaData);
+      options?.budgetMetaData ?? parseYnab4BudgetMetaData(recordField(ynabData, "budgetMetaData"));
     const settings: Ynab4BudgetSettings = { ...xmlSettings, ...budgetMetaData };
     // `resetDatabase` above wiped the settings table; rewrite it with
     // only the defined values so a partial document leaves no blanks.

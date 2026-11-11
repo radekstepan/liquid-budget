@@ -1,4 +1,5 @@
 import AdmZip from "adm-zip";
+import { recordField } from "./guards.js";
 import { assertYnab4BudgetDataVersion, collectYnab4VersionWarnings } from "./versions.js";
 import { parseYnab4SettingsXml, parseYnab4BudgetMetaData } from "./settings-xml.js";
 import type { ExtractedYnab4Data } from "./types.js";
@@ -55,7 +56,9 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
     throw new Error("Backup settings payload exceeds the size limit");
   }
 
-  const ynabData = JSON.parse(ynab4JsonStr);
+  // JSON.parse yields `any`; the document is untrusted wire data, so treat
+  // it as `unknown` from here on and read only through `./guards.js`.
+  const ynabData: unknown = JSON.parse(ynab4JsonStr);
   // Version gate (G-01): reject backups that predate fileMetaData (4.0)
   // or the 2.6 floor before any import step can misparse them.
   assertYnab4BudgetDataVersion(ynabData);
@@ -64,7 +67,7 @@ export function extractYnab4DataFromZip(buffer: Buffer | ArrayBuffer): Extracted
     ...collectYnab4PackageWarnings(zipEntries.map((e) => e.entryName)),
   ];
   const settings = settingsXml ? parseYnab4SettingsXml(settingsXml) : undefined;
-  const budgetMetaData = parseYnab4BudgetMetaData(ynabData.budgetMetaData);
+  const budgetMetaData = parseYnab4BudgetMetaData(recordField(ynabData, "budgetMetaData"));
   return { ynabData, settingsXml, settings, budgetMetaData, warnings };
 }
 

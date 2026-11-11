@@ -14,6 +14,25 @@ export type MutationOptions = {
   skipReload?: boolean;
 };
 
+export type OptimisticMutationOptions<T> = {
+  /** Optimistic preview applied synchronously before the request fires. */
+  plan?: () => void;
+  request: () => Promise<T>;
+  messages: MutationMessages<T>;
+  /** Local-state restore; the helper appends the silent confirming reload. */
+  rollback?: () => void;
+  /** Patch server-assigned ids into the optimistic rows (runs pre-toast). */
+  mapResult?: (result: T) => void;
+  skipReload?: boolean;
+  /**
+   * Resolve as soon as the POST lands and reload detached (reconcile):
+   * implies skipReload for the inner runMutation.
+   */
+  deferredReload?: boolean;
+};
+
+export type OptimisticMutation = <T>(opts: OptimisticMutationOptions<T>) => Promise<T>;
+
 export type RunMutation = <T>(
   action: () => Promise<T>,
   messages: MutationMessages<T>,
@@ -37,6 +56,7 @@ export type BudgetApiDeps = {
   setData: (value: SetStateAction<BudgetData | null>) => void;
   reload: () => Promise<void>;
   runMutation: RunMutation;
+  optimisticMutation: OptimisticMutation;
   withSync: <T>(fn: () => Promise<T>) => Promise<T>;
   addToast: ToastFn;
 };

@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
+import { translateConstraintError } from "../errors.js";
 import { withTransaction } from "../transaction.js";
 import { assignments, categories, categoryGroups, payees, recurring, recurringSubTransactions, transactions } from "../schema.js";
 import { assertValidAmount } from "./transactions.js";
@@ -91,8 +92,14 @@ export async function updateCategoryGroup(
     const [row] = await db.select().from(categoryGroups).where(eq(categoryGroups.id, id));
     return row;
   }
-  const [row] = await db.update(categoryGroups).set(p).where(eq(categoryGroups.id, id)).returning();
-  return row;
+  try {
+    const [row] = await db.update(categoryGroups).set(p).where(eq(categoryGroups.id, id)).returning();
+    return row;
+  } catch (e) {
+    // No withTransaction here (single statement): translate UNIQUE name
+    // violations at the source like the tx path does.
+    throw translateConstraintError(e);
+  }
 }
 
 export async function renameCategoryGroup(db: Database, id: number, name: string) {
@@ -128,8 +135,14 @@ export async function updateCategory(
     const [row] = await db.select().from(categories).where(eq(categories.id, id));
     return row;
   }
-  const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
-  return row;
+  try {
+    const [row] = await db.update(categories).set(p).where(eq(categories.id, id)).returning();
+    return row;
+  } catch (e) {
+    // Single-statement update outside withTransaction: translate UNIQUE
+    // (group,name) and FOREIGN KEY (groupId) violations at the source.
+    throw translateConstraintError(e);
+  }
 }
 
 export async function updateCategoryGroupSort(db: Database, id: number, sort: number) {

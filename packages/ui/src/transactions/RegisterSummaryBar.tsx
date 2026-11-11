@@ -1,6 +1,6 @@
 "use client";
 
-import type { MergeOverrides } from "@ynab/logic";
+import type { MergeOverrides, TransactionMergeResponse } from "@ynab/logic";
 import { Button, Tooltip, money } from "@ynab/theme";
 import type { RegisterData } from "./useRegisterData.js";
 import type { RegisterState } from "./useRegisterState.js";
@@ -20,7 +20,7 @@ export function RegisterSummaryBar({
   onBulkEdit?: (ids: number[]) => void;
   onDelete: (id: number) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
-  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<void> | void;
+  onMergeTransactions?: (ids: number[], overrides?: MergeOverrides) => Promise<TransactionMergeResponse | void> | void;
 }) {
   const { selectedIds, setSelectedIds, setMergePreviewIds } = state;
   const { totals } = data;

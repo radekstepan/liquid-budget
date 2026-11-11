@@ -1,8 +1,7 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-// TODO(P2) [toolchain]: ADR better-sqlite3 vs node:sqlite (stable since Node 22) to remove native
-// binding fragility (rebuild after Node switch); pin @types/node to .nvmrc; unify Vitest to one
-// major; drop turbo ^build from lint/typecheck; consolidate db:generate ownership on @ynab/server.
+// Toolchain decisions (sqlite driver, @types/node pin, vitest, turbo
+// ordering, db:generate ownership): see docs/toolchain-adr.md.
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema.js";
 import { fileURLToPath } from "url";
@@ -37,6 +36,24 @@ const globalForDb = globalThis as typeof globalThis & {
 
 import { mkdirSync } from "fs";
 
+/**
+ * Storage-maintenance policy (P2 operational note — no scheduled VACUUM job):
+ *
+ * - WAL + `wal_autocheckpoint = 100` bounds the `-wal` file during long
+ *   server sessions; snapshot creation and the SQLite export additionally
+ *   force `wal_checkpoint(TRUNCATE)` first so backups/exports never read a
+ *   stale WAL tail (see snapshots.ts, export-budget.ts).
+ * - Compaction comes from `VACUUM INTO` (snapshot copies are compacted by
+ *   construction); a full-database `VACUUM` rewrite is never run on a
+ *   schedule because this workload is single-user with small (MB-scale)
+ *   files and VACUUM would block the single writer for no measurable gain.
+ * - Page-level corruption is surfaced, not scheduled around: both
+ *   diagnostics endpoints report `PRAGMA integrity_check` as `storage`
+ *   (see queries/diagnostics.ts `checkStorageIntegrity`), and snapshot
+ *   restore pre-flights the same pragma before touching the live file.
+ * - Repo hygiene: `yarn check:artifacts` fails if budget.db*, *.y4backup or
+ *   import.csv ever get git-tracked — keep it gating commits/CI.
+ */
 export function openDb(dbPath: string): Db {
   if (dbPath !== ":memory:") {
     mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });

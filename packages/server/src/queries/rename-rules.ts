@@ -7,6 +7,7 @@ import {
   matchesRenameRule,
 } from "@ynab/logic";
 import type { Db } from "../client.js";
+import { translateConstraintError } from "../errors.js";
 import { withTransaction } from "../transaction.js";
 import { payees, renameRules, transactions } from "../schema.js";
 
@@ -64,16 +65,22 @@ export async function createRenameRule(db: Db, input: RenameRuleInput): Promise<
   const targetPayee = input.targetPayee.trim();
   assertNotTransferRule(sourcePattern, targetPayee);
   const now = new Date().toISOString();
-  const [inserted] = await db
-    .insert(renameRules)
-    .values({
-      sourcePattern,
-      targetPayee,
-      operator: input.operator ?? "is",
-      createdAt: now,
-    })
-    .returning();
-  return toView(inserted!);
+  try {
+    const [inserted] = await db
+      .insert(renameRules)
+      .values({
+        sourcePattern,
+        targetPayee,
+        operator: input.operator ?? "is",
+        createdAt: now,
+      })
+      .returning();
+    return toView(inserted!);
+  } catch (e) {
+    // Single-statement insert outside withTransaction: translate the
+    // UNIQUE (source,target,operator) violation at the source.
+    throw translateConstraintError(e);
+  }
 }
 
 export async function updateRenameRule(
@@ -99,12 +106,18 @@ export async function updateRenameRule(
     values.targetPayee ?? current.targetPayee
   );
   values.updatedAt = new Date().toISOString();
-  const [updated] = await db
-    .update(renameRules)
-    .set(values)
-    .where(eq(renameRules.id, id))
-    .returning();
-  return updated ? toView(updated) : null;
+  try {
+    const [updated] = await db
+      .update(renameRules)
+      .set(values)
+      .where(eq(renameRules.id, id))
+      .returning();
+    return updated ? toView(updated) : null;
+  } catch (e) {
+    // Single-statement update outside withTransaction: translate UNIQUE
+    // violations at the source (same contract as createRenameRule).
+    throw translateConstraintError(e);
+  }
 }
 
 export function deleteRenameRule(db: Db, id: number): boolean {

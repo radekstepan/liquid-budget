@@ -863,5 +863,76 @@ describe("SpendingTrendsReport", () => {
       expect((g as HTMLElement).style.opacity).toBe("1");
     });
   });
+
+  describe("category filter checkboxes (test-bar)", () => {
+    it("toggles a single category off and updates the filter button count", () => {
+      const data = makeTestData();
+      render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter included categories" }));
+      expect(screen.getByText("Categories: All")).toBeInTheDocument();
+
+      const groceriesBox = screen.getByRole("checkbox", { name: "Groceries" });
+      expect(groceriesBox).toBeChecked();
+      fireEvent.click(groceriesBox);
+      expect(groceriesBox).not.toBeChecked();
+      // 3 of 4 categories remain: button shows the narrowed count.
+      expect(screen.getByText("Categories: 3/4")).toBeInTheDocument();
+      // Groceries leaves the breakdown table but Fuel stays (the open
+      // filter popover still lists Groceries, so scope to tbody rows).
+      const bodyText = Array.from(document.querySelectorAll("tbody tr"))
+        .map((r) => r.textContent ?? "")
+        .join("|");
+      expect(bodyText).not.toContain("Groceries");
+      // Top-level rows are master categories: Everyday Expenses survives on
+      // Fuel alone ($110), alongside Monthly Bills.
+      expect(bodyText).toContain("Everyday Expenses");
+      expect(bodyText).toContain("Monthly Bills");
+
+      fireEvent.click(groceriesBox);
+      expect(groceriesBox).toBeChecked();
+      expect(screen.getByText("Categories: All")).toBeInTheDocument();
+    });
+
+    it("toggles a whole master-category group off and back on", () => {
+      const data = makeTestData();
+      render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter included categories" }));
+      const groupBoxes = screen.getAllByRole("checkbox");
+      const everydayBox = groupBoxes.find((b) =>
+        b.closest("div")?.textContent?.includes("Everyday Expenses")
+      )!;
+      expect(everydayBox).toBeChecked();
+      fireEvent.click(everydayBox);
+      // Both Everyday subcategories are deselected.
+      expect(screen.getByRole("checkbox", { name: "Groceries" })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "Fuel" })).not.toBeChecked();
+      expect(screen.getByText("Categories: 2/4")).toBeInTheDocument();
+
+      fireEvent.click(everydayBox);
+      expect(screen.getByRole("checkbox", { name: "Groceries" })).toBeChecked();
+      expect(screen.getByText("Categories: All")).toBeInTheDocument();
+    });
+
+    it("toggles a subcategory from the drilled group-contextual filter", () => {
+      const data = makeTestData();
+      render(<SpendingTrendsReport data={data} startMonth="2026-04" endMonth="2026-06" />);
+
+      fireEvent.click(screen.getByText("Everyday Expenses"));
+      fireEvent.click(screen.getByRole("button", { name: "Filter included categories" }));
+      expect(screen.getByText("Filter: Everyday Expenses")).toBeInTheDocument();
+
+      const groceriesBox = screen.getByRole("checkbox", { name: "Groceries" });
+      fireEvent.click(groceriesBox);
+      expect(groceriesBox).not.toBeChecked();
+      expect(screen.getByText("Categories: 1/2")).toBeInTheDocument();
+      const drilledBodyText = Array.from(document.querySelectorAll("tbody tr"))
+        .map((r) => r.textContent ?? "")
+        .join("|");
+      expect(drilledBodyText).not.toContain("Groceries");
+      expect(drilledBodyText).toContain("Fuel");
+    });
+  });
 });
 

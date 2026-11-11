@@ -136,8 +136,6 @@ export async function reconcileAccount(
     const state = await getReconcileState(db, input.accountId, statementDate);
     const diff = state.workingBalance - input.statementBalance;
 
-    // TODO(P1) [reconcile-idempotency]: add idempotency key / disable-while-pending — rapid
-    // double-submit currently inserts two reconciliations rows (second is no-op flip).
     if (
       input.expectedWorkingBalance !== undefined &&
       input.expectedWorkingBalance !== null &&
@@ -147,6 +145,20 @@ export async function reconcileAccount(
         `Account balance changed since the reconcile modal was opened (expected working balance ${input.expectedWorkingBalance}, actual is ${state.workingBalance}). Please review the updated difference.`,
         422
       );
+    }
+    // No-op replay short-circuit: `clearedCount === 0` implies both flip
+    // targets below are empty, and `withTransaction` serializes concurrent
+    // submits on the connection mutex, so a replayed submit always observes
+    // the first one's flips. Returning the existing stamps (no new row)
+    // keeps unreconcile paired 1:1 with real rounds. First-time reconciles
+    // (no previous round) keep their row and stamps exactly as before.
+    if (diff === 0 && state.clearedCount === 0 && state.lastReconciledAt != null) {
+      return {
+        reconciledCount: 0,
+        adjustmentTransactionId: null,
+        finalDiff: 0,
+        lastReconciledAt: state.lastReconciledAt,
+      };
     }
     if (diff !== 0) {
       if (input.adjustmentCategoryId == null) {

@@ -14,11 +14,22 @@
  * Amounts in `BudgetData` are decimal strings; delta maps and row builders
  * use integer cents via `num()`/`toFixed(2)`, matching the server.
  */
-// TODO(P2) [optimistic-drift]: this module mirrors server income/boundary/split rules — any server
-// rule change needs parallel update here; mitigate with shared helpers (classifyBoundaryTransfer
-// done) + transactionUpdateNeedsReload/skipReload safety net; consider extracting shared rule fns.
+/**
+ * Drift contract with the server (transactions/create, transactions/update,
+ * transactions/splits, transactions/bulk-update): the income/boundary leaf
+ * rules live in shared helpers (`classifyBoundaryTransfer`,
+ * `inferUncategorizedInflowIncome` in transfers.ts) — this module calls
+ * them instead of re-implementing the predicates. What stays mirrored by
+ * hand: the update value-change preservation predicate (paired with
+ * `transactionUpdateNeedsReload`/`skipReload`, which refetch whenever the
+ * optimistic pass cannot fully recompute) and server-only concerns
+ * (incomeCategoryRaw lineage clearing, payee-autofill history lookups).
+ * Any server rule change to a shared helper propagates here via the
+ * import; hand-mirrored branches need parallel updates plus parity tests
+ * in tests/optimistic.test.ts.
+ */
 import { num } from "./format.js";
-import { classifyBoundaryTransfer } from "./transfers.js";
+import { classifyBoundaryTransfer, inferUncategorizedInflowIncome } from "./transfers.js";
 import {
   applyMergeOverrides,
   pickMergePrimary,
@@ -431,10 +442,16 @@ export function planOptimisticInsert(
       initialIsIncome = false;
       initialIncomeMonth = null;
     } else {
-      const explicit =
-        "isIncome" in t && t.isIncome !== undefined ? Boolean(t.isIncome) : undefined;
-      initialIsIncome = initialCatId == null && t.amount > 0 ? (explicit ?? true) : false;
-      if (!initialIsIncome) initialIncomeMonth = null;
+      // Shared leaf rule with the server (transactions/create).
+      const inferred = inferUncategorizedInflowIncome({
+        categoryId: initialCatId,
+        amountCents: t.amount,
+        explicitIsIncome:
+          "isIncome" in t && t.isIncome !== undefined ? Boolean(t.isIncome) : undefined,
+        incomeMonth: initialIncomeMonth,
+      });
+      initialIsIncome = inferred.isIncome;
+      initialIncomeMonth = inferred.incomeMonth;
     }
   }
 
@@ -477,7 +494,11 @@ export function planOptimisticInsert(
         childCategoryId = null;
         isIncome = false;
       } else {
-        isIncome = childCategoryId == null && st.amount > 0;
+        // Shared leaf rule with the server (transactions/create split child).
+        isIncome = inferUncategorizedInflowIncome({
+          categoryId: childCategoryId,
+          amountCents: st.amount,
+        }).isIncome;
       }
 
       newTransactions.push({
@@ -704,9 +725,15 @@ export function planOptimisticUpdate(
       const incomeMonthChanged =
         "incomeMonth" in t && (t.incomeMonth ?? null) !== (currentTarget.incomeMonth ?? null);
       if (categoryChanged || amountChanged || accountChanged || incomeExplicit || incomeMonthChanged) {
-        const isIncome = isEligibleForIncome
-          ? (incomeExplicit ? Boolean(t.isIncome) : true)
-          : false;
+        // Shared leaf rule with the server (transactions/update): eligible
+        // uncategorized inflows default to income unless explicitly
+        // un-flagged. The income month keeps its patched/current value
+        // here (only cleared below).
+        const { isIncome } = inferUncategorizedInflowIncome({
+          categoryId: finalCatId,
+          amountCents: newAmount,
+          explicitIsIncome: incomeExplicit ? Boolean(t.isIncome) : undefined,
+        });
         nextIsIncome = isIncome;
         if (!isIncome) {
           nextIncomeMonth = null;

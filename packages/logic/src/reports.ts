@@ -3,15 +3,35 @@
  *
  * Pure business logic for financial reports (Net Worth, etc.).
  * No React, no DB access.
+ *
+ * Spending sub-aggregators (insights collectors, trends drilldown builders,
+ * drilldown row filter) live in report-spending.ts; the entry points below
+ * stay thin orchestrators. Boundary math (internal-transfer detection, net
+ * on-budget deltas) is shared with transfers.ts.
+ * SQL counterpart: @ynab/server queries/reports.ts (getReportAggregates) pushes
+ * these group-bys into SQLite SUM/GROUP BY for large budgets; the pure fns
+ * below stay as the fallback for small/offline bundles.
  */
-// TODO(P2) [decompose]: extract computeSpendingTrends ~190-line + computeMonthlyInsights ~140-line
-// sub-aggregators; reuse transfers.isInternalTransfer instead of inlining boundary math.
-// TODO(P1) [sql-aggregation]: for large budgets move group-bys to SQL; keep these pure fns as fallback.
 
 
 import type { BudgetData, Transaction } from "./types.js";
 import { fmt, num, isValidISODate } from "./format.js";
 import { isIncomeTransaction } from "./budget-engine.js";
+import { collectSplitParentIds } from "./budget-walk.js";
+import { isInternalTransfer, rowNetOnBudgetDelta } from "./transfers.js";
+import {
+  accumulateSpendingByMonth,
+  buildSpendingConstituents,
+  buildSpendingMonthPoints,
+  buildSpendingScanContext,
+  buildTrendInsights,
+  collectInsightSpend,
+  countAvailableBaselineMonths,
+  finalizeSpendingConstituents,
+  matchesSpendingTransaction,
+  resolveSpendingDrill,
+} from "./report-spending.js";
+import type { SpendingTransactionFilter } from "./report-spending.js";
 
 export type NetWorthPoint = {
   month: string;
@@ -70,12 +90,9 @@ export function computeNetWorthReport(
   const months = getMonthsBetween(actualStart, actualEnd);
 
   // 1. Identify split parents and valid account IDs
-  const splitParentIds = new Set<number>();
+  const splitParentIds = collectSplitParentIds(data.transactions);
   const validAccountIds = new Set<number>(data.accounts.map((a) => a.id));
   const earliestMonthByAccount = new Map<number, string>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
 
   // 2. Compute total lifetime delta per account across all transactions
   const totalDeltas = new Map<number, number>();
@@ -228,10 +245,7 @@ export function computeCashFlowRange(
 ): CashFlowRangeSummary {
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
+  const splitParentIds = collectSplitParentIds(data.transactions);
   const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
 
   let income = 0;
@@ -243,24 +257,15 @@ export function computeCashFlowRange(
     if (mk < actualStart || mk > actualEnd) continue;
 
     const amt = num(t.amount);
-    const accA = accountMap.get(t.accountId);
-    const onA = accA ? accA.onBudget : true;
-
-    let netOnBudgetDelta: number;
-    let isInternalTransfer = false;
-    if (t.transferAccountId != null) {
-      const accB = accountMap.get(t.transferAccountId);
-      const onB = accB ? accB.onBudget : true;
-      netOnBudgetDelta = (onA ? amt : 0) + (onB ? -amt : 0);
-      isInternalTransfer = onA && onB;
-    } else {
-      netOnBudgetDelta = onA ? amt : 0;
-    }
+    // Shared boundary math (transfers.ts): net on-budget delta plus the
+    // internal-transfer (same-boundary) exclusion.
+    const netOnBudgetDelta = rowNetOnBudgetDelta(t, accountMap);
+    const isInternal = isInternalTransfer(t, accountMap);
 
     if (isIncomeTransaction(t, accountMap)) {
       const incomeAmt = netOnBudgetDelta > 0 ? netOnBudgetDelta : amt;
       income = Math.round(income + incomeAmt);
-    } else if (!isInternalTransfer) {
+    } else if (!isInternal) {
       outflow = Math.round(outflow - netOnBudgetDelta);
     }
   }
@@ -473,15 +478,7 @@ export function computeMonthlyInsights(
   const cutoffDay =
     asOfMonth === month && asOfDate != null ? Number(asOfDate.slice(8, 10)) : null;
 
-  const insights: SpendingInsight[] = [];
-  const groupMap = new Map(data.groups.map((g) => [g.id, g]));
-  const catMap = new Map(data.categories.map((c) => [c.id, c.name]));
-  const catMetaMap = new Map(data.categories.map((c) => [c.id, c]));
-  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
+  const ctx = buildSpendingScanContext(data);
 
   // Spending per category this month vs previous 3 months
   const m1 = getOffsetMonth(month, -1);
@@ -489,88 +486,19 @@ export function computeMonthlyInsights(
   const m3 = getOffsetMonth(month, -3);
   const priorMonths = new Set([m1, m2, m3]);
 
-  let earliestMonth: string | null = null;
-  const currentSpendByCat = new Map<number, number>();
-  const priorSpendByCatMonth = new Map<number, Map<string, number>>();
-
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null) continue;
-    if (isIncomeTransaction(t, accountMap)) continue;
-
-    const metaCat = catMetaMap.get(t.categoryId);
-    if (metaCat && groupMap.get(metaCat.groupId)?.isCreditCardPayments) continue;
-
-    const netOutflow = -num(t.amount);
-    const mk = t.date.slice(0, 7);
-    if (!earliestMonth || mk < earliestMonth) {
-      earliestMonth = mk;
-    }
-
-    // Same-day alignment for the in-progress month: ignore spend after the
-    // cutoff day on both sides, including future-dated entries this month.
-    if (cutoffDay != null && Number(t.date.slice(8, 10)) > cutoffDay) continue;
-
-    if (mk === month) {
-      currentSpendByCat.set(
-        t.categoryId,
-        (currentSpendByCat.get(t.categoryId) ?? 0) + netOutflow
-      );
-    } else if (priorMonths.has(mk)) {
-      let mMap = priorSpendByCatMonth.get(t.categoryId);
-      if (!mMap) {
-        mMap = new Map();
-        priorSpendByCatMonth.set(t.categoryId, mMap);
-      }
-      mMap.set(mk, (mMap.get(mk) ?? 0) + netOutflow);
-    }
-  }
+  const maps = collectInsightSpend(data, ctx, month, priorMonths, cutoffDay);
 
   // Count how many of the 3 prior months are present in the budget history
-  const availablePriorMonths = [m1, m2, m3].filter(
-    (m) => earliestMonth != null && m >= earliestMonth
+  const divisor = countAvailableBaselineMonths([m1, m2, m3], maps.earliestMonth);
+
+  const insights = buildTrendInsights(
+    maps,
+    divisor,
+    new Map(data.categories.map((c) => [c.id, c.name])),
+    cutoffDay,
+    MIN_INSIGHT_PCT_CHANGE,
+    fmt
   );
-  const divisor = availablePriorMonths.length;
-
-  if (divisor > 0) {
-    // Evaluate all categories that had spend either in the current month or in prior baseline months
-    const candidateCatIds = new Set<number>([
-      ...currentSpendByCat.keys(),
-      ...priorSpendByCatMonth.keys(),
-    ]);
-
-    // Calculate baseline average and % difference for categories
-    for (const catId of candidateCatIds) {
-      const currentSpend = currentSpendByCat.get(catId) ?? 0;
-      const mMap = priorSpendByCatMonth.get(catId);
-      if (mMap && mMap.size > 0) {
-        const totalPriorSpend = Array.from(mMap.values()).reduce((a, b) => a + b, 0);
-        const avg3mo = Math.round(totalPriorSpend / divisor);
-        if (avg3mo > 0) {
-          // Mid-month net-refund spend is timing noise (returns posted
-          // before the corresponding purchases). Exact $0 is kept: against
-          // a positive baseline it renders as an informative "$0" row.
-          if (cutoffDay != null && currentSpend < 0) continue;
-          const pct = Math.round(((currentSpend - avg3mo) / avg3mo) * 100);
-          // Near-zero changes are noise, not trends.
-          if (Math.abs(pct) < MIN_INSIGHT_PCT_CHANGE) continue;
-          const name = catMap.get(catId) ?? "Unknown";
-          const baselineLabel = cutoffDay != null ? "MTD 3-mo avg" : "3-mo avg";
-          insights.push({
-            id: `trend-${catId}`,
-            type: "trend",
-            categoryId: catId,
-            categoryName: name,
-            amount: currentSpend,
-            avgAmount: avg3mo,
-            pctChange: pct,
-            basis: cutoffDay != null ? "mtd" : "full",
-            message: `${name}: ${fmt(currentSpend)} (${pct >= 0 ? "+" : ""}${pct}% vs ${baselineLabel})`,
-          });
-        }
-      }
-    }
-  }
 
   // Sort by largest absolute dollar move vs the baseline first
   insights.sort((a, b) => insightAbsDiff(b) - insightAbsDiff(a));
@@ -646,170 +574,40 @@ export function computeSpendingTrends(
   const monthList = getMonthsBetween(actualStart, actualEnd);
   const numMonths = Math.max(1, monthList.length);
 
-  const { drillGroupId = null, drillCategoryId = null, activeCategoryIds = null } = options;
-
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
-
-  const groupMap = new Map(data.groups.map((g) => [g.id, g]));
-  const catMap = new Map(data.categories.map((c) => [c.id, c]));
-  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
-
-  // Determine current drill level & metadata
-  let drillLevel: "all" | "group" | "category" = "all";
-  let currentGroupId: number | null = null;
-  let currentGroupName: string | null = null;
-  let currentCategoryId: number | null = null;
-  let currentCategoryName: string | null = null;
-
-  if (drillCategoryId != null) {
-    drillLevel = "category";
-    currentCategoryId = drillCategoryId;
-    const cat = catMap.get(drillCategoryId);
-    currentCategoryName = cat?.name ?? "Category";
-    if (cat) {
-      currentGroupId = cat.groupId;
-      currentGroupName = groupMap.get(cat.groupId)?.name ?? null;
-    }
-  } else if (drillGroupId != null) {
-    drillLevel = "group";
-    currentGroupId = drillGroupId;
-    currentGroupName = groupMap.get(drillGroupId)?.name ?? "Master Category";
-  }
+  const { activeCategoryIds = null } = options;
+  const drill = resolveSpendingDrill(data, options);
+  const ctx = buildSpendingScanContext(data);
 
   // Group spending by: month -> categoryId -> net spending (outflow - inflow)
-  const spendByMonthCat = new Map<string, Map<number, number>>();
-  for (const m of monthList) {
-    spendByMonthCat.set(m, new Map());
-  }
-
-  for (const t of data.transactions) {
-    if (splitParentIds.has(t.id)) continue;
-    if (t.categoryId == null) continue;
-    if (isIncomeTransaction(t, accountMap)) continue;
-
-    // Category filter check
-    if (activeCategoryIds && !activeCategoryIds.has(t.categoryId)) continue;
-
-    const mk = t.date.slice(0, 7);
-    if (mk < actualStart || mk > actualEnd) continue;
-
-    const cat = catMap.get(t.categoryId);
-    if (!cat) continue;
-
-    // Drilldown filter checks
-    if (drillLevel === "category" && t.categoryId !== currentCategoryId) continue;
-    if (drillLevel === "group" && cat.groupId !== currentGroupId) continue;
-    if (drillLevel === "all" && groupMap.get(cat.groupId)?.isCreditCardPayments) continue;
-
-    const mCatMap = spendByMonthCat.get(mk);
-    if (mCatMap) {
-      // Amount < 0 is outflow (+ netOutflow); amount > 0 is return (- netOutflow)
-      const delta = -num(t.amount);
-      mCatMap.set(t.categoryId, (mCatMap.get(t.categoryId) ?? 0) + delta);
-    }
-  }
+  const spendByMonthCat = accumulateSpendingByMonth(
+    data,
+    ctx,
+    monthList,
+    actualStart,
+    actualEnd,
+    drill,
+    activeCategoryIds
+  );
 
   // Build constituents list based on drill level
-  const constituentsMap = new Map<number, { id: number; name: string; total: number }>();
-
-  if (drillLevel === "all") {
-    // Constituents are category groups (excluding credit card payment groups)
-    for (const g of data.groups) {
-      if (g.isCreditCardPayments) continue;
-      // Check if this group has any categories (or active categories)
-      const groupCats = data.categories.filter((c) => c.groupId === g.id);
-      if (activeCategoryIds) {
-        const hasActive = groupCats.some((c) => activeCategoryIds.has(c.id));
-        if (!hasActive && groupCats.length > 0) continue;
-      }
-      constituentsMap.set(g.id, { id: g.id, name: g.name, total: 0 });
-    }
-  } else if (drillLevel === "group" && currentGroupId != null) {
-    // Constituents are subcategories in this group
-    const groupCats = data.categories.filter((c) => c.groupId === currentGroupId);
-    for (const c of groupCats) {
-      if (activeCategoryIds && !activeCategoryIds.has(c.id)) continue;
-      constituentsMap.set(c.id, { id: c.id, name: c.name, total: 0 });
-    }
-  } else if (drillLevel === "category" && currentCategoryId != null) {
-    const cat = catMap.get(currentCategoryId);
-    if (cat) {
-      constituentsMap.set(cat.id, { id: cat.id, name: cat.name, total: 0 });
-    }
-  }
+  const constituentsMap = buildSpendingConstituents(data, drill, activeCategoryIds);
 
   // Calculate monthly points with segments
-  const monthPoints: SpendingTrendsMonthPoint[] = [];
-  let overallTotal = 0;
-  let maxMonthSpend = 0;
-  let minMonthSpend = 0;
-
-  for (const m of monthList) {
-    const mCatMap = spendByMonthCat.get(m) ?? new Map<number, number>();
-    const segmentSums = new Map<number, number>();
-
-    for (const [catId, rawSpend] of mCatMap.entries()) {
-      const spend = Math.round(rawSpend);
-      if (spend === 0) continue;
-
-      if (drillLevel === "all") {
-        const cat = catMap.get(catId);
-        if (cat) {
-          segmentSums.set(cat.groupId, (segmentSums.get(cat.groupId) ?? 0) + spend);
-        }
-      } else {
-        // group or category drilldown -> by categoryId
-        segmentSums.set(catId, (segmentSums.get(catId) ?? 0) + spend);
-      }
-    }
-
-    const segments: SpendingTrendsMonthSegment[] = [];
-    let monthTotal = 0;
-
-    for (const [id, constituent] of constituentsMap.entries()) {
-      const amt = segmentSums.get(id) ?? 0;
-      if (amt !== 0) {
-        segments.push({
-          id,
-          name: constituent.name,
-          amount: amt,
-        });
-        monthTotal += amt;
-        constituent.total += amt;
-      }
-    }
-
-    // Sort segments consistently by constituent order/id
-    segments.sort((a, b) => a.id - b.id);
-
-    if (monthTotal > maxMonthSpend) {
-      maxMonthSpend = monthTotal;
-    }
-    if (monthTotal < minMonthSpend) {
-      minMonthSpend = monthTotal;
-    }
-    overallTotal += monthTotal;
-
-    monthPoints.push({
-      month: m,
-      total: monthTotal,
-      segments,
-    });
-  }
+  const { monthPoints, overallTotal, maxMonthSpend, minMonthSpend } =
+    buildSpendingMonthPoints(
+      monthList,
+      spendByMonthCat,
+      constituentsMap,
+      drill.drillLevel,
+      ctx.catMap
+    );
 
   // Finalize constituents array sorted by total spend descending
-  const constituents: SpendingTrendsConstituent[] = Array.from(constituentsMap.values())
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      total: c.total,
-      avgPerMonth: Math.round(c.total / numMonths),
-      pctOfTotal: overallTotal > 0 ? Math.round((c.total / overallTotal) * 100) : 0,
-    }))
-    .sort((a, b) => b.total - a.total);
+  const constituents = finalizeSpendingConstituents(
+    constituentsMap,
+    numMonths,
+    overallTotal
+  );
 
   const avgPerMonth = Math.round(overallTotal / numMonths);
 
@@ -820,11 +618,11 @@ export function computeSpendingTrends(
     avgPerMonth,
     maxMonthSpend,
     minMonthSpend,
-    drillLevel,
-    currentGroupId,
-    currentGroupName,
-    currentCategoryId,
-    currentCategoryName,
+    drillLevel: drill.drillLevel,
+    currentGroupId: drill.currentGroupId,
+    currentGroupName: drill.currentGroupName,
+    currentCategoryId: drill.currentCategoryId,
+    currentCategoryName: drill.currentCategoryName,
   };
 }
 
@@ -835,59 +633,193 @@ export function getSpendingTransactions(
   data: BudgetData,
   startMonth: string,
   endMonth: string,
-  filter?: {
-    groupId?: number | null;
-    categoryId?: number | null;
-    month?: string | null;
-    activeCategoryIds?: Set<number> | null;
-  }
+  filter?: SpendingTransactionFilter
 ): Transaction[] {
   const actualStart = startMonth <= endMonth ? startMonth : endMonth;
   const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
 
-  const splitParentIds = new Set<number>();
-  for (const t of data.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
-
-  const groupMap = new Map(data.groups.map((g) => [g.id, g]));
-  const catMap = new Map(data.categories.map((c) => [c.id, c]));
-  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+  const ctx = buildSpendingScanContext(data);
 
   return data.transactions
-    .filter((t) => {
-      if (splitParentIds.has(t.id)) return false;
-      if (t.categoryId == null) return false;
-      if (isIncomeTransaction(t, accountMap)) return false;
-
-      const mk = t.date.slice(0, 7);
-      if (filter?.month) {
-        if (mk !== filter.month) return false;
-      } else {
-        if (mk < actualStart || mk > actualEnd) return false;
-      }
-
-      if (filter?.activeCategoryIds && !filter.activeCategoryIds.has(t.categoryId)) {
-        return false;
-      }
-
-      if (filter?.categoryId != null) {
-        return t.categoryId === filter.categoryId;
-      }
-
-      if (filter?.groupId != null) {
-        const cat = catMap.get(t.categoryId);
-        return cat?.groupId === filter.groupId;
-      }
-
-      // No explicit category/group filter -> top-level "all" drilldown.
-      // Skip CC-payment groups to match computeSpendingTrends.
-      const cat = catMap.get(t.categoryId);
-      if (!cat) return false;
-      const grp = groupMap.get(cat.groupId);
-      if (grp?.isCreditCardPayments) return false;
-
-      return true;
-    })
+    .filter((t) => matchesSpendingTransaction(t, ctx, actualStart, actualEnd, filter))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+}
+
+// ---------------------------------------------------------------------------
+// SQL-aggregation mirror (P1 sql-aggregation).
+//
+// `buildReportAggregates` is the pure-JS single-pass mirror of the SQLite
+// group-bys in `@ynab/server` queries/reports.ts. Parity between the two is
+// covered by server tests; the `*FromAggregates` helpers below let report
+// screens consume O(months x categories) aggregate rows instead of the full
+// transaction list. The full-scan `compute*` fns above remain the fallback.
+// ---------------------------------------------------------------------------
+
+export type ReportOutflowAggregate = {
+  /** "YYYY-MM" of the transaction date. */
+  month: string;
+  /** Null = uncategorized outflow (cash-flow relevant, budget-irrelevant). */
+  categoryId: number | null;
+  /** SUM of net on-budget deltas (negative = spending, positive = refund). */
+  total: number;
+};
+
+export type ReportIncomeAggregate = {
+  /** Transaction month: substr(date, 1, 7) — the cash-flow grouping. */
+  month: string;
+  /** Budget month: incomeMonth ?? transaction month — the TBB grouping. */
+  incomeMonth: string;
+  total: number;
+};
+
+export type ReportAccountDeltaAggregate = {
+  /** "YYYY-MM" of the transaction date. */
+  month: string;
+  accountId: number;
+  total: number;
+};
+
+export type ReportAggregates = {
+  outflow: ReportOutflowAggregate[];
+  income: ReportIncomeAggregate[];
+  accountDeltas: ReportAccountDeltaAggregate[];
+};
+
+/**
+ * Single-pass JS mirror of the SQL aggregates: split-parent exclusion,
+ * internal-transfer exclusion, boundary net, and income classification all
+ * match queries/reports.ts row-for-row (amounts are integer cents).
+ */
+export function buildReportAggregates(data: BudgetData): ReportAggregates {
+  const splitParentIds = collectSplitParentIds(data.transactions);
+  const accountMap = new Map(data.accounts.map((a) => [a.id, a]));
+
+  const outflowByKey = new Map<string, number>();
+  const incomeByMonth = new Map<string, number>();
+  const deltaByKey = new Map<string, number>();
+
+  for (const t of data.transactions) {
+    const isSplitParent = splitParentIds.has(t.id);
+    const amt = num(t.amount);
+    // Shared boundary math (transfers.ts): plain rows score their on-budget
+    // leg, transfer rows their net on-budget delta.
+    const net = rowNetOnBudgetDelta(t, accountMap);
+    const isInternal = isInternalTransfer(t, accountMap);
+
+    const isIncome =
+      isIncomeTransaction(t, accountMap) && (!isSplitParent || t.isIncome === true);
+
+    if (!isSplitParent) {
+      const mk = t.date.slice(0, 7);
+      const srcKey = `${mk}|${t.accountId}`;
+      deltaByKey.set(srcKey, (deltaByKey.get(srcKey) ?? 0) + amt);
+      if (t.transferAccountId != null) {
+        const dstKey = `${mk}|${t.transferAccountId}`;
+        deltaByKey.set(dstKey, (deltaByKey.get(dstKey) ?? 0) - amt);
+      }
+    }
+
+    if (!isSplitParent && !isInternal && net !== 0 && !isIncome) {
+      const mk = t.date.slice(0, 7);
+      const key = `${mk}|${t.categoryId ?? ""}`;
+      outflowByKey.set(key, (outflowByKey.get(key) ?? 0) + net);
+    }
+
+    if (isIncome) {
+      const mk = t.date.slice(0, 7);
+      const incomeMonth = t.incomeMonth || mk;
+      const incomeAmt = net > 0 ? net : amt;
+      const key = `${mk}|${incomeMonth}`;
+      incomeByMonth.set(key, (incomeByMonth.get(key) ?? 0) + incomeAmt);
+    }
+  }
+
+  const outflow: ReportOutflowAggregate[] = Array.from(outflowByKey.entries()).map(
+    ([key, total]) => {
+      const sep = key.indexOf("|");
+      const month = key.slice(0, sep);
+      const catPart = key.slice(sep + 1);
+      return { month, categoryId: catPart === "" ? null : Number(catPart), total };
+    }
+  );
+  outflow.sort(
+    (a, b) => a.month.localeCompare(b.month) || (a.categoryId ?? -1) - (b.categoryId ?? -1)
+  );
+
+  const income: ReportIncomeAggregate[] = Array.from(incomeByMonth.entries()).map(
+    ([key, total]) => {
+      const sep = key.indexOf("|");
+      return { month: key.slice(0, sep), incomeMonth: key.slice(sep + 1), total };
+    }
+  );
+  income.sort((a, b) => a.month.localeCompare(b.month) || a.incomeMonth.localeCompare(b.incomeMonth));
+
+  const accountDeltas: ReportAccountDeltaAggregate[] = Array.from(deltaByKey.entries()).map(
+    ([key, total]) => {
+      const sep = key.indexOf("|");
+      return { month: key.slice(0, sep), accountId: Number(key.slice(sep + 1)), total };
+    }
+  );
+  accountDeltas.sort(
+    (a, b) => a.month.localeCompare(b.month) || a.accountId - b.accountId
+  );
+
+  return { outflow, income, accountDeltas };
+}
+
+/**
+ * Cash-flow summary over a month range from pre-aggregated rows instead of
+ * the full transaction list. Income is grouped by *transaction* month (the
+ * `month` key), matching `computeCashFlowRange`, which attributes income to
+ * the month it posted — not the deferred `incomeMonth` the budget engine
+ * uses for TBB (available on each row as `incomeMonth` for that grouping).
+ * `outflow` nets are negative spending, so the reported outflow is their
+ * negation.
+ */
+export function computeCashFlowRangeFromAggregates(
+  aggregates: ReportAggregates,
+  startMonth: string,
+  endMonth: string
+): CashFlowRangeSummary {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  let income = 0;
+  for (const row of aggregates.income) {
+    if (row.month >= actualStart && row.month <= actualEnd) income += row.total;
+  }
+  let outflowNet = 0;
+  for (const row of aggregates.outflow) {
+    if (row.month >= actualStart && row.month <= actualEnd) outflowNet += row.total;
+  }
+  const outflow = -outflowNet;
+  const net = Math.round(income - outflow);
+  const savingsRate =
+    income > 0
+      ? Math.round(((income - outflow) / income) * 1000) / 10
+      : net > 0
+        ? 100
+        : 0;
+  return { income, outflow, net, savingsRate };
+}
+
+/** Single-month cash flow from aggregates (mirrors `computeCashFlow`). */
+export function computeCashFlowFromAggregates(
+  aggregates: ReportAggregates,
+  month: string
+): CashFlowSummary {
+  return { month, ...computeCashFlowRangeFromAggregates(aggregates, month, month) };
+}
+
+/** Monthly surplus series from aggregates (mirrors `computeMonthlySurplus`). */
+export function computeMonthlySurplusFromAggregates(
+  aggregates: ReportAggregates,
+  startMonth: string,
+  endMonth: string
+): SurplusMonthPoint[] {
+  const actualStart = startMonth <= endMonth ? startMonth : endMonth;
+  const actualEnd = startMonth <= endMonth ? endMonth : startMonth;
+  return getMonthsBetween(actualStart, actualEnd).map((m) => {
+    const flow = computeCashFlowRangeFromAggregates(aggregates, m, m);
+    return { month: m, income: flow.income, outflow: flow.outflow, surplus: flow.net };
+  });
 }

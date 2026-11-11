@@ -291,22 +291,27 @@ export function SettingsView({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {aiAvailable && (
-              <Tooltip
-                tip={
-                  uncoveredCount === 0
-                    ? "No imported payees need rules"
-                    : `Clean up ${uncoveredCount} imported payee${uncoveredCount === 1 ? "" : "s"} with AI`
-                }
-              >
-                <Button
-                  size="sm"
-                  onClick={() => void runSuggest()}
-                  disabled={suggesting || uncoveredCount === 0}
-                  aria-label="Suggest rename rules with AI"
+              <>
+                <span className="y-hint text-[11px] max-w-[220px] leading-tight hidden sm:inline">
+                  Payee names are sent to your configured AI service.
+                </span>
+                <Tooltip
+                  tip={
+                    uncoveredCount === 0
+                      ? "No imported payees need rules"
+                      : `Clean up ${uncoveredCount} imported payee${uncoveredCount === 1 ? "" : "s"} with AI`
+                  }
                 >
-                  {suggestLabel}
-                </Button>
-              </Tooltip>
+                  <Button
+                    size="sm"
+                    onClick={() => void runSuggest()}
+                    disabled={suggesting || uncoveredCount === 0}
+                    aria-label="Suggest rename rules with AI"
+                  >
+                    {suggestLabel}
+                  </Button>
+                </Tooltip>
+              </>
             )}
             <Button size="sm" variant="primary" onClick={openCreate} aria-label="Add rename rule">
               <Icon name="plus" size={12} /> Add rule

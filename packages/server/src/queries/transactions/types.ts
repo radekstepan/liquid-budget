@@ -1,5 +1,5 @@
 import type { ClearedStatus, TransactionFlagColor } from "@ynab/logic";
-import { transactions } from "../../schema.js";
+import type { transactions } from "../../schema.js";
 
 export type CreateTransactionInput = {
   accountId: number;

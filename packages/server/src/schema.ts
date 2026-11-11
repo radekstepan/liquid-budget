@@ -5,18 +5,33 @@ import {
   uniqueIndex,
   index,
   check,
-  AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
-// TODO(P2) [schema-hygiene]: YNAB4 lineage (entityId/transferEntityId/fitid/ynabId/importedPayee/...)
-// pollutes core tables for round-trip fidelity — consider ynab4_lineage side table or documented
-// compat block so 30-column transactions table stays readable.
+/**
+ * Schema conventions — YNAB4 compat columns.
+ *
+ * Tables carry two column kinds: core columns (drive app logic) and
+ * `--- YNAB4 compat ---` sections (nullable round-trip lineage: entity
+ * ids, OFX fields, verbatim sentinels). The compat set is pinned by
+ * tests/schema-compat.test.ts: every compat column stays nullable so
+ * in-app rows never require YNAB4 lineage, while app-generated identity
+ * (e.g. scheduledPostings.entityId) stays NOT NULL.
+ *
+ * A ynab4_lineage side table was considered and rejected: import and
+ * export touch lineage per row on every read/write, so inline columns
+ * keep single-row O(1) lookups with no joins (see export-perf), at the
+ * cost of wider tables. Adding a compat column means: nullable, a
+ * G-ref doc comment, a banner below, the test registry, and clearing
+ * it on in-app rewrites where the verbatim value no longer applies.
+ */
 
 export const accounts = sqliteTable(
   "accounts",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     name: text("name").notNull(),
     kind: text("kind").notNull(),
@@ -28,6 +43,7 @@ export const accounts = sqliteTable(
     lastReconciledBalance: integer("last_reconciled_balance"),
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
     notes: text("notes").notNull().default(""),
+    // --- YNAB4 compat: verbatim wire value (see doc on the column) ---
     /**
      * Verbatim YNAB4 `AccountVO.accountType` (G-03: Checking, Savings,
      * CreditCard, Cash, LineofCredit, Paypal, MerchantAccount,
@@ -47,6 +63,7 @@ export const categoryGroups = sqliteTable(
   "category_groups",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     name: text("name").notNull(),
     sort: integer("sort").notNull().default(0),
@@ -62,6 +79,7 @@ export const categories = sqliteTable(
   "categories",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     groupId: integer("group_id")
       .notNull()
@@ -74,6 +92,7 @@ export const categories = sqliteTable(
       onDelete: "set null",
     }),
     overspendCarriesOver: integer("overspend_carries_over", { mode: "boolean" }).notNull().default(false),
+    // --- YNAB4 compat: hidden-category home (see doc on the columns) ---
     /**
      * YNAB4 hidden-category lineage (`MangledHiddenNameComponents.as`):
      * a hidden sub-category stores its original home as a mangled name
@@ -134,6 +153,7 @@ export const payees = sqliteTable(
   "payees",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     name: text("name").notNull(),
     autoCategoryId: integer("auto_category_id").references(() => categories.id, {
@@ -144,6 +164,7 @@ export const payees = sqliteTable(
      * Mirrors `accounts.archived`; written back as `enabled` on export.
      */
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    // --- YNAB4 compat: entity-level autofill defaults (see doc on the columns) ---
     /**
      * YNAB4 entity-level autofill defaults (`PayeeVO.autoFillMemo` /
      * `autoFillAmount`, G-04): what typing this payee on a blank row
@@ -167,6 +188,7 @@ export const transactions = sqliteTable(
   "transactions",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage, both legs (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     transferEntityId: text("transfer_entity_id"),
     accountId: integer("account_id")
@@ -181,6 +203,7 @@ export const transactions = sqliteTable(
     memo: text("memo").notNull().default(""),
     amount: integer("amount").notNull().default(0),
     status: text("status", { enum: ["u", "c", "r"] }).notNull().default("c"),
+    // --- YNAB4 compat: check + OFX lineage (see doc on the columns) ---
     /**
      * YNAB4 `checkNumber` (G-05, `BaseTransactionVO`). Nullable free-text
      * (check users); round-tripped verbatim on export.
@@ -195,6 +218,7 @@ export const transactions = sqliteTable(
     ynabId: text("ynab_id"),
     importedPayee: text("imported_payee"),
     source: text("source"),
+    // --- YNAB4 compat: verbatim income sentinel (see doc on the column) ---
     /**
      * Verbatim YNAB4 income sentinel (`Category/__ImmediateIncome__`,
      * `Category/__DeferredIncome__`, or the legacy serialization names
@@ -207,6 +231,7 @@ export const transactions = sqliteTable(
      * re-specifies the category/income month.
      */
     incomeCategoryRaw: text("income_category_raw"),
+    // --- YNAB4 compat: destination-leg memo + OFX lineage (see doc on the columns) ---
     /**
      * Destination-leg memo + OFX lineage for single-row transfers
      * (mirrors `memo` / `checkNumber` / `fitid` / `ynabId` /
@@ -274,6 +299,7 @@ export const reconciliations = sqliteTable(
   "reconciliations",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     accountId: integer("account_id")
       .notNull()
@@ -295,6 +321,7 @@ export const recurring = sqliteTable(
   "recurring",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     accountId: integer("account_id")
       .notNull()
@@ -329,6 +356,7 @@ export const recurringSubTransactions = sqliteTable(
   "recurring_sub_transactions",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    // --- YNAB4 compat: entity lineage (round-trip only; never drives app logic) ---
     entityId: text("entity_id"),
     recurringId: integer("recurring_id")
       .notNull()

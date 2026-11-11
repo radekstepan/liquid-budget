@@ -52,16 +52,17 @@
  * single-row transfers, exact-only matching, incomeMonth superset, case
  * folding, integer-cents money) are documented in
  * `.planning/codebase/INTEGRATIONS.md` ("YNAB4 fidelity vs deliberate forks").
+ *
+ * The month-walk passes live in budget-walk.ts: `walkNonCCCategory` +
+ * `walkCCPaymentCategories` per month plus the `applyRefundWaterfall`
+ * sub-aggregator; shared set collectors (`collectSplitParentIds`,
+ * `collectCCGroupIds`) are reused by reports.ts.
  */
-// TODO(P2) [decompose]: extract computeAllMonths ~310-line 2-pass CC-buffer walk + 5-step refund
-// waterfall into month-walk passes + sub-aggregators; extract collectSplitParents()/ccGroupIds()
-// helpers to kill duplicated set-construction across budget-engine/reports.
 
 import type {
   Account,
   BudgetData,
   BudgetResult,
-  Category,
   CatRow,
   GroupRow,
   OverspendOverrides,
@@ -70,6 +71,15 @@ import type {
 } from "./types.js";
 import { num } from "./format.js";
 import { classifyBoundaryTransfer } from "./transfers.js";
+import {
+  collectCCGroupIds,
+  collectSplitParentIds,
+  effectiveOverspendHandling,
+  mapCCPayCategories,
+  walkCCPaymentCategories,
+  walkNonCCCategory,
+} from "./budget-walk.js";
+import type { CategoryTxEntry } from "./budget-walk.js";
 
 // ---------------------------------------------------------------------------
 // Income classification helper
@@ -148,14 +158,6 @@ export function isIncomeTransaction(
 // Indexing & Memoization Cache for High Performance
 // ---------------------------------------------------------------------------
 
-type CategoryTxEntry = {
-  id: number;
-  accountId: number;
-  date: string;
-  amount: number;
-  isCC: boolean;
-};
-
 type RawIndexData = {
   assignedByMonth: Map<string, Map<number, number>>;
   assignedTotalByMonth: Map<string, number>;
@@ -209,9 +211,7 @@ export function normalizeBudgetData(data: BudgetData): BudgetData {
     (a) => a.kind === "credit" && a.onBudget !== false
   );
 
-  const ccGroupIds = new Set(
-    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-  );
+  const ccGroupIds = collectCCGroupIds(data.groups);
 
   // Invariant: at most one category linked per credit account, and it must belong
   // to a Credit Card Payments group.
@@ -334,9 +334,7 @@ function getCCAccountIds(data: BudgetData): Set<number> {
       ccAccountIds.add(a.id);
     }
   }
-  const ccGroupIds = new Set(
-    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-  );
+  const ccGroupIds = collectCCGroupIds(data.groups);
   const seenLinked = new Set<number>();
   for (const c of data.categories) {
     if (ccGroupIds.has(c.groupId) && c.linkedAccountId != null) {
@@ -401,31 +399,6 @@ function resolveOverspendOverrides(
     normalizeOverspendOverrides(explicit) ??
     normalizeOverspendOverrides(data.overspendOverrides)
   );
-}
-
-/**
- * YNAB4 `overspendingHandling` inheritance for one category+month in walk
- * order: an explicit override for the month wins; otherwise the previous
- * walked month's effective handling is inherited; otherwise the static
- * `Category.overspendCarriesOver` flag seeds the chain (default false =
- * AffectsBuffer). Records the result in `inherited` and returns it.
- */
-function effectiveOverspendHandling(
-  category: Category,
-  month: string,
-  overrides: Map<number, Map<string, boolean>> | undefined,
-  inherited: Map<number, boolean>
-): boolean {
-  const explicit = overrides?.get(category.id)?.get(month);
-  if (explicit !== undefined) {
-    inherited.set(category.id, explicit);
-    return explicit;
-  }
-  const prev = inherited.get(category.id);
-  if (prev !== undefined) return prev;
-  const seed = category.overspendCarriesOver ?? false;
-  inherited.set(category.id, seed);
-  return seed;
 }
 
 function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData, overspendOverrides?: OverspendOverridesInput | null): IndexedBudgetData {
@@ -510,9 +483,7 @@ function hydrateBudgetIndex(idx: SerializedBudgetIndex, data?: BudgetData, overs
     const normData = normalizeBudgetData(data);
     const overrides = normalizeOverspendOverrides(overspendOverrides);
     const inheritedHandling = new Map<number, boolean>();
-    const ccGroupIds = new Set(
-      normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-    );
+    const ccGroupIds = collectCCGroupIds(normData.groups);
     const seenLinkedAccounts = new Set<number>();
     const ccPayCatToAccount = new Map<number, number>();
     for (const c of normData.categories) {
@@ -766,16 +737,7 @@ function computeAllMonths(
   let runningSurplus = 0;
   const unfundedDebt = new Map<number, Map<number, number>>();
 
-  const accountToCCPayCat = new Map<number, number>();
-  for (const c of data.categories) {
-    if (
-      ccGroupIds.has(c.groupId) &&
-      c.linkedAccountId != null &&
-      !accountToCCPayCat.has(c.linkedAccountId)
-    ) {
-      accountToCCPayCat.set(c.linkedAccountId, c.id);
-    }
-  }
+  const accountToCCPayCat = mapCCPayCategories(data.categories, ccGroupIds);
 
   for (const month of orderedMonths) {
     carryoverByMonth.set(month, new Map(currentBalance));
@@ -799,230 +761,38 @@ function computeAllMonths(
     // 1. First pass: Non-CC categories
     for (const c of data.categories) {
       if (ccGroupIds.has(c.groupId)) continue;
-
-      const prev = currentBalance.get(c.id) ?? 0;
-      const assigned = aMap.get(c.id) ?? 0;
-      const rawFlow = oMap.get(c.id) ?? 0;
-      const txs = categoryTxMap.get(c.id) ?? [];
-      const carriesOver = effectiveOverspendHandling(c, month, overrides, inheritedHandling);
-
-      const catFundedCCByAccount = new Map<number, number>();
-      const cardCreditByAccount = new Map<number, number>();
-      let catFundedCC = 0;
-      let netCCSpend = 0;
-
-      const priorCatDebt = unfundedDebt.get(c.id);
-      const priorDebtMap = new Map<number, number>(priorCatDebt ? priorCatDebt : []);
-      const catDebtMap = new Map<number, number>(priorDebtMap);
-      unfundedDebt.set(c.id, catDebtMap);
-
-      // If category carried over a negative balance (prev < 0) and has prior unfunded CC debt,
-      // any positive assignment in this month first covers any cash portion of the deficit,
-      // and any remaining assignment funds the prior CC debt (moving funds to CC Payment category).
-      if (prev < 0 && assigned > 0) {
-        const totalPriorCCDebt = Array.from(priorDebtMap.values()).reduce((sum, d) => sum + d, 0);
-        const priorCashDeficit = Math.max(0, -prev - totalPriorCCDebt);
-        let assignedAfterCashDeficit = Math.max(0, assigned - priorCashDeficit);
-
-        for (const [accId, debt] of priorDebtMap) {
-          if (assignedAfterCashDeficit <= 0) break;
-          if (debt > 0) {
-            const fundedAmt = Math.min(debt, assignedAfterCashDeficit);
-            catFundedCCByAccount.set(
-              accId,
-              (catFundedCCByAccount.get(accId) ?? 0) + fundedAmt
-            );
-            monthFundedCCByAccount.set(
-              accId,
-              (monthFundedCCByAccount.get(accId) ?? 0) + fundedAmt
-            );
-            catDebtMap.set(accId, debt - fundedAmt);
-            priorDebtMap.set(accId, debt - fundedAmt);
-            assignedAfterCashDeficit -= fundedAmt;
-            catFundedCC += fundedAmt;
-          }
+      monthCashOverspent += walkNonCCCategory(
+        c,
+        month,
+        aMap.get(c.id) ?? 0,
+        oMap.get(c.id) ?? 0,
+        categoryTxMap.get(c.id) ?? [],
+        {
+          currentBalance,
+          unfundedDebt,
+          accountToCCPayCat,
+          availableCCBufferByAccount,
+          monthFundedCCByAccount,
+          inheritedHandling,
+          overrides,
+          nextBalance,
+          monthUnfundedPaydown,
         }
-      }
-
-      const availableBeforeSpend = prev + assigned;
-
-      // Pass 1 (Cash Priority): Deduct all cash (non-CC) activity from the available pool first.
-      // This ensures cash spending always takes priority over CC spending regardless of transaction dates.
-      let netCashFlow = 0;
-      for (const tx of txs) {
-        if (!tx.isCC) {
-          netCashFlow += tx.amount;
-        }
-      }
-      let runningCashPool = Math.max(0, availableBeforeSpend + netCashFlow);
-
-      let catPriorUnfundedPaydown = 0;
-
-      // Pass 2 (CC Funding): Process CC transactions chronologically using remaining cash pool.
-      const ccTxs = txs
-        .filter((tx) => tx.isCC)
-        .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-
-      for (const tx of ccTxs) {
-        if (tx.amount < 0) {
-          const spend = -tx.amount;
-          netCCSpend += spend;
-
-          const cardCredit = cardCreditByAccount.get(tx.accountId) ?? 0;
-          const creditUsed = Math.min(cardCredit, spend);
-          cardCreditByAccount.set(tx.accountId, cardCredit - creditUsed);
-          const remainingSpend = spend - creditUsed;
-
-          const funded = Math.max(0, Math.min(runningCashPool, remainingSpend));
-          runningCashPool -= funded;
-          catFundedCC += funded;
-          catFundedCCByAccount.set(
-            tx.accountId,
-            (catFundedCCByAccount.get(tx.accountId) ?? 0) + funded
-          );
-          monthFundedCCByAccount.set(
-            tx.accountId,
-            (monthFundedCCByAccount.get(tx.accountId) ?? 0) + funded
-          );
-          const unfunded = remainingSpend - funded;
-          if (unfunded > 0) {
-            catDebtMap.set(
-              tx.accountId,
-              (catDebtMap.get(tx.accountId) ?? 0) + unfunded
-            );
-          }
-        } else if (tx.amount > 0) {
-          let refund = tx.amount;
-          netCCSpend -= refund;
-
-          // 1. Pay down unfunded CC debt from prior months first
-          const priorDebtForAcc = priorDebtMap.get(tx.accountId) ?? 0;
-          const priorPaydown = Math.max(0, Math.min(priorDebtForAcc, refund));
-          if (priorPaydown > 0) {
-            priorDebtMap.set(tx.accountId, priorDebtForAcc - priorPaydown);
-            catDebtMap.set(
-              tx.accountId,
-              Math.max(0, (catDebtMap.get(tx.accountId) ?? 0) - priorPaydown)
-            );
-            refund -= priorPaydown;
-            if (!carriesOver || prev >= 0) {
-              catPriorUnfundedPaydown += priorPaydown;
-            }
-          }
-
-          // 2. Pay down unfunded CC spend from current month
-          if (refund > 0) {
-            const currentTotalDebt = catDebtMap.get(tx.accountId) ?? 0;
-            const remainingPrior = priorDebtMap.get(tx.accountId) ?? 0;
-            const currentMonthUnfunded = Math.max(0, currentTotalDebt - remainingPrior);
-            const currentMonthPaydown = Math.max(0, Math.min(currentMonthUnfunded, refund));
-            if (currentMonthPaydown > 0) {
-              catDebtMap.set(tx.accountId, currentTotalDebt - currentMonthPaydown);
-              refund -= currentMonthPaydown;
-            }
-          }
-
-          // 3. Reverse funded CC spending in the current month for this account
-          if (refund > 0) {
-            const currentFunded = catFundedCCByAccount.get(tx.accountId) ?? 0;
-            const fundedRefund = Math.max(0, Math.min(currentFunded, refund));
-            if (fundedRefund > 0) {
-              catFundedCCByAccount.set(
-                tx.accountId,
-                currentFunded - fundedRefund
-              );
-              catFundedCC -= fundedRefund;
-              monthFundedCCByAccount.set(
-                tx.accountId,
-                (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefund
-              );
-              runningCashPool += fundedRefund;
-              refund -= fundedRefund;
-            }
-          }
-
-          // 4. Reverse prior months' funded CC buffer (if any remaining refund)
-          if (refund > 0) {
-            const availInCC = availableCCBufferByAccount.get(tx.accountId) ?? 0;
-            const fundedRefundFromPrior = Math.max(0, Math.min(availInCC, refund));
-            if (fundedRefundFromPrior > 0) {
-              availableCCBufferByAccount.set(tx.accountId, availInCC - fundedRefundFromPrior);
-              monthFundedCCByAccount.set(
-                tx.accountId,
-                (monthFundedCCByAccount.get(tx.accountId) ?? 0) - fundedRefundFromPrior
-              );
-              runningCashPool += fundedRefundFromPrior;
-              refund -= fundedRefundFromPrior;
-            }
-          }
-
-          // 5. Any excess refund remains as card credit balance on this card
-          if (refund > 0) {
-            cardCreditByAccount.set(
-              tx.accountId,
-              (cardCreditByAccount.get(tx.accountId) ?? 0) + refund
-            );
-          }
-        }
-      }
-
-      if (catPriorUnfundedPaydown > 0) {
-        monthUnfundedPaydown.set(c.id, catPriorUnfundedPaydown);
-      }
-
-      const effectiveFlow = rawFlow - catPriorUnfundedPaydown;
-      const endAvailable = Math.round(prev + assigned + effectiveFlow);
-      if (endAvailable >= 0) {
-        nextBalance.set(c.id, endAvailable);
-      } else {
-        if (carriesOver) {
-          nextBalance.set(c.id, endAvailable);
-        } else {
-          nextBalance.set(c.id, 0);
-          const totalDeficit = -endAvailable;
-          const ccOverspent = Math.max(0, Math.min(totalDeficit, netCCSpend - catFundedCC));
-          const cashOverspent = totalDeficit - ccOverspent;
-          monthCashOverspent += cashOverspent;
-        }
-      }
+      );
     }
 
     // 2. Second pass: CC payment categories
-    const monthSpendByAccount = new Map<number, number>();
-    const seenLinkedAccounts = new Set<number>();
-    for (const c of data.categories) {
-      if (!ccGroupIds.has(c.groupId)) continue;
-
-      const prev = currentBalance.get(c.id) ?? 0;
-      const assigned = aMap.get(c.id) ?? 0;
-      const rawFlow = oMap.get(c.id) ?? 0;
-
-      let ccBuffer = 0;
-      const linkedAcc = c.linkedAccountId;
-      if (linkedAcc != null && !seenLinkedAccounts.has(linkedAcc)) {
-        seenLinkedAccounts.add(linkedAcc);
-        const fundedCC = monthFundedCCByAccount.get(linkedAcc) ?? 0;
-        const cardPayment = cardPayments.get(linkedAcc) ?? 0;
-        ccBuffer = Math.round(fundedCC - cardPayment);
-        monthSpendByAccount.set(linkedAcc, ccBuffer);
-      }
-
-      const next = Math.round(prev + assigned + rawFlow + ccBuffer);
-      // YNAB4-style: overspend inside the CC Payment category itself is cash
-      // overspending like a regular category — deduct the deficit from TBB
-      // and clamp carryover to 0 (unless red-arrow handling carries it).
-      if (next >= 0) {
-        nextBalance.set(c.id, next);
-      } else {
-        const carriesOver = effectiveOverspendHandling(c, month, overrides, inheritedHandling);
-        if (carriesOver) {
-          nextBalance.set(c.id, next);
-        } else {
-          nextBalance.set(c.id, 0);
-          monthCashOverspent += -next;
-        }
-      }
-    }
+    const { monthSpendByAccount, cashOverspent: ccCashOverspent } = walkCCPaymentCategories(
+      data.categories,
+      ccGroupIds,
+      month,
+      aMap,
+      oMap,
+      cardPayments,
+      monthFundedCCByAccount,
+      { currentBalance, inheritedHandling, overrides, nextBalance }
+    );
+    monthCashOverspent += ccCashOverspent;
 
     endingBalanceByMonth.set(month, new Map(nextBalance));
     spendByAccountMonth.set(month, monthSpendByAccount);
@@ -1057,18 +827,13 @@ function computeAllMonths(
 
 export function buildBudgetIndex(data: BudgetData, overspendOverrides?: OverspendOverridesInput | null): SerializedBudgetIndex {
   const normData = normalizeBudgetData(data);
-  const splitParentIds = new Set<number>();
-  for (const t of normData.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
+  const splitParentIds = collectSplitParentIds(normData.transactions);
   const accountMap = new Map<number, Account>(normData.accounts.map((a) => [a.id, a]));
   const ccAccountIds = getCCAccountIds(normData);
   const rawData = buildRawIndexData(normData, splitParentIds, accountMap, ccAccountIds);
 
   const months = getMonthsWithData(normData);
-  const ccGroupIds = new Set(
-    normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-  );
+  const ccGroupIds = collectCCGroupIds(normData.groups);
 
   const resolvedOverrides = resolveOverspendOverrides(data, overspendOverrides);
   const index = computeAllMonths(normData, rawData, months, ccGroupIds, resolvedOverrides);
@@ -1173,9 +938,7 @@ function getOrBuildIndex(
     targetMonth && !months.includes(targetMonth)
       ? [...new Set([...months, targetMonth])].sort()
       : months;
-  const ccGroupIds = new Set(
-    data.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-  );
+  const ccGroupIds = collectCCGroupIds(data.groups);
 
   const fresh = computeAllMonths(data, rawData, orderedMonths, ccGroupIds, overrides);
   if (overrides === undefined) {
@@ -1202,10 +965,7 @@ export function computeBudget(data: BudgetData, month: string, overspendOverride
   const normData = normalizeBudgetData(data);
 
   // Build split parent ID set so parent rows are skipped in all aggregations
-  const splitParentIds = new Set<number>();
-  for (const t of normData.transactions) {
-    if (t.parentId != null) splitParentIds.add(t.parentId);
-  }
+  const splitParentIds = collectSplitParentIds(normData.transactions);
 
   const accountMap = new Map<number, Account>(normData.accounts.map((a) => [a.id, a]));
   const ccAccountIds = getCCAccountIds(normData);
@@ -1219,9 +979,7 @@ export function computeBudget(data: BudgetData, month: string, overspendOverride
   const months = getMonthsWithData(normData);
 
   // CC Payment groups and categories: Map<categoryId, linkedAccountId>
-  const ccGroupIds = new Set(
-    normData.groups.filter((g) => g.isCreditCardPayments).map((g) => g.id)
-  );
+  const ccGroupIds = collectCCGroupIds(normData.groups);
   const seenLinkedAccounts = new Set<number>();
   const ccPayCatToAccount = new Map<number, number>();
   for (const c of normData.categories) {

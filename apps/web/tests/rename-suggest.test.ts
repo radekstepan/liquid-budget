@@ -63,6 +63,7 @@ describe("Rename suggest API routes", () => {
   });
 
   it("POST suggest returns 502 when the AI response is unusable", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubEnv("LLM_API_KEY", "test-key");
     vi.stubEnv("LLM_MODEL", "test-model");
     const db = getDefaultDb();
@@ -85,9 +86,11 @@ describe("Rename suggest API routes", () => {
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.error).toContain("not valid JSON");
+    infoSpy.mockRestore();
   });
 
   it("POST suggest sends only uncovered payees to the LLM", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubEnv("LLM_API_KEY", "test-key");
     vi.stubEnv("LLM_MODEL", "test-model");
     vi.stubEnv("LLM_MAX_PAYEES", "1000");
@@ -134,14 +137,24 @@ describe("Rename suggest API routes", () => {
         memos: ["downtown store"],
       },
     ]);
-    // The covered payee never leaves the server; the uncovered one does,
-    // with its memo as disambiguation context.
+    // The covered payee never leaves the server; the uncovered one does —
+    // payee name only (memos stay on the server unless LLM_INCLUDE_MEMOS).
     expect(sentBody).toContain("WONKY SMOKE 999");
-    expect(sentBody).toContain("downtown store");
+    expect(sentBody).not.toContain("downtown store");
     expect(sentBody).not.toContain("COVERED SMOKE 1");
+    // Audit trail: model + candidate count, no key/payee/memo text.
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    const logged = String(infoSpy.mock.calls[0]![0]);
+    expect(logged).toContain('"model":"test-model"');
+    expect(logged).toContain('"candidates":1');
+    expect(logged).not.toContain("test-key");
+    expect(logged).not.toContain("WONKY");
+    expect(logged).not.toContain("downtown");
+    infoSpy.mockRestore();
   });
 
   it("POST suggest pages through candidates with offset/limit", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubEnv("LLM_API_KEY", "test-key");
     vi.stubEnv("LLM_MODEL", "test-model");
     const db = getDefaultDb();
@@ -186,6 +199,7 @@ describe("Rename suggest API routes", () => {
     ]);
     expect(sentBody).toContain("ZZZ WONKY");
     expect(sentBody).not.toContain("AAA WONKY");
+    infoSpy.mockRestore();
   });
 
   it("POST suggest rejects invalid batch bodies", async () => {

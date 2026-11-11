@@ -4,7 +4,7 @@ import type { BudgetApiDeps } from "./types";
 import { jsonReq } from "./client";
 
 export function createRenameApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addRenameRule" | "updateRenameRule" | "deleteRenameRule" | "applyRenameRule" | "getRenameSuggestStatus" | "suggestRenameRules" | "acceptRenameSuggestions"> {
-  const { dataRef, setData, reload, runMutation, withSync } = deps;
+  const { dataRef, setData, runMutation, withSync, optimisticMutation } = deps;
   return {
   addRenameRule: async (sourcePattern, targetPayee) => {
     // Rule CRUD touches no transactions, so the returned row is patched
@@ -56,34 +56,31 @@ export function createRenameApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addRen
   },
   deleteRenameRule: async (id) => {
     const prevRules = dataRef.current?.renameRules;
-    setData((prev) =>
-      prev
-        ? {
-            ...prev,
-            renameRules: (prev.renameRules ?? []).filter((r) => r.id !== id),
-            budgetIndex: undefined,
-          }
-        : prev
-    );
-    return withSync(() =>
-      runMutation(
-        async () => {
-          return await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
-        },
-        { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false },
-        {
-          onRollback: () => {
-            if (prevRules) {
-              setData((current) =>
-                current ? { ...current, renameRules: prevRules, budgetIndex: undefined } : current
-              );
-            }
-            reload().catch(() => {});
-          },
-          skipReload: true,
+    return optimisticMutation({
+      plan: () => {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                renameRules: (prev.renameRules ?? []).filter((r) => r.id !== id),
+                budgetIndex: undefined,
+              }
+            : prev
+        );
+      },
+      request: async () => {
+        return await jsonReq(`/api/rename-rules?id=${id}`, { method: "DELETE" });
+      },
+      messages: { success: "Rename rule deleted.", failure: "Failed to delete rename rule.", notifyFailure: false },
+      rollback: () => {
+        if (prevRules) {
+          setData((current) =>
+            current ? { ...current, renameRules: prevRules, budgetIndex: undefined } : current
+          );
         }
-      )
-    );
+      },
+      skipReload: true,
+    });
   },
   applyRenameRule: async (id) => {
     return withSync(() =>
@@ -121,9 +118,9 @@ export function createRenameApi(deps: BudgetApiDeps): Pick<BudgetAppApi, "addRen
       runMutation(
         async () => {
           const res = parseRenameSuggestAcceptResponse(
-            await jsonReq<unknown>("/api/rename-rules/suggest?action=accept", {
+            await jsonReq<unknown>("/api/rename-rules/suggest", {
               method: "POST",
-              body: JSON.stringify({ suggestions, applyToExisting }),
+              body: JSON.stringify({ action: "accept", suggestions, applyToExisting }),
             })
           );
           return {

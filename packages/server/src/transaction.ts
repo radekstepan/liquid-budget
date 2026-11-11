@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import type { Database, Db } from "./client.js";
+import { translateConstraintError } from "./errors.js";
 
 export class AsyncMutex {
   private queue: Array<() => void> = [];
@@ -103,7 +104,9 @@ export async function withTransaction<T>(
       } catch {
         // preserve original error
       }
-      throw err;
+      // Translate SQLite wire errors at the source so callers (and the web
+      // layer above) only ever see domain errors.
+      throw translateConstraintError(err);
     }
   }
 
@@ -125,7 +128,8 @@ export async function withTransaction<T>(
       } catch {
         // preserve original error
       }
-      throw err;
+      // Translate SQLite wire errors at the source (see nested path above).
+      throw translateConstraintError(err);
     }
   } finally {
     releaseLock();

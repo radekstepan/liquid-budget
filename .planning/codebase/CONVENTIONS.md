@@ -53,7 +53,7 @@ Base config (`tsconfig.base.json`): `strict: true`, plus:
 ### Styling / app specifics
 
 - `apps/web` uses `postcss.config.mjs` + `next.config.ts` (`transpilePackages` covers all four workspaces); theming split into `packages/theme`, shared UI into `packages/ui`.
-- Drizzle ORM config at `apps/web/drizzle.config.json` (schema + migrations both point into `packages/server`).
+- Drizzle ORM config at `packages/server/drizzle.config.ts` (owned by `@ynab/server`; `yarn db:generate` runs there).
 - Env-var surface: `DATABASE_URL` (DB path, default repo-root `budget.db`), `RESET_ENABLED` (gates `/api/reset`), `SNAPSHOTS_DIR` (snapshot storage), `LLM_*` (optional AI features, see `apps/web/.env.example`). `E2E_TESTING` is set by `e2e:server` but currently read by nothing.
 
 ## How to run the gates
